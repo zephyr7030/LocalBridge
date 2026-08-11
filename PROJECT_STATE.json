@@ -1,7 +1,7 @@
 {
   "schema_version": 14,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -122,7 +122,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run G1 independent adversarial review generation 6 before LB-006"
+    "next_action": "Execute LB-006 — Portable Coding Tools Runtime"
   },
   "current_task_ui": {
     "enabled": true,
@@ -161,7 +161,7 @@
     "auto_select_other_on_remove": false,
     "mcp_can_mutate_registry": false
   },
-  "current_group": "G1",
+  "current_group": "G2",
   "recovery_policy": {
     "automatic_reconnect": true,
     "attempts": 5,
