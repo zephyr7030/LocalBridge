@@ -23,6 +23,14 @@ group.status = PASS
 group.review_status = PASS
 ```
 
+若当前组为 G4，还必须额外确认：
+
+```text
+G3.human_review_status = PASS
+```
+
+执行智能体无权自行把 G3 人工 Gate 标为 PASS。若依赖预授权执行人工测试相关操作，必须逐项记录具体授权并等待用户审核；不能用笼统“已预授权”代替记录。
+
 执行：
 
 1. 读当前 PR contract。

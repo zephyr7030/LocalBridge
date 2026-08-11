@@ -25,7 +25,10 @@ Result: **PASS — ready for G0 / LB-000**
 - auto reconnect exactly 5 attempts with 1/2/5/10/30s；
 - no new reconnect UI until exhaustion；
 - 20 PRs / 5 groups；
-- mandatory independent adversarial review between groups.
+- mandatory independent adversarial review between groups；
+- G3→G4 additionally requires a human manual/detail review after adversarial PASS；
+- during that human Gate, user/executor factual claims are challengeable evidence rather than automatic truth；
+- executor pre-authorization is permitted only as a concrete recorded authorization and must be user-audited PASS before the human Gate can PASS.
 
 LB-000 仍实证决定：
 

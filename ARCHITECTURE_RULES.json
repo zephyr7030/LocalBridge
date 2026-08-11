@@ -197,7 +197,7 @@
     },
     {
       "id": "ARCH-024",
-      "description": "Next PR group cannot become READY until previous group independent adversarial review is PASS",
+      "description": "Next PR group requires previous independent adversarial PASS; G4 additionally requires G3 human manual/detail review PASS with audited executor pre-authorizations",
       "severity": "error",
       "verification": { "mode": "enforced", "type": "group_review_gate" }
     }

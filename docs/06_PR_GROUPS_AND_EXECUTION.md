@@ -13,6 +13,8 @@
 
 前组审查未 PASS，后组任何 PR 不得开始。
 
+G3→G4 是唯一双重 Gate：G3 独立对抗审查 PASS 后只进入 `human_review_status=REQUIRED`，不得解锁 G4；还必须完成一次人工实测细审核，并由独立审查智能体基于证据接受为 PASS。
+
 ## G0 — 上游与可行性
 
 ```text
@@ -72,6 +74,37 @@ LB-015：
 LB-018 Runtime Packaging
 LB-019 Release / Clean-machine / Reboot E2E
 ```
+
+### G3 → G4 人工实测细审核 Gate
+
+G3 独立对抗审查 PASS 时必须：
+
+```text
+G3.status = PASS
+G3.review_status = PASS
+G3.human_review_status = REQUIRED
+current_group = G3
+current_pr = null
+G4 = BLOCKED
+LB-018 = BLOCKED
+```
+
+人工 Gate 的事实证据默认不可信：审查智能体可质疑、要求复测、独立验证或拒绝采信执行智能体和用户提供的日志、截图、口头结论与测试描述。用户/执行智能体陈述不是自动 PASS。
+
+执行智能体允许预授权，但每一项实际使用的预授权必须具体记录：
+
+```text
+authorization_id
+scope
+actions
+evidence_ref
+recorded_by
+user_audit_status
+```
+
+人工 Gate PASS 前，所有记录的执行智能体预授权都必须 `user_audit_status = PASS`。人工 PASS/FAIL 均必须绑定独立 `human_review_provenance` 和仅修改 `PR_INDEX.json` / `PROJECT_STATE.json` 的 decision commit。
+
+人工 PASS 才允许：`G4 = READY`、`LB-018 = READY`、`current_group = G4`。人工 FAIL 必须回开具体 G3 PR，并把 G3 智能体审查重新置为 REQUIRED；修复后必须重新执行 G3 独立对抗审查，旧 PASS 不得沿用。
 
 ## 组内推进
 

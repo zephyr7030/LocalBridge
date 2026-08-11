@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { classifyArchitectureRules } from "./core.mjs";
+import { validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 import { validateGovernanceAuthorizations } from "./governance-authorization.mjs";
 import { runPrScopedVerifier } from "./pr-scoped.mjs";
 
@@ -132,7 +133,7 @@ const verifiers = {
     if (!existsSync(path)) return;
     const pr = progressDoc;
     const groups = pr.groups ?? [];
-    const authorizationFindings = validateGovernanceAuthorizations(contractsDoc, {
+    const governanceGit = {
       isAncestor(commit) {
         return runGit(["merge-base", "--is-ancestor", commit, "HEAD"]).status === 0;
       },
@@ -143,9 +144,16 @@ const verifiers = {
       workingText,
       firstParentChild: gitFirstParentChild,
       firstParentParent: gitFirstParentParent,
-    });
+    };
+    const authorizationFindings = validateGovernanceAuthorizations(contractsDoc, governanceGit);
     for (const detail of authorizationFindings) {
       findings.push([rule.id, `PR_CONTRACTS.json:governance-authorization:${detail}`]);
+    }
+    for (const detail of validatePreG4GateAuthorization(contractsDoc, governanceGit)) {
+      findings.push([rule.id, `PR_CONTRACTS.json:pre-g4-authorization:${detail}`]);
+    }
+    for (const detail of validateG4HumanGate(pr, governanceGit)) {
+      findings.push([rule.id, `PR_INDEX.json:pre-g4-human-gate:${detail}`]);
     }
     for (const group of groups) {
       if (!new Set(["PASS", "FAIL"]).has(group.review_status)) continue;

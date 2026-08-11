@@ -9,6 +9,8 @@
 
 目标：尽可能证明当前组错误。
 
+所有来自执行智能体和用户的事实性陈述、截图、日志、测试描述与结论都只是待验证证据；你有权质疑、复核、独立验证或拒绝采信。用户的治理指令仍是治理权限来源，但用户对“实际发生了什么”的事实性描述不自动构成 PASS。
+
 覆盖：
 
 ```text
@@ -41,6 +43,10 @@ temporary workaround
 - 移除项目删除文件；
 - 后一组提前实现。
 
-PASS：不得改代码/合同/文档/测试，只允许受限更新 PR_INDEX.json / PROJECT_STATE.json，标记当前组审查 PASS 并只解锁下一组首 PR。
+PASS：不得改代码/合同/文档/测试，只允许受限更新 PR_INDEX.json / PROJECT_STATE.json。除 G3 外，标记当前组审查 PASS 并只解锁下一组首 PR。
+
+G3 特例：独立对抗审查 PASS 只能把 `human_review_status` 置为 `REQUIRED`（generation +1），`current_group` 仍为 G3、`current_pr=null`，G4/LB-018 必须继续 BLOCKED。之后人工实测细审核也由你按证据审查；只有人工 Gate PASS 才可解锁 G4/LB-018。
+
+人工 Gate 中若使用执行智能体预授权，逐项核对 `authorization_id/scope/actions/evidence_ref/recorded_by/user_audit_status`。可以存在预授权，但人工 PASS 时所有已记录预授权必须经用户审核为 PASS。人工 FAIL 必须回开对应 G3 PR，并要求修复后重新执行 G3 独立对抗审查。
 
 FAIL：给 severity/evidence/reproduction/minimal fix/reopen_from_pr；当前组进入 REWORK_REQUIRED，下一组保持 BLOCKED。

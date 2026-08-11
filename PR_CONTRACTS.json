@@ -1,5 +1,5 @@
 {
-  "schema_version": 16,
+  "schema_version": 17,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -51,6 +51,33 @@
         ],
         "scope": "single_governance_repair_commit",
         "does_not_expand_pr_writable_paths": true
+      },
+      {
+        "id": "GOV-AUTH-G4-HUMAN-001",
+        "scheme": "user_file_sha256_v1",
+        "evidence_path": "governance/G4_HUMAN_GATE_AUTHORIZATION.txt",
+        "evidence_commit": "15963a0ca227feac41e2bf522c5321562567c6f7",
+        "evidence_canonical_sha256": "ebdc20eac990c77b6cd30a388792340bc0c1c0797187ba6ffcfac7e41cb61e7a",
+        "scope": "single_immediate_governance_commit",
+        "authorized_paths": [
+          "AGENTS.md",
+          "ARCHITECTURE_RULES.json",
+          "FINAL_REVIEW.json",
+          "PR_CONTRACTS.json",
+          "PR_INDEX.json",
+          "PROJECT_STATE.json",
+          "docs/06_PR_GROUPS_AND_EXECUTION.md",
+          "docs/08_FINAL_REVIEW.md",
+          "scripts/verify-architecture/g4-human-gate.mjs",
+          "scripts/verify-architecture/g4-human-gate.test.mjs",
+          "scripts/verify-architecture/governance-authorization.mjs",
+          "scripts/verify-architecture/index.mjs",
+          "skills/adversarial-review/SKILL.md",
+          "templates/ADVERSARIAL_REVIEW_PROMPT.md",
+          "templates/PR_EXECUTION_PROMPT.md"
+        ],
+        "consumed": true,
+        "does_not_expand_pr_writable_paths": true
       }
     ],
     "dependency_manifest_write_exception": {
@@ -79,6 +106,21 @@
     "mcp_workspace_registry_mutation_forbidden": true,
     "group_review_gate_required": true,
     "next_group_requires_previous_adversarial_pass": true,
+    "pre_g4_human_review_gate_required": true,
+    "g3_adversarial_pass_only_enters_human_review": true,
+    "g4_requires_g3_human_review_pass": true,
+    "human_review_claims_default_untrusted": true,
+    "human_review_reviewer_may_challenge_user_and_executor": true,
+    "executor_pre_authorization_allowed": true,
+    "executor_pre_authorization_required_fields": [
+      "authorization_id",
+      "scope",
+      "actions",
+      "evidence_ref",
+      "recorded_by",
+      "user_audit_status"
+    ],
+    "executor_pre_authorization_requires_user_audit_pass_for_human_gate_pass": true,
     "group_review_code_write_forbidden": true,
     "group_review_governance_write_paths": [
       "PR_INDEX.json",

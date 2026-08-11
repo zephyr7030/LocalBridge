@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "project": "LocalBridge",
   "state": "PRE_CODE",
   "execution": {
@@ -44,6 +44,8 @@
     "current_group": "G2",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
+    "pre_g4_human_review_gate_required": true,
+    "g4_requires_g3_human_review_pass": true,
     "allowed_group_statuses": [
       "BLOCKED",
       "READY",
@@ -341,7 +343,9 @@
       ],
       "status": "BLOCKED",
       "review_status": "BLOCKED",
-      "review_generation": 0
+      "review_generation": 0,
+      "human_review_status": "BLOCKED",
+      "human_review_generation": 0
     },
     {
       "id": "G4",

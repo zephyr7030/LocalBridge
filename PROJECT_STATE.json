@@ -1,5 +1,5 @@
 {
-  "schema_version": 14,
+  "schema_version": 15,
   "phase": "PRE_CODE",
   "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
@@ -47,7 +47,9 @@
     "Remembered project list is not an authorization list",
     "Exactly zero or one active workspace is authorized at a time",
     "Removing a project never deletes disk files",
-    "Removing the active project enters NoActiveWorkspace and does not auto-authorize another project"
+    "Removing the active project enters NoActiveWorkspace and does not auto-authorize another project",
+    "G4 remains blocked after G3 adversarial PASS until a separate human manual/detail review is accepted as PASS",
+    "Human review treats user/executor factual claims as untrusted evidence and requires user-audited concrete executor pre-authorizations"
   ],
   "execution_plan_version": 15,
   "total_prs": 20,
@@ -197,7 +199,11 @@
     ],
     "strict_sequence_inside_group": true,
     "independent_adversarial_review_between_groups": true,
-    "next_group_requires_review_pass": true
+    "next_group_requires_review_pass": true,
+    "pre_g4_human_manual_review": true,
+    "g3_adversarial_pass_unlocks_g4": false,
+    "human_review_claims_are_untrusted_evidence": true,
+    "executor_pre_authorization_requires_concrete_record_and_user_audit": true
   },
   "onboarding_ui": {
     "screens": 5,

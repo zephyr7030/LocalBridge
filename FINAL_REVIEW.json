@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "review_date": "2026-08-10",
   "baseline": "v15-FINAL",
   "status": "PASS",
@@ -63,7 +63,11 @@
   "group_gates": {
     "count": 5,
     "independent_adversarial_review_required": true,
-    "next_group_locked_until_pass": true
+    "next_group_locked_until_pass": true,
+    "g3_to_g4_human_manual_review_required": true,
+    "g3_adversarial_pass_alone_unlocks_g4": false,
+    "human_review_user_and_executor_claims_are_untrusted_evidence": true,
+    "executor_pre_authorization_requires_user_audited_concrete_record": true
   },
   "onboarding": {
     "screens": 5,

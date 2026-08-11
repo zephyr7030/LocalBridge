@@ -37,8 +37,9 @@ function requiredEvidenceFragments(expected) {
 
 function exactContractEntry(contractsDoc, expected) {
   const entries = contractsDoc?.rules?.governance_authorizations;
-  if (!Array.isArray(entries) || entries.length !== 1) return null;
-  const entry = entries[0];
+  if (!Array.isArray(entries)) return null;
+  const entry = entries.find((candidate) => candidate?.id === expected.id);
+  if (!entry) return null;
   const ratified = [...(entry.ratified_commits ?? [])].sort();
   if (entry.id !== expected.id
     || entry.scheme !== expected.scheme
