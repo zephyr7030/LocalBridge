@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::state::{ActiveWorkspaceState, WorkspaceControlState, WorkspaceIdentity, WorkspaceRef};
+use crate::state::{WorkspaceControlState, WorkspaceIdentity, WorkspaceRef};
+
+use super::{ValidatedWorkspace, WorkspaceValidator};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -21,14 +23,20 @@ impl WorkspaceId {
     }
 }
 
+/// Untrusted metadata recording the identity observed when a workspace was last validated.
+/// Deserializing this value never grants workspace authority.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ValidatedWorkspaceIdentity(String);
+pub struct PersistedWorkspaceIdentity(String);
 
-impl ValidatedWorkspaceIdentity {
-    /// Accepts only an opaque identity that has already been produced by the workspace validator.
-    /// LB-003 deliberately does not derive identity from a path string.
-    pub fn from_validator(value: impl Into<String>) -> Result<Self, WorkspaceRegistryError> {
+impl PersistedWorkspaceIdentity {
+    fn from_validated(validated: &ValidatedWorkspace) -> Self {
+        Self(validated.identity().as_str().to_owned())
+    }
+
+    pub(crate) fn from_persisted_claim(
+        value: impl Into<String>,
+    ) -> Result<Self, WorkspaceRegistryError> {
         let value = value.into();
         if value.trim().is_empty() {
             return Err(WorkspaceRegistryError::EmptyValidatedIdentity);
@@ -46,21 +54,37 @@ impl ValidatedWorkspaceIdentity {
 pub struct WorkspaceEntry {
     pub workspace_id: WorkspaceId,
     pub display_path: PathBuf,
-    pub validated_identity: ValidatedWorkspaceIdentity,
+    pub validated_identity: PersistedWorkspaceIdentity,
     pub last_opened_at: u64,
 }
 
 impl WorkspaceEntry {
-    pub fn from_validator(
+    fn from_validated(
         workspace_id: WorkspaceId,
         display_path: impl Into<PathBuf>,
-        validated_identity: ValidatedWorkspaceIdentity,
+        validated: &ValidatedWorkspace,
         last_opened_at: u64,
     ) -> Result<Self, WorkspaceRegistryError> {
         let entry = Self {
             workspace_id,
             display_path: display_path.into(),
-            validated_identity,
+            validated_identity: PersistedWorkspaceIdentity::from_validated(validated),
+            last_opened_at,
+        };
+        entry.validate()?;
+        Ok(entry)
+    }
+
+    pub(crate) fn from_persisted_claim(
+        workspace_id: WorkspaceId,
+        display_path: impl Into<PathBuf>,
+        identity_claim: impl Into<String>,
+        last_opened_at: u64,
+    ) -> Result<Self, WorkspaceRegistryError> {
+        let entry = Self {
+            workspace_id,
+            display_path: display_path.into(),
+            validated_identity: PersistedWorkspaceIdentity::from_persisted_claim(identity_claim)?,
             last_opened_at,
         };
         entry.validate()?;
@@ -80,10 +104,17 @@ impl WorkspaceEntry {
         Ok(())
     }
 
-    pub fn to_domain_ref(&self) -> Result<WorkspaceRef, WorkspaceRegistryError> {
-        let identity = WorkspaceIdentity::from_validated(self.validated_identity.as_str().to_owned())
-            .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)?;
-        WorkspaceRef::from_validated(identity, self.display_path.clone())
+    fn to_domain_ref(
+        &self,
+        freshly_validated: &ValidatedWorkspace,
+    ) -> Result<WorkspaceRef, WorkspaceRegistryError> {
+        if self.validated_identity.as_str() != freshly_validated.identity().as_str() {
+            return Err(WorkspaceRegistryError::PersistedIdentityMismatch);
+        }
+        let identity =
+            WorkspaceIdentity::from_validated(freshly_validated.identity().as_str().to_owned())
+                .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)?;
+        WorkspaceRef::from_validated(identity, freshly_validated.resolved_path().to_path_buf())
             .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)
     }
 }
@@ -103,8 +134,32 @@ impl WorkspaceRegistry {
         self.entries.iter().find(|entry| &entry.workspace_id == id)
     }
 
-    /// De-duplicates only by validator-produced identity. Display paths are presentation metadata.
+    /// Adds metadata only after the filesystem path has been validated in this process.
     pub fn upsert_validated(
+        &mut self,
+        workspace_id: WorkspaceId,
+        display_path: impl Into<PathBuf>,
+        validated: &ValidatedWorkspace,
+        last_opened_at: u64,
+    ) -> Result<WorkspaceId, WorkspaceRegistryError> {
+        self.upsert_entry(WorkspaceEntry::from_validated(
+            workspace_id,
+            display_path,
+            validated,
+            last_opened_at,
+        )?)
+    }
+
+    /// Migration-only path: preserves a historical identity as an untrusted claim. It must never
+    /// be used as authorization; to_control_state always revalidates against the filesystem.
+    pub(crate) fn upsert_persisted_claim(
+        &mut self,
+        incoming: WorkspaceEntry,
+    ) -> Result<WorkspaceId, WorkspaceRegistryError> {
+        self.upsert_entry(incoming)
+    }
+
+    fn upsert_entry(
         &mut self,
         incoming: WorkspaceEntry,
     ) -> Result<WorkspaceId, WorkspaceRegistryError> {
@@ -194,14 +249,15 @@ impl WorkspacePersistence {
         self.registry.entries()
     }
 
-    /// Returns exactly zero or one active workspace. Remembered entries are never authorization roots.
+    /// Returns persisted selection metadata only. It is not an authorization proof.
     pub fn active_entry(&self) -> Option<&WorkspaceEntry> {
         self.active_workspace_id
             .as_ref()
             .and_then(|id| self.registry.get(id))
     }
 
-    pub fn set_active(&mut self, id: WorkspaceId) -> Result<(), WorkspaceRegistryError> {
+    /// Selects persisted metadata only. Authorization is established later by to_control_state.
+    pub fn set_active_reference(&mut self, id: WorkspaceId) -> Result<(), WorkspaceRegistryError> {
         if self.registry.get(&id).is_none() {
             return Err(WorkspaceRegistryError::ActiveWorkspaceMissingFromRegistry);
         }
@@ -213,11 +269,16 @@ impl WorkspacePersistence {
         self.active_workspace_id = None;
     }
 
-    pub fn to_control_state(&self) -> Result<WorkspaceControlState, WorkspaceRegistryError> {
+    /// Revalidates the active filesystem object before producing any Active authority.
+    pub fn to_control_state(
+        &self,
+        validator: &WorkspaceValidator,
+    ) -> Result<WorkspaceControlState, WorkspaceRegistryError> {
         self.validate()?;
         let mut state = WorkspaceControlState::default();
         if let Some(active) = self.active_entry() {
-            state.begin_switch(active.to_domain_ref()?);
+            let freshly_validated = validator.validate(&active.display_path)?;
+            state.begin_switch(active.to_domain_ref(&freshly_validated)?);
             state
                 .commit_candidate()
                 .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)?;
@@ -230,10 +291,8 @@ impl WorkspacePersistence {
     }
 
     pub fn domain_is_no_active_workspace(&self) -> Result<bool, WorkspaceRegistryError> {
-        Ok(matches!(
-            self.to_control_state()?.active(),
-            ActiveWorkspaceState::NoActiveWorkspace
-        ))
+        self.validate()?;
+        Ok(self.active_workspace_id.is_none())
     }
 }
 
@@ -246,5 +305,9 @@ pub enum WorkspaceRegistryError {
     DuplicateWorkspaceId,
     DuplicateValidatedIdentity,
     ActiveWorkspaceMissingFromRegistry,
+    PersistedIdentityMismatch,
+    WorkspaceNotDirectory,
+    WorkspaceValidationWindowsApi { operation: &'static str, code: u32 },
+    UnsupportedPlatform,
     DomainMappingFailed,
 }

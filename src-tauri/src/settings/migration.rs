@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 
-use super::model::{AppData, StoredSettings, CURRENT_SETTINGS_SCHEMA_VERSION};
+use super::model::{AppData, CURRENT_SETTINGS_SCHEMA_VERSION, StoredSettings};
 use crate::workspace::{
-    PendingWorkspaceConfirmation, PendingWorkspaceReason, ValidatedWorkspaceIdentity,
-    WorkspaceEntry, WorkspaceId, WorkspacePersistence,
+    PendingWorkspaceConfirmation, PendingWorkspaceReason, WorkspaceEntry, WorkspaceId,
+    WorkspacePersistence,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,7 +78,7 @@ pub fn migrate_bytes(bytes: &[u8]) -> Result<MigrationOutcome, MigrationError> {
                 return Err(MigrationError::HistoricalSchemaInvalid {
                     version: other,
                     detail: "no sequential migration step registered".to_owned(),
-                })
+                });
             }
         };
         let next = read_schema_version(&value)?;
@@ -112,12 +112,11 @@ fn read_schema_version(value: &Value) -> Result<u32, MigrationError> {
 }
 
 fn migrate_v1_to_v2(value: Value) -> Result<Value, MigrationError> {
-    let old: V1 = serde_json::from_value(value).map_err(|error| {
-        MigrationError::HistoricalSchemaInvalid {
+    let old: V1 =
+        serde_json::from_value(value).map_err(|error| MigrationError::HistoricalSchemaInvalid {
             version: 1,
             detail: error.to_string(),
-        }
-    })?;
+        })?;
     if old.schema_version != 1 {
         return Err(MigrationError::HistoricalSchemaInvalid {
             version: 1,
@@ -137,12 +136,11 @@ fn migrate_v1_to_v2(value: Value) -> Result<Value, MigrationError> {
 }
 
 fn migrate_v2_to_v3(value: Value) -> Result<Value, MigrationError> {
-    let old: V2 = serde_json::from_value(value).map_err(|error| {
-        MigrationError::HistoricalSchemaInvalid {
+    let old: V2 =
+        serde_json::from_value(value).map_err(|error| MigrationError::HistoricalSchemaInvalid {
             version: 2,
             detail: error.to_string(),
-        }
-    })?;
+        })?;
     if old.schema_version != 2 {
         return Err(MigrationError::HistoricalSchemaInvalid {
             version: 2,
@@ -168,7 +166,7 @@ fn migrate_v2_to_v3(value: Value) -> Result<Value, MigrationError> {
             .filter(|value| !value.trim().is_empty());
         match (id, identity) {
             (Some(id), Some(identity)) => {
-                let entry = WorkspaceEntry::from_validator(
+                let entry = WorkspaceEntry::from_persisted_claim(
                     WorkspaceId::from_validated(id.to_owned()).map_err(|error| {
                         MigrationError::HistoricalSchemaInvalid {
                             version: 2,
@@ -176,25 +174,21 @@ fn migrate_v2_to_v3(value: Value) -> Result<Value, MigrationError> {
                         }
                     })?,
                     old_workspace.display_path,
-                    ValidatedWorkspaceIdentity::from_validator(identity.to_owned()).map_err(
-                        |error| MigrationError::HistoricalSchemaInvalid {
-                            version: 2,
-                            detail: format!("invalid validated identity: {error:?}"),
-                        },
-                    )?,
+                    identity.to_owned(),
                     old_workspace.last_opened_at,
                 )
                 .map_err(|error| MigrationError::HistoricalSchemaInvalid {
                     version: 2,
                     detail: format!("invalid workspace entry: {error:?}"),
                 })?;
-                let active_id = workspace
-                    .registry
-                    .upsert_validated(entry)
-                    .map_err(|error| MigrationError::HistoricalSchemaInvalid {
-                        version: 2,
-                        detail: format!("registry migration failed: {error:?}"),
-                    })?;
+                let active_id =
+                    workspace
+                        .registry
+                        .upsert_persisted_claim(entry)
+                        .map_err(|error| MigrationError::HistoricalSchemaInvalid {
+                            version: 2,
+                            detail: format!("registry migration failed: {error:?}"),
+                        })?;
                 workspace.active_workspace_id = Some(active_id);
             }
             (id, identity) => {
@@ -216,12 +210,12 @@ fn migrate_v2_to_v3(value: Value) -> Result<Value, MigrationError> {
         settings: old.settings,
         workspace,
     };
-    current.validate().map_err(|error| {
-        MigrationError::HistoricalSchemaInvalid {
+    current
+        .validate()
+        .map_err(|error| MigrationError::HistoricalSchemaInvalid {
             version: 2,
             detail: format!("migrated current data invalid: {error:?}"),
-        }
-    })?;
+        })?;
     serde_json::to_value(current)
         .map_err(|error| MigrationError::MigrationSerialization(error.to_string()))
 }

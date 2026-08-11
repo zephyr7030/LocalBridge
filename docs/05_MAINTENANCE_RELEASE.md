@@ -70,6 +70,9 @@ v1 single-workspace preferences
 - migration 必须逐版本执行，禁止跨版本跳迁；
 - remembered registry 仅为便利性元数据，不是 MCP authorization roots；
 - registry 只按 WorkspaceValidator 已确认的 `validated_identity` 去重，不按大小写路径字符串去重；
+- `validated_identity` 的持久化值只是“上次验证时观察到的 identity claim”，反序列化后不具备授权能力；运行时 `ValidatedWorkspaceIdentity` 不支持 JSON 反序列化，只能由 `WorkspaceValidator` 从实际文件系统对象生成；
+- 从持久化状态恢复 Active workspace 时必须重新打开 `display_path`，以 Windows 文件句柄取得 volume/file identity 与 final path，并与持久化 claim 匹配；不匹配、路径被替换或目录已消失时 fail-closed，不能生成 Active；
+- Active domain root 使用本次验证得到的 final path，而不是直接信任持久化 `display_path`；
 - 无法确认 historical identity 时保留 `pending_workspace_confirmation`，同时保持 `active_workspace_id = null`；
 - Windows 写入先写同目录临时文件并 `sync_all`，已有文件通过原子 replace 替换；旧目标保留为 `.bak` 回滚点；
 - migration/validation/future-schema 任一失败均不覆盖原文件，也不自动 reset。
