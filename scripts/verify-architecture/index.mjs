@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
 import { classifyArchitectureRules } from "./core.mjs";
+import { runPrScopedVerifier } from "./pr-scoped.mjs";
 
 const args = process.argv.slice(2);
 const valueAfter = (flag) => {
@@ -17,6 +18,7 @@ const rulesDoc = JSON.parse(readFileSync(join(repoRoot, "ARCHITECTURE_RULES.json
 if (!Array.isArray(rulesDoc.rules) || rulesDoc.rules.length !== 24) throw new Error("architecture rule inventory must contain exactly 24 rules");
 const progressPath = resolve(progressArg && !progressArg.startsWith("--") ? progressArg : join(repoRoot, "PR_INDEX.json"));
 const progressDoc = JSON.parse(readFileSync(progressPath, "utf8"));
+const contractsDoc = JSON.parse(readFileSync(join(repoRoot, "PR_CONTRACTS.json"), "utf8"));
 
 const supportedTypes = new Set([
   "frontend_process_ownership",
@@ -135,7 +137,24 @@ const verifiers = {
 };
 
 const findings = [];
-for (const rule of classification.activeRules) verifiers[rule.verification.type](rule, findings);
+let builtInActive = 0;
+let prScopedActive = 0;
+for (const rule of classification.activeRules) {
+  if (supportedTypes.has(rule.verification.type)) {
+    verifiers[rule.verification.type](rule, findings);
+    builtInActive += 1;
+    continue;
+  }
+  if (rule.verification.mode !== "deferred") {
+    throw new Error(`${rule.id} enforced rule cannot use a PR-scoped verifier`);
+  }
+  try {
+    runPrScopedVerifier(repoRoot, rule, contractsDoc);
+    prScopedActive += 1;
+  } catch (error) {
+    findings.push([rule.id, `pr-scoped:${error.message}`]);
+  }
+}
 
 const actualIds = new Set(findings.map(([id]) => id));
 if (expectFailure) {
@@ -150,4 +169,4 @@ if (findings.length) {
   for (const [id, file] of findings) console.error(`${id}: ${file}`);
   process.exit(1);
 }
-console.log(`ARCHITECTURE_VERIFY=PASS configured_enforced=${classification.configuredEnforced.length} activated_deferred=${classification.activatedDeferred.length} future_deferred=${classification.futureDeferred.length} active=${classification.activeRules.length} total=${rulesDoc.rules.length}`);
+console.log(`ARCHITECTURE_VERIFY=PASS configured_enforced=${classification.configuredEnforced.length} activated_deferred=${classification.activatedDeferred.length} future_deferred=${classification.futureDeferred.length} built_in_active=${builtInActive} pr_scoped_active=${prScopedActive} active=${classification.activeRules.length} total=${rulesDoc.rules.length}`);

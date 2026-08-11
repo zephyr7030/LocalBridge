@@ -1,5 +1,7 @@
 pub mod app;
+pub mod settings;
 pub mod state;
+pub mod workspace;
 
 pub const PRODUCT_NAME: &str = "LocalBridge";
 

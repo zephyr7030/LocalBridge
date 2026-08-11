@@ -13,6 +13,11 @@ if (!buildRs.includes('x86_64-pc-windows-msvc') || !buildRs.includes('dummy-side
 const cargoToml = readFileSync("src-tauri/Cargo.toml", "utf8");
 if (!/^autobins\s*=\s*false$/m.test(cargoToml)) throw new Error("Cargo autobin discovery must be disabled so Tauri externalBin is the only packaged dummy sidecar source");
 if (/name\s*=\s*"dummy-sidecar"/.test(cargoToml)) throw new Error("dummy sidecar must not be a Cargo application binary");
+const libRs = readFileSync("src-tauri/src/lib.rs", "utf8");
+for (const moduleName of ["settings", "workspace"]) {
+  if (!new RegExp(`pub\\s+mod\\s+${moduleName}\\s*;`).test(libRs)) throw new Error(`future PR module bootstrap missing: ${moduleName}`);
+  if (!existsSync(`src-tauri/src/${moduleName}/mod.rs`)) throw new Error(`future PR module stub missing: ${moduleName}`);
+}
 if (sha("assets/icons/localbridge.ico") !== "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78") throw new Error("frozen ICO hash mismatch");
 if (sha("assets/icons/localbridge.png") !== "710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a") throw new Error("frozen PNG hash mismatch");
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
@@ -38,12 +43,14 @@ if (arch011?.verification?.activate_at_pr !== "LB-002" || arch011?.verification?
 
 const architectureRunner = readFileSync("scripts/verify-architecture/index.mjs", "utf8");
 if (architectureRunner.includes("rules=${rules.rules.length}")) throw new Error("architecture runner still contains misleading all-rules PASS output");
-if (!architectureRunner.includes("configured_enforced=${classification.configuredEnforced.length} activated_deferred=${classification.activatedDeferred.length} future_deferred=${classification.futureDeferred.length}")) throw new Error("architecture runner activation-aware evidence output missing");
+if (!architectureRunner.includes("configured_enforced=${classification.configuredEnforced.length} activated_deferred=${classification.activatedDeferred.length} future_deferred=${classification.futureDeferred.length}") || !architectureRunner.includes("built_in_active=${builtInActive} pr_scoped_active=${prScopedActive}")) throw new Error("architecture runner activation-aware evidence output missing");
 if (!architectureRunner.includes("classifyArchitectureRules") || !architectureRunner.includes("task_summary_redaction")) throw new Error("architecture activation/redaction verifier integration missing");
 if (!pkg.scripts?.["verify:architecture:activation"]?.includes("activation.test.mjs")) throw new Error("architecture activation deterministic test missing");
+if (!pkg.scripts?.["verify:architecture:pr-scoped"]?.includes("pr-scoped.test.mjs")) throw new Error("PR-scoped architecture verifier test missing");
 if (!pkg.scripts?.["verify:architecture:activated"]?.includes("--progress tests/fixtures/architecture/progress-lb002-pass.json")) throw new Error("architecture activated end-to-end progress fixture missing");
 if (!pkg.scripts?.["verify:architecture:negative"]?.includes("--progress tests/fixtures/architecture/intentional-violation/PR_INDEX.json") || !pkg.scripts?.["verify:architecture:negative"]?.includes("--expected ARCH-001,ARCH-003,ARCH-023,ARCH-024")) throw new Error("architecture negative fixture progress isolation/exact rule IDs missing");
-if (!pkg.scripts?.["verify:lb001"]?.includes("verify:architecture:activation") || !pkg.scripts?.["verify:lb001"]?.includes("verify:architecture:activated")) throw new Error("LB-001 acceptance does not execute architecture activation tests");
+if (!pkg.scripts?.["verify:lb001"]?.includes("verify:architecture:activation") || !pkg.scripts?.["verify:lb001"]?.includes("verify:architecture:pr-scoped") || !pkg.scripts?.["verify:lb001"]?.includes("verify:architecture:activated")) throw new Error("LB-001 acceptance does not execute architecture activation tests");
+for (const required of ["resolvePrScopedVerifier", "runPrScopedVerifier", "PR_CONTRACTS.json", "LOCALBRIDGE_ARCH_RULE_ID", "LOCALBRIDGE_ARCH_ACTIVATE_AT_PR"]) if (!architectureRunner.includes(required) && !readFileSync("scripts/verify-architecture/pr-scoped.mjs", "utf8").includes(required)) throw new Error(`PR-scoped verifier integration missing: ${required}`);
 
 const packagingSmoke = readFileSync("scripts/lb001-packaging-smoke.mjs", "utf8");
 for (const required of ["@tauri-apps", "tauri.js", '"build", "--bundles", "nsis"', "lb001-nsis-install", "installedSidecarSha", "LB001_REAL_TAURI_NSIS_SMOKE=PASS"]) {

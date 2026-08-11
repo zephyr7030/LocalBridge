@@ -55,9 +55,6 @@ export function classifyArchitectureRules(rulesDoc, prIndex, supportedTypes) {
     }
     const activationStatus = prById.get(activationPr)?.status;
     if (ACTIVATED_PR_STATUSES.has(activationStatus)) {
-      if (!supportedTypes.has(verification.type)) {
-        throw new Error(`${rule.id} activated at ${activationPr} (${activationStatus}) without a supported verifier type`);
-      }
       activatedDeferred.push(rule);
     } else if (FUTURE_PR_STATUSES.has(activationStatus)) {
       futureDeferred.push(rule);

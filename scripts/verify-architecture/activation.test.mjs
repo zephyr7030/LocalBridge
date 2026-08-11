@@ -28,14 +28,12 @@ for (const status of ["READY", "BLOCKED"]) {
   assert.deepEqual(result.futureDeferred.map((item) => item.id), ["ARCH-011"]);
   assert.equal(result.activatedDeferred.length, 0);
 }
-assert.throws(
-  () => classifyArchitectureRules(
-    { rules: [rule({ mode: "deferred", activate_at_pr: "LB-002", reason: "fixture activation" })] },
-    progress("PASS"),
-    supported,
-  ),
-  /activated at LB-002 \(PASS\) without a supported verifier type/,
+const prScoped = classifyArchitectureRules(
+  { rules: [rule({ mode: "deferred", activate_at_pr: "LB-002", reason: "fixture activation" })] },
+  progress("PASS"),
+  supported,
 );
+assert.equal(prScoped.activatedDeferred.length, 1);
 assert.throws(
   () => classifyArchitectureRules(
     { rules: [rule({ ...declared, activate_at_pr: "LB-099" })] },
@@ -44,4 +42,4 @@ assert.throws(
   ),
   /activate_at_pr is not in execution_order/,
 );
-console.log("ARCHITECTURE_ACTIVATION_TEST=PASS active_statuses=4 future_statuses=2 fail_closed_missing_verifier=true");
+console.log("ARCHITECTURE_ACTIVATION_TEST=PASS active_statuses=4 future_statuses=2 pr_scoped_resolution_delegated=true");
