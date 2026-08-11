@@ -1,6 +1,6 @@
 {
   "schema_version": 6,
-  "status": "ENFORCEMENT_TO_BE_IMPLEMENTED_BY_LB_001_AND_LATER",
+  "status": "ENFORCEMENT_BASELINE_LB_001",
   "rules": [
     {
       "id": "ARCH-001",

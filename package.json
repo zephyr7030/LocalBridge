@@ -1,0 +1,32 @@
+{
+  "name": "localbridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.config.ts",
+    "build": "tsc -b && vite build --config vite.config.ts",
+    "test": "vitest run",
+    "verify:architecture": "node scripts/verify-architecture/index.mjs",
+    "verify:architecture:negative": "node scripts/verify-architecture/index.mjs --root tests/fixtures/architecture/intentional-violation --expect-failure",
+    "verify:runtime-manifest": "node scripts/verify-runtime-manifest/index.mjs",
+    "verify:ui-language": "node scripts/verify-ui-language/index.mjs",
+    "sidecar:prepare": "node scripts/prepare-dummy-sidecar.mjs",
+    "packaging:smoke": "node scripts/lb001-packaging-smoke.mjs",
+    "verify:lb001": "npm run test && npm run build && npm run verify:architecture && npm run verify:architecture:negative && npm run verify:runtime-manifest && npm run verify:ui-language && npm run sidecar:prepare && cargo test --manifest-path src-tauri/Cargo.toml --locked && npm run packaging:smoke && node scripts/verify-lb001-contract.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -1,0 +1,17 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+const sha = (p) => createHash("sha256").update(readFileSync(p)).digest("hex");
+for (const p of ["package-lock.json", "src-tauri/Cargo.lock", "src-tauri/tauri.conf.json"]) if (!existsSync(p)) throw new Error(`missing ${p}`);
+const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
+if (!config.bundle.externalBin.includes("binaries/dummy-sidecar")) throw new Error("Tauri externalBin missing dummy sidecar");
+if (!config.bundle.icon.includes("../assets/icons/localbridge.ico")) throw new Error("frozen ICO not wired");
+const manifest = readFileSync("runtime-manifest.toml", "utf8");
+if (!manifest.includes('bundle_webview2 = false') || !manifest.includes('webview2_source = "windows-system-runtime"')) throw new Error("WebView2 contract mismatch");
+const buildRs = readFileSync("src-tauri/build.rs", "utf8");
+if (!buildRs.includes('x86_64-pc-windows-msvc') || !buildRs.includes('dummy-sidecar-x86_64-pc-windows-msvc.exe')) throw new Error("standalone Cargo dummy sidecar preparation missing");
+if (sha("assets/icons/localbridge.ico") !== "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78") throw new Error("frozen ICO hash mismatch");
+if (sha("assets/icons/localbridge.png") !== "710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a") throw new Error("frozen PNG hash mismatch");
+const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+const deps = Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) });
+if (deps.some((d) => /lucide|heroicons|fontawesome|react-icons/i.test(d))) throw new Error("icon library dependency forbidden");
+console.log("LB001_CONTRACT_VERIFY=PASS");

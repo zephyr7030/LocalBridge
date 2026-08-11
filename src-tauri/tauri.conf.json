@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LocalBridge",
+  "version": "0.1.0",
+  "identifier": "com.localbridge.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../tests/artifacts/frontend-dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LocalBridge",
+        "width": 900,
+        "height": 620,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["../assets/icons/localbridge.ico"],
+    "externalBin": ["binaries/dummy-sidecar"]
+  }
+}

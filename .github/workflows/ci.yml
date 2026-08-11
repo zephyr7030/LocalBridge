@@ -1,0 +1,20 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows-baseline:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: npm ci
+      - run: cargo fetch --manifest-path src-tauri/Cargo.toml --locked
+      - run: npm run verify:lb001

@@ -1,0 +1,31 @@
+[package]
+name = "localbridge"
+version = "0.1.0"
+description = "LocalBridge desktop shell"
+authors = ["LocalBridge"]
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+name = "localbridge_lib"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "localbridge"
+path = "src/main.rs"
+
+[[bin]]
+name = "dummy-sidecar"
+path = "src/bin/dummy-sidecar.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"
