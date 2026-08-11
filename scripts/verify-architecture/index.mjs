@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { classifyArchitectureRules } from "./core.mjs";
-import { validateOneTimeGovernanceExceptions } from "./governance-exception.mjs";
+import { validateGovernanceAuthorizations } from "./governance-authorization.mjs";
 import { runPrScopedVerifier } from "./pr-scoped.mjs";
 
 const args = process.argv.slice(2);
@@ -72,6 +72,21 @@ const gitJsonAt = (revision, path) => {
   if (result.status !== 0) return null;
   try { return JSON.parse(result.stdout); } catch { return null; }
 };
+const gitCommitMessage = (commit) => {
+  const result = runGit(["show", "-s", "--format=%B", commit]);
+  return result.status === 0 ? result.stdout : null;
+};
+const gitCommitExists = (commit) => runGit(["cat-file", "-e", `${commit}^{commit}`]).status === 0;
+const gitFirstParentChild = (commit) => {
+  const result = runGit(["rev-list", "--first-parent", "--reverse", `${commit}..HEAD`]);
+  if (result.status !== 0) return null;
+  return result.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)[0] ?? null;
+};
+const gitFirstParentParent = (commit) => {
+  const result = runGit(["show", "-s", "--format=%P", commit]);
+  if (result.status !== 0) return null;
+  return result.stdout.trim().split(/\s+/)[0] ?? null;
+};
 const addSourceMatches = (ruleId, predicate, pattern, findings) => {
   for (const p of all) {
     const r = rel(p);
@@ -116,15 +131,19 @@ const verifiers = {
     if (!existsSync(path)) return;
     const pr = progressDoc;
     const groups = pr.groups ?? [];
-    const exceptionFindings = validateOneTimeGovernanceExceptions(contractsDoc, {
+    const authorizationFindings = validateGovernanceAuthorizations(contractsDoc, {
       isAncestor(commit) {
         return runGit(["merge-base", "--is-ancestor", commit, "HEAD"]).status === 0;
       },
       commitPaths: gitCommitPaths,
+      commitMessage: gitCommitMessage,
+      commitExists: gitCommitExists,
       jsonAt: gitJsonAt,
+      firstParentChild: gitFirstParentChild,
+      firstParentParent: gitFirstParentParent,
     });
-    for (const detail of exceptionFindings) {
-      findings.push([rule.id, `PR_CONTRACTS.json:one-time-governance-exception:${detail}`]);
+    for (const detail of authorizationFindings) {
+      findings.push([rule.id, `PR_CONTRACTS.json:governance-authorization:${detail}`]);
     }
     for (const group of groups) {
       if (!new Set(["PASS", "FAIL"]).has(group.review_status)) continue;

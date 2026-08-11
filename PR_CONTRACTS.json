@@ -1,5 +1,5 @@
 {
-  "schema_version": 14,
+  "schema_version": 15,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -39,24 +39,21 @@
         "project phase/release readiness"
       ]
     },
-    "one_time_governance_exceptions": [
+    "governance_authorizations": [
       {
-        "id": "GOV-EX-001",
-        "authorization": "explicit_user_instruction",
-        "scope": "historical_commit_only",
-        "commit": "f2101eb1909785c6cefef48050b2498a54a8f54b",
-        "parent_current_pr": "LB-005",
-        "parent_pr_status": "REWORK_REQUIRED",
-        "allowed_paths": [
-          "AGENTS.md",
-          "PR_INDEX.json",
-          "START_HERE.md",
-          "docs/06_PR_GROUPS_AND_EXECUTION.md",
-          "scripts/verify-architecture/index.mjs"
+        "id": "GOV-AUTH-001",
+        "scheme": "git_empty_anchor_v1",
+        "anchor_commit": "ec330c7560e11d595b5ddc3c9242824b2c91ea45",
+        "ratified_commits": [
+          "f2101eb1909785c6cefef48050b2498a54a8f54b",
+          "5bb1b27f94feb6d0efbd7bc264c76ce9d056d03f"
         ],
-        "reason": "One-time user-authorized governance correction for the G1 review provenance and frozen-state fact-source defects identified during LB-005 rework.",
-        "consumed": true,
-        "does_not_expand_pr_writable_paths": true
+        "authorized_child_paths": [
+          "PR_CONTRACTS.json",
+          "scripts/verify-architecture/governance-authorization.mjs",
+          "scripts/verify-architecture/governance-authorization.test.mjs",
+          "scripts/verify-architecture/index.mjs"
+        ]
       }
     ],
     "dependency_manifest_write_exception": {
