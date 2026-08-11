@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": null,
+    "current_pr": "LB-000",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -66,7 +66,7 @@
       "title": "Upstream + Security Compatibility Spike",
       "depends_on": [],
       "gate": "G0",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-001",
@@ -277,9 +277,9 @@
       "prs": [
         "LB-000"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
-      "review_generation": 0
+      "status": "REWORK_REQUIRED",
+      "review_status": "FAIL",
+      "review_generation": 1
     },
     {
       "id": "G1",
