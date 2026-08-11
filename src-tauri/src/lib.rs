@@ -1,3 +1,6 @@
+pub mod app;
+pub mod state;
+
 pub const PRODUCT_NAME: &str = "LocalBridge";
 
 pub fn build_app() -> tauri::Builder<tauri::Wry> {
