@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
+import { classifyArchitectureRules } from "./core.mjs";
 
 const args = process.argv.slice(2);
 const valueAfter = (flag) => {
@@ -8,11 +9,14 @@ const valueAfter = (flag) => {
 };
 const rootArg = valueAfter("--root");
 const root = resolve(rootArg && !rootArg.startsWith("--") ? rootArg : ".");
+const progressArg = valueAfter("--progress");
 const expectFailure = args.includes("--expect-failure");
 const expectedIds = new Set((valueAfter("--expected") ?? "").split(",").map((v) => v.trim()).filter(Boolean));
 const repoRoot = resolve(".");
 const rulesDoc = JSON.parse(readFileSync(join(repoRoot, "ARCHITECTURE_RULES.json"), "utf8"));
 if (!Array.isArray(rulesDoc.rules) || rulesDoc.rules.length !== 24) throw new Error("architecture rule inventory must contain exactly 24 rules");
+const progressPath = resolve(progressArg && !progressArg.startsWith("--") ? progressArg : join(repoRoot, "PR_INDEX.json"));
+const progressDoc = JSON.parse(readFileSync(progressPath, "utf8"));
 
 const supportedTypes = new Set([
   "frontend_process_ownership",
@@ -23,16 +27,9 @@ const supportedTypes = new Set([
   "telemetry_absence",
   "visual_dependency_absence",
   "group_review_gate",
+  "task_summary_redaction",
 ]);
-const ids = new Set();
-for (const rule of rulesDoc.rules) {
-  if (!/^ARCH-\d{3}$/.test(rule.id) || ids.has(rule.id)) throw new Error(`invalid or duplicate architecture rule id: ${rule.id}`);
-  ids.add(rule.id);
-  const verification = rule.verification;
-  if (!verification || !["enforced", "deferred"].includes(verification.mode)) throw new Error(`${rule.id} missing supported verification mode`);
-  if (verification.mode === "enforced" && !supportedTypes.has(verification.type)) throw new Error(`${rule.id} has unsupported verifier type: ${verification.type ?? "missing"}`);
-  if (verification.mode === "deferred" && (!/^LB-\d{3}$/.test(verification.activate_at_pr ?? "") || !verification.reason)) throw new Error(`${rule.id} deferred verification requires activate_at_pr and reason`);
-}
+const classification = classifyArchitectureRules(rulesDoc, progressDoc, supportedTypes);
 
 const ignoredSegments = new Set(["node_modules", ".git", ".coding-tools", "target", "artifacts"]);
 function filesUnder(dir) {
@@ -109,12 +106,36 @@ const verifiers = {
       if (current.status !== "BLOCKED" && previous.review_status !== "PASS") findings.push([rule.id, `PR_INDEX.json:${previous.id}->${current.id}`]);
     }
   },
+  task_summary_redaction(rule, findings) {
+    const taskPath = join(root, "src-tauri", "src", "state", "task.rs");
+    if (!existsSync(taskPath)) {
+      findings.push([rule.id, "src-tauri/src/state/task.rs:missing"]);
+      return;
+    }
+    const body = read(taskPath);
+    const requiredPatterns = [
+      [/pub\s+enum\s+SafeTaskSummary\b/, "SafeTaskSummary"],
+      [/pub\s+fn\s+from_untrusted\s*\(/, "from_untrusted"],
+      [/summary:\s*SafeTaskSummary\b/, "typed-summary-field"],
+      [/summary:\s*SafeTaskSummary::from_untrusted\s*\(\s*raw_summary\s*\)/, "start-redaction"],
+      [/contains_sensitive_key_value\s*\(/, "sensitive-key-detector"],
+    ];
+    for (const [pattern, label] of requiredPatterns) {
+      if (!pattern.test(body)) findings.push([rule.id, `src-tauri/src/state/task.rs:${label}`]);
+    }
+    for (const marker of ["token", "password", "access_token", "api_key", "client_secret", "authorization"]) {
+      if (!body.toLowerCase().includes(`\"${marker}\"`)) findings.push([rule.id, `src-tauri/src/state/task.rs:missing-${marker}`]);
+    }
+    for (const p of all) {
+      const r = rel(p);
+      if (r === "src-tauri/src/state/task.rs" || (!r.startsWith("src-tauri/") && !r.startsWith("src/"))) continue;
+      if (/SafeTaskSummary::Text\s*\(/.test(read(p))) findings.push([rule.id, `${r}:direct-SafeTaskSummary-Text`]);
+    }
+  },
 };
 
 const findings = [];
-const enforced = rulesDoc.rules.filter((r) => r.verification.mode === "enforced");
-const deferred = rulesDoc.rules.filter((r) => r.verification.mode === "deferred");
-for (const rule of enforced) verifiers[rule.verification.type](rule, findings);
+for (const rule of classification.activeRules) verifiers[rule.verification.type](rule, findings);
 
 const actualIds = new Set(findings.map(([id]) => id));
 if (expectFailure) {
@@ -129,4 +150,4 @@ if (findings.length) {
   for (const [id, file] of findings) console.error(`${id}: ${file}`);
   process.exit(1);
 }
-console.log(`ARCHITECTURE_VERIFY=PASS enforced=${enforced.length} deferred=${deferred.length} total=${rulesDoc.rules.length}`);
+console.log(`ARCHITECTURE_VERIFY=PASS configured_enforced=${classification.configuredEnforced.length} activated_deferred=${classification.activatedDeferred.length} future_deferred=${classification.futureDeferred.length} active=${classification.activeRules.length} total=${rulesDoc.rules.length}`);

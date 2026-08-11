@@ -21,7 +21,7 @@ if (deps.some((d) => /lucide|heroicons|fontawesome|react-icons/i.test(d))) throw
 if (!pkg.devDependencies?.["@tauri-apps/cli"]) throw new Error("local Tauri CLI dependency missing");
 
 const rules = JSON.parse(readFileSync("ARCHITECTURE_RULES.json", "utf8"));
-const supported = new Set(["frontend_process_ownership", "system_python_fallback", "socket_bind_address_policy", "whole_app_elevation", "self_update_absence", "telemetry_absence", "visual_dependency_absence", "group_review_gate"]);
+const supported = new Set(["frontend_process_ownership", "system_python_fallback", "socket_bind_address_policy", "whole_app_elevation", "self_update_absence", "telemetry_absence", "visual_dependency_absence", "group_review_gate", "task_summary_redaction"]);
 if (!Array.isArray(rules.rules) || rules.rules.length !== 24) throw new Error("architecture rule inventory must contain 24 rules");
 const enforced = rules.rules.filter((r) => r.verification?.mode === "enforced");
 const deferred = rules.rules.filter((r) => r.verification?.mode === "deferred");
@@ -33,11 +33,17 @@ for (const rule of rules.rules) {
   if (v.mode === "deferred" && (!/^LB-\d{3}$/.test(v.activate_at_pr ?? "") || !v.reason)) throw new Error(`${rule.id} invalid deferred verification declaration`);
   if (!enforced.includes(rule) && !deferred.includes(rule)) throw new Error(`${rule.id} unsupported verification mode`);
 }
+const arch011 = rules.rules.find((r) => r.id === "ARCH-011");
+if (arch011?.verification?.activate_at_pr !== "LB-002" || arch011?.verification?.type !== "task_summary_redaction") throw new Error("ARCH-011 activation/verifier contract missing");
 
 const architectureRunner = readFileSync("scripts/verify-architecture/index.mjs", "utf8");
 if (architectureRunner.includes("rules=${rules.rules.length}")) throw new Error("architecture runner still contains misleading all-rules PASS output");
-if (!architectureRunner.includes("enforced=${enforced.length} deferred=${deferred.length} total=${rulesDoc.rules.length}")) throw new Error("architecture runner honest evidence output missing");
-if (!pkg.scripts?.["verify:architecture:negative"]?.includes("--expected ARCH-001,ARCH-003,ARCH-023,ARCH-024")) throw new Error("architecture negative fixture does not require exact rule IDs");
+if (!architectureRunner.includes("configured_enforced=${classification.configuredEnforced.length} activated_deferred=${classification.activatedDeferred.length} future_deferred=${classification.futureDeferred.length}")) throw new Error("architecture runner activation-aware evidence output missing");
+if (!architectureRunner.includes("classifyArchitectureRules") || !architectureRunner.includes("task_summary_redaction")) throw new Error("architecture activation/redaction verifier integration missing");
+if (!pkg.scripts?.["verify:architecture:activation"]?.includes("activation.test.mjs")) throw new Error("architecture activation deterministic test missing");
+if (!pkg.scripts?.["verify:architecture:activated"]?.includes("--progress tests/fixtures/architecture/progress-lb002-pass.json")) throw new Error("architecture activated end-to-end progress fixture missing");
+if (!pkg.scripts?.["verify:architecture:negative"]?.includes("--progress tests/fixtures/architecture/intentional-violation/PR_INDEX.json") || !pkg.scripts?.["verify:architecture:negative"]?.includes("--expected ARCH-001,ARCH-003,ARCH-023,ARCH-024")) throw new Error("architecture negative fixture progress isolation/exact rule IDs missing");
+if (!pkg.scripts?.["verify:lb001"]?.includes("verify:architecture:activation") || !pkg.scripts?.["verify:lb001"]?.includes("verify:architecture:activated")) throw new Error("LB-001 acceptance does not execute architecture activation tests");
 
 const packagingSmoke = readFileSync("scripts/lb001-packaging-smoke.mjs", "utf8");
 for (const required of ["@tauri-apps", "tauri.js", '"build", "--bundles", "nsis"', "lb001-nsis-install", "installedSidecarSha", "LB001_REAL_TAURI_NSIS_SMOKE=PASS"]) {

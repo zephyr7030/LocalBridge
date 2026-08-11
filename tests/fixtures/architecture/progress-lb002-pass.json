@@ -9,8 +9,8 @@
   },
   "prs": [
     { "id": "LB-000", "status": "PASS" },
-    { "id": "LB-001", "status": "IN_PROGRESS" },
-    { "id": "LB-002", "status": "BLOCKED" },
+    { "id": "LB-001", "status": "PASS" },
+    { "id": "LB-002", "status": "PASS" },
     { "id": "LB-003", "status": "BLOCKED" },
     { "id": "LB-004", "status": "BLOCKED" },
     { "id": "LB-005", "status": "BLOCKED" },
@@ -28,9 +28,5 @@
     { "id": "LB-017", "status": "BLOCKED" },
     { "id": "LB-018", "status": "BLOCKED" },
     { "id": "LB-019", "status": "BLOCKED" }
-  ],
-  "groups": [
-    { "id": "G0", "status": "REVIEW_REQUIRED", "review_status": "FAIL" },
-    { "id": "G1", "status": "READY", "review_status": "BLOCKED" }
   ]
 }

@@ -105,7 +105,7 @@
         "src-tauri/**",
         "src/**"
       ],
-      "verification": { "mode": "deferred", "activate_at_pr": "LB-002", "reason": "SafeTaskSummary domain contract is introduced in LB-002" }
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-002", "reason": "SafeTaskSummary domain contract is introduced in LB-002", "type": "task_summary_redaction" }
     },
     {
       "id": "ARCH-012",

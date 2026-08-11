@@ -8,12 +8,14 @@
     "build": "tsc -b && vite build --config vite.config.ts",
     "test": "vitest run",
     "verify:architecture": "node scripts/verify-architecture/index.mjs",
-    "verify:architecture:negative": "node scripts/verify-architecture/index.mjs --root tests/fixtures/architecture/intentional-violation --expect-failure --expected ARCH-001,ARCH-003,ARCH-023,ARCH-024",
+    "verify:architecture:activation": "node scripts/verify-architecture/activation.test.mjs",
+    "verify:architecture:activated": "node scripts/verify-architecture/index.mjs --progress tests/fixtures/architecture/progress-lb002-pass.json",
+    "verify:architecture:negative": "node scripts/verify-architecture/index.mjs --root tests/fixtures/architecture/intentional-violation --progress tests/fixtures/architecture/intentional-violation/PR_INDEX.json --expect-failure --expected ARCH-001,ARCH-003,ARCH-023,ARCH-024",
     "verify:runtime-manifest": "node scripts/verify-runtime-manifest/index.mjs",
     "verify:ui-language": "node scripts/verify-ui-language/index.mjs",
     "sidecar:prepare": "node scripts/prepare-dummy-sidecar.mjs",
     "packaging:smoke": "node scripts/lb001-packaging-smoke.mjs",
-    "verify:lb001": "npm run test && npm run build && npm run verify:architecture && npm run verify:architecture:negative && npm run verify:runtime-manifest && npm run verify:ui-language && npm run sidecar:prepare && cargo test --manifest-path src-tauri/Cargo.toml --locked && npm run packaging:smoke && node scripts/verify-lb001-contract.mjs"
+    "verify:lb001": "npm run test && npm run build && npm run verify:architecture && npm run verify:architecture:activation && npm run verify:architecture:activated && npm run verify:architecture:negative && npm run verify:runtime-manifest && npm run verify:ui-language && npm run sidecar:prepare && cargo test --manifest-path src-tauri/Cargo.toml --locked && npm run packaging:smoke && node scripts/verify-lb001-contract.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
