@@ -59,6 +59,21 @@ last_opened_at
 
 迁移后安全 identity 无法验证时不隐式授权。
 
+LB-003 当前 app-data schema 为 `v3`：
+
+```text
+v1 single-workspace preferences
+→ v2 nested settings + single workspace
+→ v3 WorkspaceRegistry + zero-or-one active_workspace_id
+```
+
+- migration 必须逐版本执行，禁止跨版本跳迁；
+- remembered registry 仅为便利性元数据，不是 MCP authorization roots；
+- registry 只按 WorkspaceValidator 已确认的 `validated_identity` 去重，不按大小写路径字符串去重；
+- 无法确认 historical identity 时保留 `pending_workspace_confirmation`，同时保持 `active_workspace_id = null`；
+- Windows 写入先写同目录临时文件并 `sync_all`，已有文件通过原子 replace 替换；旧目标保留为 `.bak` 回滚点；
+- migration/validation/future-schema 任一失败均不覆盖原文件，也不自动 reset。
+
 ## Release
 
 ```text

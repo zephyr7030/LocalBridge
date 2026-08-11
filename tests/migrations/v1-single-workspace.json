@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "permission_mode": "Edit",
+  "auto_start_services": false,
+  "onboarding_complete": true,
+  "workspace": {
+    "workspace_id": "legacy-one",
+    "display_path": "D:\\project\\legacy-one",
+    "validated_identity": "validated:v1",
+    "last_opened_at": 100
+  }
+}

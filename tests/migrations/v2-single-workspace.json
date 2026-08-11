@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "settings": {
+    "permission_mode": "Full",
+    "auto_start_services": true,
+    "onboarding_complete": true
+  },
+  "workspace": {
+    "workspace_id": "legacy-two",
+    "display_path": "D:\\project\\legacy-two",
+    "validated_identity": "validated:v2",
+    "last_opened_at": 200
+  }
+}
