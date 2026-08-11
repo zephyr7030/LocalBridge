@@ -1,0 +1,85 @@
+schema_version = 3
+runtime_version = "0.2.2"
+status = "UNVERIFIED_UNTIL_LB_000"
+
+edit_allowed_tools = []
+full_allowed_tools = []
+elevated_allowed_tools = []
+blocked_tools = []
+
+[capabilities]
+unknown = "deny"
+process_exec_in_edit = "deny"
+process_exec_in_full = "allow_if_reviewed"
+elevated_exec_in_edit = "deny"
+elevated_exec_in_full = "deny"
+elevated_exec_in_elevated = "allow_if_reviewed_and_broker_active"
+workflow_with_process_exec_in_edit = "deny"
+control_plane = "deny_always"
+privileged_external_runtime = "review_required"
+
+[enforcement]
+tools_list_filter = "ux_only"
+tools_call_check = "mandatory"
+implementation = "TO_BE_DECIDED_BY_ADR_0001"
+privileged_route = "broker_only"
+
+[elevation]
+whole_app_elevation = "forbidden"
+uac = "explicit_user_action"
+ttl = "none"
+automatic_background_uac = "forbidden"
+broker_network_listener = "forbidden"
+
+[defaults]
+edit_unknown_tool = "deny"
+full_unknown_tool = "deny"
+elevated_unknown_tool = "deny"
+
+
+[elevated_exec]
+enabled = true
+canonical_request = "structured_program_args"
+shell_true_default = false
+requires_broker = true
+requires_explicit_elevated_mode = true
+timeout_required = true
+output_limit_required = true
+cancellation_required = true
+redaction_required = true
+
+
+[credentials]
+plaintext_persistence = "deny_always"
+cli_argument_secret = "deny_always"
+frontend_persistence = "deny_always"
+diagnostic_secret = "deny_always"
+secure_backend_required = true
+
+[workspace_registry]
+remembered_projects_are_authorized_roots = false
+max_active_authorized_roots = 1
+mcp_mutation = "deny_always"
+filesystem_delete_on_remove = "deny_always"
+auto_select_other_after_active_remove = false
+
+[recovery_v13]
+automatic_reconnect = true
+attempts = 5
+backoff_seconds = [1, 2, 5, 10, 30]
+initial_failure_counts_as_attempt = false
+stop_after_exhaustion = true
+user_attention_event_after_exhaustion = true
+user_attention_event_once_per_generation = true
+manual_retry_starts_new_generation = true
+ui_notification_before_exhaustion = "deny"
+
+[ui_dependency_policy]
+apple_inspired = true
+native_css_only = true
+ui_component_library_for_visuals = "deny"
+animation_library_for_visuals = "deny"
+icon_package_for_visuals = "deny"
+css_framework_for_visuals = "deny"
+bundled_font_for_visuals = "deny"
+system_font_stack = true

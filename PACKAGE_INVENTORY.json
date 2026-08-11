@@ -1,0 +1,422 @@
+[
+  {
+    "path": "AGENTS.md",
+    "bytes": 2666,
+    "sha256": "749d643aa7304c585422561c780f04d602bb41fd0c5d98095155241a447ec60d"
+  },
+  {
+    "path": "ARCHITECTURE_RULES.json",
+    "bytes": 4822,
+    "sha256": "a4a968613b277fac46895fc7af47848731297c375c13894550a319ac52c3cbad"
+  },
+  {
+    "path": "CHANGELOG.md",
+    "bytes": 283,
+    "sha256": "5fdfccd98f8d9dcefc7f43124afcefbfeab66518dfa4b53c9af64a5bf27699e6"
+  },
+  {
+    "path": "COMPATIBILITY_BASELINE.json",
+    "bytes": 313,
+    "sha256": "ecdf6f099452d219916980b1d4e0241022dc5b5f079442d052fd7dfee7f3ffa2"
+  },
+  {
+    "path": "FINAL_REVIEW.json",
+    "bytes": 2131,
+    "sha256": "3faffa28c574274c9756a1424d7c7b978eb92d82af6bef93dabd4c47d5678e6d"
+  },
+  {
+    "path": "PROJECT_STATE.json",
+    "bytes": 8873,
+    "sha256": "47ed0e37a8a4c4d3e71ac2e9d7ac7dbc716e1ac06ae4bfe70b892a54e1269253"
+  },
+  {
+    "path": "PR_CONTRACTS.json",
+    "bytes": 30555,
+    "sha256": "ac8dbf51897ce52bff863aad23e73999afda8adbf56e60460f8e13ea3b4b501b"
+  },
+  {
+    "path": "PR_INDEX.json",
+    "bytes": 6494,
+    "sha256": "f081041bb4db95086576b8a739023a21e590ac27b8411f292edccbb76014c4ac"
+  },
+  {
+    "path": "SECURITY.md",
+    "bytes": 904,
+    "sha256": "3f3fd204536d3604a722a6866411827730e431a7ab9a0fa09a2edefd10432bb2"
+  },
+  {
+    "path": "START_HERE.md",
+    "bytes": 1774,
+    "sha256": "f7d835625f64bd6d40377265fffbd349bc45c7b48603718dc2fe2185a8ea740f"
+  },
+  {
+    "path": "THIRD_PARTY_NOTICES.md",
+    "bytes": 514,
+    "sha256": "360e2114926091d7967d9fc9c7bac47f90222f233c8dbe624e470552557122a2"
+  },
+  {
+    "path": "assets/icons/localbridge.ico",
+    "bytes": 122222,
+    "sha256": "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78"
+  },
+  {
+    "path": "assets/icons/localbridge.png",
+    "bytes": 1367148,
+    "sha256": "710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a"
+  },
+  {
+    "path": "compatibility/coding-tools/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "compatibility/tunnel-client/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "docs/01_PRODUCT_UX.md",
+    "bytes": 6888,
+    "sha256": "ce9ccdf984b238e21d112f20a6a0647009506a60932bf1cfa0bcdb36242038de"
+  },
+  {
+    "path": "docs/02_ARCHITECTURE_RUNTIME.md",
+    "bytes": 2796,
+    "sha256": "ada1620de9562a357f7099875195d08476058718a4987540f641246c2313ea9a"
+  },
+  {
+    "path": "docs/03_SECURITY.md",
+    "bytes": 2840,
+    "sha256": "71e42f6a54b612cb0f5ad2cfaef3cd6eef30faebf71b46b5079b30dfef1459b8"
+  },
+  {
+    "path": "docs/04_UPSTREAM_DISTRIBUTION.md",
+    "bytes": 1634,
+    "sha256": "733f433c391a398f9eb4e900cbf37f0974ce8d78b3754dfaac8dfda3eb6f6090"
+  },
+  {
+    "path": "docs/05_MAINTENANCE_RELEASE.md",
+    "bytes": 1625,
+    "sha256": "21124c7bc10d537ee1be407392accb8652de581d8a89ef3ccb07421b6330a5d5"
+  },
+  {
+    "path": "docs/06_PR_GROUPS_AND_EXECUTION.md",
+    "bytes": 2642,
+    "sha256": "edacfab9327d78ee2ec594d3f3c9f23c752d274a7bb021b84e966aaa1f2dd0d1"
+  },
+  {
+    "path": "docs/07_ACCEPTANCE.md",
+    "bytes": 12795,
+    "sha256": "a862a323c24220b2049dc1bcb6c546caa86a9afeedf31e334df0b389ef7b68a8"
+  },
+  {
+    "path": "docs/08_FINAL_REVIEW.md",
+    "bytes": 1779,
+    "sha256": "a839a6d59d94021fe51566f4c573723f355baed7c527949ff748dab64ca5423f"
+  },
+  {
+    "path": "release-artifacts/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "runtime/coding-tools-mcp/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "runtime/python/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "runtime/tunnel-client/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "runtime-manifest.toml",
+    "bytes": 1475,
+    "sha256": "14e7db47978f6ef5cd8e5a94159c30878a9281bb626799df2eb23d711e93ef79"
+  },
+  {
+    "path": "runtime-policy.toml",
+    "bytes": 2258,
+    "sha256": "b39ba7c1e8c65675960ea02d95e556d2162e36f8ab4845ddb5eebc50bbf33552"
+  },
+  {
+    "path": "schema/runtime-policy/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "schema/settings/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "scripts/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "scripts/diff-upstream-surface/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "scripts/generate-sbom/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "scripts/verify-architecture/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "scripts/verify-runtime-manifest/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "scripts/verify-ui-language/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "skills/adversarial-review/SKILL.md",
+    "bytes": 350,
+    "sha256": "b12e1cd23d66b29886bc5ee5e0c8b1804f85155d1c8d2fa2ea99656bddb25d9e"
+  },
+  {
+    "path": "skills/engineering/SKILL.md",
+    "bytes": 338,
+    "sha256": "dd27762c92c866de26b94cb8ae3f72fa4c2905f13df70711c31b3ffcf71113af"
+  },
+  {
+    "path": "skills/privilege-boundary/SKILL.md",
+    "bytes": 290,
+    "sha256": "e6446a4f6929bca73b0cc4db027cabda0730eaff25cbb73da6a8cce49b349c14"
+  },
+  {
+    "path": "skills/runtime-distribution/SKILL.md",
+    "bytes": 298,
+    "sha256": "589d759434eadd6a49f532486041dbc9dd2da5d4e44d197b4262185810e7ea19"
+  },
+  {
+    "path": "skills/ui/SKILL.md",
+    "bytes": 727,
+    "sha256": "4ba7d04a392c180377b1b0ccd2068e4269d3abcae256aadc63277f66884cfe55"
+  },
+  {
+    "path": "spikes/lb-000/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/app/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/components/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/features/dashboard/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/features/diagnostics/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/features/onboarding/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/features/settings/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/lib/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/lib/i18n/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/lib/presentation/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/stores/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src/styles/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/bin/privileged-broker/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/capabilities/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/app/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/commands/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/credentials/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/diagnostics/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/mcp/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/privilege/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/privilege/broker/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/privilege/ipc/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/privilege/policy/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/runtime/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/settings/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/state/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/tray/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/tunnel/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "src-tauri/src/workspace/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "templates/ADVERSARIAL_REVIEW_PROMPT.md",
+    "bytes": 1221,
+    "sha256": "51b7703302c53c6a3dda2c5e80d8f60fc06341f0cf8a53d103d78a016657d1f0"
+  },
+  {
+    "path": "templates/PR_EXECUTION_PROMPT.md",
+    "bytes": 924,
+    "sha256": "711a215f2dbb088ac6beafd0dc2cac63276e3263cc95c916f27f44a9cd582c46"
+  },
+  {
+    "path": "tests/adversarial/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/contract/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/e2e/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/fixtures/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/fixtures/privilege/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/fuzz/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/integration/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/integration/privilege/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/migrations/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/unit/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "path": "tests/unit/privilege/.gitkeep",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+]

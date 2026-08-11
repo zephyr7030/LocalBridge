@@ -1,0 +1,143 @@
+
+# 06 — PR Groups & Execution
+
+20 个 PR 不变，严格按编号顺序执行，并增加组级对抗审查 Gate。
+
+```text
+组内 PR 全部 PASS
+→ GROUP_REVIEW_REQUIRED
+→ 独立对抗审查
+→ PASS
+→ 下一组第一个 PR 才 READY
+```
+
+前组审查未 PASS，后组任何 PR 不得开始。
+
+## G0 — 上游与可行性
+
+```text
+LB-000 Upstream + Security Compatibility Spike
+```
+
+## G1 — 基础与数据
+
+```text
+LB-001 Repository Bootstrap + Packaging Smoke
+LB-002 Domain Contracts
+LB-003 Settings & App Data
+LB-004 Windows Process Supervisor
+LB-005 Credentials
+```
+
+## G2 — 运行时与安全执行
+
+```text
+LB-006 Portable Coding Tools Runtime
+LB-007 MCP Policy Enforcement
+LB-008 Tunnel Runtime
+LB-009 Orchestrator Core
+LB-010 Recovery + Workspace Switch
+LB-011 Privileged Broker IPC Foundation
+LB-012 Elevated Permission Mode
+```
+
+自动重连职责：
+
+- LB-008：Tunnel reconnect primitive；
+- LB-009：outage generation/状态；
+- LB-010：5 次 budget、1/2/5/10/30s、最小层重启、最终单次错误事件。
+
+## G3 — 桌面与极简 UI
+
+```text
+LB-013 Tray + Background
+LB-014 Autostart + Single Instance
+LB-015 UI Shell
+LB-016 First-run Wizard
+LB-017 Diagnostics
+```
+
+LB-015：
+
+- Apple-inspired；
+- 只用 React/Tauri + 原生 CSS/SVG/system fonts；
+- 不新增 UI/动画/图标/CSS/字体依赖；
+- 单行绿色脉冲当前执行；
+- 重连前 5 次无新增 UI；
+- 5 次失败后一次极简错误窗口。
+
+## G4 — 打包与发布
+
+```text
+LB-018 Runtime Packaging
+LB-019 Release / Clean-machine / Reboot E2E
+```
+
+## 组内推进
+
+当前 PR PASS：
+
+- 若组内还有 PR：只解锁下一编号 PR；
+- 若是组末：
+  - group → REVIEW_REQUIRED；
+  - current_pr = null；
+  - 下一组继续 BLOCKED；
+  - 开发智能体停止。
+
+## 独立组审
+
+审查整个组当前磁盘状态：
+
+```text
+contracts
+architecture
+all acceptance
+cross-PR integration
+negative/adversarial cases
+security boundaries
+scope
+```
+
+### PASS
+
+Reviewer 不得改代码/合同/文档/测试。
+
+只允许受限写：
+
+```text
+PR_INDEX.json
+PROJECT_STATE.json
+```
+
+仅推进当前 group review/status，并解锁下一组首 PR。
+
+### FAIL
+
+必须给：
+
+```text
+severity
+evidence
+reproduction
+reopen_from_pr
+```
+
+状态：
+
+```text
+group = REWORK_REQUIRED
+review_status = FAIL
+reopen_from_pr = REWORK_REQUIRED
+其后同组 PR = BLOCKED
+下一组 = BLOCKED
+```
+
+从 reopen_from_pr 起重新顺序执行，再重新组审。
+
+## 外部凭据
+
+LB-000 real Tunnel 子 Gate 若唯一阻塞是缺真实 credential：
+
+- deterministic/spike 仍必须完成；
+- 明确记录 external blocker；
+- 不伪造 PASS。

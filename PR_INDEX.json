@@ -1,0 +1,340 @@
+{
+  "schema_version": 5,
+  "project": "LocalBridge",
+  "state": "PRE_CODE",
+  "execution": {
+    "single_executor": true,
+    "single_pr_at_a_time": true,
+    "stop_after_acceptance": true,
+    "current_pr": "LB-000",
+    "contract_file": "PR_CONTRACTS.json",
+    "strict_sequence": true,
+    "execution_order": [
+      "LB-000",
+      "LB-001",
+      "LB-002",
+      "LB-003",
+      "LB-004",
+      "LB-005",
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-009",
+      "LB-010",
+      "LB-011",
+      "LB-012",
+      "LB-013",
+      "LB-014",
+      "LB-015",
+      "LB-016",
+      "LB-017",
+      "LB-018",
+      "LB-019"
+    ],
+    "allowed_statuses": [
+      "BLOCKED",
+      "READY",
+      "IN_PROGRESS",
+      "PASS",
+      "FAILED",
+      "REWORK_REQUIRED"
+    ],
+    "advance_only_after_acceptance": true,
+    "governance_transition_updates_current_pr": true,
+    "current_group": "G0",
+    "group_review_gate_required": true,
+    "next_group_locked_until_review_pass": true,
+    "allowed_group_statuses": [
+      "BLOCKED",
+      "READY",
+      "IN_PROGRESS",
+      "REVIEW_REQUIRED",
+      "REWORK_REQUIRED",
+      "PASS"
+    ],
+    "allowed_review_statuses": [
+      "BLOCKED",
+      "PENDING",
+      "REQUIRED",
+      "PASS",
+      "FAIL"
+    ]
+  },
+  "prs": [
+    {
+      "id": "LB-000",
+      "title": "Upstream + Security Compatibility Spike",
+      "depends_on": [],
+      "gate": "G0",
+      "status": "READY"
+    },
+    {
+      "id": "LB-001",
+      "title": "Repository Bootstrap + Packaging Smoke",
+      "depends_on": [
+        "LB-000"
+      ],
+      "gate": "G1",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-002",
+      "title": "Domain Contracts",
+      "depends_on": [
+        "LB-001"
+      ],
+      "gate": "G1",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-003",
+      "title": "Settings & App Data",
+      "depends_on": [
+        "LB-002"
+      ],
+      "gate": "G1",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-004",
+      "title": "Windows Process Supervisor",
+      "depends_on": [
+        "LB-000",
+        "LB-002"
+      ],
+      "gate": "G1",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-005",
+      "title": "Credentials",
+      "depends_on": [
+        "LB-002",
+        "LB-003"
+      ],
+      "gate": "G1",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-006",
+      "title": "Portable Coding Tools Runtime",
+      "depends_on": [
+        "LB-000",
+        "LB-004"
+      ],
+      "gate": "G2",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-007",
+      "title": "MCP Policy Enforcement",
+      "depends_on": [
+        "LB-000",
+        "LB-006"
+      ],
+      "gate": "G2",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-008",
+      "title": "Tunnel Runtime",
+      "depends_on": [
+        "LB-000",
+        "LB-004",
+        "LB-005",
+        "LB-007"
+      ],
+      "gate": "G2",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-009",
+      "title": "Orchestrator Core",
+      "depends_on": [
+        "LB-004",
+        "LB-006",
+        "LB-007",
+        "LB-008"
+      ],
+      "gate": "G2",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-010",
+      "title": "Recovery + Workspace Switch",
+      "depends_on": [
+        "LB-003",
+        "LB-009"
+      ],
+      "gate": "G2",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-011",
+      "title": "Privileged Broker IPC Foundation",
+      "depends_on": [
+        "LB-002",
+        "LB-004",
+        "LB-005",
+        "LB-007"
+      ],
+      "gate": "G2",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-012",
+      "title": "Elevated Permission Mode",
+      "depends_on": [
+        "LB-009",
+        "LB-010",
+        "LB-011"
+      ],
+      "gate": "G2",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-013",
+      "title": "Tray + Background",
+      "depends_on": [
+        "LB-010",
+        "LB-012"
+      ],
+      "gate": "G3",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-014",
+      "title": "Autostart + Single Instance",
+      "depends_on": [
+        "LB-013"
+      ],
+      "gate": "G3",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-015",
+      "title": "UI Shell",
+      "depends_on": [
+        "LB-002",
+        "LB-003",
+        "LB-009",
+        "LB-012"
+      ],
+      "gate": "G3",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-016",
+      "title": "First-run Wizard",
+      "depends_on": [
+        "LB-005",
+        "LB-008",
+        "LB-015"
+      ],
+      "gate": "G3",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-017",
+      "title": "Diagnostics",
+      "depends_on": [
+        "LB-009",
+        "LB-010",
+        "LB-012",
+        "LB-015"
+      ],
+      "gate": "G3",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-018",
+      "title": "Runtime Packaging",
+      "depends_on": [
+        "LB-006",
+        "LB-008",
+        "LB-011",
+        "LB-014",
+        "LB-016",
+        "LB-017"
+      ],
+      "gate": "G4",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "LB-019",
+      "title": "Release / Clean-machine / Reboot E2E",
+      "depends_on": [
+        "LB-018"
+      ],
+      "gate": "G4",
+      "status": "BLOCKED"
+    }
+  ],
+  "groups": [
+    {
+      "id": "G0",
+      "title": "Upstream & Feasibility",
+      "prs": [
+        "LB-000"
+      ],
+      "status": "READY",
+      "review_status": "PENDING",
+      "review_generation": 0
+    },
+    {
+      "id": "G1",
+      "title": "Foundation & Data",
+      "prs": [
+        "LB-001",
+        "LB-002",
+        "LB-003",
+        "LB-004",
+        "LB-005"
+      ],
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
+      "review_generation": 0
+    },
+    {
+      "id": "G2",
+      "title": "Runtime & Security",
+      "prs": [
+        "LB-006",
+        "LB-007",
+        "LB-008",
+        "LB-009",
+        "LB-010",
+        "LB-011",
+        "LB-012"
+      ],
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
+      "review_generation": 0
+    },
+    {
+      "id": "G3",
+      "title": "Desktop & Minimal UI",
+      "prs": [
+        "LB-013",
+        "LB-014",
+        "LB-015",
+        "LB-016",
+        "LB-017"
+      ],
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
+      "review_generation": 0
+    },
+    {
+      "id": "G4",
+      "title": "Packaging & Release",
+      "prs": [
+        "LB-018",
+        "LB-019"
+      ],
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
+      "review_generation": 0
+    }
+  ]
+}

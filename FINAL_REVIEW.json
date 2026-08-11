@@ -1,0 +1,80 @@
+{
+  "schema_version": 7,
+  "review_date": "2026-08-10",
+  "baseline": "v15-FINAL",
+  "status": "PASS",
+  "phase": "PRE_CODE",
+  "current_pr": "LB-000",
+  "blocking_findings": [],
+  "dynamic_gates_owned_by_lb000": [
+    "coding-tools capability surface",
+    "PEP implementation decision",
+    "tunnel secret injection",
+    "Windows Job Object behavior",
+    "reparse-point behavior",
+    "live tunnel compatibility"
+  ],
+  "dynamic_gate_owned_by_lb006": [
+    "exact Python 3.12.x embedded runtime patch/layout"
+  ],
+  "current_task_status_ui": {
+    "status_only": true,
+    "activity_feed": false,
+    "history_list": false,
+    "source": "actual MCP/Broker execution",
+    "redaction_required": true,
+    "presentation": "single_inline_status",
+    "active_indicator": "green_pulsing_dot",
+    "titles": false,
+    "field_labels": false,
+    "running_text": false,
+    "reduced_motion_supported": true
+  },
+  "credentials": {
+    "runtime_api_key_plaintext": false,
+    "secure_backend_required": true,
+    "cli_argument_forbidden": true
+  },
+  "project_registry": {
+    "add": true,
+    "select": true,
+    "remove": true,
+    "max_authorized_roots": 1,
+    "remove_deletes_files": false,
+    "active_remove_result": "NoActiveWorkspace"
+  },
+  "current_group": "G0",
+  "reconnect": {
+    "attempts": 5,
+    "backoff_seconds": [
+      1,
+      2,
+      5,
+      10,
+      30
+    ],
+    "silent_before_exhaustion": true,
+    "error_window_after_exhaustion": true
+  },
+  "ui_visual_dependencies": {
+    "apple_inspired": true,
+    "extra_dependencies_required": false
+  },
+  "group_gates": {
+    "count": 5,
+    "independent_adversarial_review_required": true,
+    "next_group_locked_until_pass": true
+  },
+  "onboarding": {
+    "screens": 5,
+    "screen_6": false,
+    "screen_5_auto_advance": false,
+    "screen_5_confirm_gated_by_all_green": true,
+    "screen_5_success_message_after_ready_only": true
+  },
+  "brand_icon": {
+    "status": "FROZEN",
+    "png_sha256": "710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a",
+    "ico_sha256": "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78"
+  }
+}

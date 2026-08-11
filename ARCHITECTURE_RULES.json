@@ -1,0 +1,181 @@
+{
+  "schema_version": 6,
+  "status": "ENFORCEMENT_TO_BE_IMPLEMENTED_BY_LB_001_AND_LATER",
+  "rules": [
+    {
+      "id": "ARCH-001",
+      "description": "Frontend must not own sidecar lifecycle",
+      "severity": "error",
+      "applies_to": [
+        "src/**"
+      ],
+      "forbid_concepts": [
+        "process spawn",
+        "process kill",
+        "PID ownership"
+      ]
+    },
+    {
+      "id": "ARCH-002",
+      "description": "Product runtime must not fallback to system Python",
+      "severity": "error",
+      "applies_to": [
+        "src-tauri/**",
+        "scripts/**"
+      ],
+      "forbid_patterns": [
+        "python from PATH",
+        "py.exe fallback",
+        "user site-packages"
+      ]
+    },
+    {
+      "id": "ARCH-003",
+      "description": "Listeners must remain loopback-only",
+      "severity": "error",
+      "verification": {
+        "type": "socket_bind_address_policy",
+        "allowed": [
+          "127.0.0.1",
+          "::1"
+        ],
+        "forbidden": [
+          "0.0.0.0",
+          "::"
+        ],
+        "match": "parsed_address_exact_not_substring"
+      }
+    },
+    {
+      "id": "ARCH-004",
+      "description": "UI must not render internal enums directly",
+      "severity": "error",
+      "applies_to": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "ARCH-005",
+      "description": "MCP cannot mutate LocalBridge control-plane",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-006",
+      "description": "Whole-app elevation is forbidden",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-007",
+      "description": "Runtime self-update is forbidden",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-008",
+      "description": "Telemetry endpoints are forbidden",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-009",
+      "description": "External runtime access must go through stable adapters",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-010",
+      "description": "Dashboard current-task UI is one ephemeral status projection, not an activity feed",
+      "severity": "error",
+      "applies_to": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "ARCH-011",
+      "description": "Task summaries must be secret-redacted before UI projection",
+      "severity": "error",
+      "applies_to": [
+        "src-tauri/**",
+        "src/**"
+      ]
+    },
+    {
+      "id": "ARCH-012",
+      "description": "Task status source must be actual MCP/Broker execution, not model prose",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-013",
+      "description": "Dashboard execution status must be one inline presentation without section/field labels",
+      "severity": "error",
+      "applies_to": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "ARCH-014",
+      "description": "Active task indicator uses presentation-level motion and must respect prefers-reduced-motion",
+      "severity": "error",
+      "applies_to": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "ARCH-015",
+      "description": "Secrets must not be persisted in plaintext settings or frontend storage",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-016",
+      "description": "Runtime API Key must not appear in spawned process command-line arguments",
+      "severity": "error",
+      "applies_to": [
+        "src-tauri/**"
+      ]
+    },
+    {
+      "id": "ARCH-017",
+      "description": "Remembered workspace registry must not be treated as simultaneous MCP authorization roots",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-018",
+      "description": "Workspace removal must never perform filesystem deletion",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-019",
+      "description": "MCP tools cannot mutate workspace registry or active workspace",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-020",
+      "description": "Recoverable runtime outages use exactly five bounded reconnect attempts before user attention",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-021",
+      "description": "Reconnect attempts before exhaustion must not create new user notifications or retry UI",
+      "severity": "error",
+      "applies_to": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "ARCH-022",
+      "description": "One outage generation may emit at most one reconnect-exhaustion error window",
+      "severity": "error"
+    },
+    {
+      "id": "ARCH-023",
+      "description": "Apple-inspired styling must not add UI/animation/icon/CSS-framework/font dependencies",
+      "severity": "error",
+      "applies_to": [
+        "package.json",
+        "src/**"
+      ]
+    },
+    {
+      "id": "ARCH-024",
+      "description": "Next PR group cannot become READY until previous group independent adversarial review is PASS",
+      "severity": "error"
+    }
+  ]
+}

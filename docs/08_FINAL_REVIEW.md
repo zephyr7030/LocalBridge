@@ -1,0 +1,65 @@
+
+# 08 — Final Predevelopment Review
+
+Review date: 2026-08-10  
+Baseline: `LocalBridge-Dev-Preflight-v15-FINAL`  
+Result: **PASS — ready for G0 / LB-000**
+
+已冻结：
+
+- Windows 11 x64；
+- Tauri 2 + React/TS + Rust；
+- bundled Python/coding-tools/tunnel-client；
+- no external Python；
+- no updater v0.1；
+- zero telemetry；
+- loopback-only；
+- Edit / Full / Elevated；
+- separate Privileged Broker；
+- Runtime API Key secure store，no plaintext/CLI；
+- project registry + zero/one active root；
+- project remove never deletes files；
+- true `--background`；
+- single-line green-pulse execution status；
+- Apple-inspired UI using native CSS only，no visual dependency；
+- auto reconnect exactly 5 attempts with 1/2/5/10/30s；
+- no new reconnect UI until exhaustion；
+- 20 PRs / 5 groups；
+- mandatory independent adversarial review between groups.
+
+LB-000 仍实证决定：
+
+- actual coding-tools capability surface；
+- PEP implementation；
+- tunnel secure secret injection；
+- Job Object；
+- reparse/junction；
+- real Tunnel compatibility。
+
+开发入口：
+
+```text
+current_group = G0
+current_pr    = LB-000
+```
+
+G0 审查 PASS 前 G1 不得开始。
+
+Additional UI freeze:
+
+- onboarding = exactly 5 screens;
+- 1/5 = `简单设置 即可开始`;
+- OpenAI = screen 2, `Tunnel` remains English;
+- workspace + permission = screen 3;
+- no screen 6;
+- screen 5 confirm disabled until all checks green;
+- completion hint appears only after readiness;
+- user clicks confirm to enter main UI.
+
+
+Frozen brand icon:
+
+- `assets/icons/localbridge.png` — 1024×1024 RGBA;
+- `assets/icons/localbridge.ico` — 16/24/32/48/64/128/256 px;
+- Windows app, installer and tray use this asset;
+- no icon-library dependency or placeholder replacement is permitted.

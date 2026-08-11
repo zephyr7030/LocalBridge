@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "tool_calls": 8,
+  "errors": 0,
+  "cache_hits": 0,
+  "deduplicated_calls": 0,
+  "local_execution_ms": 6044,
+  "estimated_wait_ms": 817403,
+  "request_bytes": 4408,
+  "response_bytes": 309192,
+  "last_finished_at": "2026-08-11T04:44:38.464Z",
+  "recent": [
+    {
+      "tool": "workspace_preheat",
+      "started_at": "2026-08-11T04:30:55.102Z",
+      "finished_at": "2026-08-11T04:30:55.102Z",
+      "duration_ms": 78,
+      "wait_before_ms": 0,
+      "request_bytes": 0,
+      "response_bytes": 0,
+      "cache_hit": false,
+      "deduplicated": false,
+      "ok": true
+    },
+    {
+      "tool": "workspace_context",
+      "started_at": "2026-08-11T04:41:33.442Z",
+      "finished_at": "2026-08-11T04:41:33.442Z",
+      "duration_ms": 108,
+      "wait_before_ms": 638235,
+      "request_bytes": 51,
+      "response_bytes": 5365,
+      "cache_hit": false,
+      "deduplicated": false,
+      "ok": true
+    },
+    {
+      "tool": "agent_workflow",
+      "started_at": "2026-08-11T04:41:43.688Z",
+      "finished_at": "2026-08-11T04:41:43.688Z",
+      "duration_ms": 436,
+      "wait_before_ms": 9813,
+      "request_bytes": 709,
+      "response_bytes": 112984,
+      "cache_hit": false,
+      "deduplicated": false,
+      "ok": true
+    },
+    {
+      "tool": "agent_workflow",
+      "started_at": "2026-08-11T04:41:58.747Z",
+      "finished_at": "2026-08-11T04:41:58.747Z",
+      "duration_ms": 156,
+      "wait_before_ms": 14906,
+      "request_bytes": 797,
+      "response_bytes": 68341,
+      "cache_hit": false,
+      "deduplicated": false,
+      "ok": true
+    },
+    {
+      "tool": "task_control",
+      "started_at": "2026-08-11T04:42:07.802Z",
+      "finished_at": "2026-08-11T04:42:07.802Z",
+      "duration_ms": 0,
+      "wait_before_ms": 9046,
+      "request_bytes": 154,
+      "response_bytes": 384,
+      "cache_hit": false,
+      "deduplicated": false,
+      "ok": true
+    },
+    {
+      "tool": "agent_workflow",
+      "started_at": "2026-08-11T04:44:12.759Z",
+      "finished_at": "2026-08-11T04:44:12.759Z",
+      "duration_ms": 828,
+      "wait_before_ms": 124125,
+      "request_bytes": 1228,
+      "response_bytes": 118454,
+      "cache_hit": false,
+      "deduplicated": false,
+      "ok": true
+    },
+    {
+      "tool": "exec_command",
+      "started_at": "2026-08-11T04:44:27.327Z",
+      "finished_at": "2026-08-11T04:44:27.327Z",
+      "duration_ms": 188,
+      "wait_before_ms": 14389,
+      "request_bytes": 703,
+      "response_bytes": 1154,
+      "cache_hit": false,
+      "deduplicated": false,
+      "ok": true
+    },
+    {
+      "tool": "exec_command",
+      "started_at": "2026-08-11T04:44:38.464Z",
+      "finished_at": "2026-08-11T04:44:38.464Z",
+      "duration_ms": 4250,
+      "wait_before_ms": 6889,
+      "request_bytes": 766,
+      "response_bytes": 2510,
+      "cache_hit": false,
+      "deduplicated": false,
+      "ok": true
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "status": "UNVERIFIED_UNTIL_LB_000",
+  "coding_tools_mcp": {
+    "version": "0.2.2",
+    "tools_list_snapshot": null,
+    "capability_map": null,
+    "behavior_snapshot": null
+  },
+  "tunnel_client": {
+    "version": "0.0.11",
+    "cli_surface": null,
+    "health_contract": null
+  }
+}

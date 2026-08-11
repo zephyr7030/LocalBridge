@@ -1,0 +1,263 @@
+{
+  "schema_version": 14,
+  "phase": "PRE_CODE",
+  "current_pr": "LB-000",
+  "architecture_frozen_candidate": true,
+  "product_name_finalized": false,
+  "target_platform": "windows-x86_64",
+  "ux_hard_requirements": [
+    "No embedded ChatGPT",
+    "Wizard screen 2 includes Open ChatGPT MCP App Page",
+    "System default browser only",
+    "Single dashboard",
+    "Tray-first background runtime",
+    "Dashboard always shows administrator privilege runtime status",
+    "Privilege status reflects actual PrivilegeState, not only selected permission mode",
+    "User-facing UI uses Simplified Chinese except necessary professional abbreviations and proper names",
+    "No unnecessary English UI labels or internal enum strings",
+    "Dashboard exposes one current-task status panel",
+    "Current-task UI is status-only; no recent activity feed or history list",
+    "Task summary is grounded in actual MCP/Broker execution and secret-redacted"
+  ],
+  "known_blockers": [],
+  "known_risks": [
+    "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
+    "Full mode process execution has current Windows user OS permissions",
+    "Guard may become a partial MCP implementation if upstream enforcement is insufficient",
+    "Windows junction/symlink/reparse points can undermine naive workspace path checks",
+    "Portable Python may differ materially from system Python",
+    "ChatGPT settings deep link may drift"
+  ],
+  "engineering_hard_requirements": [
+    "First-principles reasoning before implementation",
+    "No short-term patch-only production code; design for maintenance and iteration",
+    "UI uses minimum necessary buttons and minimum necessary prompts",
+    "Administrator operations use a separate privileged broker; no forced expiry timer; user enables/disables explicitly",
+    "All product runtimes are bundled; no system Python dependency",
+    "Third-party runtimes only upgrade with a full LocalBridge release",
+    "Windows 11 x64 only for v0.1",
+    "No telemetry or automatic updater in v0.1",
+    "Use system WebView2; do not bundle WebView2 runtime",
+    "Architecture invariants must become automated checks where feasible",
+    "Every upstream runtime upgrade requires a compatibility and capability diff",
+    "Persistent state is schema-versioned and migrated sequentially",
+    "External runtimes are isolated behind stable adapters",
+    "Stable releases include SBOM, third-party notices, provenance and exact runtime manifest",
+    "Runtime API Key never persists in plaintext and never appears in process CLI arguments",
+    "Remembered project list is not an authorization list",
+    "Exactly zero or one active workspace is authorized at a time",
+    "Removing a project never deletes disk files",
+    "Removing the active project enters NoActiveWorkspace and does not auto-authorize another project"
+  ],
+  "execution_plan_version": 15,
+  "total_prs": 20,
+  "architecture_decisions_pending_lb000": [
+    "Policy Enforcement implementation: upstream / adapter / Rust Guard",
+    "Windows process ownership: Job Object exact design",
+    "Tunnel Runtime Key safe injection path",
+    "Portable Python exact layout/version",
+    "Dynamic loopback port allocation strategy"
+  ],
+  "permission_architecture": {
+    "user_visible_modes": [
+      "Edit",
+      "Full",
+      "Elevated"
+    ],
+    "internal_model": "Elevated = Full + Privileged Broker",
+    "whole_app_elevation": false,
+    "admin_ttl": null,
+    "user_controls_enable_disable": true,
+    "background_auto_uac": false,
+    "generic_elevated_exec": true
+  },
+  "distribution_architecture": {
+    "target": "Windows 11 x64",
+    "bundle_python_embedded": true,
+    "external_python_dependency": false,
+    "bundle_coding_tools_mcp": true,
+    "bundle_tunnel_client": true,
+    "bundle_webview2": false,
+    "runtime_self_update": false,
+    "application_auto_update_v0_1": false,
+    "telemetry": false,
+    "runtime_upgrade_model": "whole LocalBridge release"
+  },
+  "ui_language_policy": {
+    "default_locale": "zh-CN",
+    "unnecessary_english_forbidden": true,
+    "professional_abbreviations_allowed": [
+      "MCP",
+      "API",
+      "URL",
+      "UAC",
+      "HTTP",
+      "HTTPS",
+      "SHA256"
+    ],
+    "proper_names_allowed": [
+      "OpenAI",
+      "ChatGPT",
+      "Windows",
+      "LocalBridge"
+    ],
+    "internal_enums_direct_render": false
+  },
+  "maintenance_architecture": {
+    "machine_verifiable_architecture_rules": true,
+    "compatibility_baseline_required": true,
+    "stable_runtime_adapters": true,
+    "versioned_persistence": true,
+    "sequential_migrations": true,
+    "release_sbom": true,
+    "release_provenance": true,
+    "third_party_notices": true,
+    "release_stages": [
+      "development",
+      "release-candidate",
+      "stable"
+    ]
+  },
+  "predevelopment_review": {
+    "status": "PASS",
+    "date": "2026-08-10",
+    "baseline": "v9-FINAL",
+    "next_action": "Execute LB-000 only"
+  },
+  "current_task_ui": {
+    "enabled": true,
+    "presentation": "single_inline_status",
+    "history_feed": false,
+    "recent_activity_list": false,
+    "model_thoughts": false,
+    "chat_response_mirroring": false,
+    "source": "actual_mcp_and_broker_execution_events",
+    "redaction_required": true,
+    "show_section_title": false,
+    "show_field_labels": false,
+    "show_running_text": false,
+    "active_indicator": "green_pulsing_dot",
+    "reduced_motion": "static_green_dot",
+    "idle": "neutral_static_dot_or_hidden"
+  },
+  "credential_policy": {
+    "runtime_api_key_plaintext_persistence": false,
+    "secure_backend": "Windows Credential Manager or equivalent DPAPI-backed secure store",
+    "plaintext_fallback": false,
+    "cli_argument_injection": false,
+    "ui_reveal_after_save": false,
+    "diagnostic_redaction": true
+  },
+  "workspace_registry": {
+    "multiple_remembered_projects": true,
+    "authorized_roots_at_once": 1,
+    "supports_add": true,
+    "supports_select": true,
+    "supports_switch": true,
+    "supports_remove_non_active": true,
+    "supports_remove_active": true,
+    "remove_deletes_disk_files": false,
+    "active_remove_result": "NoActiveWorkspace",
+    "auto_select_other_on_remove": false,
+    "mcp_can_mutate_registry": false
+  },
+  "current_group": "G0",
+  "recovery_policy": {
+    "automatic_reconnect": true,
+    "attempts": 5,
+    "backoff_seconds": [
+      1,
+      2,
+      5,
+      10,
+      30
+    ],
+    "ui_before_exhaustion": false,
+    "error_window_after_exhaustion": true,
+    "single_error_per_generation": true,
+    "manual_retry_new_generation": true
+  },
+  "ui_visual_policy": {
+    "style": "Apple-inspired minimal",
+    "implementation": "React/Tauri + native CSS/SVG/system fonts",
+    "new_visual_dependencies": false,
+    "component_library": false,
+    "animation_library": false,
+    "icon_package": false,
+    "css_framework": false,
+    "bundled_font": false
+  },
+  "pr_group_policy": {
+    "groups": [
+      "G0",
+      "G1",
+      "G2",
+      "G3",
+      "G4"
+    ],
+    "strict_sequence_inside_group": true,
+    "independent_adversarial_review_between_groups": true,
+    "next_group_requires_review_pass": true
+  },
+  "onboarding_ui": {
+    "screens": 5,
+    "screen_order": [
+      "welcome",
+      "openai",
+      "workspace_and_permission",
+      "chatgpt",
+      "runtime_check"
+    ],
+    "screen_1": {
+      "title": "简单设置 即可开始",
+      "description": "LocalBridge是链接ChatGPT与本地代码的工具",
+      "primary_action": "开始"
+    },
+    "screen_2": {
+      "tunnel_term": "Tunnel",
+      "runtime_key_security_hint": "运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志或命令行。"
+    },
+    "screen_5": {
+      "title": "正在准备",
+      "checks": [
+        "本地运行环境",
+        "编码服务",
+        "OpenAI Tunnel"
+      ],
+      "confirm_disabled_until_all_green": true,
+      "success_message": "设置完成，尝试在插件中选择刚刚添加的工具吧！",
+      "success_message_visible_before_ready": false,
+      "auto_advance": false,
+      "extra_chatgpt_check": false
+    }
+  },
+  "brand_icon": {
+    "frozen": true,
+    "png": {
+      "path": "assets/icons/localbridge.png",
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "sha256": "710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a"
+    },
+    "ico": {
+      "path": "assets/icons/localbridge.ico",
+      "sizes": [
+        16,
+        24,
+        32,
+        48,
+        64,
+        128,
+        256
+      ],
+      "sha256": "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78"
+    },
+    "windows_app": "assets/icons/localbridge.ico",
+    "tray": "assets/icons/localbridge.ico",
+    "installer": "assets/icons/localbridge.ico",
+    "replacement_without_contract": false
+  }
+}

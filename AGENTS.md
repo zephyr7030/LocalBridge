@@ -1,0 +1,30 @@
+
+# LocalBridge Agent Rules
+
+1. 事实源：`START_HERE.md`、8 份 `docs/**`、机器合同、runtime manifest/policy、当前磁盘代码。冲突立即停止报告。
+2. 一次只执行 `current_pr`，LB-000→LB-019 严格顺序。
+3. 组末必须停止；只有独立组级对抗审查 PASS 才能解锁下一组。
+4. 只写当前 PR writable paths 和合同明确的受限例外。
+5. 不写 patch-only 生产代码；上游 runtime 放在 stable adapter 后。
+6. Rust 管 lifecycle；React 不管理 sidecar/PID/权限/安全策略/raw MCP。
+7. 编辑模式无 process exec；完整模式为当前用户权限；管理员能力只走独立 Broker；control-plane 永久 deny。
+8. `tools/call` mandatory enforcement；unknown deny；workflow 间接能力必须分类。
+9. remembered projects 不授予访问；同时最多一个 active root；remove 永不删文件；MCP 无权改 workspace control-plane。
+10. Runtime API Key 只存 secure credential backend；禁止明文 settings/log/diagnostics/browser storage/CLI；无安全 tunnel 注入则 fail-closed。
+11. Windows Job Object 优先；禁止 PID-only 最终所有权。
+12. listener 只允许 127.0.0.1/::1。
+13. recoverable 故障自动重连 5 次，1/2/5/10/30s；成功静默；5 次失败才一次错误窗口；禁止 restart storm。
+14. UI 中文、极简、Apple-inspired；视觉只用 React/Tauri + 原生 CSS/SVG/system fonts；不得新增 UI/动画/图标/CSS/字体依赖。
+15. 当前执行只显示单行绿色脉冲状态；无 feed/history；摘要脱敏。
+16. `--background` 从入口不显示窗口；管理员偏好不自动 UAC。
+17. 捆绑 Python/coding-tools/tunnel-client；无系统 Python fallback；无独立 runtime/app updater v0.1。
+18. 普通 PR 使用 deterministic fake sidecars；真实 external test 只属于明确 Gate；安全边界必须 negative/adversarial。
+19. 持久化 schema_version + sequential atomic migration；失败保留原数据；future schema fail-safe。
+20. Stable release 需要 SBOM/notices/provenance、clean-machine/reboot/background/Broker/reconnect E2E、secret scan、zero telemetry。
+
+PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRED。
+
+21. 首次启动严格 5 屏：欢迎 → OpenAI → 项目与权限 → ChatGPT → 启动检查。禁止第 6 屏。
+22. 第 5 屏三项未全绿时“确定”必须灰色 disabled；全绿后才显示完成提示并启用“确定”；禁止自动跳转。
+
+23. 品牌图标固定为 `assets/icons/localbridge.png` / `localbridge.ico`；应用、安装包、托盘使用该资产，未经明确合同不得替换、重绘或引入图标库。

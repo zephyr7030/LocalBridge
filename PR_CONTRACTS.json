@@ -1,0 +1,888 @@
+{
+  "schema_version": 13,
+  "rules": {
+    "paths_are_repo_relative": true,
+    "unlisted_write_is_forbidden": true,
+    "must_stop_after_acceptance": true,
+    "live_external_tests_only": [
+      "LB-000",
+      "LB-019"
+    ],
+    "elevation_has_no_ttl": true,
+    "elevation_requires_explicit_user_uac": true,
+    "whole_app_elevation_forbidden": true,
+    "target_platform": "windows-11-x86_64",
+    "external_python_dependency": false,
+    "runtime_self_update": false,
+    "application_auto_update_v0_1": false,
+    "telemetry": false,
+    "webview2_bundled": false,
+    "generic_elevated_exec": true,
+    "user_facing_language": "zh-CN",
+    "unnecessary_english_ui_forbidden": true,
+    "architecture_rules_file": "ARCHITECTURE_RULES.json",
+    "compatibility_baseline_file": "COMPATIBILITY_BASELINE.json",
+    "versioned_persistence_required": true,
+    "release_sbom_required": true,
+    "stable_adapter_required": true,
+    "strict_pr_sequence": true,
+    "governance_write_exception": {
+      "paths": [
+        "PR_INDEX.json",
+        "PROJECT_STATE.json"
+      ],
+      "allowed_only_after_acceptance": true,
+      "allowed_mutations": [
+        "current PR status",
+        "next sequential PR status",
+        "current_pr pointer",
+        "project phase/release readiness"
+      ]
+    },
+    "dependency_manifest_write_exception": {
+      "paths": [
+        "src-tauri/Cargo.toml",
+        "src-tauri/Cargo.lock",
+        "package.json",
+        "package-lock.json"
+      ],
+      "condition": "only minimal dependencies required by the current PR; lockfiles must stay synchronized"
+    },
+    "dashboard_current_task_status": "single_ephemeral_projection",
+    "activity_feed_forbidden": true,
+    "task_history_ui_forbidden": true,
+    "task_summary_redaction_required": true,
+    "current_task_inline_only": true,
+    "current_task_section_title_forbidden": true,
+    "current_task_field_labels_forbidden": true,
+    "active_indicator": "green_pulse",
+    "reduced_motion_required": true,
+    "runtime_api_key_plaintext_forbidden": true,
+    "runtime_api_key_cli_forbidden": true,
+    "workspace_registry_is_not_authorization_set": true,
+    "max_active_workspace_roots": 1,
+    "workspace_remove_filesystem_delete_forbidden": true,
+    "mcp_workspace_registry_mutation_forbidden": true,
+    "group_review_gate_required": true,
+    "next_group_requires_previous_adversarial_pass": true,
+    "group_review_code_write_forbidden": true,
+    "group_review_governance_write_paths": [
+      "PR_INDEX.json",
+      "PROJECT_STATE.json"
+    ],
+    "auto_reconnect_enabled": true,
+    "auto_reconnect_attempts": 5,
+    "auto_reconnect_backoff_seconds": [
+      1,
+      2,
+      5,
+      10,
+      30
+    ],
+    "reconnect_ui_before_exhaustion": "forbidden_as_new_ui",
+    "reconnect_exhaustion_error_window": true,
+    "reconnect_error_window_once_per_generation": true,
+    "ui_visual_dependency_additions_forbidden": true,
+    "apple_inspired_ui_native_css_only": true,
+    "onboarding_screen_count": 5,
+    "onboarding_screen_6_forbidden": true,
+    "onboarding_screen_5_auto_advance_forbidden": true,
+    "onboarding_screen_5_confirm_requires_all_green": true,
+    "brand_icon_frozen": true,
+    "brand_icon_png": "assets/icons/localbridge.png",
+    "brand_icon_ico": "assets/icons/localbridge.ico",
+    "brand_icon_replacement_requires_explicit_contract": true,
+    "third_party_icon_library_for_branding_forbidden": true
+  },
+  "prs": {
+    "LB-000": {
+      "writable_paths": [
+        "docs/UPSTREAM_COMPAT_REPORT.md",
+        "docs/ADR-0001_POLICY_ENFORCEMENT.md",
+        "docs/ADR-0002_PROCESS_OWNERSHIP.md",
+        "runtime-policy.toml",
+        "runtime-manifest.toml",
+        "tests/fixtures/upstream/**",
+        "tests/integration/upstream_spike/**",
+        "COMPATIBILITY_BASELINE.json",
+        "compatibility/**",
+        "docs/04_UPSTREAM_DISTRIBUTION.md",
+        "spikes/lb-000/**",
+        "spikes/README.md"
+      ],
+      "forbidden_paths": [
+        "src/**",
+        "src-tauri/src/**"
+      ],
+      "required_artifacts": [
+        "tool/capability snapshot",
+        "PEP decision ADR",
+        "process ownership ADR",
+        "portable Python feasibility result",
+        "tunnel secret injection result",
+        "machine-readable compatibility baseline",
+        "stable adapter boundary decision"
+      ],
+      "required_tests": [
+        "real upstream tools/list",
+        "junction/symlink/reparse adversarial spike",
+        "Job Object PoC",
+        "portable Python PoC",
+        "live tunnel PoC",
+        "upstream structural diff baseline generation",
+        "capability baseline serialization"
+      ],
+      "non_goals": [
+        "production UI",
+        "production supervisor",
+        "modifying upstream source"
+      ]
+    },
+    "LB-001": {
+      "writable_paths": [
+        "package.json",
+        "package-lock.json",
+        "vite.config.*",
+        "tsconfig*.json",
+        "src/**",
+        "src-tauri/**",
+        "tests/**",
+        ".github/**",
+        "scripts/**",
+        "ARCHITECTURE_RULES.json",
+        "scripts/verify-architecture/**",
+        "scripts/verify-runtime-manifest/**",
+        "scripts/verify-ui-language/**"
+      ],
+      "forbidden_paths": [
+        "runtime/coding-tools-mcp/**",
+        "runtime/tunnel-client/**",
+        "runtime/python/**"
+      ],
+      "required_artifacts": [
+        "Tauri bootstrap",
+        "dummy sidecar packaging smoke",
+        "architecture verification runner",
+        "CI baseline consuming architecture rules",
+        "frozen LocalBridge application icon wired into Tauri project"
+      ],
+      "required_tests": [
+        "frontend unit baseline",
+        "cargo test baseline",
+        "release bundle dummy sidecar smoke",
+        "Windows 11 x64 target baseline",
+        "system WebView2 path; no bundled WebView2 payload",
+        "architecture verifier detects intentional violation fixture",
+        "lockfiles are present and deterministic",
+        "application icon uses assets/icons/localbridge.ico or generated Tauri packaging derivative from frozen asset",
+        "branding does not add icon library dependency"
+      ],
+      "non_goals": [
+        "real MCP integration",
+        "real tunnel integration"
+      ]
+    },
+    "LB-002": {
+      "writable_paths": [
+        "src-tauri/src/state/**",
+        "src-tauri/src/app/**",
+        "src-tauri/src/lib.rs",
+        "tests/unit/domain/**"
+      ],
+      "forbidden_paths": [
+        "src/features/**",
+        "runtime/**"
+      ],
+      "required_artifacts": [
+        "typed domain models",
+        "PrivilegeState/PrivilegeFault domain contracts",
+        "current task domain contract",
+        "stable task kind classification",
+        "task execution state contract"
+      ],
+      "required_tests": [
+        "domain transition/model tests",
+        "privilege domain state tests",
+        "task kind domain is independent of upstream tool ids",
+        "current task supports idle/running/blocked/failed/cancelled states"
+      ],
+      "non_goals": [
+        "process spawning",
+        "UI"
+      ]
+    },
+    "LB-003": {
+      "writable_paths": [
+        "src-tauri/src/settings/**",
+        "src-tauri/src/workspace/**",
+        "tests/unit/settings/**",
+        "tests/unit/workspace/**",
+        "schema/settings/**",
+        "tests/migrations/**",
+        "docs/05_MAINTENANCE_RELEASE.md"
+      ],
+      "forbidden_paths": [
+        "src-tauri/src/credentials/**",
+        "runtime/**"
+      ],
+      "required_artifacts": [
+        "versioned settings",
+        "desired/candidate/active workspace model",
+        "settings schema version",
+        "sequential migration framework",
+        "WorkspaceRegistry persistence model",
+        "zero-or-one active workspace reference",
+        "workspace registry migration"
+      ],
+      "required_tests": [
+        "migration",
+        "atomic-write",
+        "workspace state tests",
+        "previous schema migrates to current",
+        "two historical schema versions migrate to current",
+        "future schema fails safely",
+        "failed migration preserves original data",
+        "remembered workspace list does not imply authorization",
+        "workspace registry de-duplicates validated identities",
+        "single-workspace historical state migrates to registry plus active reference",
+        "NoActiveWorkspace persists as normal state"
+      ],
+      "non_goals": [
+        "secrets",
+        "process lifecycle"
+      ]
+    },
+    "LB-004": {
+      "writable_paths": [
+        "src-tauri/src/runtime/**",
+        "tests/unit/runtime/**",
+        "tests/integration/process/**",
+        "docs/ADR-0002_PROCESS_OWNERSHIP.md"
+      ],
+      "forbidden_paths": [
+        "src/features/**",
+        "runtime/coding-tools-mcp/**",
+        "runtime/tunnel-client/**"
+      ],
+      "required_artifacts": [
+        "Windows process supervisor"
+      ],
+      "required_tests": [
+        "Job Object/process ownership",
+        "PID reuse",
+        "stale state",
+        "nested child",
+        "graceful/forced stop"
+      ],
+      "non_goals": [
+        "MCP-specific logic",
+        "Tunnel-specific logic"
+      ]
+    },
+    "LB-005": {
+      "writable_paths": [
+        "src-tauri/src/credentials/**",
+        "tests/unit/credentials/**",
+        "src-tauri/capabilities/**"
+      ],
+      "forbidden_paths": [
+        "src/features/**",
+        "runtime/**"
+      ],
+      "required_artifacts": [
+        "Windows credential backend",
+        "Windows secure CredentialStore backend",
+        "Runtime API Key secure save/read/delete",
+        "credential metadata-only settings representation"
+      ],
+      "required_tests": [
+        "save/get/remove",
+        "redaction",
+        "corrupt/missing credential",
+        "Runtime API Key never appears in settings files",
+        "Runtime API Key never appears in frontend persisted storage",
+        "Runtime API Key never appears in logs or diagnostics",
+        "credential store survives app restart",
+        "credential delete removes secure entry",
+        "no plaintext credential fallback"
+      ],
+      "non_goals": [
+        "Tunnel startup",
+        "UI forms"
+      ]
+    },
+    "LB-006": {
+      "writable_paths": [
+        "src-tauri/src/mcp/**",
+        "runtime/python/**",
+        "runtime/coding-tools-mcp/**",
+        "runtime-manifest.toml",
+        "scripts/**",
+        "tests/integration/mcp/**"
+      ],
+      "forbidden_paths": [
+        "src/features/**",
+        "runtime/tunnel-client/**"
+      ],
+      "required_artifacts": [
+        "portable Python runtime",
+        "pinned coding-tools runtime",
+        "embedded Python exact layout",
+        "no-external-Python contract"
+      ],
+      "required_tests": [
+        "embedded Python launch",
+        "MCP readiness",
+        "bearer",
+        "loopback",
+        "stop/redaction",
+        "no system Python fallback",
+        "offline embedded Python startup",
+        "no runtime pip install"
+      ],
+      "non_goals": [
+        "policy enforcement",
+        "Tunnel"
+      ]
+    },
+    "LB-007": {
+      "writable_paths": [
+        "src-tauri/src/mcp/**",
+        "runtime-policy.toml",
+        "tests/unit/policy/**",
+        "tests/integration/policy/**",
+        "docs/ADR-0001_POLICY_ENFORCEMENT.md"
+      ],
+      "forbidden_paths": [
+        "src/features/**",
+        "src-tauri/src/tunnel/**"
+      ],
+      "required_artifacts": [
+        "capability policy enforcement",
+        "PEP-to-current-task status integration"
+      ],
+      "required_tests": [
+        "tools/call bypass",
+        "unknown deny",
+        "workflow indirect exec",
+        "Full control-plane deny",
+        "mode-switch cached list",
+        "denied tools/call projects Blocked not Running",
+        "allowed tools/call projects actual execution state",
+        "task summary redacts sensitive arguments"
+      ],
+      "non_goals": [
+        "Tunnel",
+        "UI"
+      ]
+    },
+    "LB-008": {
+      "writable_paths": [
+        "src-tauri/src/tunnel/**",
+        "runtime/tunnel-client/**",
+        "runtime-manifest.toml",
+        "tests/integration/tunnel/**"
+      ],
+      "forbidden_paths": [
+        "src/features/**"
+      ],
+      "required_artifacts": [
+        "pinned tunnel runtime",
+        "tunnel reconnect primitive with typed recoverable/non-recoverable faults"
+      ],
+      "required_tests": [
+        "fake tunnel deterministic tests",
+        "checksum",
+        "secret injection",
+        "readiness",
+        "typed auth/config faults",
+        "tunnel process command line never contains Runtime API Key",
+        "tunnel runtime retrieves key transiently from CredentialStore",
+        "unsupported safe secret injection fails with typed SecretInjectionUnsupported",
+        "recoverable tunnel disconnect can be restarted without exposing secret",
+        "non-recoverable credential/config fault is classified without retry"
+      ],
+      "non_goals": [
+        "orchestration",
+        "live ChatGPT UI test"
+      ]
+    },
+    "LB-009": {
+      "writable_paths": [
+        "src-tauri/src/app/**",
+        "src-tauri/src/runtime/**",
+        "src-tauri/src/commands/**",
+        "tests/integration/orchestrator/**"
+      ],
+      "forbidden_paths": [
+        "src/features/**"
+      ],
+      "required_artifacts": [
+        "core start/stop orchestrator",
+        "single CurrentTaskStatus projection",
+        "outage generation and retry state contract"
+      ],
+      "required_tests": [
+        "MCP→PEP→Tunnel→Ready",
+        "cleanup",
+        "manual stop",
+        "fake sidecars",
+        "terminal current task clears to Idle",
+        "orchestrator does not accumulate user-visible task history",
+        "outage generation prevents duplicate final user-attention event"
+      ],
+      "non_goals": [
+        "backoff recovery",
+        "workspace switching",
+        "UI"
+      ]
+    },
+    "LB-010": {
+      "writable_paths": [
+        "src-tauri/src/runtime/**",
+        "src-tauri/src/workspace/**",
+        "tests/integration/recovery/**",
+        "tests/integration/workspace_switch/**"
+      ],
+      "forbidden_paths": [
+        "src/features/**"
+      ],
+      "required_artifacts": [
+        "bounded recovery",
+        "two-phase workspace switch",
+        "workspace registry add/select/remove behavior",
+        "NoActiveWorkspace transition",
+        "five-attempt automatic reconnect controller",
+        "minimal-layer restart policy",
+        "single reconnect-exhaustion UserAttentionRequired event"
+      ],
+      "required_tests": [
+        "backoff",
+        "retryability",
+        "60s reset",
+        "shutdown order",
+        "rollback",
+        "candidate commit only after Ready",
+        "add workspace validates and de-duplicates before commit",
+        "select workspace uses two-phase candidate/active switch",
+        "remove non-active workspace changes metadata only",
+        "remove workspace never deletes disk files",
+        "remove active workspace stops Tunnel then PEP then MCP",
+        "remove active workspace enters NoActiveWorkspace",
+        "remove active workspace does not auto-select another remembered project",
+        "MCP cannot mutate workspace registry or active workspace",
+        "missing active workspace does not silently authorize another project",
+        "reconnect attempts are exactly five",
+        "reconnect backoff is 1/2/5/10/30 seconds",
+        "initial disconnect is not counted as reconnect attempt",
+        "successful reconnect before attempt five returns Ready silently",
+        "tunnel fault restarts tunnel only when dependencies are healthy",
+        "PEP fault restarts PEP then tunnel",
+        "MCP fault restarts MCP then PEP then tunnel",
+        "fifth reconnect failure stops automatic loop",
+        "same outage generation emits final user-attention event once",
+        "manual retry starts a fresh five-attempt generation",
+        "non-retryable credential/config/integrity faults bypass reconnect loop"
+      ],
+      "non_goals": [
+        "Tray",
+        "UI"
+      ]
+    },
+    "LB-013": {
+      "writable_paths": [
+        "src-tauri/src/tray/**",
+        "src-tauri/src/app/**",
+        "src-tauri/src/main.rs",
+        "tests/integration/background/**",
+        "src-tauri/src/privilege/**"
+      ],
+      "forbidden_paths": [
+        "src/features/onboarding/**"
+      ],
+      "required_artifacts": [
+        "Tray",
+        "background lifecycle",
+        "system tray uses frozen LocalBridge brand icon"
+      ],
+      "required_tests": [
+        "close-to-hide",
+        "--background no visible window",
+        "tray exit cleanup",
+        "tray exit stops privileged broker after closing privileged call gate",
+        "background recovery emits no toast/banner/tray notification before retry exhaustion",
+        "background mode may show final error window only after fifth failed reconnect",
+        "tray icon derives from frozen localbridge.ico asset",
+        "tray does not use emoji or placeholder icon"
+      ],
+      "non_goals": [
+        "autostart",
+        "wizard"
+      ]
+    },
+    "LB-014": {
+      "writable_paths": [
+        "src-tauri/src/app/**",
+        "src-tauri/src/tray/**",
+        "src-tauri/src/main.rs",
+        "tests/integration/single_instance/**",
+        "tests/integration/autostart/**"
+      ],
+      "forbidden_paths": [
+        "src/features/**"
+      ],
+      "required_artifacts": [
+        "autostart",
+        "single-instance"
+      ],
+      "required_tests": [
+        "existing background instance wake",
+        "manual stop persistence",
+        "startup args",
+        "Elevated preference does not auto-trigger UAC on background startup"
+      ],
+      "non_goals": [
+        "UI redesign"
+      ]
+    },
+    "LB-015": {
+      "writable_paths": [
+        "src/**",
+        "src-tauri/src/commands/**",
+        "tests/unit/ui/**",
+        "tests/e2e/dashboard/**"
+      ],
+      "forbidden_paths": [
+        "runtime/**"
+      ],
+      "required_artifacts": [
+        "single dashboard",
+        "settings shell",
+        "diagnostics entry",
+        "Edit/Full/Elevated minimal permission UI",
+        "Dashboard privilege runtime status",
+        "PrivilegeState-to-UI projection",
+        "centralized Chinese presentation mapper",
+        "UI terminology map",
+        "dashboard current-task status panel",
+        "minimal project picker with add/select/remove",
+        "secure Runtime API Key input state",
+        "native CSS Apple-inspired visual token layer",
+        "reconnect exhaustion minimal error window"
+      ],
+      "required_tests": [
+        "minimal-ui assertions",
+        "no redundant pages",
+        "state rendering",
+        "no admin time selector",
+        "only enable/disable admin controls",
+        "Dashboard shows privilege status independently from permission preference",
+        "Elevated+Requested shows waiting authorization",
+        "Elevated+Active shows administrator enabled",
+        "Broker Faulted updates dashboard status",
+        "Full/Edit do not show redundant administrator action button",
+        "No Broker PID/nonce/SID/IPC internals on dashboard",
+        "user-facing dashboard contains no unnecessary English terms",
+        "internal enum names are never rendered directly",
+        "Edit/Full/Elevated are presented as 编辑模式/完整模式/管理员模式",
+        "Dashboard/Settings/Diagnostics presented as 主控界面/设置/诊断",
+        "professional abbreviations remain allowed only by terminology policy",
+        "dashboard shows task kind summary and status for active task",
+        "dashboard idle state shows only current-task idle status",
+        "dashboard has no recent activity list",
+        "dashboard has no activity message feed or timeline",
+        "dashboard never displays raw MCP tool identifiers",
+        "dashboard task summary is redacted",
+        "dashboard current task renders as one inline row",
+        "dashboard current task has no section title",
+        "dashboard current task has no type/task/status labels",
+        "running task uses green pulsing activity indicator",
+        "running task does not show redundant Running text",
+        "prefers-reduced-motion disables task pulse animation",
+        "activity animation does not shift layout",
+        "project picker supports selecting remembered project",
+        "project picker supports selecting another folder",
+        "non-active project removal has no disk delete semantics",
+        "active project removal confirmation states files are not deleted",
+        "NoActiveWorkspace UI shows choose-project action",
+        "Runtime API Key is never revealed after save",
+        "Runtime API Key is not persisted in browser storage",
+        "Apple-inspired visual styling introduces no UI component framework",
+        "Apple-inspired visual styling introduces no animation library",
+        "Apple-inspired visual styling introduces no icon package",
+        "Apple-inspired visual styling introduces no CSS framework",
+        "Apple-inspired visual styling introduces no bundled font dependency",
+        "reconnect attempts 1-5 create no new UI notification",
+        "reconnect exhaustion shows one minimal error window",
+        "reconnect error window offers Retry and Diagnostics only",
+        "same outage generation does not create duplicate error windows",
+        "prefers-reduced-motion is respected"
+      ],
+      "non_goals": [
+        "wizard",
+        "runtime rewrites"
+      ]
+    },
+    "LB-016": {
+      "writable_paths": [
+        "src/features/onboarding/**",
+        "src/components/**",
+        "src-tauri/src/commands/**",
+        "tests/e2e/onboarding/**"
+      ],
+      "forbidden_paths": [
+        "runtime/**"
+      ],
+      "required_artifacts": [
+        "6-screen wizard",
+        "five-screen onboarding flow",
+        "runtime-check gated confirm button"
+      ],
+      "required_tests": [
+        "Screen 2 ChatGPT button",
+        "system browser allowlist",
+        "no WebView",
+        "wizard completion",
+        "Elevated option present without TTL UI",
+        "UAC only from explicit user action",
+        "wizard user-facing copy contains no unnecessary English terms",
+        "wizard error messages are concise Chinese and actionable",
+        "onboarding has exactly five screens",
+        "screen 1 title is 简单设置 即可开始",
+        "screen 1 description is LocalBridge是链接ChatGPT与本地代码的工具",
+        "screen 2 uses English Tunnel terminology",
+        "screen 2 shows one-line secure Runtime API Key storage hint",
+        "workspace and permission are combined in screen 3",
+        "screen 5 contains only local runtime environment coding service and OpenAI Tunnel checks",
+        "screen 5 confirm is disabled until all three checks are green",
+        "screen 5 success message is hidden until all three checks are green",
+        "screen 5 success message is 设置完成，尝试在插件中选择刚刚添加的工具吧！",
+        "screen 5 does not auto-advance",
+        "screen 5 confirm enters main UI after readiness",
+        "onboarding has no sixth screen"
+      ],
+      "non_goals": [
+        "new dashboard pages",
+        "runtime changes"
+      ]
+    },
+    "LB-017": {
+      "writable_paths": [
+        "src/features/diagnostics/**",
+        "src-tauri/src/diagnostics/**",
+        "src-tauri/src/commands/**",
+        "tests/integration/diagnostics/**"
+      ],
+      "forbidden_paths": [
+        "runtime/**"
+      ],
+      "required_artifacts": [
+        "minimal diagnostics",
+        "redacted export"
+      ],
+      "required_tests": [
+        "no secret export",
+        "safe repair boundaries",
+        "typed checks",
+        "broker status without nonce/secret exposure",
+        "diagnostics can report reconnect generation/attempt history without exposing it as dashboard feed",
+        "reconnect diagnostics contain no secrets"
+      ],
+      "non_goals": [
+        "credential reset automation",
+        "permission changes",
+        "workspace policy changes"
+      ]
+    },
+    "LB-018": {
+      "writable_paths": [
+        "src-tauri/**",
+        "runtime/**",
+        "scripts/**",
+        "runtime-manifest.toml",
+        "tests/integration/packaging/**",
+        "docs/05_MAINTENANCE_RELEASE.md",
+        "src-tauri/bin/privileged-broker/**",
+        "scripts/generate-sbom/**",
+        "THIRD_PARTY_NOTICES.md",
+        "compatibility/**",
+        "release-artifacts/**"
+      ],
+      "forbidden_paths": [
+        "src/features/**"
+      ],
+      "required_artifacts": [
+        "final vendored runtime bundle",
+        "installer",
+        "privileged broker packaged binary",
+        "runtime size report",
+        "bundled Python runtime",
+        "no bundled WebView2 evidence",
+        "zero-telemetry release configuration",
+        "SBOM",
+        "third-party notices",
+        "release provenance manifest",
+        "installer and Windows executable packaging use frozen LocalBridge brand icon"
+      ],
+      "required_tests": [
+        "all SHA256",
+        "clean bundle smoke",
+        "install/uninstall resource cleanup",
+        "clean bundle does not require system Python",
+        "runtime components do not self-update",
+        "no application auto-updater",
+        "no telemetry endpoint",
+        "installer size budget report",
+        "installed size budget report",
+        "SBOM/runtime manifest consistency",
+        "third-party notice coverage",
+        "dependency lockfile consistency",
+        "release packaging uses frozen LocalBridge icon",
+        "brand icon asset hashes match frozen project state"
+      ],
+      "non_goals": [
+        "first-time runtime feasibility",
+        "live OpenAI E2E"
+      ]
+    },
+    "LB-019": {
+      "writable_paths": [
+        "docs/**",
+        "tests/e2e/release/**",
+        "PROJECT_STATE.json",
+        "release-artifacts/**",
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "COMPATIBILITY_BASELINE.json"
+      ],
+      "forbidden_paths": [
+        "src/**",
+        "src-tauri/src/**",
+        "runtime/**"
+      ],
+      "required_artifacts": [
+        "release acceptance report",
+        "stable release acceptance report",
+        "frozen compatibility baseline",
+        "final release provenance verification",
+        "final changelog"
+      ],
+      "required_tests": [
+        "clean-machine",
+        "live Tunnel",
+        "ChatGPT MCP call",
+        "reboot silent start",
+        "crash recovery",
+        "uninstall/orphan check",
+        "Elevated UAC activation",
+        "privileged operation smoke",
+        "disable Elevated blocks further privileged calls",
+        "reboot does not auto-trigger UAC",
+        "manual reactivation",
+        "no orphan elevated broker",
+        "clean Windows 11 x64 without Python",
+        "generic elevated_exec smoke",
+        "no telemetry network activity",
+        "runtime versions remain pinned after restart",
+        "migration rollback smoke",
+        "release provenance verification",
+        "compatibility baseline matches packaged runtimes",
+        "live recoverable disconnect succeeds silently when reconnect succeeds within five attempts",
+        "five failed reconnects produce exactly one error window",
+        "error-window Retry starts a new reconnect cycle",
+        "release dependency audit confirms no styling-only UI/animation/icon/font framework was added"
+      ],
+      "non_goals": [
+        "feature implementation",
+        "architecture changes"
+      ]
+    },
+    "LB-011": {
+      "writable_paths": [
+        "src-tauri/src/privilege/**",
+        "src-tauri/bin/privileged-broker/**",
+        "src-tauri/src/app/**",
+        "tests/unit/privilege/**",
+        "tests/integration/privilege/**",
+        "tests/fixtures/privilege/**",
+        "docs/03_SECURITY.md"
+      ],
+      "forbidden_paths": [
+        "src/features/**",
+        "runtime/coding-tools-mcp/**",
+        "runtime/tunnel-client/**"
+      ],
+      "required_artifacts": [
+        "separate privileged broker binary",
+        "typed local IPC protocol",
+        "UAC launch path",
+        "broker generation/nonce handshake"
+      ],
+      "required_tests": [
+        "current-user SID/ACL enforcement",
+        "stale generation rejected",
+        "replay rejected",
+        "malformed request rejected",
+        "oversized payload rejected",
+        "no network listener",
+        "broker shutdown lifecycle",
+        "whole LocalBridge remains non-elevated"
+      ],
+      "non_goals": [
+        "arbitrary admin shell",
+        "UI",
+        "time-based expiration",
+        "Windows service",
+        "scheduled-task elevation bypass"
+      ]
+    },
+    "LB-012": {
+      "writable_paths": [
+        "src-tauri/src/state/**",
+        "src-tauri/src/privilege/**",
+        "src-tauri/src/mcp/**",
+        "src-tauri/src/runtime/**",
+        "tests/unit/privilege/**",
+        "tests/integration/privilege/**",
+        "runtime-policy.toml"
+      ],
+      "forbidden_paths": [
+        "src/features/**",
+        "runtime/coding-tools-mcp/**",
+        "runtime/tunnel-client/**"
+      ],
+      "required_artifacts": [
+        "Edit/Full/Elevated internal model",
+        "PrivilegeState",
+        "privileged capability policy",
+        "explicit user-controlled enable/disable semantics",
+        "generic elevated_exec capability"
+      ],
+      "required_tests": [
+        "no TTL/expires_at behavior",
+        "Elevated requires Active broker",
+        "Full cannot elevated-exec",
+        "Edit cannot process-exec",
+        "Elevated control-plane still denied",
+        "disable Elevated immediately closes privileged call gate",
+        "broker crash moves privilege state out of Active",
+        "background startup never auto-prompts UAC",
+        "structured elevated_exec program/args",
+        "elevated_exec timeout",
+        "elevated_exec cancellation",
+        "elevated_exec output limit",
+        "elevated_exec secret redaction",
+        "Full mode elevated_exec denied",
+        "elevated task awaiting UAC projects waiting authorization",
+        "elevated denied task projects Blocked",
+        "elevated task summary does not leak sensitive arguments"
+      ],
+      "non_goals": [
+        "UI",
+        "administrator password storage",
+        "automatic UAC approval",
+        "permanent Windows service"
+      ]
+    }
+  }
+}

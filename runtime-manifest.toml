@@ -1,0 +1,64 @@
+schema_version = 1
+
+[product]
+codename = "LocalBridge"
+target = "windows-x86_64"
+release = "0.1.0"
+
+[coding_tools_mcp]
+source = "https://github.com/xyTom/coding-tools-mcp"
+version = "0.2.2"
+git_commit = "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc"
+sha256 = "TO_BE_FILLED_BY_LB_000"
+vendoring = "source"
+
+[tunnel_client]
+source = "https://github.com/openai/tunnel-client"
+version = "0.0.11"
+asset = "TO_BE_RESOLVED_WINDOWS_AMD64_BY_LB_000"
+sha256 = "TO_BE_FILLED_FROM_OFFICIAL_SHA256SUMS_BY_LB_000"
+vendoring = "binary"
+
+[python]
+version = "3.12.x"
+source = "python.org Windows embeddable package"
+sha256 = "TO_BE_FILLED_BY_LB_006"
+vendoring = "embeddable"
+
+[policy]
+file = "runtime-policy.toml"
+
+[verification]
+compatibility_gate = "LB-000"
+packaging_gate = "LB-018"
+release_gate = "LB-019"
+
+
+[privileged_broker]
+kind = "first_party_rust_binary"
+elevation = "uac_on_explicit_user_action"
+ttl = "none"
+network_listener = false
+
+
+[distribution]
+target_os = "windows"
+minimum_os = "windows-11"
+arch = "x86_64"
+bundle_python = true
+bundle_coding_tools_mcp = true
+bundle_tunnel_client = true
+bundle_webview2 = false
+webview2_source = "windows-system-runtime"
+external_python_dependency = false
+runtime_self_update = false
+application_auto_update = false
+telemetry = false
+
+[size_budget]
+installer_target_mib_min = 45
+installer_target_mib_max = 70
+installed_target_mib_min = 90
+installed_target_mib_max = 150
+investigate_installer_over_mib = 100
+investigate_installed_over_mib = 250

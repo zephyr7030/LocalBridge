@@ -1,0 +1,432 @@
+# 05 — Runtime Contract
+
+## Desired / Candidate / Active
+
+Workspace 状态必须分离：
+
+```text
+desired_workspace
+candidate_workspace
+active_workspace
+```
+
+仅在完整 Runtime Ready 后：
+
+```text
+candidate → active
+```
+
+不得在启动前提前覆盖 active。
+
+## RuntimeState
+
+```rust
+enum RuntimeState {
+    Stopped,
+    StartingMcp,
+    WaitingMcpReady,
+    StartingPolicyEnforcement,
+    WaitingPolicyReady,
+    StartingTunnel,
+    WaitingTunnelReady,
+    Ready,
+    Recovering { component: Component, attempt: u32 },
+    SwitchingWorkspace { from: PathBuf, candidate: PathBuf },
+    Faulted(RuntimeFault),
+}
+```
+
+## RuntimeFault
+
+最小 typed faults：
+
+```text
+WorkspaceMissing
+WorkspaceInvalid
+RuntimeMissing
+RuntimeChecksumMismatch
+ProcessOwnershipFailed
+McpSpawnFailed
+McpHealthTimeout
+McpExited
+PolicyBindFailed
+PolicyInvalid
+PolicyCapabilityUnknown
+TunnelIdMissing
+RuntimeKeyMissing
+SecretStoreFailed
+SecretInjectionUnsupported
+TunnelAuthFailed
+TunnelSpawnFailed
+TunnelHealthTimeout
+TunnelExited
+PortUnavailable
+ConfigurationInvalid
+UserStopped
+Unknown
+```
+
+禁止把所有错误折叠为“连接失败”。
+
+## Start
+
+前置：
+
+- workspace exists；
+- runtime manifest valid；
+- vendor checksums valid；
+- credentials available；
+- Tunnel ID present；
+- capability policy valid。
+
+顺序：
+
+```text
+MCP ↑
+→ MCP readiness
+→ Policy Enforcement ↑
+→ Policy readiness
+→ Tunnel ↑
+→ Tunnel readiness
+→ Ready
+```
+
+任何阶段失败：
+
+- 清理由本次 generation 创建的后续组件；
+- 保留 typed fault；
+- 不假装 Ready。
+
+## Stop
+
+```text
+manual_stop = true
+→ Tunnel ↓
+→ Policy Enforcement ↓
+→ MCP ↓
+→ state = Stopped
+```
+
+Supervisor 不得再次自动拉起。
+
+## Workspace Switch
+
+```text
+validate(candidate)
+→ state = SwitchingWorkspace
+→ Tunnel ↓
+→ Policy Enforcement ↓
+→ MCP ↓
+→ MCP(candidate) ↑
+→ PEP(candidate) ↑
+→ Tunnel(candidate) ↑
+→ Ready
+→ active_workspace = candidate
+```
+
+失败：
+
+- candidate 不 commit；
+- 保留 previous active metadata；
+- 可显式 rollback。
+
+## Process Ownership
+
+不得仅靠 PID。
+
+至少跟踪：
+
+- role；
+- pid；
+- generation；
+- process start identity；
+- parent/job ownership；
+- started_at。
+
+Windows 首选 Job Object。
+
+LB-004 必须测试：
+
+- KILL_ON_JOB_CLOSE；
+- PID reuse；
+- stale state；
+- nested child；
+- forced kill；
+- graceful timeout。
+
+## Readiness
+
+Process alive ≠ Ready。
+
+MCP：
+
+- 使用真实 protocol readiness / supported health。
+
+Tunnel：
+
+- 使用官方 tunnel-client readiness/health。
+
+## Recovery
+
+transient：
+
+```text
+1s, 2s, 5s, 10s, 30s
+```
+
+连续 5 次失败：
+
+```text
+Faulted
+```
+
+稳定 60s 后 reset retry counter。
+
+认证/配置/校验类 fault：
+
+```text
+non-retryable
+```
+
+## Deterministic Test Contract
+
+Orchestrator/recovery 测试默认使用 fake sidecars：
+
+- fake-mcp；
+- fake-policy；
+- fake-tunnel。
+
+可控制：
+
+- delayed ready；
+- crash；
+- exit code；
+- invalid health；
+- auth fault；
+- hang；
+- child process spawn。
+
+真实 OpenAI 只用于 LB-000 / LB-019。
+
+
+## PrivilegeState
+
+Elevated 与基础 RuntimeState 分离：
+
+```rust
+enum PrivilegeState {
+    Disabled,
+    Requested,
+    AwaitingUac,
+    Active { broker_generation: GenerationId },
+    Faulted(PrivilegeFault),
+}
+```
+
+不加入 timer / expires_at / TTL。
+
+### 启用
+
+```text
+user selects Elevated
+→ Requested
+→ explicit user activation
+→ AwaitingUac
+→ Broker handshake
+→ Active
+```
+
+### 关闭
+
+```text
+user disables Elevated
+→ privileged call gate closes
+→ Broker stops
+→ Disabled
+```
+
+### Background Startup
+
+如果用户上次选择 Elevated：
+
+```text
+permission preference = Elevated
+privilege runtime = Requested
+```
+
+但：
+
+- 不自动弹 UAC；
+- 不假装 Active；
+- 普通 MCP/Tunnel 可继续后台 Ready；
+- 用户打开控制中心后主动完成 UAC。
+
+### Elevated Call
+
+```text
+MCP tool
+→ capability policy
+→ requires elevated
+→ PrivilegeState == Active ?
+   yes → Broker
+   no  → typed ElevationRequired
+```
+
+
+## Python Runtime Contract
+
+Coding Tools Runtime 的正式启动必须来自：
+
+```text
+<install>/runtime/python/python.exe
+```
+
+或 manifest 指定的等价 Embedded Python launcher。
+
+禁止 fallback 到：
+
+```text
+python.exe from PATH
+py.exe
+system site-packages
+user site-packages
+```
+
+如果 bundled Python 缺失或 checksum 不匹配：
+
+```text
+RuntimeMissing
+RuntimeChecksumMismatch
+```
+
+并停止启动。
+
+## ElevatedExec Contract
+
+```text
+tool call
+→ PEP capability = elevated_exec
+→ mode == Elevated
+→ PrivilegeState == Active
+→ Broker typed request
+→ process result
+```
+
+任一前置不满足时 fail-closed。
+
+没有 TTL / expires_at。
+
+
+## Dashboard Projection Contract
+
+主控界面必须同时收到：
+
+```text
+PermissionMode
+PrivilegeState
+```
+
+两者语义不同：
+
+```text
+PermissionMode = 用户选择的策略档位
+PrivilegeState = Broker 实际生命周期状态
+```
+
+允许组合：
+
+```text
+Edit     + Disabled
+Full     + Disabled
+Elevated + Requested
+Elevated + AwaitingUac
+Elevated + Active
+Elevated + Faulted
+```
+
+Dashboard 状态不能仅由 PermissionMode 推断。
+
+Broker crash：
+
+```text
+Active
+→ Faulted
+```
+
+UI 必须立即从“已启用”切换为“故障”。
+
+Broker 正常关闭：
+
+```text
+Active
+→ Disabled / Requested
+```
+
+具体取决于用户是否仍选择 Elevated。
+
+## Current Task Status Contract
+
+真实工具调用产生：
+
+```text
+request
+→ allowed / blocked
+→ running
+→ terminal
+→ idle
+```
+
+主控界面只消费 `CurrentTaskStatus | Idle`。
+
+- PEP deny → `已阻止`
+- 等待 UAC → `等待授权`
+- process 已启动 → `执行中`
+- terminal → 最终回到 `空闲`
+
+任务摘要不得成为 secret 泄漏通道。
+
+## NoActiveWorkspace Contract
+
+“没有当前项目”是正常应用状态，不是 runtime fault。
+
+在该状态：
+
+```text
+MCP      stopped
+PEP      stopped
+Tunnel   stopped
+App      running
+Tray     running
+```
+
+用户选择项目后才启动运行链。
+
+移除当前项目必须先停止 Tunnel → PEP → MCP，再清理 active workspace。
+
+不得自动切换到另一个 remembered project。
+
+## Runtime Secret Contract
+
+Runtime API Key：
+
+```text
+CredentialStore
+→ transient in-memory retrieval
+→ supported secret injection
+→ target process/auth
+```
+
+禁止：
+
+```text
+command-line argument
+plain settings
+logs
+diagnostic export
+```
+
+若 tunnel-client 的真实兼容性只允许不安全 CLI secret：
+
+```text
+SecretInjectionUnsupported
+```
