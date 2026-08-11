@@ -14,7 +14,7 @@ const cargoToml = readFileSync("src-tauri/Cargo.toml", "utf8");
 if (!/^autobins\s*=\s*false$/m.test(cargoToml)) throw new Error("Cargo autobin discovery must be disabled so Tauri externalBin is the only packaged dummy sidecar source");
 if (/name\s*=\s*"dummy-sidecar"/.test(cargoToml)) throw new Error("dummy sidecar must not be a Cargo application binary");
 const libRs = readFileSync("src-tauri/src/lib.rs", "utf8");
-for (const moduleName of ["settings", "workspace"]) {
+for (const moduleName of ["commands", "credentials", "diagnostics", "mcp", "privilege", "runtime", "settings", "tray", "tunnel", "workspace"]) {
   if (!new RegExp(`pub\\s+mod\\s+${moduleName}\\s*;`).test(libRs)) throw new Error(`future PR module bootstrap missing: ${moduleName}`);
   if (!existsSync(`src-tauri/src/${moduleName}/mod.rs`)) throw new Error(`future PR module stub missing: ${moduleName}`);
 }

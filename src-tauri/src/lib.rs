@@ -1,6 +1,14 @@
 pub mod app;
+pub mod commands;
+pub mod credentials;
+pub mod diagnostics;
+pub mod mcp;
+pub mod privilege;
+pub mod runtime;
 pub mod settings;
 pub mod state;
+pub mod tray;
+pub mod tunnel;
 pub mod workspace;
 
 pub const PRODUCT_NAME: &str = "LocalBridge";
