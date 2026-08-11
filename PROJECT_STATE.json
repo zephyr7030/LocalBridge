@@ -51,7 +51,13 @@
   ],
   "execution_plan_version": 15,
   "total_prs": 20,
-  "architecture_decisions_pending_lb000": [],
+  "architecture_decisions_pending_lb000": [
+    "Policy Enforcement implementation: upstream / adapter / Rust Guard",
+    "Windows process ownership: Job Object exact design",
+    "Tunnel Runtime Key safe injection path",
+    "Portable Python exact layout/version",
+    "Dynamic loopback port allocation strategy"
+  ],
   "permission_architecture": {
     "user_visible_modes": [
       "Edit",
