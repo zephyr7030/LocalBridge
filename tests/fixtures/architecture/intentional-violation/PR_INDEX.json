@@ -1,0 +1,6 @@
+{
+  "groups": [
+    { "id": "G0", "status": "REVIEW_REQUIRED", "review_status": "FAIL" },
+    { "id": "G1", "status": "READY", "review_status": "BLOCKED" }
+  ]
+}

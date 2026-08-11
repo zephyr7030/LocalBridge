@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build --config vite.config.ts",
     "test": "vitest run",
     "verify:architecture": "node scripts/verify-architecture/index.mjs",
-    "verify:architecture:negative": "node scripts/verify-architecture/index.mjs --root tests/fixtures/architecture/intentional-violation --expect-failure",
+    "verify:architecture:negative": "node scripts/verify-architecture/index.mjs --root tests/fixtures/architecture/intentional-violation --expect-failure --expected ARCH-001,ARCH-003,ARCH-023,ARCH-024",
     "verify:runtime-manifest": "node scripts/verify-runtime-manifest/index.mjs",
     "verify:ui-language": "node scripts/verify-ui-language/index.mjs",
     "sidecar:prepare": "node scripts/prepare-dummy-sidecar.mjs",

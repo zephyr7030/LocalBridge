@@ -13,7 +13,8 @@
         "process spawn",
         "process kill",
         "PID ownership"
-      ]
+      ],
+      "verification": { "mode": "enforced", "type": "frontend_process_ownership" }
     },
     {
       "id": "ARCH-002",
@@ -27,13 +28,15 @@
         "python from PATH",
         "py.exe fallback",
         "user site-packages"
-      ]
+      ],
+      "verification": { "mode": "enforced", "type": "system_python_fallback" }
     },
     {
       "id": "ARCH-003",
       "description": "Listeners must remain loopback-only",
       "severity": "error",
       "verification": {
+        "mode": "enforced",
         "type": "socket_bind_address_policy",
         "allowed": [
           "127.0.0.1",
@@ -52,32 +55,38 @@
       "severity": "error",
       "applies_to": [
         "src/**"
-      ]
+      ],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-015", "reason": "UI presentation mapper and domain rendering do not exist before LB-015" }
     },
     {
       "id": "ARCH-005",
       "description": "MCP cannot mutate LocalBridge control-plane",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-007", "reason": "MCP policy enforcement point is implemented in LB-007" }
     },
     {
       "id": "ARCH-006",
       "description": "Whole-app elevation is forbidden",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "enforced", "type": "whole_app_elevation" }
     },
     {
       "id": "ARCH-007",
       "description": "Runtime self-update is forbidden",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "enforced", "type": "self_update_absence" }
     },
     {
       "id": "ARCH-008",
       "description": "Telemetry endpoints are forbidden",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "enforced", "type": "telemetry_absence" }
     },
     {
       "id": "ARCH-009",
       "description": "External runtime access must go through stable adapters",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-006", "reason": "First production external runtime adapter is introduced in LB-006" }
     },
     {
       "id": "ARCH-010",
@@ -85,7 +94,8 @@
       "severity": "error",
       "applies_to": [
         "src/**"
-      ]
+      ],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-015", "reason": "Dashboard current-task UI is introduced in LB-015" }
     },
     {
       "id": "ARCH-011",
@@ -94,12 +104,14 @@
       "applies_to": [
         "src-tauri/**",
         "src/**"
-      ]
+      ],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-002", "reason": "SafeTaskSummary domain contract is introduced in LB-002" }
     },
     {
       "id": "ARCH-012",
       "description": "Task status source must be actual MCP/Broker execution, not model prose",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-007", "reason": "Actual MCP execution events first project task state in LB-007" }
     },
     {
       "id": "ARCH-013",
@@ -107,7 +119,8 @@
       "severity": "error",
       "applies_to": [
         "src/**"
-      ]
+      ],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-015", "reason": "Inline task presentation is implemented in LB-015" }
     },
     {
       "id": "ARCH-014",
@@ -115,12 +128,14 @@
       "severity": "error",
       "applies_to": [
         "src/**"
-      ]
+      ],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-015", "reason": "Task activity motion and reduced-motion UI are implemented in LB-015" }
     },
     {
       "id": "ARCH-015",
       "description": "Secrets must not be persisted in plaintext settings or frontend storage",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-005", "reason": "Secure credential persistence boundary is implemented in LB-005" }
     },
     {
       "id": "ARCH-016",
@@ -128,27 +143,32 @@
       "severity": "error",
       "applies_to": [
         "src-tauri/**"
-      ]
+      ],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-008", "reason": "Tunnel process secret injection is implemented in LB-008" }
     },
     {
       "id": "ARCH-017",
       "description": "Remembered workspace registry must not be treated as simultaneous MCP authorization roots",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-003", "reason": "Workspace registry persistence model is implemented in LB-003" }
     },
     {
       "id": "ARCH-018",
       "description": "Workspace removal must never perform filesystem deletion",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-010", "reason": "Workspace removal behavior is implemented in LB-010" }
     },
     {
       "id": "ARCH-019",
       "description": "MCP tools cannot mutate workspace registry or active workspace",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-007", "reason": "MCP control-plane policy enforcement is implemented in LB-007" }
     },
     {
       "id": "ARCH-020",
       "description": "Recoverable runtime outages use exactly five bounded reconnect attempts before user attention",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-010", "reason": "Reconnect controller is implemented in LB-010" }
     },
     {
       "id": "ARCH-021",
@@ -156,12 +176,14 @@
       "severity": "error",
       "applies_to": [
         "src/**"
-      ]
+      ],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-015", "reason": "Reconnect user-notification behavior becomes UI-testable in LB-015" }
     },
     {
       "id": "ARCH-022",
       "description": "One outage generation may emit at most one reconnect-exhaustion error window",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-010", "reason": "Outage generation state is implemented in LB-010" }
     },
     {
       "id": "ARCH-023",
@@ -170,12 +192,14 @@
       "applies_to": [
         "package.json",
         "src/**"
-      ]
+      ],
+      "verification": { "mode": "enforced", "type": "visual_dependency_absence" }
     },
     {
       "id": "ARCH-024",
       "description": "Next PR group cannot become READY until previous group independent adversarial review is PASS",
-      "severity": "error"
+      "severity": "error",
+      "verification": { "mode": "enforced", "type": "group_review_gate" }
     }
   ]
 }

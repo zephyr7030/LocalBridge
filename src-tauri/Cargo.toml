@@ -5,6 +5,7 @@ description = "LocalBridge desktop shell"
 authors = ["LocalBridge"]
 edition = "2024"
 rust-version = "1.85"
+autobins = false
 
 [lib]
 name = "localbridge_lib"
@@ -13,10 +14,6 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 [[bin]]
 name = "localbridge"
 path = "src/main.rs"
-
-[[bin]]
-name = "dummy-sidecar"
-path = "src/bin/dummy-sidecar.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

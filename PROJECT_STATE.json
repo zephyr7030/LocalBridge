@@ -1,7 +1,7 @@
 {
   "schema_version": 14,
   "phase": "PRE_CODE",
-  "current_pr": "LB-003",
+  "current_pr": "LB-002",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -122,7 +122,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run LB-003 - Settings & App Data"
+    "next_action": "Rework LB-002 - Domain Contracts"
   },
   "current_task_ui": {
     "enabled": true,
