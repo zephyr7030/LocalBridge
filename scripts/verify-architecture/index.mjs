@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { classifyArchitectureRules } from "./core.mjs";
+import { validateOneTimeGovernanceExceptions } from "./governance-exception.mjs";
 import { runPrScopedVerifier } from "./pr-scoped.mjs";
 
 const args = process.argv.slice(2);
@@ -115,6 +116,16 @@ const verifiers = {
     if (!existsSync(path)) return;
     const pr = progressDoc;
     const groups = pr.groups ?? [];
+    const exceptionFindings = validateOneTimeGovernanceExceptions(contractsDoc, {
+      isAncestor(commit) {
+        return runGit(["merge-base", "--is-ancestor", commit, "HEAD"]).status === 0;
+      },
+      commitPaths: gitCommitPaths,
+      jsonAt: gitJsonAt,
+    });
+    for (const detail of exceptionFindings) {
+      findings.push([rule.id, `PR_CONTRACTS.json:one-time-governance-exception:${detail}`]);
+    }
     for (const group of groups) {
       if (!new Set(["PASS", "FAIL"]).has(group.review_status)) continue;
       const provenance = group.review_provenance;
