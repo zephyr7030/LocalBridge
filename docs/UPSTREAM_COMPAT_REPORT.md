@@ -1,10 +1,10 @@
 # LB-000 — Upstream + Security Compatibility Report
 
 Date: 2026-08-11
-Overall LB-000 status: **REWORK REQUIRED — live revalidation pending**
+Overall LB-000 status: **REWORK REQUIRED — schema-v2 live poll failed**
 Deterministic/security spike status: **PASS**
 
-The first G0 adversarial review rejected the original live Tunnel evidence because the live probe treated metadata success as sufficient and reported command-line/output secret properties with constant assertions. That evidence is now superseded. Deterministic LB-000 gates remain valid, but LB-000 cannot return to acceptance until a fresh real-credential run passes the strengthened probe. LB-001 remains blocked.
+The first G0 adversarial review rejected the original live Tunnel evidence because the live probe treated metadata success as sufficient and reported command-line/output secret properties with constant assertions. That evidence is superseded. A fresh real-credential schema-v2 run has now exercised the strengthened probe: authenticated Tunnel metadata succeeded, but the observed control-plane poll cycle failed and no successful-poll timestamp was produced. Runtime API Key command-line and stdout/stderr leakage checks passed. Deterministic LB-000 gates remain valid, but LB-000 cannot return to acceptance until a later real-credential run proves at least one successful poll. LB-001 remains blocked.
 
 ## Pinned upstream identities
 
@@ -77,8 +77,8 @@ Third-party private structures do not cross into LocalBridge domain contracts. T
 | junction/symlink/reparse adversarial spike | PASS | `compatibility/coding-tools/0.2.2/path-probe.json` |
 | Job Object PoC | PASS | `spikes/lb-000/job-object-result.json` |
 | portable Python PoC | PASS | `spikes/lb-000/portable-python-result.json` |
-| live Tunnel PoC | REVALIDATION REQUIRED | strengthened probe `spikes/lb-000/live_tunnel_probe.py`; fresh real credentials required |
+| live Tunnel PoC | FAIL | schema-v2 `spikes/lb-000/live-tunnel-result.json`: metadata authenticated; 1 poll cycle / 1 poll error; no successful-poll timestamp; secret-leak checks PASS |
 | structural diff baseline generation | PASS | `compatibility/coding-tools/0.2.2/structural-diff.json` |
 | capability baseline serialization | PASS | `compatibility/coding-tools/0.2.2/capability-map.json` |
 
-The prior live result remains historical evidence of metadata connectivity only and is not accepted for the reworked gate. A fresh schema-v2 result must prove an actual successful control-plane poll and measured command-line/output secret properties. Until that run passes, LB-000 stays `REWORK_REQUIRED` and G0 is not ready for another review.
+The prior schema-v1 live result remains historical evidence of metadata connectivity only. The latest schema-v2 result is valid measured evidence, but it fails the gate because `commands_poll_last_successful_timestamp_seconds` never became positive. The same run confirmed that the Runtime API Key was absent from the OS-observed process command line and captured stdout/stderr. LB-000 therefore stays `REWORK_REQUIRED`; G0 is not ready for another review until a later real-credential run observes a successful control-plane poll.

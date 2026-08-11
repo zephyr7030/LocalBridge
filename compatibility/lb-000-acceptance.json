@@ -14,18 +14,24 @@
   },
   "external_gates": {
     "live_tunnel_poc": {
-      "status": "REVALIDATION_REQUIRED",
+      "status": "FAIL",
       "evidence": "spikes/lb-000/live-tunnel-result.json",
       "previous_evidence_superseded_by_review": true,
       "required_probe_schema": 2,
       "required_poll_evidence": "commands_poll_last_successful_timestamp_seconds > 0 from the current tunnel-client process",
       "control_plane_poll_success_observed": false,
+      "control_plane_poll_cycles_observed": 1,
+      "control_plane_poll_errors_observed": 1,
+      "control_plane_poll_last_successful_timestamp_present": false,
       "tunnel_working_state_observed": false,
-      "measurements_are_runtime_observed": false,
-      "authenticated_control_plane_metadata_observed": false,
-      "secret_emitted": null,
-      "api_key_in_command_line": null,
-      "tunnel_id_in_command_line": null
+      "measurements_are_runtime_observed": true,
+      "authenticated_control_plane_metadata_observed": true,
+      "secret_emitted": false,
+      "api_key_in_command_line": false,
+      "api_key_reference_in_command_line": true,
+      "tunnel_id_in_command_line": false,
+      "stdout_contains_api_key": false,
+      "stderr_contains_api_key": false
     }
   },
   "governance_transition_allowed": false,

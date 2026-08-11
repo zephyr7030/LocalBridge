@@ -100,4 +100,4 @@ Stable release 产出 exact manifest、lockfiles、SBOM、THIRD_PARTY_NOTICES、
 - Python 3.12.10 embeddable sample 已验证可直接运行 coding-tools-mcp v0.2.2；最终 patch/hash/layout 仍由 LB-006 冻结；
 - Windows Job Object `KILL_ON_JOB_CLOSE` 已验证可清理根进程及嵌套子进程。
 
-首次 G0 对抗审查已否决原 live Tunnel 证据：仅成功读取 control-plane metadata 不足以证明 poll/实际 Tunnel 工作状态，且旧 live probe 的命令行与输出 secret 结论包含常量断言。现已将 live gate 重新打开：新 probe 必须在同一真实 `tunnel-client` 进程中观察到 `commands_poll_last_successful_timestamp_seconds > 0`，并通过 Windows OS command line 与实际 stdout/stderr 内容测量确认 Runtime API Key 未泄漏。完成新一轮真实凭据验证前，LB-000 保持 REWORK_REQUIRED，LB-001 继续 BLOCKED。
+首次 G0 对抗审查已否决原 live Tunnel 证据：仅成功读取 control-plane metadata 不足以证明 poll/实际 Tunnel 工作状态，且旧 live probe 的命令行与输出 secret 结论包含常量断言。新 schema-v2 probe 已用真实凭据重新执行：authenticated metadata 为真，但仅观察到 1 次 poll cycle 且该次为 error，`commands_poll_last_successful_timestamp_seconds` 未变为正值，因此实际 Tunnel 工作态未成立；与此同时 Windows OS command line 与 stdout/stderr 的 Runtime API Key 泄漏测量均通过。LB-000 继续保持 REWORK_REQUIRED，LB-001 继续 BLOCKED；只有后续真实凭据运行观察到至少一次成功 poll 后才能重新进入 G0 审查。
