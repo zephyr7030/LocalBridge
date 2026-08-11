@@ -63,7 +63,7 @@ const dependencyNames = () => Object.keys({ ...(packageJson().dependencies ?? {}
 const reviewGovernancePaths = new Set(["PR_INDEX.json", "PROJECT_STATE.json"]);
 const runGit = (gitArgs) => spawnSync("git", gitArgs, { cwd: repoRoot, encoding: "utf8", windowsHide: true });
 const gitCommitPaths = (commit) => {
-  const result = runGit(["show", "--format=", "--name-only", commit]);
+  const result = runGit(["-c", "core.quotePath=false", "show", "--format=", "--name-only", commit]);
   if (result.status !== 0) return null;
   return result.stdout.split(/\r?\n/).map((v) => v.trim().replaceAll("\\", "/")).filter(Boolean);
 };
@@ -72,10 +72,11 @@ const gitJsonAt = (revision, path) => {
   if (result.status !== 0) return null;
   try { return JSON.parse(result.stdout); } catch { return null; }
 };
-const gitCommitMessage = (commit) => {
-  const result = runGit(["show", "-s", "--format=%B", commit]);
+const gitTextAt = (revision, path) => {
+  const result = runGit(["show", `${revision}:${path}`]);
   return result.status === 0 ? result.stdout : null;
 };
+const workingText = (path) => existsSync(join(repoRoot, path)) ? readFileSync(join(repoRoot, path), "utf8") : null;
 const gitCommitExists = (commit) => runGit(["cat-file", "-e", `${commit}^{commit}`]).status === 0;
 const gitFirstParentChild = (commit) => {
   const result = runGit(["rev-list", "--first-parent", "--reverse", `${commit}..HEAD`]);
@@ -136,9 +137,10 @@ const verifiers = {
         return runGit(["merge-base", "--is-ancestor", commit, "HEAD"]).status === 0;
       },
       commitPaths: gitCommitPaths,
-      commitMessage: gitCommitMessage,
       commitExists: gitCommitExists,
       jsonAt: gitJsonAt,
+      textAt: gitTextAt,
+      workingText,
       firstParentChild: gitFirstParentChild,
       firstParentParent: gitFirstParentParent,
     });
