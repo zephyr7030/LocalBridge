@@ -1,1 +1,8 @@
-//! Windows runtime/process infrastructure is implemented by LB-004 and later runtime PRs.
+#[cfg(windows)]
+mod windows_supervisor;
+
+#[cfg(windows)]
+pub use windows_supervisor::{
+    classify_persisted_snapshot, ManagedProcessSpec, ProcessGeneration, ProcessSnapshot,
+    SnapshotDisposition, StopDisposition, SupervisorError, WindowsProcessSupervisor,
+};

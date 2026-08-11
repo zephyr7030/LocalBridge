@@ -22,7 +22,13 @@ tauri-build = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
 
 [[test]]
 name = "lb003_settings_persistence"
@@ -35,6 +41,14 @@ path = "../tests/unit/workspace/workspace_registry.rs"
 [[test]]
 name = "lb003_migration_matrix"
 path = "../tests/migrations/migration_matrix.rs"
+
+[[test]]
+name = "lb004_runtime_contracts"
+path = "../tests/unit/runtime/runtime_contracts.rs"
+
+[[test]]
+name = "lb004_process_supervisor"
+path = "../tests/integration/process/process_supervisor.rs"
 
 [profile.release]
 strip = true
