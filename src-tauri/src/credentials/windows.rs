@@ -80,14 +80,7 @@ impl CredentialStore for WindowsCredentialStore {
         let mut raw: *mut CREDENTIALW = null_mut();
         let ok = unsafe { CredReadW(target.as_ptr(), CRED_TYPE_GENERIC, 0, &mut raw) };
         if ok == 0 {
-            let code = last_error_code();
-            if code == ERROR_NOT_FOUND_CODE {
-                return Ok(None);
-            }
-            return Err(CredentialStoreError::WindowsApi {
-                operation: "CredReadW",
-                code,
-            });
+            return classify_read_failure(last_error_code());
         }
         if raw.is_null() {
             return Err(CredentialStoreError::CorruptCredential);
@@ -155,4 +148,45 @@ fn last_error(operation: &'static str) -> CredentialStoreError {
 
 fn last_error_code() -> u32 {
     std::io::Error::last_os_error().raw_os_error().unwrap_or(-1) as u32
+}
+
+fn classify_read_failure(code: u32) -> Result<Option<SecretString>, CredentialStoreError> {
+    if code == ERROR_NOT_FOUND_CODE {
+        return Ok(None);
+    }
+    Err(CredentialStoreError::WindowsApi {
+        operation: "CredReadW",
+        code,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ERROR_ACCESS_DENIED_CODE: u32 = 5;
+    const ERROR_INVALID_DATA_CODE: u32 = 13;
+
+    #[test]
+    fn inaccessible_or_wrong_user_credential_fails_closed() {
+        for code in [ERROR_ACCESS_DENIED_CODE, ERROR_INVALID_DATA_CODE] {
+            let error = classify_read_failure(code).unwrap_err();
+            assert_eq!(
+                error,
+                CredentialStoreError::WindowsApi {
+                    operation: "CredReadW",
+                    code,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn only_not_found_is_treated_as_absent() {
+        assert!(
+            classify_read_failure(ERROR_NOT_FOUND_CODE)
+                .unwrap()
+                .is_none()
+        );
+    }
 }

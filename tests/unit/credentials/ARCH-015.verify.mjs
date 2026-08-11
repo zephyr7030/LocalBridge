@@ -29,7 +29,12 @@ for (const required of [
   "CredFree",
   "CRED_TYPE_GENERIC",
   "CRED_PERSIST_LOCAL_MACHINE",
+  "classify_read_failure",
+  "inaccessible_or_wrong_user_credential_fails_closed",
+  "only_not_found_is_treated_as_absent",
 ]) if (!windowsSource.includes(required)) process.exit(5);
+
+if (!/if\s+code\s*==\s*ERROR_NOT_FOUND_CODE[\s\S]{0,180}Ok\(None\)[\s\S]{0,260}CredentialStoreError::WindowsApi/.test(windowsSource)) process.exit(11);
 
 const secretDerive = moduleSource.match(/#\[derive\(([^)]*)\)\]\s*pub struct SecretString/);
 if (secretDerive && /Serialize|Deserialize|Clone/.test(secretDerive[1])) process.exit(6);
