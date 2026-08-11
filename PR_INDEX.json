@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": null,
+    "current_pr": "LB-005",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -113,7 +113,7 @@
         "LB-003"
       ],
       "gate": "G1",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-006",
@@ -297,9 +297,9 @@
         "LB-004",
         "LB-005"
       ],
-      "status": "REVIEW_REQUIRED",
+      "status": "REWORK_REQUIRED",
       "review_status": "FAIL",
-      "review_generation": 2,
+      "review_generation": 3,
       "review_provenance": {
         "generation": 2,
         "kind": "independent_adversarial",
