@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
-  "status": "LB_000_REWORK_REQUIRED",
+  "status": "LB_000_VERIFIED",
   "lb000": {
     "deterministic_status": "PASS",
-    "live_tunnel_status": "FAIL",
-    "acceptance_status": "REWORK_REQUIRED",
+    "live_tunnel_status": "PASS",
+    "acceptance_status": "PASS",
     "acceptance_evidence": "compatibility/lb-000-acceptance.json"
   },
   "coding_tools_mcp": {
@@ -38,7 +38,7 @@
     "secret_injection": "child_environment_reference",
     "secret_injection_result": "PASS",
     "live_probe": "spikes/lb-000/live-tunnel-result.json",
-    "live_probe_status": "FAIL"
+    "live_probe_status": "PASS"
   },
   "python_embedded_feasibility": {
     "status": "PASS",

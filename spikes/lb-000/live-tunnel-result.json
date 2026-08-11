@@ -1,13 +1,13 @@
 {
   "schema_version": 2,
-  "status": "FAIL",
+  "status": "PASS",
   "authenticated_control_plane_metadata_observed": true,
-  "control_plane_poll_success_observed": false,
-  "control_plane_poll_cycles_observed": 1,
-  "control_plane_poll_errors_observed": 1,
-  "control_plane_poll_last_successful_timestamp_present": false,
+  "control_plane_poll_success_observed": true,
+  "control_plane_poll_cycles_observed": 2,
+  "control_plane_poll_errors_observed": 0,
+  "control_plane_poll_last_successful_timestamp_present": true,
   "poll_evidence_source": "tunnel_client_prometheus_commands_poll_last_successful_timestamp_seconds",
-  "tunnel_working_state_observed": false,
+  "tunnel_working_state_observed": true,
   "ready_status": 200,
   "os_command_line_observed": true,
   "api_key_in_command_line": false,
@@ -23,5 +23,10 @@
   "stderr_contains_api_key": false,
   "stdout_contains_tunnel_id": true,
   "stderr_contains_tunnel_id": false,
-  "secrets_emitted": false
+  "secrets_emitted": false,
+  "control_plane_failure_category": null,
+  "control_plane_failure_http_statuses": [],
+  "credential_session_attempts": 1,
+  "credential_file_deleted_before_external_use": true,
+  "preflight_status": "PASS"
 }

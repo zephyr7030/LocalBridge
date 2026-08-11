@@ -1,7 +1,7 @@
 {
   "schema_version": 14,
   "phase": "PRE_CODE",
-  "current_pr": "LB-000",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -51,13 +51,7 @@
   ],
   "execution_plan_version": 15,
   "total_prs": 20,
-  "architecture_decisions_pending_lb000": [
-    "Policy Enforcement implementation: upstream / adapter / Rust Guard",
-    "Windows process ownership: Job Object exact design",
-    "Tunnel Runtime Key safe injection path",
-    "Portable Python exact layout/version",
-    "Dynamic loopback port allocation strategy"
-  ],
+  "architecture_decisions_pending_lb000": [],
   "permission_architecture": {
     "user_visible_modes": [
       "Edit",
@@ -122,7 +116,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Rework LB-000 after G0 adversarial review FAIL"
+    "next_action": "Run independent G0 adversarial review after LB-000 PASS"
   },
   "current_task_ui": {
     "enabled": true,

@@ -1,10 +1,10 @@
 # LB-000 — Upstream + Security Compatibility Report
 
 Date: 2026-08-11
-Overall LB-000 status: **REWORK REQUIRED — schema-v2 live poll failed**
+Overall LB-000 status: **PASS — ready for independent G0 adversarial review**
 Deterministic/security spike status: **PASS**
 
-The first G0 adversarial review rejected the original live Tunnel evidence because the live probe treated metadata success as sufficient and reported command-line/output secret properties with constant assertions. That evidence is superseded. A fresh real-credential schema-v2 run has now exercised the strengthened probe: authenticated Tunnel metadata succeeded, but the observed control-plane poll cycle failed and no successful-poll timestamp was produced. Runtime API Key command-line and stdout/stderr leakage checks passed. Deterministic LB-000 gates remain valid, but LB-000 cannot return to acceptance until a later real-credential run proves at least one successful poll. LB-001 remains blocked.
+The first G0 adversarial review rejected the original live Tunnel evidence because the live probe treated metadata success as sufficient and reported command-line/output secret properties with constant assertions. That evidence is superseded. The strengthened schema-v2 probe has now passed with fresh real credentials after credential-free preflight: authenticated Tunnel metadata succeeded, the same running `tunnel-client` process observed two poll cycles with zero poll errors and a positive successful-poll timestamp, and the Runtime API Key remained absent from the OS-observed command line and captured stdout/stderr. LB-000 therefore satisfies its acceptance contract. G0 now requires a fresh independent adversarial review; LB-001 remains blocked until that review passes.
 
 ## Pinned upstream identities
 
@@ -77,8 +77,8 @@ Third-party private structures do not cross into LocalBridge domain contracts. T
 | junction/symlink/reparse adversarial spike | PASS | `compatibility/coding-tools/0.2.2/path-probe.json` |
 | Job Object PoC | PASS | `spikes/lb-000/job-object-result.json` |
 | portable Python PoC | PASS | `spikes/lb-000/portable-python-result.json` |
-| live Tunnel PoC | FAIL | schema-v2 `spikes/lb-000/live-tunnel-result.json`: metadata authenticated; 1 poll cycle / 1 poll error; no successful-poll timestamp; secret-leak checks PASS |
+| live Tunnel PoC | PASS | schema-v2 `spikes/lb-000/live-tunnel-result.json`: metadata authenticated; 2 poll cycles / 0 poll errors; successful-poll timestamp observed; secret-leak checks PASS |
 | structural diff baseline generation | PASS | `compatibility/coding-tools/0.2.2/structural-diff.json` |
 | capability baseline serialization | PASS | `compatibility/coding-tools/0.2.2/capability-map.json` |
 
-The prior schema-v1 live result remains historical evidence of metadata connectivity only. The latest schema-v2 result is valid measured evidence, but it fails the gate because `commands_poll_last_successful_timestamp_seconds` never became positive. The same run confirmed that the Runtime API Key was absent from the OS-observed process command line and captured stdout/stderr. LB-000 therefore stays `REWORK_REQUIRED`; G0 is not ready for another review until a later real-credential run observes a successful control-plane poll.
+The prior schema-v1 result and the first schema-v2 failure remain historical evidence only. The latest schema-v2 result is the controlling evidence: `commands_poll_last_successful_timestamp_seconds` became positive in the same live `tunnel-client` process, metadata authentication succeeded, readiness remained loopback-local, and the Runtime API Key was absent from the OS-observed process command line and captured stdout/stderr. The plaintext credential file was deleted before external use and one credential session was sufficient. LB-000 is `PASS`; G0 is `REVIEW_REQUIRED`, and LB-001 remains blocked pending independent review.

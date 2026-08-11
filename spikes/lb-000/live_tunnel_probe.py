@@ -96,6 +96,30 @@ def parse_poll_metrics(payload: str | None) -> dict[str, float]:
     return values
 
 
+def classify_control_plane_failure(stdout: str, stderr: str) -> tuple[str | None, list[int]]:
+    text = f"{stdout}\n{stderr}".lower()
+    statuses = sorted({int(value) for value in re.findall(r"(?<!\d)(401|403|404|408|409|429|5\d\d)(?!\d)", text)})
+    if not text.strip():
+        return None, statuses
+    if 401 in statuses or "unauthorized" in text or "invalid api key" in text:
+        return "authentication", statuses
+    if 403 in statuses or "forbidden" in text or "tunnel_use_forbidden" in text:
+        return "authorization", statuses
+    if 404 in statuses or "tunnel_not_found" in text or "not found" in text:
+        return "tunnel_not_found", statuses
+    if 429 in statuses or "rate limit" in text:
+        return "rate_limited", statuses
+    if any(status >= 500 for status in statuses):
+        return "control_plane_server", statuses
+    if 408 in statuses or "timeout" in text or "deadline exceeded" in text:
+        return "timeout", statuses
+    if "tls" in text or "certificate" in text or "x509" in text:
+        return "tls", statuses
+    if "dial tcp" in text or "connection refused" in text or "no such host" in text:
+        return "network", statuses
+    return "unclassified", statuses
+
+
 def write_result(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
@@ -155,10 +179,6 @@ def main() -> int:
             "--embedded-mcp-stub",
             "--control-plane.api-key",
             f"env:{api_env}",
-            "--control-plane.poll-timeout",
-            "1000ms",
-            "--control-plane.poll-deadline-guardrail",
-            "500ms",
             "--health.listen-addr",
             "127.0.0.1:0",
             "--health.url-file",
@@ -169,6 +189,21 @@ def main() -> int:
             "warn",
         ]
         child_env = os.environ.copy()
+        for override in (
+            "CONTROL_PLANE_BASE_URL",
+            "CONTROL_PLANE_URL_PATH",
+            "CONTROL_PLANE_ORGANIZATION_ID",
+            "CONTROL_PLANE_HTTP_PROXY",
+            "CONTROL_PLANE_EXTRA_HEADERS",
+            "CONTROL_PLANE_CLIENT_CERT",
+            "CONTROL_PLANE_CLIENT_KEY",
+            "TUNNEL_CLIENT_CONFIG",
+            "TUNNEL_CLIENT_PROFILE",
+            "TUNNEL_CLIENT_PROFILE_FILE",
+            "TUNNEL_CLIENT_PROFILE_DIR",
+            "CA_BUNDLE",
+        ):
+            child_env.pop(override, None)
         if stdin_api_key is not None:
             child_env["CONTROL_PLANE_API_KEY"] = stdin_api_key
         if stdin_tunnel_id is not None:
@@ -237,6 +272,7 @@ def main() -> int:
     stdout_contains_tunnel_id = tunnel_id in stdout
     stderr_contains_tunnel_id = tunnel_id in stderr
     secrets_emitted = stdout_contains_api_key or stderr_contains_api_key
+    failure_category, failure_http_statuses = classify_control_plane_failure(stdout, stderr)
     health_loopback = bool(base and base.startswith("http://127.0.0.1:"))
     ok = bool(
         metadata_ok
@@ -276,6 +312,8 @@ def main() -> int:
         "stdout_contains_tunnel_id": stdout_contains_tunnel_id,
         "stderr_contains_tunnel_id": stderr_contains_tunnel_id,
         "secrets_emitted": secrets_emitted,
+        "control_plane_failure_category": None if ok else failure_category,
+        "control_plane_failure_http_statuses": [] if ok else failure_http_statuses,
     }
     write_result(output, result)
     return 0 if ok else 1

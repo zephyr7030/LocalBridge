@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "pr": "LB-000",
-  "status": "REWORK_REQUIRED",
+  "status": "PASS",
   "deterministic_gates": {
     "real_upstream_tools_list": "PASS",
     "junction_symlink_reparse_adversarial_spike": "PASS",
@@ -14,16 +14,16 @@
   },
   "external_gates": {
     "live_tunnel_poc": {
-      "status": "FAIL",
+      "status": "PASS",
       "evidence": "spikes/lb-000/live-tunnel-result.json",
       "previous_evidence_superseded_by_review": true,
       "required_probe_schema": 2,
       "required_poll_evidence": "commands_poll_last_successful_timestamp_seconds > 0 from the current tunnel-client process",
-      "control_plane_poll_success_observed": false,
-      "control_plane_poll_cycles_observed": 1,
-      "control_plane_poll_errors_observed": 1,
-      "control_plane_poll_last_successful_timestamp_present": false,
-      "tunnel_working_state_observed": false,
+      "control_plane_poll_success_observed": true,
+      "control_plane_poll_cycles_observed": 2,
+      "control_plane_poll_errors_observed": 0,
+      "control_plane_poll_last_successful_timestamp_present": true,
+      "tunnel_working_state_observed": true,
       "measurements_are_runtime_observed": true,
       "authenticated_control_plane_metadata_observed": true,
       "secret_emitted": false,
@@ -31,9 +31,12 @@
       "api_key_reference_in_command_line": true,
       "tunnel_id_in_command_line": false,
       "stdout_contains_api_key": false,
-      "stderr_contains_api_key": false
+      "stderr_contains_api_key": false,
+      "credential_session_attempts": 1,
+      "credential_file_deleted_before_external_use": true,
+      "preflight_status": "PASS"
     }
   },
-  "governance_transition_allowed": false,
+  "governance_transition_allowed": true,
   "next_pr_unlocked": false
 }
