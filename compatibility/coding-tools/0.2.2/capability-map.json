@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "runtime": "coding-tools-mcp",
+  "version": "0.2.2",
+  "commit": "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc",
+  "tools_list_sha256": "d187db7ad6729893f17fceb539f030eb0c6139528ab35cb3f9564d27383d3674",
+  "policy_basis": "LocalBridge PEP classification; upstream permission mode is defense-in-depth only",
+  "native_workflow_tools": [],
+  "unknown_tool_policy": "deny",
+  "tools": {
+    "server_info": {"capabilities": ["runtime-inspect"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "check_exec_environment": {"capabilities": ["runtime-inspect"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "get_default_cwd": {"capabilities": ["workspace-session-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "set_default_cwd": {"capabilities": ["workspace-session-cwd"], "edit": "allow", "full": "allow", "elevated": "allow", "constraint": "must remain inside active workspace"},
+    "read_file": {"capabilities": ["file-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "list_dir": {"capabilities": ["file-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "list_files": {"capabilities": ["file-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "search_text": {"capabilities": ["file-read", "search"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "apply_patch": {"capabilities": ["file-write"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "exec_command": {"capabilities": ["process-exec", "open-world"], "edit": "deny", "full": "allow_if_reviewed", "elevated": "allow_if_reviewed", "transitive_classification_required": true},
+    "write_stdin": {"capabilities": ["process-session-control"], "edit": "deny", "full": "allow_if_reviewed", "elevated": "allow_if_reviewed"},
+    "kill_session": {"capabilities": ["process-session-control"], "edit": "deny", "full": "allow_if_reviewed", "elevated": "allow_if_reviewed"},
+    "read_output": {"capabilities": ["process-session-read"], "edit": "deny", "full": "allow_if_reviewed", "elevated": "allow_if_reviewed"},
+    "git_status": {"capabilities": ["git-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "git_diff": {"capabilities": ["git-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "git_log": {"capabilities": ["git-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "git_show": {"capabilities": ["git-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "git_blame": {"capabilities": ["git-read"], "edit": "allow", "full": "allow", "elevated": "allow"},
+    "request_permissions": {"capabilities": ["upstream-permission-semantics"], "edit": "deny", "full": "deny", "elevated": "deny", "reason": "LocalBridge authorization/control-plane is non-delegable; v0.2.2 currently cannot grant in safe/trusted but future upstream behavior must not silently widen authority"},
+    "view_image": {"capabilities": ["file-read", "image-read"], "edit": "allow", "full": "allow", "elevated": "allow"}
+  },
+  "transitive_rules": {
+    "process_exec_tool": "exec_command",
+    "process_session_tools": ["write_stdin", "kill_session", "read_output"],
+    "privileged_external_runtime_programs": ["docker", "docker.exe", "podman", "podman.exe", "wsl", "wsl.exe"],
+    "privileged_external_runtime_policy": "review_required",
+    "future_workflow_or_new_tool": "unknown_then_deny_until_compatibility_review"
+  }
+}

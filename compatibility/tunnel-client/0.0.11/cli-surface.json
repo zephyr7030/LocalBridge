@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "runtime": "openai/tunnel-client",
+  "version_output": "0.0.11+8d55683eeef80bc5e360d95abf4692454fafc615 (git sha: 8d55683eeef80bc5e360d95abf4692454fafc615)",
+  "raw_version_file": "compatibility/tunnel-client/0.0.11/version.txt",
+  "raw_version_file_sha256": "98a9cfd7b9cd941352812bd445e482a9e652b04294bf1a6354a4d35c34aed2f4",
+  "raw_run_help_file": "compatibility/tunnel-client/0.0.11/run-help.txt",
+  "raw_run_help_file_sha256": "4b8b291f26b727a44610379b1218f43c0bc6f031071417f57ccc0cf5b6eb66fd",
+  "required_localbridge_flags_verified": [
+    "--control-plane.api-key",
+    "--control-plane.base-url",
+    "--control-plane.tunnel-id",
+    "--health.listen-addr",
+    "--health.url-file",
+    "--mcp.server-url",
+    "--mcp.command",
+    "--pid.file"
+  ],
+  "secret_reference_forms": ["env:VARNAME", "file:/path/to/secret"],
+  "localbridge_selected_secret_form": "env:LOCALBRIDGE_RUNTIME_API_KEY",
+  "plaintext_secret_in_cli": "forbidden_by_localbridge"
+}

@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "binary_started": true,
+  "process_exit_code_after_probe_stop": 1,
+  "argv_contains_secret": false,
+  "argv_uses_env_reference": true,
+  "os_command_line_observed": true,
+  "os_command_line_contains_secret": false,
+  "os_command_line_uses_env_reference": true,
+  "secret_reference": "env:LOCALBRIDGE_RUNTIME_API_KEY",
+  "child_environment_only": true,
+  "persistent_environment_modified": false,
+  "health_url": "http://127.0.0.1:49403",
+  "health_loopback": true,
+  "health_status": 200,
+  "ready_status": 200,
+  "readyz_is_process_startup_readiness_only": true,
+  "readyz_does_not_prove_control_plane_connectivity": true,
+  "admin_status": {
+    "version": "0.0.11+8d55683eeef80bc5e360d95abf4692454fafc615",
+    "client_instance_id": "35011ff388f8b25af398c1d0866b60f4",
+    "started_at": "2026-08-11T12:59:39.5383839+08:00",
+    "uptime_seconds": 0,
+    "health_listen_addr": "127.0.0.1:49403",
+    "control_plane_base_url": "http://127.0.0.1:9",
+    "control_plane_tunnel_id": "tunnel_00000000000000000000000000000000",
+    "control_plane_max_inflight": 20,
+    "control_plane_poll_timeout": "30s",
+    "control_plane_poll_deadline_guardrail": "5s",
+    "mcp_server_url": "http://127.0.0.1:49402/mcp",
+    "mcp_resource_metadata_urls": [
+      "http://127.0.0.1:49402/.well-known/oauth-protected-resource/mcp",
+      "http://127.0.0.1:49402/.well-known/oauth-protected-resource"
+    ],
+    "channels": [
+      {
+        "name": "main",
+        "enabled": true,
+        "server_kind": "external",
+        "transport_kind": "http-streamable",
+        "probe_status": "ok",
+        "details": [
+          {
+            "key": "address",
+            "value": "http://127.0.0.1:49402/mcp"
+          }
+        ]
+      },
+      {
+        "name": "harpoon",
+        "enabled": false,
+        "server_kind": "builtin",
+        "transport_kind": "in-memory",
+        "reason": "no harpoon targets registered"
+      }
+    ],
+    "control_plane_route": {
+      "kind": "control_plane",
+      "name": "control-plane",
+      "target": "127.0.0.1:9",
+      "route_mode": "direct",
+      "proxy_source": "none"
+    },
+    "mcp_routes": [
+      {
+        "kind": "mcp_channel",
+        "name": "main",
+        "target": "127.0.0.1:49402",
+        "route_mode": "direct",
+        "proxy_source": "none"
+      }
+    ],
+    "raw_http_logging_enabled": false,
+    "tunnel_metadata_error": "controlplane client: fetch tunnel metadata: Get \"http://127.0.0.1:9/v1/tunnels/tunnel_00000000000000000000000000000000\": dial tcp 127.0.0.1:9: connectex: No connection could be made because the target machine actively refused it."
+  },
+  "admin_system": {
+    "tls": {
+      "system_trust": {
+        "enabled": true,
+        "source": "system cert pool"
+      }
+    },
+    "proxy_health": [
+      {
+        "route": {
+          "kind": "control_plane",
+          "name": "control-plane",
+          "target": "127.0.0.1:9",
+          "route_mode": "direct",
+          "proxy_source": "none"
+        },
+        "health_state": "direct"
+      },
+      {
+        "route": {
+          "kind": "mcp_channel",
+          "name": "main",
+          "target": "127.0.0.1:49402",
+          "route_mode": "direct",
+          "proxy_source": "none"
+        },
+        "health_state": "direct"
+      }
+    ],
+    "main_channel_probe_status": "ok"
+  },
+  "control_plane_proxy_health": [
+    {
+      "route": {
+        "kind": "control_plane",
+        "name": "control-plane",
+        "target": "127.0.0.1:9",
+        "route_mode": "direct",
+        "proxy_source": "none"
+      },
+      "health_state": "direct"
+    },
+    {
+      "route": {
+        "kind": "mcp_channel",
+        "name": "main",
+        "target": "127.0.0.1:49402",
+        "route_mode": "direct",
+        "proxy_source": "none"
+      },
+      "health_state": "direct"
+    }
+  ],
+  "stdout_contains_secret": false,
+  "stderr_contains_secret": false,
+  "live_external_credentials_present": false,
+  "live_external_test_status": "BLOCKED_EXTERNAL_CREDENTIAL",
+  "ok": true
+}

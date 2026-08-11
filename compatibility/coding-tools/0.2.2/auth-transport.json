@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "transport": "streamable_http",
+  "endpoint_path": "/mcp",
+  "bind": "127.0.0.1:ephemeral",
+  "protocol_version": "2025-11-25",
+  "auth": "bearer",
+  "auth_secret_injection": "child_environment:CODING_TOOLS_MCP_AUTH_TOKEN",
+  "unauthenticated_initialize_rejected": true,
+  "mcp_session_id_issued": true,
+  "session_header_reused_for_tools_calls": true,
+  "stdio_supported_but_not_selected_for_localbridge_http_adapter": true,
+  "oauth_mode_supported_but_not_selected_for_guard_to_upstream_hop": true
+}

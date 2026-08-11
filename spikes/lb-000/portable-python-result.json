@@ -1,0 +1,18 @@
+﻿{
+    "schema_version":  1,
+    "purpose":  "LB-000 feasibility only; exact 3.12.x patch/layout remains LB-006 authority",
+    "sample_python_version":  "3.12.10",
+    "source":  "python.org Windows embeddable package",
+    "archive":  "python-3.12.10-embed-amd64.zip",
+    "archive_sha256":  "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3",
+    "runtime_executable":  "D:\\project\\LocalBridge\\spikes\\lb-000\\python-embed-poc\\runtime\\python.exe",
+    "import_coding_tools_mcp":  true,
+    "import_pyjwt":  true,
+    "cli_help_runs":  true,
+    "actual_http_mcp_probe_exit":  0,
+    "actual_http_mcp_tools_list":  true,
+    "build_time_staging_used_external_python":  true,
+    "runtime_execution_used_embedded_python_directly":  true,
+    "runtime_pip_install":  false,
+    "ok":  true
+}

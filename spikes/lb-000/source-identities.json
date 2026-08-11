@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "coding_tools_mcp": {
+    "version": "0.2.2",
+    "commit": "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc",
+    "tree": "5ef5e638a12aa74dc8836ca02a88490c2fe019a6",
+    "git_archive_sha256": "227b94128eaacda8d63d391911db1918e0bd813718d9ea5d276b5aab7eac73fd"
+  },
+  "tunnel_client": {
+    "version": "0.0.11",
+    "commit": "8d55683eeef80bc5e360d95abf4692454fafc615",
+    "tree": "f55ee74dd024b5e69714ec25c94a579276798b7f",
+    "windows_amd64_zip_sha256": "eb912c86c6ccde90cda805cb17009507176a656725cf86c36fabe1901a12e29b"
+  },
+  "python_embedded_feasibility": {
+    "sample_version": "3.12.10",
+    "archive_sha256": "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3",
+    "exact_release_pin_owned_by": "LB-006"
+  }
+}

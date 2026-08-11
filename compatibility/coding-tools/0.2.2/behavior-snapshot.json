@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "runtime_version": "0.2.2",
+  "safe_tool_names": [
+    "server_info",
+    "check_exec_environment",
+    "get_default_cwd",
+    "set_default_cwd",
+    "read_file",
+    "list_dir",
+    "list_files",
+    "search_text",
+    "apply_patch",
+    "exec_command",
+    "write_stdin",
+    "kill_session",
+    "read_output",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_show",
+    "git_blame",
+    "request_permissions",
+    "view_image"
+  ],
+  "trusted_tool_names": [
+    "server_info",
+    "check_exec_environment",
+    "get_default_cwd",
+    "set_default_cwd",
+    "read_file",
+    "list_dir",
+    "list_files",
+    "search_text",
+    "apply_patch",
+    "exec_command",
+    "write_stdin",
+    "kill_session",
+    "read_output",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_show",
+    "git_blame",
+    "request_permissions",
+    "view_image"
+  ],
+  "safe_and_trusted_catalog_identical": true,
+  "safe_tools_sha256": "d187db7ad6729893f17fceb539f030eb0c6139528ab35cb3f9564d27383d3674",
+  "trusted_tools_sha256": "d187db7ad6729893f17fceb539f030eb0c6139528ab35cb3f9564d27383d3674",
+  "server_info": {
+    "annotation_override": null,
+    "auth_enabled": true,
+    "cache_dir": "C:\\Users\\Zephyr\\AppData\\Local\\Temp\\coding-tools-mcp\\ffdeab4adbfcd578\\MaCv24CKc60OXKzS\\tmp\\coding-tools-mcp\\6d87d7bdc1f43f3d\\MAnCh0XdxP4SWhBG\\cache",
+    "dangerously_skip_all_permissions": false,
+    "default_cwd": ".",
+    "endpoint_path": "/mcp",
+    "exec_policy": {
+      "global_tmp_write": "blocked",
+      "inline_script": "blocked",
+      "secret_env_filter": "enabled",
+      "shell_expansion": "blocked"
+    },
+    "home": "C:\\Users\\Zephyr\\AppData\\Local\\Temp\\coding-tools-mcp\\ffdeab4adbfcd578\\MaCv24CKc60OXKzS\\tmp\\coding-tools-mcp\\6d87d7bdc1f43f3d\\MAnCh0XdxP4SWhBG\\home",
+    "landlock": {
+      "abi_version": null,
+      "available": false,
+      "details": {},
+      "enabled": false,
+      "reason": "Linux Landlock filesystem confinement is unavailable on this platform."
+    },
+    "network_allowed": false,
+    "ok": true,
+    "permission_mode": "safe",
+    "project_context": {
+      "nested_instruction_files": [],
+      "root_instruction_files": [],
+      "warnings": []
+    },
+    "protocol_version": "2025-11-25",
+    "runtime_dir": "C:\\Users\\Zephyr\\AppData\\Local\\Temp\\coding-tools-mcp\\ffdeab4adbfcd578\\MaCv24CKc60OXKzS\\tmp\\coding-tools-mcp\\6d87d7bdc1f43f3d\\MAnCh0XdxP4SWhBG",
+    "server": "coding-tools-mcp",
+    "shell_env_exclude": [],
+    "shell_env_include_only": [],
+    "shell_env_inherit": "core",
+    "title": "Coding Tools MCP",
+    "tmpdir": "C:\\Users\\Zephyr\\AppData\\Local\\Temp\\coding-tools-mcp\\ffdeab4adbfcd578\\MaCv24CKc60OXKzS\\tmp\\coding-tools-mcp\\6d87d7bdc1f43f3d\\MAnCh0XdxP4SWhBG\\tmp",
+    "tool_count": 20,
+    "tools": [
+      "server_info",
+      "check_exec_environment",
+      "get_default_cwd",
+      "set_default_cwd",
+      "read_file",
+      "list_dir",
+      "list_files",
+      "search_text",
+      "apply_patch",
+      "exec_command",
+      "write_stdin",
+      "kill_session",
+      "read_output",
+      "git_status",
+      "git_diff",
+      "git_log",
+      "git_show",
+      "git_blame",
+      "request_permissions",
+      "view_image"
+    ],
+    "version": "0.2.2",
+    "workspace": "C:\\Users\\Zephyr\\AppData\\Local\\Temp\\coding-tools-mcp\\ffdeab4adbfcd578\\MaCv24CKc60OXKzS\\tmp\\localbridge-lb000-mcp-dy4bq3my\\workspace"
+  },
+  "bearer_auth_enforced": true,
+  "unauthenticated_error": "MCP HTTP 401: {\"error\":{\"code\":-32000,\"message\":\"Unauthorized\"},\"id\":null,\"jsonrpc\":\"2.0\"}",
+  "authenticated_session_id_issued": true,
+  "inside_read_ok": true,
+  "traversal_denied": true,
+  "junction_denied": true,
+  "symlink_denied": true,
+  "safe_mode_exec_present": true,
+  "safe_mode_exec_succeeded": true,
+  "safe_mode_patch_present": true,
+  "safe_mode_patch_succeeded": true,
+  "unknown_tool_fail_closed": true,
+  "unknown_tool_error": "MCP JSON-RPC error: {'code': -32602, 'data': {'reason': 'unknown_tool'}, 'message': 'Unknown tool: definitely_unknown_lb000_tool'}",
+  "safe_server_log": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "coding-tools-mcp listening on http://127.0.0.1:60133/mcp (bearer auth enabled)\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 202 -\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 401 -\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 200 -\n"
+  },
+  "trusted_server_log": {
+    "exit_code": 1,
+    "stdout": "",
+    "stderr": "coding-tools-mcp listening on http://127.0.0.1:60146/mcp (bearer auth enabled)\n\"POST /mcp HTTP/1.1\" 200 -\n\"POST /mcp HTTP/1.1\" 202 -\n\"POST /mcp HTTP/1.1\" 200 -\n"
+  },
+  "trusted_initialize": {
+    "capabilities": {
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "instructions": "Use these tools only for coding operations inside the configured workspace.\n\nUse apply_patch as the only direct file-modification tool; do not modify files through exec_command.",
+    "protocolVersion": "2025-11-25",
+    "serverInfo": {
+      "name": "coding-tools-mcp",
+      "title": "Coding Tools MCP",
+      "version": "0.2.2"
+    }
+  }
+}

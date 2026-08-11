@@ -1,4 +1,4 @@
-schema_version = 1
+schema_version = 2
 
 [product]
 codename = "LocalBridge"
@@ -9,21 +9,33 @@ release = "0.1.0"
 source = "https://github.com/xyTom/coding-tools-mcp"
 version = "0.2.2"
 git_commit = "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc"
-sha256 = "TO_BE_FILLED_BY_LB_000"
+git_tree = "5ef5e638a12aa74dc8836ca02a88490c2fe019a6"
+sha256 = "227b94128eaacda8d63d391911db1918e0bd813718d9ea5d276b5aab7eac73fd"
+sha256_basis = "git archive --format=tar pinned commit"
 vendoring = "source"
+telemetry = "disabled"
 
 [tunnel_client]
 source = "https://github.com/openai/tunnel-client"
 version = "0.0.11"
-asset = "TO_BE_RESOLVED_WINDOWS_AMD64_BY_LB_000"
-sha256 = "TO_BE_FILLED_FROM_OFFICIAL_SHA256SUMS_BY_LB_000"
+git_commit = "8d55683eeef80bc5e360d95abf4692454fafc615"
+git_tree = "f55ee74dd024b5e69714ec25c94a579276798b7f"
+asset = "tunnel-client-v0.0.11-windows-amd64.zip"
+sha256 = "eb912c86c6ccde90cda805cb17009507176a656725cf86c36fabe1901a12e29b"
 vendoring = "binary"
+secret_injection = "child_environment_reference"
+health_contract = "compatibility/tunnel-client/0.0.11/health-contract.json"
+bundled_cloudflared_version = "2026.7.2"
+bundled_cloudflared_sha256 = "88024cf82cec72d10604c13aa4670016dca375c602e200b551ec9d53b31e874d"
 
 [python]
 version = "3.12.x"
 source = "python.org Windows embeddable package"
 sha256 = "TO_BE_FILLED_BY_LB_006"
 vendoring = "embeddable"
+lb000_feasibility_sample_version = "3.12.10"
+lb000_feasibility_sample_sha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
+lb000_feasibility_status = "PASS"
 
 [policy]
 file = "runtime-policy.toml"

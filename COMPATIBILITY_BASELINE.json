@@ -1,15 +1,67 @@
 {
-  "schema_version": 1,
-  "status": "UNVERIFIED_UNTIL_LB_000",
+  "schema_version": 2,
+  "status": "LB_000_DETERMINISTIC_VERIFIED_LIVE_TUNNEL_BLOCKED",
+  "lb000": {
+    "deterministic_status": "PASS",
+    "live_tunnel_status": "BLOCKED_EXTERNAL_CREDENTIAL",
+    "acceptance_status": "BLOCKED",
+    "acceptance_evidence": "compatibility/lb-000-acceptance.json"
+  },
   "coding_tools_mcp": {
     "version": "0.2.2",
-    "tools_list_snapshot": null,
-    "capability_map": null,
-    "behavior_snapshot": null
+    "commit": "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc",
+    "git_tree": "5ef5e638a12aa74dc8836ca02a88490c2fe019a6",
+    "source_archive_sha256": "227b94128eaacda8d63d391911db1918e0bd813718d9ea5d276b5aab7eac73fd",
+    "tools_list_snapshot": "compatibility/coding-tools/0.2.2/tools-list.json",
+    "tools_list_sha256": "d187db7ad6729893f17fceb539f030eb0c6139528ab35cb3f9564d27383d3674",
+    "tool_count": 20,
+    "capability_map": "compatibility/coding-tools/0.2.2/capability-map.json",
+    "behavior_snapshot": "compatibility/coding-tools/0.2.2/behavior-snapshot.json",
+    "auth_transport": "compatibility/coding-tools/0.2.2/auth-transport.json",
+    "structural_baseline": "compatibility/coding-tools/0.2.2/structural-baseline.json",
+    "structural_diff": "compatibility/coding-tools/0.2.2/structural-diff.json",
+    "capability_diff": "compatibility/coding-tools/0.2.2/capability-diff.json",
+    "safe_and_trusted_catalog_identical": true,
+    "safe_mode_process_exec_observed": true,
+    "bearer_auth_enforced": true,
+    "streamable_http_session_verified": true,
+    "telemetry_must_be_disabled": true
   },
   "tunnel_client": {
     "version": "0.0.11",
-    "cli_surface": null,
-    "health_contract": null
+    "commit": "8d55683eeef80bc5e360d95abf4692454fafc615",
+    "git_tree": "f55ee74dd024b5e69714ec25c94a579276798b7f",
+    "asset": "tunnel-client-v0.0.11-windows-amd64.zip",
+    "asset_sha256": "eb912c86c6ccde90cda805cb17009507176a656725cf86c36fabe1901a12e29b",
+    "cli_surface": "compatibility/tunnel-client/0.0.11/cli-surface.json",
+    "health_contract": "compatibility/tunnel-client/0.0.11/health-contract.json",
+    "secret_injection": "child_environment_reference",
+    "secret_injection_result": "PASS",
+    "live_probe": "spikes/lb-000/live-tunnel-result.json",
+    "live_probe_status": "BLOCKED_EXTERNAL_CREDENTIAL"
+  },
+  "python_embedded_feasibility": {
+    "status": "PASS",
+    "sample_version": "3.12.10",
+    "sample_archive_sha256": "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3",
+    "exact_runtime_pin_owned_by": "LB-006"
+  },
+  "policy_enforcement": {
+    "decision": "first_party_rust_mcp_guard",
+    "adr": "docs/ADR-0001_POLICY_ENFORCEMENT.md",
+    "tools_call_mandatory": true,
+    "unknown_deny": true,
+    "request_permissions_deny": true
+  },
+  "process_ownership": {
+    "decision": "windows_job_object",
+    "adr": "docs/ADR-0002_PROCESS_OWNERSHIP.md",
+    "kill_on_job_close_poc": "PASS",
+    "pid_only_forbidden": true
+  },
+  "stable_adapter_boundary": {
+    "domain_depends_on_upstream_private_structures": false,
+    "tunnel_targets_coding_tools_directly": false,
+    "boundaries": ["MCP Guard/adapter", "Tunnel runtime adapter", "Windows process supervisor"]
   }
 }

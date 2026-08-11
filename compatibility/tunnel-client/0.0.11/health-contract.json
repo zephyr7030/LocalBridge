@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "runtime": "openai/tunnel-client",
+  "version": "0.0.11",
+  "health_bind": "127.0.0.1:0",
+  "health_url_file_supported": true,
+  "healthz": {
+    "meaning": "local process liveness",
+    "observed_offline_negative_probe_status": 200
+  },
+  "readyz": {
+    "meaning": "local startup gates including MCP/OAuth probing; not sufficient evidence of OpenAI control-plane connectivity",
+    "observed_offline_negative_probe_status": 200
+  },
+  "admin_status": {
+    "path": "/api/status",
+    "control_plane_fields": ["control_plane_route", "tunnel_metadata", "tunnel_metadata_error"],
+    "offline_negative_probe": "tunnel_metadata_error populated while /readyz was 200"
+  },
+  "admin_system": {
+    "path": "/api/system",
+    "proxy_health_field": "proxy_health",
+    "note": "route health value 'direct' describes routing mode and is not by itself proof that the direct target is reachable"
+  },
+  "localbridge_ready_rule": "process alive AND /readyz=200 AND control-plane compatibility/connection evidence has no typed auth/config/connectivity failure; /readyz alone MUST NOT project Ready",
+  "live_control_plane_confirmation_gate": "LB-000 live Tunnel PoC when credentials are available; repeated end-to-end ChatGPT MCP confirmation belongs to LB-019"
+}

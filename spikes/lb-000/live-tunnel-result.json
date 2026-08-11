@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "status": "BLOCKED_EXTERNAL_CREDENTIAL",
+  "api_key_present": false,
+  "tunnel_id_present": false,
+  "secret_read_or_logged": false,
+  "required_environment": [
+    "CONTROL_PLANE_API_KEY or OPENAI_API_KEY",
+    "CONTROL_PLANE_TUNNEL_ID"
+  ]
+}

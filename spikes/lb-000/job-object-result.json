@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "ok": true,
+  "job_limit": "JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE",
+  "assigned_before_nested_spawn": true,
+  "root_pid": 16600,
+  "nested_pid": 8996,
+  "before_job_close": {
+    "root_alive": true,
+    "nested_alive": true
+  },
+  "after_job_close": {
+    "root_alive": false,
+    "nested_alive": false
+  },
+  "ownership_model": "kernel job handle, not PID-only"
+}

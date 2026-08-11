@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "runtime": "openai/tunnel-client",
+  "version": "0.0.11",
+  "git_commit": "8d55683eeef80bc5e360d95abf4692454fafc615",
+  "git_tree": "f55ee74dd024b5e69714ec25c94a579276798b7f",
+  "official_windows_amd64_asset": "tunnel-client-v0.0.11-windows-amd64.zip",
+  "asset_size_bytes": 26519876,
+  "asset_sha256": "eb912c86c6ccde90cda805cb17009507176a656725cf86c36fabe1901a12e29b",
+  "asset_hash_verified_locally": true,
+  "contents": [
+    {"name": "tunnel-client.exe", "size_bytes": 20798464, "sha256": "7d3c7d492ce84b52835e11865a835a8a5bcd4a669dee84e169aa11b314dc952a"},
+    {"name": "cloudflared.exe", "version": "2026.7.2", "size_bytes": 39102976, "sha256": "88024cf82cec72d10604c13aa4670016dca375c602e200b551ec9d53b31e874d"},
+    {"name": "cloudflared-manifest.json", "size_bytes": 1038, "sha256": "149c1b5c0095ffab41c3986d620ca18c35373e05c5b6ca0bea88ac19f6d4a7a5"},
+    {"name": "LICENSE", "size_bytes": 10758, "sha256": "f4c1d7ba32ef5bcf5cf03e2eefec5825ebafedf50fa330a36700a49c605c1ef4"}
+  ]
+}

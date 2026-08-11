@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "comparison_kind": "initial_baseline",
+  "runtime": "coding-tools-mcp",
+  "previous": null,
+  "current_capability_map": "compatibility/coding-tools/0.2.2/capability-map.json",
+  "security_findings": [
+    "safe and trusted publish the same tool catalog",
+    "safe mode can execute exec_command",
+    "request_permissions is an upstream permission semantic and must not be delegated LocalBridge authorization",
+    "future unknown tools or workflow-like transitive execution capabilities must default deny"
+  ],
+  "policy_impact": "first-party Rust MCP Guard required",
+  "decision": "freeze_as_initial_capability_baseline"
+}

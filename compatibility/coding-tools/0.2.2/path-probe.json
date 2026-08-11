@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "junction": {
+    "created": true,
+    "returncode": 0,
+    "stdout": "Ϊ C:\\Users\\Zephyr\\AppData\\Local\\Temp\\coding-tools-mcp\\ffdeab4adbfcd578\\MaCv24CKc60OXKzS\\tmp\\localbridge-lb000-mcp-dy4bq3my\\workspace\\junction-out <<===>> C:\\Users\\Zephyr\\AppData\\Local\\Temp\\coding-tools-mcp\\ffdeab4adbfcd578\\MaCv24CKc60OXKzS\\tmp\\localbridge-lb000-mcp-dy4bq3my\\outside ����������\n",
+    "stderr": "",
+    "is_junction": true
+  },
+  "symlink": {
+    "created": true,
+    "error": null
+  },
+  "traversal_denied": true,
+  "junction_denied": true,
+  "symlink_denied": true,
+  "outside_secret_leaked": false
+}
