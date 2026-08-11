@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, relative, join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { classifyArchitectureRules } from "./core.mjs";
 import { runPrScopedVerifier } from "./pr-scoped.mjs";
 
@@ -58,6 +59,18 @@ const rel = (p) => relative(root, p).replaceAll("\\", "/");
 const read = (p) => readFileSync(p, "utf8");
 const packageJson = () => JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const dependencyNames = () => Object.keys({ ...(packageJson().dependencies ?? {}), ...(packageJson().devDependencies ?? {}) });
+const reviewGovernancePaths = new Set(["PR_INDEX.json", "PROJECT_STATE.json"]);
+const runGit = (gitArgs) => spawnSync("git", gitArgs, { cwd: repoRoot, encoding: "utf8", windowsHide: true });
+const gitCommitPaths = (commit) => {
+  const result = runGit(["show", "--format=", "--name-only", commit]);
+  if (result.status !== 0) return null;
+  return result.stdout.split(/\r?\n/).map((v) => v.trim().replaceAll("\\", "/")).filter(Boolean);
+};
+const gitJsonAt = (revision, path) => {
+  const result = runGit(["show", `${revision}:${path}`]);
+  if (result.status !== 0) return null;
+  try { return JSON.parse(result.stdout); } catch { return null; }
+};
 const addSourceMatches = (ruleId, predicate, pattern, findings) => {
   for (const p of all) {
     const r = rel(p);
@@ -100,8 +113,53 @@ const verifiers = {
   group_review_gate(rule, findings) {
     const path = join(root, "PR_INDEX.json");
     if (!existsSync(path)) return;
-    const pr = JSON.parse(readFileSync(path, "utf8"));
+    const pr = progressDoc;
     const groups = pr.groups ?? [];
+    for (const group of groups) {
+      if (!new Set(["PASS", "FAIL"]).has(group.review_status)) continue;
+      const provenance = group.review_provenance;
+      if (!provenance
+        || provenance.generation !== group.review_generation
+        || provenance.kind !== "independent_adversarial"
+        || !/^[0-9a-f]{40}$/.test(provenance.commit ?? "")) {
+        findings.push([rule.id, `PR_INDEX.json:${group.id}:review-provenance`]);
+        continue;
+      }
+
+      const ancestor = runGit(["merge-base", "--is-ancestor", provenance.commit, "HEAD"]);
+      const paths = gitCommitPaths(provenance.commit);
+      if (ancestor.status !== 0
+        || !paths
+        || paths.length === 0
+        || paths.some((candidate) => !reviewGovernancePaths.has(candidate))) {
+        findings.push([rule.id, `PR_INDEX.json:${group.id}:review-commit-scope`]);
+      }
+
+      const before = gitJsonAt(`${provenance.commit}^`, "PR_INDEX.json");
+      const after = gitJsonAt(provenance.commit, "PR_INDEX.json");
+      const beforeGroup = before?.groups?.find((candidate) => candidate.id === group.id);
+      const afterGroup = after?.groups?.find((candidate) => candidate.id === group.id);
+      if (beforeGroup?.status !== "REVIEW_REQUIRED"
+        || afterGroup?.review_generation !== provenance.generation
+        || afterGroup?.review_status !== group.review_status) {
+        findings.push([rule.id, `PR_INDEX.json:${group.id}:review-transition`]);
+      }
+
+      for (const invalidated of provenance.invalidated_generations ?? []) {
+        if (!Number.isInteger(invalidated.generation)
+          || invalidated.generation >= provenance.generation
+          || !/^[0-9a-f]{40}$/.test(invalidated.commit ?? "")) {
+          findings.push([rule.id, `PR_INDEX.json:${group.id}:invalidated-review-record`]);
+          continue;
+        }
+        if (invalidated.cause === "mixed_scope_review_commit") {
+          const invalidatedPaths = gitCommitPaths(invalidated.commit);
+          if (!invalidatedPaths || invalidatedPaths.every((candidate) => reviewGovernancePaths.has(candidate))) {
+            findings.push([rule.id, `PR_INDEX.json:${group.id}:invalidated-review-evidence`]);
+          }
+        }
+      }
+    }
     for (let i = 1; i < groups.length; i += 1) {
       const previous = groups[i - 1];
       const current = groups[i];

@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "project": "LocalBridge",
   "state": "PRE_CODE",
   "execution": {
@@ -279,7 +279,13 @@
       ],
       "status": "PASS",
       "review_status": "PASS",
-      "review_generation": 2
+      "review_generation": 2,
+      "review_provenance": {
+        "generation": 2,
+        "kind": "independent_adversarial",
+        "commit": "01e3cb3060583efd393bf02b8aefbcb6c4ad2560",
+        "invalidated_generations": []
+      }
     },
     {
       "id": "G1",
@@ -293,7 +299,19 @@
       ],
       "status": "REWORK_REQUIRED",
       "review_status": "FAIL",
-      "review_generation": 2
+      "review_generation": 2,
+      "review_provenance": {
+        "generation": 2,
+        "kind": "independent_adversarial",
+        "commit": "bc3ef5dae2c4197639db33f2a4e0ac2d89a2a486",
+        "invalidated_generations": [
+          {
+            "generation": 1,
+            "commit": "59de62e29e0c2d69fa20da11afa4ab04cbaba882",
+            "cause": "mixed_scope_review_commit"
+          }
+        ]
+      }
     },
     {
       "id": "G2",

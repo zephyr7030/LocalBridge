@@ -1,11 +1,14 @@
 
 # LocalBridge v15 FINAL — Start Here
 
+> 本文件是开发前 **冻结启动快照（historical bootstrap snapshot）**，用于说明读取顺序与冻结约束，不承载推进中的实时 PR/Gate 状态。
+> 实时 `current_group`、`current_pr`、group review 状态只读取 `PR_INDEX.json` 与 `PROJECT_STATE.json`；若二者互相冲突，立即停止并报告。
+
 ```text
-phase         = PRE_CODE
-current_group = G0
-current_pr    = LB-000
-final_review  = PASS
+bootstrap_phase        = PRE_CODE
+bootstrap_group        = G0
+bootstrap_pr           = LB-000
+predevelopment_review  = PASS
 ```
 
 读取顺序：
@@ -29,9 +32,9 @@ final_review  = PASS
 17. `runtime-manifest.toml`
 18. `runtime-policy.toml`
 
-机器合同与文档冲突：立即停止并报告。
+机器合同与文档冲突：立即停止并报告。冻结/历史快照中的旧状态字段不属于实时状态冲突。
 
-当前唯一任务：
+历史启动任务（冻结快照）：
 
 ```text
 G0

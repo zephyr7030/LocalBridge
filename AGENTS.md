@@ -1,7 +1,7 @@
 
 # LocalBridge Agent Rules
 
-1. 事实源：`START_HERE.md`、8 份 `docs/**`、机器合同、runtime manifest/policy、当前磁盘代码。冲突立即停止报告。
+1. 事实源：`START_HERE.md`、8 份 `docs/**`、机器合同、runtime manifest/policy、当前磁盘代码。实时执行状态（current group/PR/review gate）只以 `PR_INDEX.json` + `PROJECT_STATE.json` 为准；`START_HERE.md` 中标记为 frozen/historical 的启动快照不得覆盖实时状态。其余语义冲突立即停止报告。
 2. 一次只执行 `current_pr`，LB-000→LB-019 严格顺序。
 3. 组末必须停止；只有独立组级对抗审查 PASS 才能解锁下一组。
 4. 只写当前 PR writable paths 和合同明确的受限例外。

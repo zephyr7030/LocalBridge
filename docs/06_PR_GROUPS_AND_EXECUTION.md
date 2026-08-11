@@ -111,6 +111,25 @@ PROJECT_STATE.json
 
 仅推进当前 group review/status，并解锁下一组首 PR。
 
+### Review provenance
+
+每次非 `BLOCKED` 的组审结论必须绑定独立 review commit：
+
+```text
+review_provenance.generation == review_generation
+review_provenance.kind = independent_adversarial
+review_provenance.commit = exact Git commit
+```
+
+合法 review commit 必须：
+
+- 从该组 `REVIEW_REQUIRED` 状态出发；
+- 只修改 `PR_INDEX.json` / `PROJECT_STATE.json`；
+- 不得与生产代码、测试、合同、架构规则修改混在同一提交；
+- 必须是当前 HEAD 的祖先提交。
+
+若历史 review generation 被发现由开发提交污染，必须显式记录为 invalidated generation；该 generation 不得再作为独立审查证据。ARCH-024 对以上约束 fail-closed。
+
 ### FAIL
 
 必须给：
