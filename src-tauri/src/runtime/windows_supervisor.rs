@@ -8,19 +8,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, HANDLE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, FILETIME, HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, CreateProcessW, GetExitCodeProcess, GetProcessTimes, PROCESS_INFORMATION,
-    ResumeThread, STARTUPINFOW, TerminateProcess,
+    CREATE_SUSPENDED, CreateProcessW, GetProcessTimes, PROCESS_INFORMATION, ResumeThread,
+    STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
 
-const STILL_ACTIVE: u32 = 259;
 const FORCED_EXIT_CODE: u32 = 0x4C42_0004;
 const FORCED_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -81,7 +82,10 @@ pub struct ManagedProcessSpec {
 }
 
 impl ManagedProcessSpec {
-    pub fn new(role: impl Into<String>, executable: impl Into<PathBuf>) -> Result<Self, SupervisorError> {
+    pub fn new(
+        role: impl Into<String>,
+        executable: impl Into<PathBuf>,
+    ) -> Result<Self, SupervisorError> {
         let role = role.into();
         if role.trim().is_empty() {
             return Err(SupervisorError::InvalidSpec("empty process role"));
@@ -130,6 +134,7 @@ pub enum SupervisorError {
     InvalidSpec(&'static str),
     WindowsApi { operation: &'static str, code: u32 },
     ResumeFailed,
+    UnexpectedWaitStatus { status: u32 },
     ForcedTerminationDidNotDrain { remaining_processes: u32 },
 }
 
@@ -141,7 +146,15 @@ impl fmt::Display for SupervisorError {
                 write!(f, "Windows API {operation} failed with code {code}")
             }
             Self::ResumeFailed => f.write_str("ResumeThread failed after Job assignment"),
-            Self::ForcedTerminationDidNotDrain { remaining_processes } => write!(
+            Self::UnexpectedWaitStatus { status } => {
+                write!(
+                    f,
+                    "WaitForSingleObject returned unexpected status {status:#x}"
+                )
+            }
+            Self::ForcedTerminationDidNotDrain {
+                remaining_processes,
+            } => write!(
                 f,
                 "owned Job still contains {remaining_processes} process(es) after forced termination"
             ),
@@ -267,12 +280,13 @@ impl WindowsProcessSupervisor {
         if self.stopped {
             return Ok(false);
         }
-        let mut exit_code = 0u32;
-        let ok = unsafe { GetExitCodeProcess(self.process, &mut exit_code) };
-        if ok == 0 {
-            return Err(last_error("GetExitCodeProcess"));
+        let wait = unsafe { WaitForSingleObject(self.process, 0) };
+        match wait {
+            WAIT_TIMEOUT => Ok(true),
+            WAIT_OBJECT_0 => Ok(false),
+            WAIT_FAILED => Err(last_error("WaitForSingleObject")),
+            status => Err(SupervisorError::UnexpectedWaitStatus { status }),
         }
-        Ok(exit_code == STILL_ACTIVE)
     }
 
     pub fn stop_with<F>(
@@ -447,6 +461,9 @@ mod tests {
         assert_eq!(quote_windows_arg(OsStr::new("plain")), "plain");
         assert_eq!(quote_windows_arg(OsStr::new("two words")), "\"two words\"");
         assert_eq!(quote_windows_arg(OsStr::new("a\\\"b")), "\"a\\\\\\\"b\"");
-        assert_eq!(quote_windows_arg(OsStr::new("C:\\with space\\")), "\"C:\\with space\\\\\"");
+        assert_eq!(
+            quote_windows_arg(OsStr::new("C:\\with space\\")),
+            "\"C:\\with space\\\\\""
+        );
     }
 }

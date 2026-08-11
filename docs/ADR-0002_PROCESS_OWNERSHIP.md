@@ -48,6 +48,8 @@ The Job handle is the ownership capability. A diagnostic snapshot contains role,
 
 Shutdown is cooperative-first: the caller requests a typed/runtime-specific graceful stop through a callback, the supervisor polls Job accounting for a bounded interval, and only if owned processes remain does it call `TerminateJobObject`. Closing the supervisor also closes the `KILL_ON_JOB_CLOSE` Job, so nested descendants remain kernel-owned even if the root exits or fails to cooperate. No ordinary-runtime breakaway flag is enabled.
 
+Root-process liveness is determined from the process handle's wait state (`WaitForSingleObject(handle, 0)`), not from `GetExitCodeProcess == STILL_ACTIVE`. Exit code `259` is a legal real process exit code, so that numeric value cannot be used as proof of liveness. `WAIT_TIMEOUT` means the process handle is still unsignaled/running; `WAIT_OBJECT_0` means the process has exited.
+
 ## Alternatives rejected
 
 PID-only tracking is rejected because PID reuse makes it possible to target an unrelated process. Recursive process enumeration is rejected as the primary boundary because it races process creation/exit and is not kernel ownership. Unmanaged detached descendants are rejected because application exit/crash would leave undefined orphans.

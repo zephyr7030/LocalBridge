@@ -10,12 +10,10 @@ use localbridge_lib::runtime::{
     ManagedProcessSpec, ProcessSnapshot, SnapshotDisposition, StopDisposition,
     WindowsProcessSupervisor,
 };
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
 
-const STILL_ACTIVE: u32 = 259;
+const SYNCHRONIZE_ACCESS: u32 = 0x0010_0000;
 
 fn helper_dir(root_pid: u32) -> PathBuf {
     std::env::temp_dir().join(format!("localbridge-lb004-{root_pid}"))
@@ -25,6 +23,12 @@ fn helper_spec() -> ManagedProcessSpec {
     ManagedProcessSpec::new("lb004-test-root", std::env::current_exe().unwrap())
         .unwrap()
         .args(["--ignored", "--exact", "helper_root", "--nocapture"])
+}
+
+fn exit_259_spec() -> ManagedProcessSpec {
+    ManagedProcessSpec::new("lb004-exit-259", std::env::current_exe().unwrap())
+        .unwrap()
+        .args(["--ignored", "--exact", "helper_exit_259", "--nocapture"])
 }
 
 fn wait_for_file(path: &Path, timeout: Duration) {
@@ -50,14 +54,17 @@ fn wait_for_dead(pid: u32, timeout: Duration) {
 }
 
 fn pid_alive(pid: u32) -> bool {
-    let handle: HANDLE = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    let handle: HANDLE = unsafe { OpenProcess(SYNCHRONIZE_ACCESS, 0, pid) };
     if handle.is_null() {
         return false;
     }
-    let mut exit_code = 0u32;
-    let ok = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
+    let wait = unsafe { WaitForSingleObject(handle, 0) };
     unsafe { CloseHandle(handle) };
-    ok != 0 && exit_code == STILL_ACTIVE
+    match wait {
+        WAIT_TIMEOUT => true,
+        WAIT_OBJECT_0 => false,
+        _ => false,
+    }
 }
 
 fn nested_pid(root_pid: u32) -> u32 {
@@ -95,7 +102,9 @@ fn graceful_stop_drains_owned_tree_without_forced_termination() {
     let signal = helper_dir(root_pid).join("graceful.stop");
 
     let disposition = supervisor
-        .stop_with(Duration::from_secs(5), |_| fs::write(&signal, b"stop").unwrap())
+        .stop_with(Duration::from_secs(5), |_| {
+            fs::write(&signal, b"stop").unwrap()
+        })
         .unwrap();
     assert_eq!(disposition, StopDisposition::Graceful);
     assert_eq!(supervisor.active_processes().unwrap(), 0);
@@ -142,9 +151,23 @@ fn stale_persisted_pid_cannot_target_unrelated_process() {
 
     drop(supervisor);
     thread::sleep(Duration::from_millis(100));
-    assert!(pid_alive(unrelated_pid), "unrelated process was killed by stale PID data");
+    assert!(
+        pid_alive(unrelated_pid),
+        "unrelated process was killed by stale PID data"
+    );
     unrelated.kill().unwrap();
     unrelated.wait().unwrap();
+}
+
+#[test]
+fn real_exit_code_259_is_not_misclassified_as_running() {
+    let supervisor = WindowsProcessSupervisor::spawn(&exit_259_spec()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && supervisor.active_processes().unwrap() != 0 {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(supervisor.active_processes().unwrap(), 0);
+    assert!(!supervisor.root_is_running().unwrap());
 }
 
 fn spawn_unrelated_leaf() -> Child {
@@ -181,4 +204,10 @@ fn helper_root() {
 #[ignore]
 fn helper_leaf() {
     thread::sleep(Duration::from_secs(60));
+}
+
+#[test]
+#[ignore]
+fn helper_exit_259() {
+    std::process::exit(259);
 }
