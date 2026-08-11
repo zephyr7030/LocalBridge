@@ -2,8 +2,8 @@
 mod state;
 
 use state::{
-    ActiveWorkspaceState, CurrentTaskStatus, PrivilegeState, SafeTaskSummary, TaskExecutionState,
-    TaskKind, WorkspaceControlState,
+    ActiveWorkspaceState, CurrentTaskContractError, CurrentTaskStatus, PrivilegeState,
+    SafeTaskSummary, TaskExecutionState, TaskKind, WorkspaceControlState,
 };
 
 #[test]
@@ -29,6 +29,54 @@ fn task_kind_contract_contains_no_upstream_tool_identifiers() {
             !source.contains(forbidden),
             "domain source depends on upstream tool id: {forbidden}"
         );
+    }
+}
+
+#[test]
+fn task_summary_rejects_common_secret_assignments_without_overmatching_tokenizer() {
+    for raw in [
+        "token=secret",
+        "password = secret",
+        "?access_token=secret",
+        "?refresh_token=secret",
+        "{\"api_key\":\"secret\"}",
+        "Authorization: Bearer secret",
+        "--client-secret secret",
+        "--passphrase secret",
+    ] {
+        assert_eq!(
+            SafeTaskSummary::from_untrusted(raw),
+            SafeTaskSummary::Omitted
+        );
+    }
+    assert_eq!(
+        SafeTaskSummary::from_untrusted("search src/tokenizer.rs"),
+        SafeTaskSummary::Text("search src/tokenizer.rs".to_string())
+    );
+}
+
+#[test]
+fn terminal_current_task_cannot_transition_back_to_running() {
+    for terminal in [
+        TaskExecutionState::Blocked,
+        TaskExecutionState::Failed,
+        TaskExecutionState::Cancelled,
+    ] {
+        let mut current = CurrentTaskStatus::project(
+            TaskKind::Other,
+            SafeTaskSummary::from_untrusted("safe operation"),
+            terminal,
+        )
+        .unwrap();
+        assert_eq!(
+            current.set_state(TaskExecutionState::Running),
+            Err(CurrentTaskContractError::InvalidStateTransition {
+                from: terminal,
+                to: TaskExecutionState::Running,
+            })
+        );
+        current.set_state(TaskExecutionState::Idle).unwrap();
+        assert_eq!(current, CurrentTaskStatus::Idle);
     }
 }
 
