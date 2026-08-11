@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "pr": "LB-000",
-  "status": "PASS",
+  "status": "REWORK_REQUIRED",
   "deterministic_gates": {
     "real_upstream_tools_list": "PASS",
     "junction_symlink_reparse_adversarial_spike": "PASS",
@@ -14,14 +14,20 @@
   },
   "external_gates": {
     "live_tunnel_poc": {
-      "status": "PASS",
+      "status": "REVALIDATION_REQUIRED",
       "evidence": "spikes/lb-000/live-tunnel-result.json",
-      "authenticated_control_plane_metadata_observed": true,
-      "secret_emitted": false,
-      "api_key_in_command_line": false,
-      "tunnel_id_in_command_line": false
+      "previous_evidence_superseded_by_review": true,
+      "required_probe_schema": 2,
+      "required_poll_evidence": "commands_poll_last_successful_timestamp_seconds > 0 from the current tunnel-client process",
+      "control_plane_poll_success_observed": false,
+      "tunnel_working_state_observed": false,
+      "measurements_are_runtime_observed": false,
+      "authenticated_control_plane_metadata_observed": false,
+      "secret_emitted": null,
+      "api_key_in_command_line": null,
+      "tunnel_id_in_command_line": null
     }
   },
-  "governance_transition_allowed": true,
+  "governance_transition_allowed": false,
   "next_pr_unlocked": false
 }

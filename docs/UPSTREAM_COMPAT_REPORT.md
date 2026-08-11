@@ -1,10 +1,10 @@
 # LB-000 — Upstream + Security Compatibility Report
 
 Date: 2026-08-11
-Overall LB-000 status: **PASS**
+Overall LB-000 status: **REWORK REQUIRED — live revalidation pending**
 Deterministic/security spike status: **PASS**
 
-The required live OpenAI Tunnel PoC also passed. LB-000 acceptance is complete, but this is the end of G0: LB-001 remains blocked until the mandatory independent G0 adversarial review passes.
+The first G0 adversarial review rejected the original live Tunnel evidence because the live probe treated metadata success as sufficient and reported command-line/output secret properties with constant assertions. That evidence is now superseded. Deterministic LB-000 gates remain valid, but LB-000 cannot return to acceptance until a fresh real-credential run passes the strengthened probe. LB-001 remains blocked.
 
 ## Pinned upstream identities
 
@@ -63,6 +63,8 @@ Health/admin was successfully bound to `127.0.0.1:0` using `--health.url-file`.
 
 A negative control-plane probe discovered an important semantic boundary: `/readyz` returned HTTP 200 while the configured control-plane endpoint was deliberately unreachable. `/api/status` simultaneously exposed `tunnel_metadata_error`. Therefore LocalBridge must not treat `/readyz` alone as Tunnel/OpenAI Ready. The stable Tunnel adapter must combine local process/startup readiness with typed control-plane evidence.
 
+The reworked live probe now requires direct evidence from the same running `tunnel-client` process that at least one control-plane poll completed successfully: its Prometheus `commands_poll_last_successful_timestamp_seconds` metric must become positive. The probe also observes the Windows process command line through `Win32_Process`, scans captured stdout/stderr for the actual Runtime API Key value, and fails closed if the command line cannot be observed. These values are measured at runtime rather than asserted as constants.
+
 ## Stable adapter decision
 
 Third-party private structures do not cross into LocalBridge domain contracts. The coding runtime is accessed through the Rust MCP Guard/stable adapter; the Tunnel runtime is accessed through a Tunnel adapter that owns CLI construction, child-only secret injection, health/status parsing and typed fault mapping; Windows process ownership is exposed through the supervisor abstraction rather than raw PIDs.
@@ -75,8 +77,8 @@ Third-party private structures do not cross into LocalBridge domain contracts. T
 | junction/symlink/reparse adversarial spike | PASS | `compatibility/coding-tools/0.2.2/path-probe.json` |
 | Job Object PoC | PASS | `spikes/lb-000/job-object-result.json` |
 | portable Python PoC | PASS | `spikes/lb-000/portable-python-result.json` |
-| live Tunnel PoC | PASS | `spikes/lb-000/live-tunnel-result.json` |
+| live Tunnel PoC | REVALIDATION REQUIRED | strengthened probe `spikes/lb-000/live_tunnel_probe.py`; fresh real credentials required |
 | structural diff baseline generation | PASS | `compatibility/coding-tools/0.2.2/structural-diff.json` |
 | capability baseline serialization | PASS | `compatibility/coding-tools/0.2.2/capability-map.json` |
 
-The live probe observed authenticated control-plane metadata using transient stdin-to-child-environment credential injection. Neither the API key nor Tunnel ID was placed on the tunnel-client command line, and the retained result contains no credential value. G0 must now stop for independent adversarial review.
+The prior live result remains historical evidence of metadata connectivity only and is not accepted for the reworked gate. A fresh schema-v2 result must prove an actual successful control-plane poll and measured command-line/output secret properties. Until that run passes, LB-000 stays `REWORK_REQUIRED` and G0 is not ready for another review.

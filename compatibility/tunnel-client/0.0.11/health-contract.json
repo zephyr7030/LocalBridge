@@ -22,6 +22,14 @@
     "proxy_health_field": "proxy_health",
     "note": "route health value 'direct' describes routing mode and is not by itself proof that the direct target is reachable"
   },
+  "poll_metrics": {
+    "endpoint": "/metrics",
+    "cycles": "commands_poll_cycles_total",
+    "errors": "commands_poll_errors_total",
+    "last_success": "commands_poll_last_successful_timestamp_seconds",
+    "observed_offline_negative_probe_last_success": 0,
+    "lb000_live_success_rule": "commands_poll_cycles_total >= 1 AND commands_poll_last_successful_timestamp_seconds > 0 in the same live tunnel-client process"
+  },
   "localbridge_ready_rule": "process alive AND /readyz=200 AND control-plane compatibility/connection evidence has no typed auth/config/connectivity failure; /readyz alone MUST NOT project Ready",
   "live_control_plane_confirmation_gate": "LB-000 live Tunnel PoC when credentials are available; repeated end-to-end ChatGPT MCP confirmation belongs to LB-019"
 }
