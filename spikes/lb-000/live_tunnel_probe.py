@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -31,11 +32,31 @@ def main() -> int:
     parser.add_argument("--exe", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--timeout", type=float, default=45.0)
+    parser.add_argument("--credentials-stdin", action="store_true")
     args = parser.parse_args()
     output = Path(args.output)
 
-    api_env = "CONTROL_PLANE_API_KEY" if os.environ.get("CONTROL_PLANE_API_KEY") else "OPENAI_API_KEY" if os.environ.get("OPENAI_API_KEY") else None
-    tunnel_id = os.environ.get("CONTROL_PLANE_TUNNEL_ID")
+    stdin_api_key: str | None = None
+    stdin_tunnel_id: str | None = None
+    if args.credentials_stdin:
+        try:
+            payload = json.loads(sys.stdin.readline())
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            api_value = payload.get("api_key")
+            tunnel_value = payload.get("tunnel_id")
+            stdin_api_key = api_value if isinstance(api_value, str) and api_value else None
+            stdin_tunnel_id = tunnel_value if isinstance(tunnel_value, str) and tunnel_value else None
+
+    api_env = (
+        "CONTROL_PLANE_API_KEY"
+        if stdin_api_key or os.environ.get("CONTROL_PLANE_API_KEY")
+        else "OPENAI_API_KEY"
+        if os.environ.get("OPENAI_API_KEY")
+        else None
+    )
+    tunnel_id = stdin_tunnel_id or os.environ.get("CONTROL_PLANE_TUNNEL_ID")
     if api_env is None or not tunnel_id:
         write_result(
             output,
@@ -56,8 +77,6 @@ def main() -> int:
             str(Path(args.exe).resolve()),
             "run",
             "--embedded-mcp-stub",
-            "--control-plane.tunnel-id",
-            tunnel_id,
             "--control-plane.api-key",
             f"env:{api_env}",
             "--health.listen-addr",
@@ -69,7 +88,20 @@ def main() -> int:
             "--log.level",
             "warn",
         ]
-        process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+        child_env = os.environ.copy()
+        if stdin_api_key is not None:
+            child_env["CONTROL_PLANE_API_KEY"] = stdin_api_key
+        if stdin_tunnel_id is not None:
+            child_env["CONTROL_PLANE_TUNNEL_ID"] = stdin_tunnel_id
+        process = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=child_env,
+        )
         status: dict[str, Any] | None = None
         try:
             deadline = time.monotonic() + args.timeout
@@ -97,6 +129,8 @@ def main() -> int:
         "authenticated_control_plane_metadata_observed": ok,
         "api_key_in_command_line": False,
         "api_key_reference": f"env:{api_env}",
+        "tunnel_id_in_command_line": False,
+        "credential_input": "stdin_to_child_environment" if args.credentials_stdin else "inherited_environment",
         "health_loopback": bool(status and str(status.get("health_listen_addr", "")).startswith("127.0.0.1:")),
         "metadata_error_present": bool(status and status.get("tunnel_metadata_error")),
         "stdout_nonempty": bool(stdout),

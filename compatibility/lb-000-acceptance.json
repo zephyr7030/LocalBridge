@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "pr": "LB-000",
-  "status": "BLOCKED_EXTERNAL_CREDENTIAL",
+  "status": "PASS",
   "deterministic_gates": {
     "real_upstream_tools_list": "PASS",
     "junction_symlink_reparse_adversarial_spike": "PASS",
@@ -14,11 +14,14 @@
   },
   "external_gates": {
     "live_tunnel_poc": {
-      "status": "BLOCKED_EXTERNAL_CREDENTIAL",
+      "status": "PASS",
       "evidence": "spikes/lb-000/live-tunnel-result.json",
-      "missing": ["CONTROL_PLANE_API_KEY or OPENAI_API_KEY", "CONTROL_PLANE_TUNNEL_ID"]
+      "authenticated_control_plane_metadata_observed": true,
+      "secret_emitted": false,
+      "api_key_in_command_line": false,
+      "tunnel_id_in_command_line": false
     }
   },
-  "governance_transition_allowed": false,
+  "governance_transition_allowed": true,
   "next_pr_unlocked": false
 }

@@ -1,11 +1,14 @@
 {
   "schema_version": 1,
-  "status": "BLOCKED_EXTERNAL_CREDENTIAL",
-  "api_key_present": false,
-  "tunnel_id_present": false,
-  "secret_read_or_logged": false,
-  "required_environment": [
-    "CONTROL_PLANE_API_KEY or OPENAI_API_KEY",
-    "CONTROL_PLANE_TUNNEL_ID"
-  ]
+  "status": "PASS",
+  "authenticated_control_plane_metadata_observed": true,
+  "api_key_in_command_line": false,
+  "api_key_reference": "env:CONTROL_PLANE_API_KEY",
+  "tunnel_id_in_command_line": false,
+  "credential_input": "stdin_to_child_environment",
+  "health_loopback": true,
+  "metadata_error_present": false,
+  "stdout_nonempty": true,
+  "stderr_nonempty": false,
+  "secrets_emitted": false
 }

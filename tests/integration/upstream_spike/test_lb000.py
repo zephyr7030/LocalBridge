@@ -129,16 +129,19 @@ class LB000EvidenceTests(unittest.TestCase):
         ]:
             self.assertTrue((ROOT / path).is_file(), path)
 
-    def test_live_tunnel_gate_is_not_silently_passed(self):
+    def test_live_tunnel_gate_and_acceptance(self):
         live = load_json("spikes/lb-000/live-tunnel-result.json")
         acceptance = load_json("compatibility/lb-000-acceptance.json")
-        self.assertIn(live["status"], {"PASS", "BLOCKED_EXTERNAL_CREDENTIAL"})
-        if live["status"] != "PASS":
-            self.assertEqual(live["status"], "BLOCKED_EXTERNAL_CREDENTIAL")
-            self.assertFalse(live["secret_read_or_logged"])
-            self.assertEqual(acceptance["status"], "BLOCKED_EXTERNAL_CREDENTIAL")
-            self.assertFalse(acceptance["governance_transition_allowed"])
-            self.assertFalse(acceptance["next_pr_unlocked"])
+        self.assertEqual(live["status"], "PASS")
+        self.assertTrue(live["authenticated_control_plane_metadata_observed"])
+        self.assertFalse(live["api_key_in_command_line"])
+        self.assertFalse(live["tunnel_id_in_command_line"])
+        self.assertFalse(live["secrets_emitted"])
+        self.assertEqual(live["credential_input"], "stdin_to_child_environment")
+        self.assertEqual(acceptance["status"], "PASS")
+        self.assertEqual(acceptance["external_gates"]["live_tunnel_poc"]["status"], "PASS")
+        self.assertTrue(acceptance["governance_transition_allowed"])
+        self.assertFalse(acceptance["next_pr_unlocked"])
 
 
 if __name__ == "__main__":

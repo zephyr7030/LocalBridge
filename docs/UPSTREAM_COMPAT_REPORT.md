@@ -1,10 +1,10 @@
 # LB-000 — Upstream + Security Compatibility Report
 
 Date: 2026-08-11
-Overall LB-000 status: **BLOCKED_EXTERNAL_CREDENTIAL**
+Overall LB-000 status: **PASS**
 Deterministic/security spike status: **PASS**
 
-LB-000 is not accepted yet because the required live OpenAI Tunnel PoC cannot execute without external credentials. No later PR is unlocked by this report.
+The required live OpenAI Tunnel PoC also passed. LB-000 acceptance is complete, but this is the end of G0: LB-001 remains blocked until the mandatory independent G0 adversarial review passes.
 
 ## Pinned upstream identities
 
@@ -75,8 +75,8 @@ Third-party private structures do not cross into LocalBridge domain contracts. T
 | junction/symlink/reparse adversarial spike | PASS | `compatibility/coding-tools/0.2.2/path-probe.json` |
 | Job Object PoC | PASS | `spikes/lb-000/job-object-result.json` |
 | portable Python PoC | PASS | `spikes/lb-000/portable-python-result.json` |
-| live Tunnel PoC | **BLOCKED_EXTERNAL_CREDENTIAL** | `spikes/lb-000/live-tunnel-result.json` |
+| live Tunnel PoC | PASS | `spikes/lb-000/live-tunnel-result.json` |
 | structural diff baseline generation | PASS | `compatibility/coding-tools/0.2.2/structural-diff.json` |
 | capability baseline serialization | PASS | `compatibility/coding-tools/0.2.2/capability-map.json` |
 
-The environment contained neither `CONTROL_PLANE_API_KEY`/`OPENAI_API_KEY` nor `CONTROL_PLANE_TUNNEL_ID`. The probe checked presence only and did not read or log a secret. Per the predevelopment contract this is an allowed external blocker for the live sub-gate, but it is not permission to mark LB-000 PASS.
+The live probe observed authenticated control-plane metadata using transient stdin-to-child-environment credential injection. Neither the API key nor Tunnel ID was placed on the tunnel-client command line, and the retained result contains no credential value. G0 must now stop for independent adversarial review.

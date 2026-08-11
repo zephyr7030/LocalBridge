@@ -100,4 +100,4 @@ Stable release 产出 exact manifest、lockfiles、SBOM、THIRD_PARTY_NOTICES、
 - Python 3.12.10 embeddable sample 已验证可直接运行 coding-tools-mcp v0.2.2；最终 patch/hash/layout 仍由 LB-006 冻结；
 - Windows Job Object `KILL_ON_JOB_CLOSE` 已验证可清理根进程及嵌套子进程。
 
-当前唯一未完成的 LB-000 动态门是 live OpenAI Tunnel PoC：执行环境缺少 Runtime API Key 与 Tunnel ID，因此状态为 `BLOCKED_EXTERNAL_CREDENTIAL`，不得据此将 LB-000 标记 PASS。
+live OpenAI Tunnel PoC 已通过：认证 control-plane metadata 可读取；Runtime API Key 与 Tunnel ID 均未进入 tunnel-client 命令行，凭据仅经 stdin 临时进入子进程环境且未写入证据文件。LB-000 因此满足 acceptance；作为 G0 组末，下一步必须是独立对抗审查，LB-001 继续保持 BLOCKED。
