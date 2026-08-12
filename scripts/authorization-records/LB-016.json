@@ -71,6 +71,23 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-005",
+      "scope": [
+        "src-tauri/Cargo.toml",
+        "scripts/test-start-localbridge.mjs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Set Cargo package default-run to the ordinary localbridge desktop binary so Tauri development startup is deterministic after the privileged broker binary was added",
+        "Extend the one-click launcher regression test to reject multi-binary Cargo manifests that do not select localbridge as the default run target"
+      ],
+      "reason": "Direct execution of start-localbridge.cmd after the Vite port repair reproduced Cargo exit 101 because both localbridge and localbridge-privileged-broker were present without a default run target.",
+      "evidence_ref": "Executor direct launcher test on 2026-08-12: Vite ready at 127.0.0.1:1420 followed by cargo run error 'could not determine which binary to run'",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

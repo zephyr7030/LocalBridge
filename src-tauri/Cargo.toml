@@ -6,6 +6,7 @@ authors = ["LocalBridge"]
 edition = "2024"
 rust-version = "1.85"
 autobins = false
+default-run = "localbridge"
 
 [lib]
 name = "localbridge_lib"

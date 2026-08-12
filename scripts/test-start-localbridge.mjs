@@ -5,9 +5,11 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const launcher = readFileSync("start-localbridge.cmd", "utf8");
 const viteConfig = readFileSync("vite.config.ts", "utf8");
+const cargoManifest = readFileSync("src-tauri/Cargo.toml", "utf8");
 const tauriConfig = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
 
 assert.equal(tauriConfig.build?.devUrl, "http://127.0.0.1:1420", "Tauri devUrl drifted from the frozen loopback development endpoint");
+assert.match(cargoManifest, /^default-run\s*=\s*"localbridge"\s*$/m, "Cargo default-run must select the desktop binary when the privileged broker binary is also present");
 for (const required of [
   'host: "127.0.0.1"',
   "port: 1420",
@@ -82,4 +84,4 @@ try {
 }
 assert.ok(frontendReady, `Vite did not become ready at Tauri devUrl http://127.0.0.1:1420:\n${devOutput}`);
 
-console.log("LOCALBRIDGE_LAUNCHER_TEST=PASS offline_check=true no_powershell=true no_install=true exact_tauri_dev=true dev_url_match=true frontend_1420_ready=true strict_port=true");
+console.log("LOCALBRIDGE_LAUNCHER_TEST=PASS offline_check=true no_powershell=true no_install=true exact_tauri_dev=true dev_url_match=true frontend_1420_ready=true strict_port=true cargo_default_run=true");
