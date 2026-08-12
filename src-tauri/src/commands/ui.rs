@@ -3,11 +3,17 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State};
 
-use crate::app::{AutostartManager, DesktopLifecycle, StartupProfileStore, STARTUP_PROFILE_FILE_NAME};
+use crate::app::{
+    AutostartManager, DesktopLifecycle, DesktopRuntimeStartError, STARTUP_PROFILE_FILE_NAME,
+    StartupProfileStore,
+};
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::runtime::ProductionRuntimeConfig;
 use crate::settings::{AppData, SettingsStore, StoredPermissionMode};
-use crate::state::{CurrentTaskStatus, PermissionMode, PrivilegeState, RuntimeComponent, RuntimeState, TaskExecutionState, TaskKind};
+use crate::state::{
+    CurrentTaskStatus, PermissionMode, PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState,
+    TaskExecutionState, TaskKind,
+};
 use crate::tunnel::TunnelId;
 use crate::workspace::{WorkspaceId, WorkspaceValidator};
 
@@ -140,13 +146,24 @@ pub fn retry_connection(lifecycle: State<'_, DesktopLifecycle>) -> Result<(), St
 }
 
 #[tauri::command]
-pub fn add_project(path: String, app: AppHandle, lifecycle: State<'_, DesktopLifecycle>) -> Result<(), String> {
+pub fn add_project(
+    path: String,
+    defer_activation: Option<bool>,
+    app: AppHandle,
+    lifecycle: State<'_, DesktopLifecycle>,
+) -> Result<String, String> {
     let candidate_path = PathBuf::from(path);
     let validated = WorkspaceValidator.validate(&candidate_path).map_err(|_| "所选项目无法验证".to_string())?;
     let (store, mut data) = load_app_data(&app)?;
     let generated = WorkspaceId::from_validated(new_workspace_id()).map_err(|_| "无法创建项目记录".to_string())?;
     let id = data.workspace.registry.upsert_validated(generated, &candidate_path, &validated, unix_seconds()).map_err(|_| "无法保存项目记录".to_string())?;
-    activate_project(&app, &lifecycle, &store, &mut data, id, validated.resolved_path())
+    let id_value = id.as_str().to_owned();
+    if defer_activation.unwrap_or(false) {
+        store.save(&data).map_err(|_| "无法保存项目记录".to_string())?;
+        return Ok(id_value);
+    }
+    activate_project(&app, &lifecycle, &store, &mut data, id, validated.resolved_path())?;
+    Ok(id_value)
 }
 
 #[tauri::command]
@@ -208,7 +225,53 @@ fn start_runtime_for_path(app: &AppHandle, lifecycle: &DesktopLifecycle, data: &
     let profile = StartupProfileStore::new(app_data.join(STARTUP_PROFILE_FILE_NAME)).load().map_err(|_| "无法读取连接设置".to_string())?;
     let tunnel_id: TunnelId = profile.validated_tunnel_id().map_err(|_| "Tunnel ID 无效".to_string())?.ok_or_else(|| "尚未配置 Tunnel ID".to_string())?;
     let config = ProductionRuntimeConfig::new(production_install_root()?, path, app_data.join("health"), tunnel_id, PermissionMode::from(data.settings.permission_mode));
-    lifecycle.start_production_runtime(config).map_err(|_| "无法启动本地编码服务".to_string())
+    lifecycle.start_production_runtime(config).map_err(runtime_start_message)
+}
+
+fn runtime_start_message(error: DesktopRuntimeStartError) -> String {
+    match error {
+        DesktopRuntimeStartError::AlreadyRegistered => "本地编码服务已在运行，请重试项目激活".to_string(),
+        DesktopRuntimeStartError::Runtime(error) => runtime_fault_message(&error.fault).to_string(),
+    }
+}
+
+fn runtime_fault_message(fault: &RuntimeFault) -> &'static str {
+    match fault {
+        RuntimeFault::WorkspaceMissing | RuntimeFault::WorkspaceInvalid => {
+            "项目目录不可用，请返回项目与权限页面重新选择"
+        }
+        RuntimeFault::RuntimeMissing | RuntimeFault::RuntimeChecksumMismatch => {
+            "本地运行环境缺失或损坏，请重新安装 LocalBridge"
+        }
+        RuntimeFault::ProcessOwnershipFailed => {
+            "本地服务进程无法安全启动，请重启 LocalBridge 后重试"
+        }
+        RuntimeFault::McpSpawnFailed | RuntimeFault::McpHealthTimeout | RuntimeFault::McpExited => {
+            "编码服务启动失败，请重试"
+        }
+        RuntimeFault::PolicyBindFailed
+        | RuntimeFault::PolicyInvalid
+        | RuntimeFault::PolicyCapabilityUnknown => "本地安全策略服务启动失败，请重试",
+        RuntimeFault::TunnelIdMissing => "尚未配置 Tunnel ID，请返回 OpenAI 页面重新保存",
+        RuntimeFault::RuntimeKeyMissing => "运行密钥未配置，请返回 OpenAI 页面重新保存",
+        RuntimeFault::SecretStoreFailed => "无法读取 Windows 安全凭据中的运行密钥",
+        RuntimeFault::SecretInjectionUnsupported => {
+            "运行密钥无法安全注入 Tunnel，请重新安装 LocalBridge"
+        }
+        RuntimeFault::TunnelAuthFailed => {
+            "OpenAI Tunnel 鉴权失败，请检查运行密钥与 Tunnel 权限"
+        }
+        RuntimeFault::TunnelSpawnFailed => "OpenAI Tunnel 进程启动失败，请重试",
+        RuntimeFault::TunnelHealthTimeout | RuntimeFault::TunnelExited => {
+            "OpenAI Tunnel 暂时无法连接，请检查网络后重试"
+        }
+        RuntimeFault::PortUnavailable => "本地服务端口暂时不可用，请关闭冲突程序后重试",
+        RuntimeFault::ConfigurationInvalid => {
+            "OpenAI Tunnel 配置无效，请检查 Tunnel ID 与连接设置"
+        }
+        RuntimeFault::UserStopped => "本地服务已停止，请重试",
+        RuntimeFault::Unknown => "本地服务启动失败，请重试",
+    }
 }
 
 fn clear_manual_stop_for_explicit_action(app: &AppHandle) -> Result<(), String> {
@@ -275,4 +338,31 @@ fn task_state_code(state: TaskExecutionState) -> &'static str {
 #[cfg(test)]
 mod tests {
     include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/unit/ui/backend_projection.rs"));
+
+    #[test]
+    fn runtime_start_fault_messages_are_redacted_and_actionable() {
+        assert_eq!(
+            runtime_fault_message(&RuntimeFault::RuntimeKeyMissing),
+            "运行密钥未配置，请返回 OpenAI 页面重新保存"
+        );
+        assert_eq!(
+            runtime_fault_message(&RuntimeFault::TunnelAuthFailed),
+            "OpenAI Tunnel 鉴权失败，请检查运行密钥与 Tunnel 权限"
+        );
+        assert_eq!(
+            runtime_fault_message(&RuntimeFault::ConfigurationInvalid),
+            "OpenAI Tunnel 配置无效，请检查 Tunnel ID 与连接设置"
+        );
+        for fault in [
+            RuntimeFault::RuntimeChecksumMismatch,
+            RuntimeFault::McpSpawnFailed,
+            RuntimeFault::TunnelHealthTimeout,
+            RuntimeFault::PolicyInvalid,
+        ] {
+            let message = runtime_fault_message(&fault);
+            assert!(!message.contains("RuntimeFault"));
+            assert!(!message.contains("OrchestratorError"));
+            assert!(!message.contains("synthetic-secret"));
+        }
+    }
 }

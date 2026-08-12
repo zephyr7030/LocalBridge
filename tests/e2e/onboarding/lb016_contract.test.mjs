@@ -5,6 +5,7 @@ const onboarding = readFileSync("src/features/onboarding/Onboarding.tsx", "utf8"
 const api = readFileSync("src/features/onboarding/api.ts", "utf8");
 const frame = readFileSync("src/components/WizardFrame.tsx", "utf8");
 const backend = readFileSync("src-tauri/src/commands/onboarding.rs", "utf8");
+const uiBackend = readFileSync("src-tauri/src/commands/ui.rs", "utf8");
 const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
 const auth = JSON.parse(readFileSync("scripts/authorization-records/LB-016.json", "utf8"));
 const contracts = JSON.parse(readFileSync("PR_CONTRACTS.json", "utf8"));
@@ -38,6 +39,30 @@ if (!onboarding.includes("项目与权限") || !onboarding.includes("管理员�
 if (onboarding.includes("enableAdmin") || onboarding.includes("enable_admin")) throw new Error("LB-016 onboarding must not trigger UAC");
 if (/ttl|expires|到期|时长/i.test(onboarding)) throw new Error("LB-016 admin permission added forbidden TTL semantics");
 
+const page3Start = onboarding.indexOf("const saveProjectAndPermission");
+const page3End = onboarding.indexOf("const finish", page3Start);
+if (page3Start < 0 || page3End <= page3Start) throw new Error("LB-016 cannot isolate page-3 persistence flow");
+const page3Flow = onboarding.slice(page3Start, page3End);
+if (!page3Flow.includes("onboardingApi.rememberProject") || page3Flow.includes("bridge.addProject") || page3Flow.includes("bridge.selectProject")) {
+  throw new Error("LB-016 page 3 must remember the project without activating runtime");
+}
+if (!api.includes('rememberProject: (path: string) => invoke<string>("add_project", { path, deferActivation: true })')) throw new Error("LB-016 deferred project persistence API missing");
+if (!api.includes('startProject: (id: string) => invoke<void>("select_project", { id })')) throw new Error("LB-016 page-5 project activation API missing");
+if (!onboarding.includes("await onboardingApi.startProject(rememberedProject)") || !onboarding.includes("setStartupAttempt((value) => value + 1)")) throw new Error("LB-016 page 5 must start runtime and expose explicit retry");
+
+const addProjectStart = uiBackend.indexOf("pub fn add_project");
+const selectProjectStart = uiBackend.indexOf("pub fn select_project", addProjectStart);
+if (addProjectStart < 0 || selectProjectStart <= addProjectStart) throw new Error("LB-016 cannot isolate add_project command");
+const addProjectFlow = uiBackend.slice(addProjectStart, selectProjectStart);
+for (const required of ["defer_activation: Option<bool>", "if defer_activation.unwrap_or(false)", "store.save(&data)", "return Ok(id_value)"]) {
+  if (!addProjectFlow.includes(required)) throw new Error(`LB-016 deferred project persistence missing: ${required}`);
+}
+if (addProjectFlow.indexOf("return Ok(id_value)") > addProjectFlow.indexOf("activate_project")) throw new Error("LB-016 deferred path activates runtime before returning");
+if (uiBackend.includes('map_err(|_| "无法启动本地编码服务"')) throw new Error("LB-016 startup fault is still collapsed to a generic error");
+for (const required of ["runtime_start_message", "RuntimeFault::RuntimeKeyMissing", "RuntimeFault::TunnelAuthFailed", "RuntimeFault::ConfigurationInvalid", "RuntimeFault::TunnelHealthTimeout"]) {
+  if (!uiBackend.includes(required)) throw new Error(`LB-016 typed startup projection missing: ${required}`);
+}
+
 if (!backend.includes('pub const CHATGPT_MCP_SETTINGS_URL: &str = "https://chatgpt.com/"')) throw new Error("LB-016 ChatGPT URL is not a Rust allowlisted https constant");
 if (!backend.includes("ShellExecuteW") || !backend.includes("open_allowlisted_url(CHATGPT_MCP_SETTINGS_URL)")) throw new Error("LB-016 ChatGPT link is not opened by system browser adapter");
 if (/WebviewWindowBuilder|WebviewUrl|window\.open/.test(`${backend}\n${onboarding}`)) throw new Error("LB-016 ChatGPT flow uses forbidden embedded/arbitrary browser surface");
@@ -63,4 +88,4 @@ for (const id of ["EXEC-PREAUTH-LB016-002", "EXEC-PREAUTH-LB016-003"]) {
   if (!extra || extra.user_audit_status !== "PENDING" || extra.does_not_expand_future_pr_writable_paths !== true) throw new Error(`LB-016 rework preauthorization invalid: ${id}`);
 }
 
-console.log("LB016_CONTRACT=PASS five_screens=true no_screen6=true semantic_conflict=false key_secure=true project_permission_combined=true no_auto_uac=true system_browser_allowlist=true checks=3 confirm_gated=true exact_success=true preauth_pending=3");
+console.log("LB016_CONTRACT=PASS five_screens=true no_screen6=true semantic_conflict=false key_secure=true project_permission_combined=true page3_deferred=true page5_start=true typed_startup_faults=true explicit_retry=true no_auto_uac=true system_browser_allowlist=true checks=3 confirm_gated=true exact_success=true preauth_pending=3");

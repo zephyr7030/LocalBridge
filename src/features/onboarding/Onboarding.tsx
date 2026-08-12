@@ -18,6 +18,7 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   const [rememberedProject, setRememberedProject] = useState("");
   const [permission, setPermission] = useState<AccessCode>("edit");
   const [error, setError] = useState<string | null>(null);
+  const [startupAttempt, setStartupAttempt] = useState(0);
   const allGreen = state.readiness.localEnvironment && state.readiness.codingService && state.readiness.openaiTunnel;
 
   useEffect(() => {
@@ -32,6 +33,10 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   useEffect(() => {
     if (step !== 5) return;
     let active = true;
+    if (!rememberedProject) {
+      setError("请选择项目目录");
+      return () => { active = false; };
+    }
     const refresh = async () => {
       try {
         const next = await onboardingApi.read();
@@ -40,10 +45,21 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
         if (active) setError("无法检查本地服务状态");
       }
     };
+    const start = async () => {
+      setError(null);
+      try {
+        await onboardingApi.startProject(rememberedProject);
+      } catch (value) {
+        if (active) setError(typeof value === "string" ? value : value instanceof Error ? value.message : "本地服务启动失败，请重试");
+      } finally {
+        if (active) void refresh();
+      }
+    };
     void refresh();
     const timer = window.setInterval(() => void refresh(), 1000);
+    void start();
     return () => { active = false; window.clearInterval(timer); };
-  }, [step]);
+  }, [step, rememberedProject, startupAttempt]);
 
   const chosenProject = useMemo(() => main?.projects.find((item) => item.id === rememberedProject) ?? null, [main, rememberedProject]);
 
@@ -63,9 +79,10 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
     setError(null);
     try {
       await bridge.setAccess(permission);
-      if (projectPath.trim()) await bridge.addProject(projectPath.trim());
-      else if (rememberedProject) await bridge.selectProject(rememberedProject);
-      else throw new Error("请选择项目目录");
+      let selectedProject = rememberedProject;
+      if (projectPath.trim()) selectedProject = await onboardingApi.rememberProject(projectPath.trim());
+      if (!selectedProject) throw new Error("请选择项目目录");
+      setRememberedProject(selectedProject);
       setStep(4);
     } catch (value) {
       setError(typeof value === "string" ? value : value instanceof Error ? value.message : "项目或权限设置未完成");
@@ -110,7 +127,7 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   );
 
   if (step === 4) return (
-    <WizardFrame step={4} title="连接 ChatGPT" footer={<><button className="onboarding-secondary" onClick={() => setStep(3)}>返回</button><button className="onboarding-primary" onClick={() => setStep(5)}>继续</button></>}>
+    <WizardFrame step={4} title="连接 ChatGPT" footer={<><button className="onboarding-secondary" onClick={() => setStep(3)}>返回</button><button className="onboarding-primary" onClick={() => { setError(null); setStep(5); }}>继续</button></>}>
       <p className="onboarding-copy">在 ChatGPT 中选择刚刚配置的 LocalBridge 工具。</p>
       <div className="onboarding-link-row"><button className="onboarding-secondary" onClick={() => void onboardingApi.openChatGpt().catch(() => setError("无法打开 ChatGPT"))}>打开 ChatGPT MCP 应用页</button></div>
       <p className="onboarding-hint">页面只会通过系统默认浏览器打开，LocalBridge 不读取 ChatGPT 会话。</p>
@@ -119,7 +136,7 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   );
 
   return (
-    <WizardFrame step={5} title="正在准备" footer={<button className="onboarding-primary" disabled={!allGreen} onClick={() => void finish()}>确定</button>}>
+    <WizardFrame step={5} title="正在准备" footer={<><button className="onboarding-secondary" onClick={() => setStep(4)}>返回</button>{error ? <button className="onboarding-secondary" onClick={() => setStartupAttempt((value) => value + 1)}>重试</button> : null}<button className="onboarding-primary" disabled={!allGreen} onClick={() => void finish()}>确定</button></>}>
       <div className="readiness-list">
         <ReadinessCheck label="本地运行环境" ready={state.readiness.localEnvironment} />
         <ReadinessCheck label="编码服务" ready={state.readiness.codingService} />
