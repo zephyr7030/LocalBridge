@@ -1,6 +1,6 @@
 use std::fmt;
 use std::net::{Ipv4Addr, TcpListener};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::credentials::CredentialStore;
@@ -33,6 +33,27 @@ pub trait RuntimeDriver {
     fn stop_mcp(&mut self, mcp: &mut Self::Mcp) -> Result<(), RuntimeFault>;
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus;
+
+    fn current_workspace(&self) -> Option<&Path> {
+        None
+    }
+
+    fn configure_workspace(&mut self, _workspace: PathBuf) -> Result<(), RuntimeFault> {
+        Err(RuntimeFault::ConfigurationInvalid)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryScope {
+    Tunnel,
+    PolicyAndTunnel,
+    FullRuntime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceSwitchError {
+    pub candidate_fault: RuntimeFault,
+    pub rollback_fault: Option<RuntimeFault>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +87,8 @@ pub struct RuntimeOrchestrator<D: RuntimeDriver> {
     driver: D,
     state: RuntimeState,
     ready: Option<ReadyHandles<D>>,
+    recovering_pep: Option<D::Pep>,
+    recovering_mcp: Option<D::Mcp>,
     outages: OutageTracker,
 }
 
@@ -74,6 +97,8 @@ impl<D: RuntimeDriver> fmt::Debug for RuntimeOrchestrator<D> {
         f.debug_struct("RuntimeOrchestrator")
             .field("state", &self.state)
             .field("has_ready_runtime", &self.ready.is_some())
+            .field("has_recovering_pep", &self.recovering_pep.is_some())
+            .field("has_recovering_mcp", &self.recovering_mcp.is_some())
             .field("current_task", &self.current_task())
             .field("outage", &self.outages.active())
             .finish()
@@ -86,6 +111,8 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
             driver,
             state: RuntimeState::Stopped,
             ready: None,
+            recovering_pep: None,
+            recovering_mcp: None,
             outages: OutageTracker::default(),
         }
     }
@@ -98,7 +125,16 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         self.ready
             .as_ref()
             .map(|ready| self.driver.current_task(&ready.pep))
+            .or_else(|| {
+                self.recovering_pep
+                    .as_ref()
+                    .map(|pep| self.driver.current_task(pep))
+            })
             .unwrap_or(CurrentTaskStatus::Idle)
+    }
+
+    pub fn configured_workspace(&self) -> Option<&Path> {
+        self.driver.current_workspace()
     }
 
     pub fn start(&mut self) -> Result<(), OrchestratorError> {
@@ -109,7 +145,11 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
     where
         F: FnMut(&RuntimeState),
     {
-        if self.ready.is_some() || self.state != RuntimeState::Stopped {
+        if self.ready.is_some()
+            || self.recovering_pep.is_some()
+            || self.recovering_mcp.is_some()
+            || self.state != RuntimeState::Stopped
+        {
             return Err(OrchestratorError {
                 fault: RuntimeFault::ConfigurationInvalid,
                 cleanup_fault: None,
@@ -169,15 +209,25 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
     where
         F: FnMut(&RuntimeState),
     {
-        let Some(mut ready) = self.ready.take() else {
-            self.transition(RuntimeState::Stopped, &mut project);
-            return Ok(());
-        };
-
-        let mut cleanup_fault = self.driver.stop_tunnel(&mut ready.tunnel).err();
-        match self.driver.stop_pep(ready.pep) {
-            Ok(mut mcp) => merge_cleanup_fault(&mut cleanup_fault, self.driver.stop_mcp(&mut mcp).err()),
-            Err(fault) => merge_cleanup_fault(&mut cleanup_fault, Some(fault)),
+        let mut cleanup_fault = None;
+        if let Some(mut ready) = self.ready.take() {
+            merge_cleanup_fault(
+                &mut cleanup_fault,
+                self.driver.stop_tunnel(&mut ready.tunnel).err(),
+            );
+            match self.driver.stop_pep(ready.pep) {
+                Ok(mcp) => self.recovering_mcp = Some(mcp),
+                Err(fault) => merge_cleanup_fault(&mut cleanup_fault, Some(fault)),
+            }
+        }
+        if let Some(pep) = self.recovering_pep.take() {
+            match self.driver.stop_pep(pep) {
+                Ok(mcp) => self.recovering_mcp = Some(mcp),
+                Err(fault) => merge_cleanup_fault(&mut cleanup_fault, Some(fault)),
+            }
+        }
+        if let Some(mut mcp) = self.recovering_mcp.take() {
+            merge_cleanup_fault(&mut cleanup_fault, self.driver.stop_mcp(&mut mcp).err());
         }
 
         if let Some(fault) = cleanup_fault {
@@ -208,6 +258,80 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         self.outages.active()
     }
 
+    pub fn refresh_outage(
+        &mut self,
+        generation: OutageGenerationId,
+        component: RuntimeComponent,
+        fault: RuntimeFault,
+    ) -> bool {
+        self.outages.refresh(generation, component, fault)
+    }
+
+    pub fn record_fault(&mut self, fault: RuntimeFault) {
+        self.state = RuntimeState::Faulted(fault);
+    }
+
+    pub fn recover_minimal(
+        &mut self,
+        scope: RecoveryScope,
+        attempt: u32,
+    ) -> Result<(), OrchestratorError> {
+        let component = match scope {
+            RecoveryScope::Tunnel => RuntimeComponent::Tunnel,
+            RecoveryScope::PolicyAndTunnel => RuntimeComponent::PolicyEnforcement,
+            RecoveryScope::FullRuntime => RuntimeComponent::CodingRuntime,
+        };
+        self.state = RuntimeState::Recovering { component, attempt };
+        let result = match scope {
+            RecoveryScope::Tunnel => self.recover_tunnel_only(),
+            RecoveryScope::PolicyAndTunnel => self.recover_policy_and_tunnel(),
+            RecoveryScope::FullRuntime => self.recover_full_runtime(),
+        };
+        match result {
+            Ok(()) => {
+                self.state = RuntimeState::Ready;
+                Ok(())
+            }
+            Err(error) => {
+                self.state = RuntimeState::Faulted(error.fault.clone());
+                Err(error)
+            }
+        }
+    }
+
+    pub fn switch_workspace_to(
+        &mut self,
+        candidate: &Path,
+        rollback_workspace: Option<&Path>,
+    ) -> Result<(), WorkspaceSwitchError> {
+        if candidate.as_os_str().is_empty() {
+            return Err(WorkspaceSwitchError {
+                candidate_fault: RuntimeFault::WorkspaceInvalid,
+                rollback_fault: None,
+            });
+        }
+        let previous = rollback_workspace.map(Path::to_path_buf);
+        if let Err(error) = self.stop() {
+            return Err(WorkspaceSwitchError {
+                candidate_fault: error.fault,
+                rollback_fault: error.cleanup_fault,
+            });
+        }
+        if let Err(fault) = self.driver.configure_workspace(candidate.to_path_buf()) {
+            return Err(WorkspaceSwitchError {
+                candidate_fault: fault,
+                rollback_fault: self.rollback_workspace(previous),
+            });
+        }
+        if let Err(error) = self.start() {
+            return Err(WorkspaceSwitchError {
+                candidate_fault: error.fault,
+                rollback_fault: self.rollback_workspace(previous),
+            });
+        }
+        Ok(())
+    }
+
     pub fn into_driver(self) -> D {
         self.driver
     }
@@ -217,6 +341,135 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
             Ok(mut mcp) => self.driver.stop_mcp(&mut mcp).err(),
             Err(fault) => Some(fault),
         }
+    }
+
+    fn recover_tunnel_only(&mut self) -> Result<(), OrchestratorError> {
+        if let Some(mut ready) = self.ready.take() {
+            if let Err(fault) = self.driver.stop_tunnel(&mut ready.tunnel) {
+                self.ready = Some(ready);
+                return Err(OrchestratorError {
+                    fault,
+                    cleanup_fault: None,
+                });
+            }
+            self.recovering_pep = Some(ready.pep);
+        }
+        if self.recovering_pep.is_none() {
+            return if self.recovering_mcp.is_some() {
+                self.recover_policy_and_tunnel()
+            } else {
+                self.recover_full_runtime()
+            };
+        }
+        let pep = self.recovering_pep.as_ref().expect("checked retained PEP");
+        if self.driver.confirm_pep_ready(pep).is_err() {
+            return self.recover_policy_and_tunnel();
+        }
+        self.start_tunnel_from_recovering_pep()
+    }
+
+    fn start_tunnel_from_recovering_pep(&mut self) -> Result<(), OrchestratorError> {
+        let pep = self
+            .recovering_pep
+            .as_ref()
+            .expect("tunnel recovery requires retained PEP");
+        let mut tunnel = self
+            .driver
+            .start_tunnel(pep)
+            .map_err(|fault| OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            })?;
+        if let Err(fault) = self.driver.confirm_tunnel_ready(&mut tunnel) {
+            let cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
+            return Err(OrchestratorError {
+                fault,
+                cleanup_fault,
+            });
+        }
+        let pep = self
+            .recovering_pep
+            .take()
+            .expect("PEP remains owned through tunnel-only recovery");
+        self.ready = Some(ReadyHandles { pep, tunnel });
+        Ok(())
+    }
+
+    fn recover_policy_and_tunnel(&mut self) -> Result<(), OrchestratorError> {
+        if let Some(mut ready) = self.ready.take() {
+            if let Err(fault) = self.driver.stop_tunnel(&mut ready.tunnel) {
+                self.ready = Some(ready);
+                return Err(OrchestratorError {
+                    fault,
+                    cleanup_fault: None,
+                });
+            }
+            self.recovering_pep = Some(ready.pep);
+        }
+        if let Some(pep) = self.recovering_pep.take() {
+            match self.driver.stop_pep(pep) {
+                Ok(mcp) => self.recovering_mcp = Some(mcp),
+                Err(fault) => {
+                    return Err(OrchestratorError {
+                        fault,
+                        cleanup_fault: None,
+                    });
+                }
+            }
+        }
+        let Some(mut mcp) = self.recovering_mcp.take() else {
+            return self.recover_full_runtime();
+        };
+        if self.driver.confirm_mcp_ready(&mut mcp).is_err() {
+            self.recovering_mcp = Some(mcp);
+            return self.recover_full_runtime();
+        }
+        let pep = self
+            .driver
+            .start_pep(mcp)
+            .map_err(|fault| OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            })?;
+        if let Err(fault) = self.driver.confirm_pep_ready(&pep) {
+            match self.driver.stop_pep(pep) {
+                Ok(mcp) => self.recovering_mcp = Some(mcp),
+                Err(cleanup_fault) => {
+                    return Err(OrchestratorError {
+                        fault,
+                        cleanup_fault: Some(cleanup_fault),
+                    });
+                }
+            }
+            return Err(OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            });
+        }
+        self.recovering_pep = Some(pep);
+        self.start_tunnel_from_recovering_pep()
+    }
+
+    fn recover_full_runtime(&mut self) -> Result<(), OrchestratorError> {
+        let cleanup_fault = self.stop().err().map(|error| error.fault);
+        if let Some(fault) = cleanup_fault {
+            return Err(OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            });
+        }
+        self.state = RuntimeState::Stopped;
+        self.start()
+    }
+
+    fn rollback_workspace(&mut self, previous: Option<PathBuf>) -> Option<RuntimeFault> {
+        let _ = self.stop();
+        self.state = RuntimeState::Stopped;
+        let previous = previous?;
+        if let Err(fault) = self.driver.configure_workspace(previous) {
+            return Some(fault);
+        }
+        self.start().err().map(|error| error.fault)
     }
 
     fn transition<F>(&mut self, state: RuntimeState, project: &mut F)
@@ -307,6 +560,20 @@ impl OutageTracker {
             active.user_attention_emitted = true;
             true
         }
+    }
+
+    pub fn refresh(
+        &mut self,
+        generation: OutageGenerationId,
+        component: RuntimeComponent,
+        fault: RuntimeFault,
+    ) -> bool {
+        let Some(active) = self.active.as_mut().filter(|active| active.id == generation) else {
+            return false;
+        };
+        active.component = component;
+        active.fault = fault;
+        true
     }
 
     pub fn clear(&mut self, generation: OutageGenerationId) -> bool {
@@ -458,6 +725,18 @@ where
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus {
         pep.current_task_projection().snapshot()
+    }
+
+    fn current_workspace(&self) -> Option<&Path> {
+        Some(&self.config.workspace)
+    }
+
+    fn configure_workspace(&mut self, workspace: PathBuf) -> Result<(), RuntimeFault> {
+        if workspace.as_os_str().is_empty() {
+            return Err(RuntimeFault::WorkspaceInvalid);
+        }
+        self.config.workspace = workspace;
+        Ok(())
     }
 }
 

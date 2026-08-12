@@ -134,6 +134,12 @@ impl WorkspaceRegistry {
         self.entries.iter().find(|entry| &entry.workspace_id == id)
     }
 
+    /// Removes LocalBridge metadata only. This operation never touches the filesystem.
+    pub fn remove(&mut self, id: &WorkspaceId) -> Option<WorkspaceEntry> {
+        let index = self.entries.iter().position(|entry| &entry.workspace_id == id)?;
+        Some(self.entries.remove(index))
+    }
+
     /// Adds metadata only after the filesystem path has been validated in this process.
     pub fn upsert_validated(
         &mut self,
@@ -305,6 +311,7 @@ pub enum WorkspaceRegistryError {
     DuplicateWorkspaceId,
     DuplicateValidatedIdentity,
     ActiveWorkspaceMissingFromRegistry,
+    WorkspaceIdMissing,
     PersistedIdentityMismatch,
     WorkspaceNotDirectory,
     WorkspaceValidationWindowsApi { operation: &'static str, code: u32 },

@@ -1,5 +1,8 @@
+mod control;
 mod registry;
 mod validator;
+
+pub use control::{WorkspaceControlError, WorkspaceCoordinator, WorkspaceRemoval};
 
 pub use registry::{
     PendingWorkspaceConfirmation, PendingWorkspaceReason, PersistedWorkspaceIdentity,
