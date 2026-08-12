@@ -123,7 +123,7 @@ fn policy_and_mcp_outages_restart_only_the_required_dependency_layers() {
 
 #[test]
 fn exact_five_attempts_backoff_nonretryable_and_manual_generation_are_deterministic() {
-    let (driver, _, fail_counter, _, _) = RecoveryDriver::new();
+    let (driver, events, fail_counter, _, _) = RecoveryDriver::new();
     let mut runtime = RuntimeOrchestrator::new(driver);
     runtime.start().unwrap();
     *fail_counter.borrow_mut() = 5;
@@ -142,6 +142,23 @@ fn exact_five_attempts_backoff_nonretryable_and_manual_generation_are_determinis
     assert_eq!(controller.clock().sleeps, [1,2,5,10,30].map(Duration::from_secs));
     assert_eq!(controller.current_attempt(), 5);
     assert!(!runtime.mark_user_attention_required(generation));
+
+    let sleeps_after_exhaustion = controller.clock().sleeps.len();
+    let events_after_exhaustion = events.borrow().len();
+    let repeated = controller.recover_auto(
+        &mut runtime,
+        RuntimeOutage::classify(RuntimeComponent::Tunnel, RuntimeFault::TunnelExited),
+    );
+    match repeated {
+        RecoveryOutcome::Exhausted { generation: repeated_generation, user_attention_required, .. } => {
+            assert_eq!(repeated_generation, generation);
+            assert!(!user_attention_required);
+        }
+        other => panic!("same exhausted generation must not restart recovery, got {other:?}"),
+    }
+    assert_eq!(controller.clock().sleeps.len(), sleeps_after_exhaustion);
+    assert_eq!(events.borrow().len(), events_after_exhaustion);
+    assert_eq!(controller.current_attempt(), 5);
 
     let before = controller.clock().sleeps.len();
     let non = controller.recover_auto(

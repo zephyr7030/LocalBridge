@@ -100,17 +100,30 @@ pub enum RecoveryOutcome {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExhaustedGeneration {
+    generation: OutageGenerationId,
+    final_fault: RuntimeFault,
+}
+
 #[derive(Debug)]
 pub struct RecoveryController<C: RecoveryClock> {
     clock: C,
     generation: Option<OutageGenerationId>,
     stable_since: Option<Duration>,
     current_attempt: u32,
+    exhausted_generation: Option<ExhaustedGeneration>,
 }
 
 impl<C: RecoveryClock> RecoveryController<C> {
     pub fn new(clock: C) -> Self {
-        Self { clock, generation: None, stable_since: None, current_attempt: 0 }
+        Self {
+            clock,
+            generation: None,
+            stable_since: None,
+            current_attempt: 0,
+            exhausted_generation: None,
+        }
     }
 
     pub const fn current_attempt(&self) -> u32 {
@@ -139,6 +152,7 @@ impl<C: RecoveryClock> RecoveryController<C> {
                 if !runtime.refresh_outage(generation, outage.component, outage.fault.clone()) {
                     let fresh = runtime.begin_outage(outage.component, outage.fault.clone());
                     self.generation = Some(fresh);
+                    self.exhausted_generation = None;
                     fresh
                 } else {
                     generation
@@ -147,10 +161,22 @@ impl<C: RecoveryClock> RecoveryController<C> {
             None => {
                 let fresh = runtime.begin_outage(outage.component, outage.fault.clone());
                 self.generation = Some(fresh);
+                self.exhausted_generation = None;
                 fresh
             }
         };
         self.stable_since = None;
+        if outage.disposition == RecoveryDisposition::Recoverable {
+            if let Some(exhausted) = &self.exhausted_generation {
+                if exhausted.generation == generation {
+                    return RecoveryOutcome::Exhausted {
+                        generation,
+                        final_fault: exhausted.final_fault.clone(),
+                        user_attention_required: false,
+                    };
+                }
+            }
+        }
         self.current_attempt = 0;
         self.run_generation(runtime, generation, outage)
     }
@@ -164,6 +190,7 @@ impl<C: RecoveryClock> RecoveryController<C> {
         self.generation = Some(generation);
         self.stable_since = None;
         self.current_attempt = 0;
+        self.exhausted_generation = None;
         self.run_generation(runtime, generation, outage)
     }
 
@@ -188,6 +215,7 @@ impl<C: RecoveryClock> RecoveryController<C> {
             self.generation = None;
             self.current_attempt = 0;
             self.stable_since = None;
+            self.exhausted_generation = None;
         }
         cleared
     }
@@ -218,6 +246,7 @@ impl<C: RecoveryClock> RecoveryController<C> {
                     let attempt = self.current_attempt;
                     self.current_attempt = 0;
                     self.stable_since = Some(self.clock.now());
+                    self.exhausted_generation = None;
                     return RecoveryOutcome::Recovered { generation, attempt };
                 }
                 Err(error) => final_fault = error.fault,
@@ -225,6 +254,10 @@ impl<C: RecoveryClock> RecoveryController<C> {
         }
         runtime.record_fault(final_fault.clone());
         let user_attention_required = runtime.mark_user_attention_required(generation);
+        self.exhausted_generation = Some(ExhaustedGeneration {
+            generation,
+            final_fault: final_fault.clone(),
+        });
         RecoveryOutcome::Exhausted { generation, final_fault, user_attention_required }
     }
 }

@@ -24,10 +24,18 @@ for (const required of [
   "pub fn manual_retry",
   "pub const STABILITY_RESET_SECONDS: u64 = 60",
   "runtime.clear_outage(generation)",
+  "exhausted_generation: Option<ExhaustedGeneration>",
+  "if exhausted.generation == generation",
+  "self.exhausted_generation = Some(ExhaustedGeneration",
 ]) if (!recovery.includes(required)) throw new Error(`ARCH-022 missing generation lifecycle: ${required}`);
+const autoStart = recovery.indexOf("pub fn recover_auto");
+const autoEnd = recovery.indexOf("pub fn manual_retry", autoStart);
+const auto = recovery.slice(autoStart, autoEnd);
+if (!auto.includes("return RecoveryOutcome::Exhausted")) throw new Error("ARCH-022 same exhausted generation is not terminal for automatic recovery");
 const manualStart = recovery.indexOf("pub fn manual_retry");
 const manualEnd = recovery.indexOf("pub fn observe_stable_ready", manualStart);
-if (manualStart < 0 || manualEnd <= manualStart || !recovery.slice(manualStart, manualEnd).includes("runtime.begin_outage")) throw new Error("ARCH-022 manual retry does not create fresh generation");
+const manual = recovery.slice(manualStart, manualEnd);
+if (manualStart < 0 || manualEnd <= manualStart || !manual.includes("runtime.begin_outage") || !manual.includes("self.exhausted_generation = None")) throw new Error("ARCH-022 manual retry does not create a fresh retry-budget generation");
 const exhaustionMarks = [...recovery.matchAll(/runtime\.mark_user_attention_required\(generation\)/g)].length;
 if (exhaustionMarks !== 2) throw new Error(`ARCH-022 expected one nonretryable and one exhausted attention call site, got ${exhaustionMarks}`);
-console.log("ARCH-022_VERIFY=PASS single_active_generation=true duplicate_attention_suppressed=true manual_retry_fresh_generation=true stable_reset_60s=true");
+console.log("ARCH-022_VERIFY=PASS single_active_generation=true exhausted_generation_terminal=true duplicate_attention_suppressed=true manual_retry_fresh_generation=true stable_reset_60s=true");

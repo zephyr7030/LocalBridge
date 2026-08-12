@@ -21,7 +21,20 @@ for (const required of [
   "RuntimeFault::RuntimeChecksumMismatch",
   "RuntimeFault::SecretInjectionUnsupported",
   "RuntimeFault::ConfigurationInvalid",
+  "exhausted_generation: Option<ExhaustedGeneration>",
+  "if exhausted.generation == generation",
+  "self.exhausted_generation = Some(ExhaustedGeneration",
 ]) if (!recovery.includes(required)) throw new Error(`ARCH-020 missing reconnect contract: ${required}`);
+const autoStart = recovery.indexOf("pub fn recover_auto");
+const autoEnd = recovery.indexOf("pub fn manual_retry", autoStart);
+if (autoStart < 0 || autoEnd <= autoStart) process.exit(4);
+const auto = recovery.slice(autoStart, autoEnd);
+const exhaustedGuard = auto.indexOf("if exhausted.generation == generation");
+const attemptReset = auto.indexOf("self.current_attempt = 0");
+const generationRun = auto.indexOf("self.run_generation(runtime, generation, outage)");
+if (!(exhaustedGuard >= 0 && attemptReset > exhaustedGuard && generationRun > exhaustedGuard)) {
+  throw new Error("ARCH-020 exhausted generation can reset or re-run the automatic retry budget");
+}
 const loopStart = recovery.indexOf("for (index, seconds) in RECONNECT_BACKOFF_SECONDS.into_iter().enumerate()");
 const loopEnd = recovery.indexOf("runtime.record_fault(final_fault.clone())", loopStart);
 if (loopStart < 0 || loopEnd <= loopStart) process.exit(4);
@@ -32,4 +45,4 @@ const afterLoop = recovery.slice(loopEnd, recovery.indexOf("RecoveryOutcome::Exh
 if (!afterLoop.includes("runtime.mark_user_attention_required(generation)")) throw new Error("ARCH-020 missing final attention after fifth failure");
 for (const required of ["RecoveryScope::Tunnel", "RecoveryScope::PolicyAndTunnel", "RecoveryScope::FullRuntime", "confirm_pep_ready", "confirm_mcp_ready"]) if (!orchestrator.includes(required)) process.exit(5);
 if (/while\s*\([^)]*reconnect|loop\s*\{[\s\S]{0,200}recover_minimal/.test(recovery)) throw new Error("ARCH-020 unbounded reconnect loop detected");
-console.log("ARCH-020_VERIFY=PASS attempts=5 backoff=1,2,5,10,30 typed_retryability=true minimal_layer_health_gate=true");
+console.log("ARCH-020_VERIFY=PASS attempts=5 backoff=1,2,5,10,30 same_generation_exhaustion_terminal=true typed_retryability=true minimal_layer_health_gate=true");
