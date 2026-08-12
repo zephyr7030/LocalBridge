@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "authorization_id": "EXEC-PREAUTH-LB009-001",
+      "scope": [
+        "docs/ADR-0001_POLICY_ENFORCEMENT.md",
+        "src-tauri/src/mcp/guard.rs",
+        "src-tauri/src/mcp/http.rs",
+        "src-tauri/src/mcp/mod.rs",
+        "src-tauri/src/mcp/runtime.rs",
+        "src-tauri/src/mcp/server.rs",
+        "tests/integration/policy/policy_enforcement.rs",
+        "tests/unit/policy/ARCH-005.verify.mjs",
+        "scripts/authorization-records/LB-009.json"
+      ],
+      "actions": [
+        "Add the missing first-party loopback MCP Policy Enforcement transport required by ADR-0001",
+        "Keep mandatory tools/call policy enforcement inside src-tauri/src/mcp rather than moving raw MCP into LB-009 app/runtime code",
+        "Preserve downstream MCP initialize/session/tools-list/tools-call semantics while using the already authenticated CodingToolsRuntime hop",
+        "Preserve downstream JSON-RPC request IDs on upstream tools/call so pinned coding-tools-mcp cancellation semantics remain valid",
+        "Accept bounded concurrent downstream HTTP connections while serializing guarded tool execution and forwarding notifications/cancelled outside the Guard execution mutex",
+        "Add actual bundled coding-tools-mcp regressions proving cached-mode bypass prevention, real forwarding, reverse ownership recovery, and cancellation of a long-running command",
+        "Allow orderly PEP stop to return the owned CodingToolsRuntime so LB-009 can enforce Tunnel then PEP then MCP shutdown"
+      ],
+      "reason": "LB-009 composition audit proved LB-007 had only an in-process McpGuard and no production listener, while LB-008 TunnelRuntime always targets 127.0.0.1:<mcp_guard_port>/mcp. Without this correction the runtime could report staged readiness while the configured PEP endpoint did not exist.",
+      "evidence_ref": "Current-disk search during LB-009: McpGuard::new existed only in tests and no production PEP TcpListener existed; ADR-0001 requires Tunnel -> loopback Rust MCP Guard/PEP -> authenticated coding-tools-mcp. Pinned coding-tools-mcp v0.2.2 uses ThreadingHTTPServer, supports notifications/cancelled, and maps JSON-RPC request_id to exec sessions; tunnel-client v0.0.11 allows concurrent MCP requests. Deterministic Windows regression with actual bundled coding-tools-mcp proved a 10-second exec_command can be cancelled through the new PEP on a second downstream connection using the same request id while CurrentTask returns to Idle.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    }
+  ]
+}

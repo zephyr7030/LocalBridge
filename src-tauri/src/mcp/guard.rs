@@ -11,7 +11,12 @@ use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 
 pub trait GuardRuntime {
     fn raw_list_tools(&mut self) -> Result<Value, CodingToolsRuntimeError>;
-    fn raw_call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, CodingToolsRuntimeError>;
+    fn raw_call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        request_id: Option<&Value>,
+    ) -> Result<Value, CodingToolsRuntimeError>;
 }
 
 impl GuardRuntime for CodingToolsRuntime {
@@ -19,8 +24,13 @@ impl GuardRuntime for CodingToolsRuntime {
         self.list_tools()
     }
 
-    fn raw_call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, CodingToolsRuntimeError> {
-        self.call_tool(name, arguments)
+    fn raw_call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        request_id: Option<&Value>,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        self.call_tool_with_request_id(name, arguments, request_id)
     }
 }
 
@@ -29,11 +39,12 @@ pub struct ToolCallRequest {
     pub name: String,
     pub arguments: Value,
     pub indirect_capabilities: Vec<Capability>,
+    request_id: Option<Value>,
 }
 
 impl ToolCallRequest {
     pub fn new(name: impl Into<String>, arguments: Value) -> Self {
-        Self { name: name.into(), arguments, indirect_capabilities: Vec::new() }
+        Self { name: name.into(), arguments, indirect_capabilities: Vec::new(), request_id: None }
     }
 
     pub fn with_indirect_capabilities<I>(mut self, capabilities: I) -> Self
@@ -41,6 +52,11 @@ impl ToolCallRequest {
         I: IntoIterator<Item = Capability>,
     {
         self.indirect_capabilities = capabilities.into_iter().collect();
+        self
+    }
+
+    pub(crate) fn with_request_id(mut self, request_id: Value) -> Self {
+        self.request_id = Some(request_id);
         self
     }
 }
@@ -122,7 +138,11 @@ impl<R: GuardRuntime> McpGuard<R> {
 
         project(CurrentTaskStatus::project(kind, summary, TaskExecutionState::Running)
             .expect("Running is a valid active task state"));
-        match self.runtime.raw_call_tool(&request.name, request.arguments) {
+        match self.runtime.raw_call_tool(
+            &request.name,
+            request.arguments,
+            request.request_id.as_ref(),
+        ) {
             Ok(result) => {
                 project(CurrentTaskStatus::Idle);
                 Ok(result)
@@ -140,6 +160,10 @@ impl<R: GuardRuntime> McpGuard<R> {
         let indirect_capabilities = effective_indirect_capabilities(request);
         self.policy
             .decide(mode, &request.name, &indirect_capabilities)
+    }
+
+    pub(crate) fn into_runtime(self) -> R {
+        self.runtime
     }
 }
 

@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -12,9 +13,49 @@ const MAX_HTTP_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 pub(crate) struct McpSession {
     port: u16,
-    bearer: InternalBearer,
-    session_id: Option<String>,
+    bearer: Arc<InternalBearer>,
+    session_id: Option<Arc<str>>,
     next_id: u64,
+}
+
+#[derive(Clone)]
+pub(crate) struct McpCancellationClient {
+    port: u16,
+    bearer: Arc<InternalBearer>,
+    session_id: Arc<str>,
+}
+
+impl std::fmt::Debug for McpCancellationClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpCancellationClient")
+            .field("endpoint", &format_args!("127.0.0.1:{}/mcp", self.port))
+            .field("authenticated", &true)
+            .finish()
+    }
+}
+
+impl McpCancellationClient {
+    pub(crate) fn cancel_request(&self, request_id: &Value) -> Result<(), CodingToolsRuntimeError> {
+        if !valid_request_id(request_id) {
+            return Err(CodingToolsRuntimeError::ProtocolMismatch);
+        }
+        let payload = json!({
+            "jsonrpc":"2.0",
+            "method":"notifications/cancelled",
+            "params":{"requestId":request_id.clone()}
+        });
+        let response = post_json(
+            self.port,
+            Some(&self.bearer),
+            Some(&self.session_id),
+            &payload,
+        )?;
+        if response.status == 202 {
+            Ok(())
+        } else {
+            Err(CodingToolsRuntimeError::HttpStatus(response.status))
+        }
+    }
 }
 
 impl std::fmt::Debug for McpSession {
@@ -31,7 +72,7 @@ impl McpSession {
     pub(crate) fn new(port: u16, bearer: InternalBearer) -> Self {
         Self {
             port,
-            bearer,
+            bearer: Arc::new(bearer),
             session_id: None,
             next_id: 1,
         }
@@ -71,9 +112,47 @@ impl McpSession {
         self.request("tools/call", json!({"name": name, "arguments": arguments}))
     }
 
+    pub(crate) fn call_tool_with_request_id(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        request_id: &Value,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        if !valid_request_id(request_id) {
+            return Err(CodingToolsRuntimeError::ProtocolMismatch);
+        }
+        self.request_with_id(
+            "tools/call",
+            json!({"name": name, "arguments": arguments}),
+            request_id.clone(),
+        )
+    }
+
+    pub(crate) fn cancellation_client(&self) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
+        let session_id = self
+            .session_id
+            .as_ref()
+            .cloned()
+            .ok_or(CodingToolsRuntimeError::ProtocolMismatch)?;
+        Ok(McpCancellationClient {
+            port: self.port,
+            bearer: Arc::clone(&self.bearer),
+            session_id,
+        })
+    }
+
     fn request(&mut self, method: &str, params: Value) -> Result<Value, CodingToolsRuntimeError> {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
+        self.request_with_id(method, params, Value::from(id))
+    }
+
+    fn request_with_id(
+        &mut self,
+        method: &str,
+        params: Value,
+        id: Value,
+    ) -> Result<Value, CodingToolsRuntimeError> {
         let payload = json!({"jsonrpc":"2.0","method":method,"params":params,"id":id});
         let response = post_json(
             self.port,
@@ -88,7 +167,7 @@ impl McpSession {
             if self.session_id.as_deref().is_some_and(|existing| existing != session) {
                 return Err(CodingToolsRuntimeError::ProtocolMismatch);
             }
-            self.session_id = Some(session);
+            self.session_id = Some(Arc::from(session));
         }
         let reply: Value = serde_json::from_slice(&response.body)
             .map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
@@ -115,6 +194,13 @@ impl McpSession {
             Err(CodingToolsRuntimeError::HttpStatus(response.status))
         }
     }
+}
+
+fn valid_request_id(request_id: &Value) -> bool {
+    request_id.is_string()
+        || request_id
+            .as_number()
+            .is_some_and(|number| number.as_i64().is_some() || number.as_u64().is_some())
 }
 
 pub(crate) fn unauthenticated_initialize_status(port: u16) -> Result<u16, CodingToolsRuntimeError> {

@@ -29,7 +29,12 @@ impl GuardRuntime for FakeRuntime {
         Ok(json!({"tools": ALL_TOOLS.iter().map(|name| json!({"name":name})).collect::<Vec<_>>() }))
     }
 
-    fn raw_call_tool(&mut self, name: &str, _arguments: Value) -> Result<Value, CodingToolsRuntimeError> {
+    fn raw_call_tool(
+        &mut self,
+        name: &str,
+        _arguments: Value,
+        _request_id: Option<&Value>,
+    ) -> Result<Value, CodingToolsRuntimeError> {
         self.calls.borrow_mut().push(name.to_string());
         if self.fail_calls { Err(CodingToolsRuntimeError::ProtocolMismatch) }
         else { Ok(json!({"ok":true,"called":name})) }
