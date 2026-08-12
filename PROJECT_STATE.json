@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -124,7 +124,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Resolve LB-017 diagnostics untranslated Generation labels and re-run G3 gates before adversarial review generation 2"
+    "next_action": "Run G3 independent adversarial review generation 2 after generation 1 repairs"
   },
   "current_task_ui": {
     "enabled": true,
