@@ -126,6 +126,23 @@ Broker：
 - timeout/cancel；
 - app lifecycle ownership。
 
+LB-011 选定的 Windows IPC 基线：
+
+```text
+LocalBridge (普通用户)
+  → 创建单实例 duplex Named Pipe
+  → DACL 仅允许当前 LocalBridge 用户 SID
+  → PIPE_REJECT_REMOTE_CLIENTS
+  → 显式 runas 启动 localbridge-privileged-broker.exe
+  → 校验实际连接 PID = 本次 ShellExecuteEx 返回并仍持有 handle 的 Broker PID
+  → 通过后才交换 generation + CSPRNG session nonce
+  → 每条请求严格递增 sequence，stale/replay fail-closed
+```
+
+Pipe 名使用 CSPRNG 随机 suffix，并使用 first-pipe-instance 防止同名 server 抢占；pipe 名与 generation 可以出现在 Broker CLI，session nonce 不进入 CLI/日志/Debug。帧采用有上限的长度前缀协议，未知/畸形/超限消息在 dispatch 前拒绝。
+
+LB-011 Broker 基础协议仅包含 `Ping` / `Shutdown`，不包含管理员执行操作；管理员能力由后续权限 PR 在同一认证边界内单独接入。Broker 不开放 TCP/UDP listener；LocalBridge pipe 会话断开后 Broker 退出。UAC 路径只提供给 Rust 内部显式用户操作调用，普通启动与 `--background` 不调用该路径。
+
 `elevated_exec` 必须 structured program/args/workdir，no shell default，timeout/cancel/output limit/redaction。
 
 ## 网络
