@@ -1,0 +1,18 @@
+{
+    "schema_version":  1,
+    "runtime":  "python-embedded",
+    "version":  "3.12.10",
+    "source":  "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
+    "source_archive":  "python-3.12.10-embed-amd64.zip",
+    "source_archive_sha256":  "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3",
+    "executable":  "runtime/python/python.exe",
+    "executable_sha256":  "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a",
+    "python312_dll_sha256":  "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120",
+    "stdlib_zip_sha256":  "fb131c0ef7e35cc5250a74c8cd18744bf4115fb8163710711f3758d7df3d1f88",
+    "pth_sha256":  "3840e706682aa41ec7e599a50763bec6c6ddd6bde66e81c64afe2394539ea4fa",
+    "isolated":  true,
+    "user_site_enabled":  false,
+    "runtime_pip_present":  false,
+    "external_python_fallback":  false,
+    "payload_tree_sha256":  "48546587a8bb59d03016ea4edf82c292a477dec6acec530745b78c8935558682"
+}

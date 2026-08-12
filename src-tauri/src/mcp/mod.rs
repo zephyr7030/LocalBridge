@@ -1,1 +1,8 @@
-//! Coding-tools runtime and MCP policy integration are implemented by LB-006/LB-007.
+mod bundle;
+mod http;
+mod runtime;
+
+pub use runtime::{
+    CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,
+    CodingToolsRuntimeError, InternalBearer,
+};

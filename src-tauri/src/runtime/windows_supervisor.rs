@@ -18,8 +18,8 @@ use windows_sys::Win32::System::JobObjects::{
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, CreateProcessW, GetProcessTimes, PROCESS_INFORMATION, ResumeThread,
-    STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetProcessTimes,
+    PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
 
 const FORCED_EXIT_CODE: u32 = 0x4C42_0004;
@@ -73,12 +73,67 @@ pub fn classify_persisted_snapshot(
     SnapshotDisposition::CurrentGeneration
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedProcessSpec {
     role: String,
     executable: PathBuf,
     args: Vec<OsString>,
     current_dir: Option<PathBuf>,
+    environment: Vec<(OsString, SecretEnvironmentValue)>,
+}
+
+impl fmt::Debug for ManagedProcessSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let environment_keys = self
+            .environment
+            .iter()
+            .map(|(key, _)| key.to_string_lossy())
+            .collect::<Vec<_>>();
+        f.debug_struct("ManagedProcessSpec")
+            .field("role", &self.role)
+            .field("executable", &self.executable)
+            .field("args", &self.args)
+            .field("current_dir", &self.current_dir)
+            .field("environment_keys", &environment_keys)
+            .finish()
+    }
+}
+
+struct SecretEnvironmentValue(Vec<u16>);
+
+impl SecretEnvironmentValue {
+    fn from_str(value: &str) -> Result<Self, SupervisorError> {
+        let wide = OsStr::new(value).encode_wide().collect::<Vec<_>>();
+        if wide.contains(&0) {
+            return Err(SupervisorError::InvalidSpec(
+                "environment value contains NUL",
+            ));
+        }
+        Ok(Self(wide))
+    }
+}
+
+impl Drop for SecretEnvironmentValue {
+    fn drop(&mut self) {
+        for value in &mut self.0 {
+            unsafe { std::ptr::write_volatile(value, 0) };
+        }
+    }
+}
+
+struct EnvironmentBlock(Vec<u16>);
+
+impl EnvironmentBlock {
+    fn as_ptr(&self) -> *const c_void {
+        self.0.as_ptr().cast()
+    }
+}
+
+impl Drop for EnvironmentBlock {
+    fn drop(&mut self) {
+        for value in &mut self.0 {
+            unsafe { std::ptr::write_volatile(value, 0) };
+        }
+    }
 }
 
 impl ManagedProcessSpec {
@@ -99,6 +154,7 @@ impl ManagedProcessSpec {
             executable,
             args: Vec::new(),
             current_dir: None,
+            environment: Vec::new(),
         })
     }
 
@@ -120,6 +176,24 @@ impl ManagedProcessSpec {
         self.current_dir = Some(path.into());
         self
     }
+
+    pub fn env(mut self, key: &str, value: &str) -> Result<Self, SupervisorError> {
+        if key.is_empty() || key.contains('=') || key.contains('\0') {
+            return Err(SupervisorError::InvalidSpec("invalid environment name"));
+        }
+        let key = OsString::from(key);
+        let value = SecretEnvironmentValue::from_str(value)?;
+        if let Some(existing) = self
+            .environment
+            .iter_mut()
+            .find(|(candidate, _)| env_names_equal(candidate, &key))
+        {
+            *existing = (key, value);
+        } else {
+            self.environment.push((key, value));
+        }
+        Ok(self)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +210,7 @@ pub enum SupervisorError {
     ResumeFailed,
     UnexpectedWaitStatus { status: u32 },
     ForcedTerminationDidNotDrain { remaining_processes: u32 },
+    RootProcessDidNotSignalAfterStop,
 }
 
 impl fmt::Display for SupervisorError {
@@ -158,6 +233,9 @@ impl fmt::Display for SupervisorError {
                 f,
                 "owned Job still contains {remaining_processes} process(es) after forced termination"
             ),
+            Self::RootProcessDidNotSignalAfterStop => {
+                f.write_str("owned root process did not signal after process tree stop")
+            }
         }
     }
 }
@@ -178,6 +256,14 @@ impl WindowsProcessSupervisor {
         let job = create_kill_on_close_job()?;
         let mut command_line = build_command_line(&spec.executable, &spec.args);
         let application = wide_null(spec.executable.as_os_str());
+        let environment = build_environment_block(&spec.environment);
+        let creation_flags = CREATE_SUSPENDED
+            | if environment.is_some() {
+                CREATE_UNICODE_ENVIRONMENT
+            } else {
+                0
+            };
+        let environment_ptr = environment.as_ref().map_or(null(), EnvironmentBlock::as_ptr);
         let current_directory = spec
             .current_dir
             .as_ref()
@@ -197,8 +283,8 @@ impl WindowsProcessSupervisor {
                 null(),
                 null(),
                 0,
-                CREATE_SUSPENDED,
-                null(),
+                creation_flags,
+                environment_ptr,
                 current_directory_ptr,
                 &startup,
                 &mut process_info,
@@ -297,13 +383,22 @@ impl WindowsProcessSupervisor {
     where
         F: FnOnce(&ProcessSnapshot),
     {
-        if self.stopped || self.active_processes()? == 0 {
+        if self.stopped {
+            return Ok(StopDisposition::AlreadyStopped);
+        }
+        if self.active_processes()? == 0 {
+            if !wait_for_process_exit(self.process, FORCED_DRAIN_TIMEOUT)? {
+                return Err(SupervisorError::RootProcessDidNotSignalAfterStop);
+            }
             self.stopped = true;
             return Ok(StopDisposition::AlreadyStopped);
         }
 
         request_graceful(&self.snapshot);
         if wait_for_job_empty(self.job, graceful_timeout)? {
+            if !wait_for_process_exit(self.process, FORCED_DRAIN_TIMEOUT)? {
+                return Err(SupervisorError::RootProcessDidNotSignalAfterStop);
+            }
             self.stopped = true;
             return Ok(StopDisposition::Graceful);
         }
@@ -315,6 +410,9 @@ impl WindowsProcessSupervisor {
             return Err(SupervisorError::ForcedTerminationDidNotDrain {
                 remaining_processes: query_active_processes(self.job)?,
             });
+        }
+        if !wait_for_process_exit(self.process, FORCED_DRAIN_TIMEOUT)? {
+            return Err(SupervisorError::RootProcessDidNotSignalAfterStop);
         }
         self.stopped = true;
         Ok(StopDisposition::Forced)
@@ -393,6 +491,22 @@ fn wait_for_job_empty(job: HANDLE, timeout: Duration) -> Result<bool, Supervisor
     }
 }
 
+fn wait_for_process_exit(process: HANDLE, timeout: Duration) -> Result<bool, SupervisorError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match unsafe { WaitForSingleObject(process, 0) } {
+            WAIT_OBJECT_0 => return Ok(true),
+            WAIT_TIMEOUT => {}
+            WAIT_FAILED => return Err(last_error("WaitForSingleObject")),
+            status => return Err(SupervisorError::UnexpectedWaitStatus { status }),
+        }
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn process_creation_time(process: HANDLE) -> Result<u64, SupervisorError> {
     let mut creation: FILETIME = unsafe { zeroed() };
     let mut exit: FILETIME = unsafe { zeroed() };
@@ -414,6 +528,56 @@ fn last_error(operation: &'static str) -> SupervisorError {
 
 fn wide_null(value: &OsStr) -> Vec<u16> {
     value.encode_wide().chain(std::iter::once(0)).collect()
+}
+
+fn env_names_equal(left: &OsStr, right: &OsStr) -> bool {
+    left.to_string_lossy()
+        .eq_ignore_ascii_case(&right.to_string_lossy())
+}
+
+fn build_environment_block(
+    overrides: &[(OsString, SecretEnvironmentValue)],
+) -> Option<EnvironmentBlock> {
+    if overrides.is_empty() {
+        return None;
+    }
+
+    enum Value<'a> {
+        Inherited(OsString),
+        Override(&'a SecretEnvironmentValue),
+    }
+
+    let mut entries = std::env::vars_os()
+        .filter(|(key, _)| {
+            !overrides
+                .iter()
+                .any(|(override_key, _)| env_names_equal(key, override_key))
+        })
+        .map(|(key, value)| (key, Value::Inherited(value)))
+        .collect::<Vec<_>>();
+    entries.extend(
+        overrides
+            .iter()
+            .map(|(key, value)| (key.clone(), Value::Override(value))),
+    );
+    entries.sort_by(|(left, _), (right, _)| {
+        left.to_string_lossy()
+            .to_ascii_lowercase()
+            .cmp(&right.to_string_lossy().to_ascii_lowercase())
+    });
+
+    let mut block = Vec::new();
+    for (key, value) in entries {
+        block.extend(key.encode_wide());
+        block.push('=' as u16);
+        match value {
+            Value::Inherited(value) => block.extend(value.encode_wide()),
+            Value::Override(value) => block.extend_from_slice(&value.0),
+        }
+        block.push(0);
+    }
+    block.push(0);
+    Some(EnvironmentBlock(block))
 }
 
 fn build_command_line(executable: &Path, args: &[OsString]) -> Vec<u16> {
@@ -465,5 +629,39 @@ mod tests {
             quote_windows_arg(OsStr::new("C:\\with space\\")),
             "\"C:\\with space\\\\\""
         );
+    }
+
+    #[test]
+    fn child_environment_override_is_case_insensitive_and_debug_redacted() {
+        let spec = ManagedProcessSpec::new("env-test", r"C:\Windows\System32\cmd.exe")
+            .unwrap()
+            .env("Path", "LB006_ENV_SECRET_SENTINEL")
+            .unwrap();
+        let debug = format!("{spec:?}");
+        assert!(debug.contains("Path"));
+        assert!(!debug.contains("LB006_ENV_SECRET_SENTINEL"));
+
+        let block = build_environment_block(&spec.environment).unwrap();
+        let entries = block
+            .0
+            .split(|value| *value == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(String::from_utf16_lossy)
+            .collect::<Vec<_>>();
+        let paths = entries
+            .iter()
+            .filter(|entry| entry.split_once('=').is_some_and(|(key, _)| key.eq_ignore_ascii_case("path")))
+            .collect::<Vec<_>>();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], "Path=LB006_ENV_SECRET_SENTINEL");
+    }
+
+    #[test]
+    fn invalid_child_environment_name_fails_closed() {
+        let error = ManagedProcessSpec::new("env-test", r"C:\Windows\System32\cmd.exe")
+            .unwrap()
+            .env("BAD=NAME", "value")
+            .unwrap_err();
+        assert!(matches!(error, SupervisorError::InvalidSpec("invalid environment name")));
     }
 }

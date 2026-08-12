@@ -1,0 +1,5 @@
+python312.zip
+.
+..\coding-tools-mcp
+..\coding-tools-mcp\site-packages
+import site

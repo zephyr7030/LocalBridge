@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 
 [product]
 codename = "LocalBridge"
@@ -14,6 +14,18 @@ sha256 = "227b94128eaacda8d63d391911db1918e0bd813718d9ea5d276b5aab7eac73fd"
 sha256_basis = "git archive --format=tar pinned commit"
 vendoring = "source"
 telemetry = "disabled"
+runtime_subset_sha256 = "cc2171854ce0035942b752ce88bb3aec2e286cdf9603dd51ad41734ea70dcda6"
+payload_tree_sha256 = "793c2f5de976c29cffc04ef43c778820089ae3cb1a4b80947e7fba7461e927c1"
+runtime_root = "runtime/coding-tools-mcp"
+entry_module = "coding_tools_mcp"
+dependency_pyjwt_version = "2.10.1"
+dependency_pyjwt_wheel = "PyJWT-2.10.1-py3-none-any.whl"
+dependency_pyjwt_wheel_sha256 = "dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb"
+auth_secret_injection = "child_environment:CODING_TOOLS_MCP_AUTH_TOKEN"
+bind_host = "127.0.0.1"
+telemetry_forced_off = true
+runtime_pip_install = false
+stable_adapter = "src-tauri/src/mcp"
 
 [tunnel_client]
 source = "https://github.com/openai/tunnel-client"
@@ -29,10 +41,21 @@ bundled_cloudflared_version = "2026.7.2"
 bundled_cloudflared_sha256 = "88024cf82cec72d10604c13aa4670016dca375c602e200b551ec9d53b31e874d"
 
 [python]
-version = "3.12.x"
+version = "3.12.10"
 source = "python.org Windows embeddable package"
-sha256 = "TO_BE_FILLED_BY_LB_006"
+archive = "python-3.12.10-embed-amd64.zip"
+sha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
 vendoring = "embeddable"
+executable = "runtime/python/python.exe"
+executable_sha256 = "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a"
+python312_dll_sha256 = "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120"
+stdlib_zip_sha256 = "fb131c0ef7e35cc5250a74c8cd18744bf4115fb8163710711f3758d7df3d1f88"
+pth_sha256 = "3840e706682aa41ec7e599a50763bec6c6ddd6bde66e81c64afe2394539ea4fa"
+payload_tree_sha256 = "48546587a8bb59d03016ea4edf82c292a477dec6acec530745b78c8935558682"
+isolated = true
+user_site_enabled = false
+runtime_pip_present = false
+external_python_fallback = false
 lb000_feasibility_sample_version = "3.12.10"
 lb000_feasibility_sample_sha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
 lb000_feasibility_status = "PASS"
