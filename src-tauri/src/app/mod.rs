@@ -6,8 +6,9 @@ use crate::state::{
 mod background;
 
 pub use background::{
-    BackgroundRecoveryAction, DesktopExitError, DesktopLifecycle, ExitRuntime, PrivilegeExit,
-    ShutdownReport, StartupMode, attention_action, recovery_action, shutdown_in_security_order,
+    BackgroundRecoveryAction, DesktopExitError, DesktopLifecycle, DesktopRuntimeStartError,
+    ExitRuntime, PrivilegeExit, ShutdownReport, StartupMode, attention_action, recovery_action,
+    shutdown_in_security_order,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

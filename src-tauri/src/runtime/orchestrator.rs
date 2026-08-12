@@ -119,6 +119,18 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_ready_for_test(driver: D, pep: D::Pep, tunnel: D::Tunnel) -> Self {
+        Self {
+            driver,
+            state: RuntimeState::Ready,
+            ready: Some(ReadyHandles { pep, tunnel }),
+            recovering_pep: None,
+            recovering_mcp: None,
+            outages: OutageTracker::default(),
+        }
+    }
+
     pub fn state(&self) -> &RuntimeState {
         &self.state
     }
@@ -649,13 +661,27 @@ impl ProductionRuntimeConfig {
     }
 }
 
+enum CredentialStoreHandle<'a, C> {
+    Borrowed(&'a C),
+    Owned(C),
+}
+
+impl<C> CredentialStoreHandle<'_, C> {
+    fn as_ref(&self) -> &C {
+        match self {
+            Self::Borrowed(store) => store,
+            Self::Owned(store) => store,
+        }
+    }
+}
+
 pub struct ProductionRuntimeDriver<'a, C, B>
 where
     C: CredentialStore,
     B: FnMut() -> Result<InternalBearer, RuntimeFault>,
 {
     config: ProductionRuntimeConfig,
-    credential_store: &'a C,
+    credential_store: CredentialStoreHandle<'a, C>,
     bearer_factory: B,
     privileged_execution: Option<Arc<dyn PrivilegedExecution>>,
 }
@@ -668,7 +694,23 @@ where
     pub fn new(config: ProductionRuntimeConfig, credential_store: &'a C, bearer_factory: B) -> Self {
         Self {
             config,
-            credential_store,
+            credential_store: CredentialStoreHandle::Borrowed(credential_store),
+            bearer_factory,
+            privileged_execution: None,
+        }
+    }
+
+    pub fn new_owned(
+        config: ProductionRuntimeConfig,
+        credential_store: C,
+        bearer_factory: B,
+    ) -> ProductionRuntimeDriver<'static, C, B>
+    where
+        C: 'static,
+    {
+        ProductionRuntimeDriver {
+            config,
+            credential_store: CredentialStoreHandle::Owned(credential_store),
             bearer_factory,
             privileged_execution: None,
         }
@@ -750,7 +792,7 @@ where
             pep.port(),
         )
         .map_err(|error| error.runtime_fault())?;
-        PreparedTunnelStart::prepare(config, self.credential_store)
+        PreparedTunnelStart::prepare(config, self.credential_store.as_ref())
             .and_then(PreparedTunnelStart::spawn)
             .map_err(|error| error.runtime_fault())
     }

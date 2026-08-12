@@ -2,6 +2,38 @@ use super::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+#[cfg(windows)]
+use crate::credentials::{
+    CredentialMetadata, CredentialStore, CredentialStoreError, RUNTIME_API_KEY_CREDENTIAL_ID,
+    SecretString,
+};
+#[cfg(windows)]
+use crate::mcp::InternalBearer;
+#[cfg(windows)]
+use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver, RuntimeDriver};
+#[cfg(windows)]
+use crate::state::{PermissionMode, RuntimeFault};
+#[cfg(windows)]
+use crate::tunnel::{PreparedTunnelStart, TunnelId, TunnelRuntimeConfig};
+#[cfg(windows)]
+use std::fs;
+#[cfg(windows)]
+use std::io::{Read, Write};
+#[cfg(windows)]
+use std::net::{Ipv4Addr, TcpListener, TcpStream};
+#[cfg(windows)]
+use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use std::process::Command;
+#[cfg(windows)]
+use std::sync::mpsc::{self, Sender};
+#[cfg(windows)]
+use std::sync::Arc;
+#[cfg(windows)]
+use std::thread::{self, JoinHandle};
+#[cfg(windows)]
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
 #[test]
 fn startup_mode_is_decided_before_tauri_window_creation() {
     assert_eq!(
@@ -109,4 +141,235 @@ fn shutdown_continues_after_each_stage_failure() {
         &*events.borrow(),
         &["tunnel.stop", "privilege.stop", "lower.stop"]
     );
+}
+
+#[cfg(windows)]
+const ACTUAL_TUNNEL_ID: &str = "tunnel_01301301301301301301301301301301";
+#[cfg(windows)]
+const ACTUAL_RUNTIME_KEY: &str = "LB013_SYNTHETIC_RUNTIME_KEY_DO_NOT_LEAK";
+#[cfg(windows)]
+const ACTUAL_INTERNAL_BEARER: &str = "LB013_SYNTHETIC_INTERNAL_BEARER_DO_NOT_LEAK";
+
+#[cfg(windows)]
+#[derive(Clone, Copy)]
+struct ActualAdapterCredentialStore;
+
+#[cfg(windows)]
+impl CredentialStore for ActualAdapterCredentialStore {
+    fn save_runtime_api_key(
+        &self,
+        _secret: &SecretString,
+    ) -> Result<CredentialMetadata, CredentialStoreError> {
+        unreachable!("LB-013 actual shutdown test never writes credentials")
+    }
+
+    fn read_runtime_api_key(&self) -> Result<Option<SecretString>, CredentialStoreError> {
+        Ok(Some(SecretString::new(ACTUAL_RUNTIME_KEY)?))
+    }
+
+    fn delete_runtime_api_key(&self) -> Result<bool, CredentialStoreError> {
+        Ok(false)
+    }
+
+    fn runtime_api_key_metadata(&self) -> Result<CredentialMetadata, CredentialStoreError> {
+        Ok(CredentialMetadata::runtime_api_key(
+            RUNTIME_API_KEY_CREDENTIAL_ID,
+            true,
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn actual_repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("src-tauri has repository parent")
+        .to_path_buf()
+}
+
+#[cfg(windows)]
+fn actual_temp_dir(label: &str) -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "localbridge-lb013-{label}-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&path).expect("create LB-013 temp directory");
+    path
+}
+
+#[cfg(windows)]
+fn actual_process_is_running(pid: u32) -> bool {
+    let script = format!(
+        "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"
+    );
+    Command::new("powershell.exe")
+        .args(["-NoProfile", "-Command", &script])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn actual_blocked_control_plane() -> (String, Sender<()>, JoinHandle<()>) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind local control plane");
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let handle = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                    let mut request = [0u8; 4096];
+                    let count = stream.read(&mut request).unwrap_or(0);
+                    let request = String::from_utf8_lossy(&request[..count]);
+                    assert!(request.starts_with("GET /v1/tunnels/"));
+                    let _ = release_rx.recv_timeout(Duration::from_secs(10));
+                    let body = r#"{"error":"LB-013 synthetic blocked control plane"}"#;
+                    let response = format!(
+                        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                    return;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("LB-013 control plane accept failed: {error}"),
+            }
+        }
+    });
+    (format!("http://127.0.0.1:{port}"), release_tx, handle)
+}
+
+#[cfg(windows)]
+fn actual_cleanup_dir(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match fs::remove_dir_all(path) {
+            Ok(()) => return,
+            Err(error) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(25));
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    return;
+                }
+            }
+            Err(error) => panic!("remove LB-013 temp dir {}: {error}", path.display()),
+        }
+    }
+}
+
+#[cfg(windows)]
+struct ActualMidpointPrivilege {
+    controller: PrivilegeController,
+    tunnel_pid: u32,
+    pep_port: u16,
+    mcp_port: u16,
+}
+
+#[cfg(windows)]
+impl PrivilegeExit for ActualMidpointPrivilege {
+    fn close_gate_and_stop_broker(&self) -> Result<(), DesktopExitError> {
+        assert!(
+            !actual_process_is_running(self.tunnel_pid),
+            "Tunnel must already be stopped before the privileged gate/Broker stage"
+        );
+        assert!(
+            TcpStream::connect((Ipv4Addr::LOCALHOST, self.pep_port)).is_ok(),
+            "PEP must remain alive until after the privileged gate/Broker stage"
+        );
+        assert!(
+            TcpStream::connect((Ipv4Addr::LOCALHOST, self.mcp_port)).is_ok(),
+            "MCP must remain alive until after the privileged gate/Broker stage"
+        );
+        self.controller
+            .disable()
+            .map_err(|_| DesktopExitError::Privilege)
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn production_tray_exit_owns_actual_adapter_and_stops_tunnel_gate_pep_mcp() {
+    let root = actual_repo_root();
+    let workspace = actual_temp_dir("workspace");
+    let health = actual_temp_dir("health");
+    fs::write(workspace.join("probe.txt"), b"LB-013 actual adapter\n").unwrap();
+
+    let controller = PrivilegeController::new();
+    let config = ProductionRuntimeConfig::new(
+        &root,
+        &workspace,
+        &health,
+        TunnelId::new(ACTUAL_TUNNEL_ID).unwrap(),
+        PermissionMode::Full,
+    );
+    let mut driver = ProductionRuntimeDriver::new_owned(
+        config,
+        ActualAdapterCredentialStore,
+        || {
+            InternalBearer::new(ACTUAL_INTERNAL_BEARER)
+                .map_err(|_| RuntimeFault::ConfigurationInvalid)
+        },
+    )
+    .with_privileged_execution(Arc::new(controller.gateway()));
+
+    let mut mcp = driver.start_mcp().expect("actual bundled MCP starts");
+    driver
+        .confirm_mcp_ready(&mut mcp)
+        .expect("actual bundled MCP ready");
+    let mcp_port = mcp.port();
+    let pep = driver.start_pep(mcp).expect("actual PEP starts");
+    driver.confirm_pep_ready(&pep).expect("actual PEP ready");
+    let pep_port = pep.port();
+
+    let (control_plane, release_control_plane, control_plane_thread) =
+        actual_blocked_control_plane();
+    let tunnel_config = TunnelRuntimeConfig::new(
+        &root,
+        &health,
+        TunnelId::new(ACTUAL_TUNNEL_ID).unwrap(),
+        pep_port,
+    )
+    .unwrap()
+    .with_test_control_plane_base_url(&control_plane)
+    .unwrap();
+    let tunnel = PreparedTunnelStart::prepare(tunnel_config, &ActualAdapterCredentialStore)
+        .and_then(PreparedTunnelStart::spawn)
+        .expect("actual vendored Tunnel starts");
+    assert!(tunnel.root_is_running().unwrap());
+    let tunnel_pid = tunnel.process_snapshot().pid;
+
+    let runtime = RuntimeOrchestrator::from_ready_for_test(driver, pep, tunnel);
+    let lifecycle = DesktopLifecycle::new(controller.clone());
+    lifecycle
+        .install_runtime_for_test(runtime)
+        .expect("actual production runtime registered under DesktopLifecycle");
+
+    let midpoint = ActualMidpointPrivilege {
+        controller,
+        tunnel_pid,
+        pep_port,
+        mcp_port,
+    };
+    let report = lifecycle.shutdown_with_privilege_for_test(&midpoint);
+    assert_eq!(report, ShutdownReport::default());
+    assert!(!actual_process_is_running(tunnel_pid));
+    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, pep_port)).is_err());
+    assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, mcp_port)).is_err());
+
+    let _ = release_control_plane.send(());
+    control_plane_thread.join().unwrap();
+    actual_cleanup_dir(&workspace);
+    actual_cleanup_dir(&health);
 }

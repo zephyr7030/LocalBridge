@@ -34,6 +34,22 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB013-003",
+      "scope": [
+        "src-tauri/src/runtime/orchestrator.rs",
+        "scripts/authorization-records/LB-013.json"
+      ],
+      "actions": [
+        "Add an owned CredentialStore path to ProductionRuntimeDriver while preserving the existing borrowed constructor for prior G2 tests",
+        "Add only a cfg(test) ready-runtime constructor needed to exercise shutdown against actual production MCP/PEP/Tunnel adapter handles"
+      ],
+      "reason": "G3 adversarial review commit fc9f4eb found that DesktopLifecycle could not own the borrowed ProductionRuntimeDriver as a long-lived production runtime, leaving Tray Exit with runtime=None even when the frozen lifecycle requires Tunnel -> privileged gate/Broker -> PEP -> MCP cleanup.",
+      "evidence_ref": "Review fc9f4eb and current source show DesktopLifecycle::register_runtime had no production caller and ProductionRuntimeDriver borrowed CredentialStore; this preauthorization is limited to making that adapter ownable and testable without broadening LB-013 writable paths.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

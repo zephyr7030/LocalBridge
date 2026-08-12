@@ -17,8 +17,10 @@ const modeGuard = main.indexOf("creates_main_window_at_startup");
 const createCall = main.indexOf("ensure_main_window", modeGuard);
 if (!(modeGuard >= 0 && createCall > modeGuard)) throw new Error("LB-013 foreground window creation is not startup-mode gated");
 if (/notification|toast|banner/i.test(`${main}\n${tray}\n${background}`)) throw new Error("LB-013 added pre-exhaustion notification surface");
-for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required", "ShowFinalErrorWindow"])
+for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required", "ShowFinalErrorWindow", "ProductionRuntimeOwner", "runtime: Mutex<ProductionRuntimeOwner>", "ProductionRuntimeOwner::default()", "start_production_runtime", "ProductionRuntimeDriver::new_owned", "WindowsCredentialStore::default", "with_privileged_execution", "self.privilege.gateway()", ".activate(runtime)", "shutdown_in_security_order(Some(&mut *runtime), privilege)"])
   if (!background.includes(required)) throw new Error(`LB-013 recovery attention gate missing: ${required}`);
+if (background.includes("Mutex<Option<Box<dyn ExitRuntime")) throw new Error("LB-013 still permits the production lifecycle owner itself to be absent");
+if (!main.includes("DesktopLifecycle::new(PrivilegeController::new())")) throw new Error("LB-013 production app setup does not construct the runtime owner");
 
 for (const required of ["TrayIconBuilder", "default_window_icon", '"打开 LocalBridge"', '"退出"'])
   if (!tray.includes(required)) throw new Error(`LB-013 tray contract missing: ${required}`);
@@ -35,9 +37,12 @@ if (!(disable.indexOf("gate_open.store(false") >= 0 && disable.indexOf("session.
   throw new Error("LB-013 privilege disable does not close gate before Broker shutdown");
 if (!orchestrator.includes("pub fn stop_tunnel_for_exit") || !orchestrator.includes("pub fn finish_exit_after_tunnel"))
   throw new Error("LB-013 production runtime has no staged security-order shutdown");
-for (const id of ["EXEC-PREAUTH-LB013-001", "EXEC-PREAUTH-LB013-002"]) {
+const backgroundTest = readFileSync("tests/integration/background/background.rs", "utf8");
+if (!backgroundTest.includes("production_tray_exit_owns_actual_adapter_and_stops_tunnel_gate_pep_mcp"))
+  throw new Error("LB-013 has no actual production-adapter Tray Exit regression");
+for (const id of ["EXEC-PREAUTH-LB013-001", "EXEC-PREAUTH-LB013-002", "EXEC-PREAUTH-LB013-003"]) {
   const record = auth.records.find((candidate) => candidate.authorization_id === id);
   if (!record || record.user_audit_status !== "PENDING" || record.does_not_expand_future_pr_writable_paths !== true)
     throw new Error(`LB-013 preauthorization record invalid: ${id}`);
 }
-console.log("LB013_CONTRACT=PASS background_no_window=true close_to_hide=true tray_frozen_icon=true exit_order=true recovery_silent_until_exhaustion=true preauth_pending=2");
+console.log("LB013_CONTRACT=PASS background_no_window=true close_to_hide=true tray_frozen_icon=true exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=3");

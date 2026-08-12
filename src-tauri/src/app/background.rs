@@ -1,8 +1,17 @@
 use std::ffi::OsStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+#[cfg(windows)]
+use crate::credentials::WindowsCredentialStore;
+#[cfg(windows)]
+use crate::mcp::InternalBearer;
 use crate::privilege::PrivilegeController;
-use crate::runtime::{RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator};
+#[cfg(windows)]
+use crate::privilege::{SESSION_NONCE_BYTES, random_session_nonce};
+use crate::runtime::{OrchestratorError, RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator};
+#[cfg(windows)]
+use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver};
+use crate::state::RuntimeFault;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupMode {
@@ -65,9 +74,64 @@ pub enum DesktopExitError {
     Privilege,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopRuntimeStartError {
+    AlreadyRegistered,
+    Runtime(OrchestratorError),
+}
+
+impl std::fmt::Display for DesktopRuntimeStartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyRegistered => f.write_str("desktop runtime is already registered"),
+            Self::Runtime(error) => write!(f, "desktop runtime start failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for DesktopRuntimeStartError {}
+
 pub trait ExitRuntime {
     fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError>;
     fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError>;
+}
+
+#[derive(Default)]
+struct ProductionRuntimeOwner {
+    active: Option<Box<dyn ExitRuntime + Send>>,
+}
+
+impl ProductionRuntimeOwner {
+    fn is_active(&self) -> bool {
+        self.active.is_some()
+    }
+
+    fn activate<R>(&mut self, runtime: R) -> Result<(), DesktopRuntimeStartError>
+    where
+        R: ExitRuntime + Send + 'static,
+    {
+        if self.active.is_some() {
+            return Err(DesktopRuntimeStartError::AlreadyRegistered);
+        }
+        self.active = Some(Box::new(runtime));
+        Ok(())
+    }
+}
+
+impl ExitRuntime for ProductionRuntimeOwner {
+    fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError> {
+        match self.active.as_deref_mut() {
+            Some(runtime) => runtime.stop_tunnel_for_exit(),
+            None => Ok(()),
+        }
+    }
+
+    fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError> {
+        match self.active.as_deref_mut() {
+            Some(runtime) => runtime.finish_exit_after_tunnel(),
+            None => Ok(()),
+        }
+    }
 }
 
 impl<D> ExitRuntime for RuntimeOrchestrator<D>
@@ -122,7 +186,8 @@ where
 
 pub struct DesktopLifecycle {
     privilege: PrivilegeController,
-    runtime: Mutex<Option<Box<dyn ExitRuntime + Send>>>,
+    runtime_operation: Mutex<()>,
+    runtime: Mutex<ProductionRuntimeOwner>,
 }
 
 impl std::fmt::Debug for DesktopLifecycle {
@@ -130,12 +195,12 @@ impl std::fmt::Debug for DesktopLifecycle {
         f.debug_struct("DesktopLifecycle")
             .field("privilege", &self.privilege)
             .field(
-                "runtime_registered",
+                "production_runtime_active",
                 &self
                     .runtime
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .is_some(),
+                    .is_active(),
             )
             .finish()
     }
@@ -145,7 +210,8 @@ impl DesktopLifecycle {
     pub fn new(privilege: PrivilegeController) -> Self {
         Self {
             privilege,
-            runtime: Mutex::new(None),
+            runtime_operation: Mutex::new(()),
+            runtime: Mutex::new(ProductionRuntimeOwner::default()),
         }
     }
 
@@ -153,23 +219,101 @@ impl DesktopLifecycle {
         &self.privilege
     }
 
-    pub fn register_runtime<R>(&self, runtime: R)
-    where
-        R: ExitRuntime + Send + 'static,
-    {
-        *self
+    #[cfg(windows)]
+    pub fn start_production_runtime(
+        &self,
+        config: ProductionRuntimeConfig,
+    ) -> Result<(), DesktopRuntimeStartError> {
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self
             .runtime
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(runtime));
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_active()
+        {
+            return Err(DesktopRuntimeStartError::AlreadyRegistered);
+        }
+
+        let driver = ProductionRuntimeDriver::new_owned(
+            config,
+            WindowsCredentialStore::default(),
+            generate_internal_bearer,
+        )
+        .with_privileged_execution(Arc::new(self.privilege.gateway()));
+        let mut runtime = RuntimeOrchestrator::new(driver);
+        runtime
+            .start()
+            .map_err(DesktopRuntimeStartError::Runtime)?;
+        self.runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .activate(runtime)
     }
 
     pub fn shutdown(&self) -> ShutdownReport {
+        self.shutdown_with_privilege(&self.privilege)
+    }
+
+    fn shutdown_with_privilege<P>(&self, privilege: &P) -> ShutdownReport
+    where
+        P: PrivilegeExit + ?Sized,
+    {
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut runtime = self
             .runtime
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        shutdown_in_security_order(runtime.as_deref_mut(), &self.privilege)
+        shutdown_in_security_order(Some(&mut *runtime), privilege)
     }
+
+    #[cfg(test)]
+    fn install_runtime_for_test<R>(&self, runtime: R) -> Result<(), DesktopRuntimeStartError>
+    where
+        R: ExitRuntime + Send + 'static,
+    {
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .activate(runtime)
+    }
+
+    #[cfg(test)]
+    fn shutdown_with_privilege_for_test<P>(&self, privilege: &P) -> ShutdownReport
+    where
+        P: PrivilegeExit + ?Sized,
+    {
+        self.shutdown_with_privilege(privilege)
+    }
+}
+
+#[cfg(windows)]
+fn generate_internal_bearer() -> Result<InternalBearer, RuntimeFault> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let nonce = random_session_nonce().map_err(|_| RuntimeFault::ConfigurationInvalid)?;
+    let mut encoded = [0u8; SESSION_NONCE_BYTES * 2];
+    for (index, byte) in nonce.as_bytes().iter().copied().enumerate() {
+        encoded[index * 2] = HEX[(byte >> 4) as usize];
+        encoded[index * 2 + 1] = HEX[(byte & 0x0f) as usize];
+    }
+    let result = std::str::from_utf8(&encoded)
+        .map_err(|_| RuntimeFault::ConfigurationInvalid)
+        .and_then(|value| {
+            InternalBearer::new(value).map_err(|_| RuntimeFault::ConfigurationInvalid)
+        });
+    for byte in &mut encoded {
+        unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+    result
 }
 
 #[cfg(test)]
