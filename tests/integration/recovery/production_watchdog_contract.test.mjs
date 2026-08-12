@@ -38,6 +38,20 @@ if (!recovery.includes("manual_retry_current_outage")) throw new Error("LB-010 p
 for (const required of ["PendingAutoRecovery", "next_deadline", "recover_minimal_cancellable", "RecoveryCancellation", "RecoveryPermit"]) {
   if (!recovery.includes(required) && !orchestrator.includes(required)) throw new Error(`LB-010 cooperative recovery primitive missing: ${required}`);
 }
+for (const required of [
+  "set_permission_mode_after_control_cancellation",
+  "resume_after_control_interruption",
+  "pending.permit = fresh_permit",
+  "next_attempt: attempt",
+]) if (!recovery.includes(required)) throw new Error(`LB-010 control-interrupted recovery reconciliation missing: ${required}`);
+
+const autoRuntimeImplStart = background.indexOf("impl<D, C> ExitRuntime for AutoRecoveryRuntime");
+const autoPermissionStart = background.indexOf("fn set_permission_mode", autoRuntimeImplStart);
+const autoWorkspaceStart = background.indexOf("fn switch_workspace", autoPermissionStart);
+if (autoRuntimeImplStart < 0 || autoPermissionStart < 0 || autoWorkspaceStart <= autoPermissionStart) throw new Error("LB-010 AutoRecoveryRuntime production permission adapter missing");
+const autoPermission = background.slice(autoPermissionStart, autoWorkspaceStart);
+if (!autoPermission.includes("set_permission_mode_after_control_cancellation(mode)")) throw new Error("LB-010 production permission switch bypasses recovery reconciliation");
+if (autoPermission.includes("orchestrator_mut()")) throw new Error("LB-010 production permission switch directly mutates orchestrator during cancelled recovery");
 
 const functionBody = (source, name, privateMethod = false) => {
   const marker = `${privateMethod ? "fn" : "pub fn"} ${name}`;
@@ -93,4 +107,4 @@ for (const endpoint of ['"/readyz"', '"/api/status"']) {
 if (!mcpHttp.includes("Duration::from_millis(500)") || !mcpHttp.includes("Duration::from_secs(2)")) throw new Error("LB-010 ordinary MCP transport timeouts were not preserved");
 if (!tunnelHealth.includes("Duration::from_millis(500)") || !tunnelHealth.includes("Duration::from_secs(2)")) throw new Error("LB-010 ordinary Tunnel health timeouts were not preserved");
 
-console.log("LB010_PRODUCTION_WATCHDOG=PASS cooperative_auto=true cancellable=true snapshot_cache=true mcp_probe=true pep_probe=true tunnel_probe=true stable_reset=true single_owner=true");
+console.log("LB010_PRODUCTION_WATCHDOG=PASS cooperative_auto=true cancellable=true permission_interrupt_resume=true snapshot_cache=true mcp_probe=true pep_probe=true tunnel_probe=true stable_reset=true single_owner=true");

@@ -63,6 +63,24 @@
       "least_privilege_reviewed": true,
       "not_used_for_unrelated_work": true,
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB010-004",
+      "scope": [
+        "src-tauri/src/app/background.rs",
+        "scripts/authorization-records/LB-010.json"
+      ],
+      "actions": [
+        "Route production AutoRecoveryRuntime permission-mode changes through the control-aware recovery reconciliation path so a permission change that cancels in-flight automatic recovery resumes the same outage generation and attempt instead of leaving Faulted(UserStopped)"
+      ],
+      "reason": "The formal G2 generation 5 independent adversarial review found that DesktopLifecycle permission changes cancel automatic recovery before taking the lifecycle lock, while the AutoRecoveryRuntime ExitRuntime adapter previously forwarded the mode change directly to RuntimeOrchestrator and could leave the cancelled recovery terminalized as Faulted(UserStopped). background.rs is the minimum adjacent production composition seam outside LB-010 writable paths.",
+      "evidence_ref": "G2 generation 5 review provenance commit b456e223a8d5d25f879a05b2928ab30a1611d3f0 plus the production AutoRecoveryRuntime ExitRuntime permission-mode adapter in src-tauri/src/app/background.rs",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "required_to_satisfy_frozen_contract": true,
+      "least_privilege_reviewed": true,
+      "not_used_for_unrelated_work": true,
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

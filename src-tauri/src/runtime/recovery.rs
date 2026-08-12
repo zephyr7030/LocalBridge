@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::state::{RuntimeComponent, RuntimeFault, RuntimeState};
+use crate::state::{PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState};
 
 use super::{
     OutageGenerationId, RecoveryCancellation, RecoveryPermit, RecoveryScope, RuntimeDriver,
@@ -174,6 +174,15 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
         self.cancellation.clone()
     }
 
+    pub fn set_permission_mode_after_control_cancellation(
+        &mut self,
+        mode: PermissionMode,
+    ) -> Result<(), RuntimeFault> {
+        let result = self.runtime.set_permission_mode(mode);
+        self.resume_after_control_interruption();
+        result
+    }
+
     pub fn monitor_once(&mut self) -> Option<RecoveryOutcome> {
         if self.pending_auto.is_some() {
             return self.advance_pending_auto();
@@ -201,6 +210,51 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
             &mut self.runtime,
             RuntimeOutage::classify(outage.component, outage.fault),
         ))
+    }
+
+    fn resume_after_control_interruption(&mut self) {
+        let pending_cancelled = self
+            .pending_auto
+            .as_ref()
+            .is_some_and(|pending| pending.permit.is_cancelled());
+        if self.pending_auto.is_some() {
+            if pending_cancelled {
+                let fresh_permit = self.cancellation.permit();
+                if let Some(pending) = self.pending_auto.as_mut() {
+                    pending.permit = fresh_permit;
+                }
+            }
+            return;
+        }
+
+        if !matches!(self.runtime.state(), RuntimeState::Recovering { .. }) {
+            return;
+        }
+        let attempt = self.controller.current_attempt;
+        if attempt == 0 || attempt > RECONNECT_BACKOFF_SECONDS.len() as u32 {
+            return;
+        }
+        let Some(generation) = self.controller.generation else {
+            return;
+        };
+        let Some(outage) = self.runtime.active_outage().cloned() else {
+            return;
+        };
+        if outage.id != generation {
+            return;
+        }
+        let classified = RuntimeOutage::classify(outage.component, outage.fault);
+        if classified.disposition != RecoveryDisposition::Recoverable {
+            return;
+        }
+        self.pending_auto = Some(PendingAutoRecovery {
+            generation,
+            component: classified.component,
+            scope: classified.recovery_scope(),
+            next_attempt: attempt,
+            next_deadline: self.controller.clock.now(),
+            permit: self.cancellation.permit(),
+        });
     }
 
     fn begin_cooperative_auto(&mut self, outage: RuntimeOutage) -> Option<RecoveryOutcome> {
@@ -271,9 +325,12 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
                     attempt,
                 })
             }
-            Err(error) if permit.is_cancelled() || error.fault == RuntimeFault::UserStopped => {
+            Err(error)
+                if permit.is_cancelled()
+                    && error.fault == RuntimeFault::UserStopped
+                    && error.cleanup_fault.is_none() =>
+            {
                 self.pending_auto = None;
-                self.controller.current_attempt = 0;
                 None
             }
             Err(error) => {

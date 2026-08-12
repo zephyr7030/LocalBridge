@@ -129,6 +129,18 @@ impl RuntimeDriver for RecoveryDriver {
     }
     fn current_workspace(&self) -> Option<&Path> { Some(&self.workspace) }
     fn configure_workspace(&mut self, workspace: PathBuf) -> Result<(), RuntimeFault> { self.workspace = workspace; Ok(()) }
+    fn configure_permission_mode(&mut self, _mode: PermissionMode) -> Result<(), RuntimeFault> {
+        self.event("permission.configure");
+        Ok(())
+    }
+    fn set_permission_mode(
+        &mut self,
+        _pep: &Self::Pep,
+        _mode: PermissionMode,
+    ) -> Result<(), RuntimeFault> {
+        self.event("permission.set");
+        Ok(())
+    }
 }
 
 #[test]
@@ -421,6 +433,44 @@ fn cooperative_auto_cancellation_during_backoff_consumes_no_attempt_or_attention
 }
 
 #[test]
+fn permission_switch_during_backoff_rearms_same_generation_without_budget_reset() {
+    let (driver, events, _, _, _) = RecoveryDriver::new();
+    let tunnel_healthy = driver.tunnel_healthy.clone();
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
+    events.borrow_mut().clear();
+    *tunnel_healthy.borrow_mut() = false;
+
+    assert!(monitored.monitor_once().is_none());
+    let generation = monitored.runtime().active_outage().unwrap().id;
+    monitored.cancellation().cancel();
+    monitored
+        .set_permission_mode_after_control_cancellation(PermissionMode::Full)
+        .expect("permission change during backoff succeeds");
+    assert_eq!(monitored.controller.current_attempt(), 0);
+    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
+    assert!(events.borrow().contains(&"permission.set"));
+
+    monitored.recovery_clock_mut().advance(Duration::from_secs(1));
+    let outcome = monitored
+        .monitor_once()
+        .expect("same pending attempt resumes after permission change");
+    assert!(matches!(
+        outcome,
+        RecoveryOutcome::Recovered {
+            generation: recovered_generation,
+            attempt: 1,
+        } if recovered_generation == generation
+    ));
+    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
+    let outage = monitored.runtime().active_outage().unwrap();
+    assert_eq!(outage.id, generation);
+    assert!(!outage.user_attention_emitted());
+    assert!(monitored.recovery_clock().sleeps.is_empty());
+}
+
+#[test]
 fn cooperative_attempt_stops_on_new_nonrecoverable_fault_without_later_deadlines() {
     let (driver, events, fail_counter, _, _) = RecoveryDriver::new();
     let tunnel_healthy = driver.tunnel_healthy.clone();
@@ -457,7 +507,7 @@ fn cooperative_attempt_stops_on_new_nonrecoverable_fault_without_later_deadlines
 }
 
 #[test]
-fn cooperative_inflight_readiness_cancellation_cleans_new_child_and_keeps_lower_ownership_stoppable() {
+fn permission_switch_after_inflight_cancellation_resumes_same_attempt_and_returns_ready() {
     let (driver, events, _, _, _) = RecoveryDriver::new();
     let tunnel_healthy = driver.tunnel_healthy.clone();
     let cancellation = RecoveryCancellation::default();
@@ -478,8 +528,12 @@ fn cooperative_inflight_readiness_cancellation_cleans_new_child_and_keeps_lower_
     assert!(monitored.monitor_once().is_none(), "UserStopped cancellation is silent");
     assert!(matches!(
         monitored.runtime().state(),
-        RuntimeState::Faulted(RuntimeFault::UserStopped)
+        RuntimeState::Recovering {
+            component: RuntimeComponent::Tunnel,
+            attempt: 1,
+        }
     ));
+    assert_eq!(monitored.controller.current_attempt(), 1);
     let outage = monitored.runtime().active_outage().unwrap();
     assert_eq!(outage.id, generation);
     assert!(!outage.user_attention_emitted());
@@ -493,13 +547,29 @@ fn cooperative_inflight_readiness_cancellation_cleans_new_child_and_keeps_lower_
         "old Tunnel and cancelled replacement are both owned and stopped"
     );
 
-    monitored.recovery_clock_mut().advance(Duration::from_secs(60));
-    assert!(monitored.monitor_once().is_none());
-    assert_eq!(events.borrow().iter().filter(|event| **event == "tunnel.start").count(), 1);
+    monitored
+        .set_permission_mode_after_control_cancellation(PermissionMode::Full)
+        .expect("permission change applies to retained PEP");
+    assert!(events.borrow().contains(&"permission.set"));
+    let outcome = monitored
+        .monitor_once()
+        .expect("cancelled attempt is rearmed immediately after control update");
+    assert!(matches!(
+        outcome,
+        RecoveryOutcome::Recovered {
+            generation: recovered_generation,
+            attempt: 1,
+        } if recovered_generation == generation
+    ));
+    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
+    let outage = monitored.runtime().active_outage().unwrap();
+    assert_eq!(outage.id, generation);
+    assert!(!outage.user_attention_emitted());
+    assert_eq!(events.borrow().iter().filter(|event| **event == "tunnel.start").count(), 2);
     monitored
         .orchestrator_mut()
         .stop()
-        .expect("explicit stop cleans retained PEP/MCP after cancelled attempt");
+        .expect("explicit stop cleans recovered Tunnel/PEP/MCP");
     assert!(events.borrow().contains(&"pep.stop"));
     assert!(events.borrow().contains(&"mcp.stop"));
 }

@@ -61,11 +61,25 @@ for (const required of [
   "attempt >= RECONNECT_BACKOFF_SECONDS.len() as u32",
   "classified.disposition == RecoveryDisposition::NonRecoverable",
   "permit.is_cancelled()",
+  "set_permission_mode_after_control_cancellation",
+  "resume_after_control_interruption",
+  "pending.permit = fresh_permit",
+  "next_attempt: attempt",
 ]) if (!recovery.includes(required)) throw new Error(`ARCH-020 missing cooperative reconnect invariant: ${required}`);
 if (cooperative.includes(".sleep(")) throw new Error("ARCH-020 cooperative automatic recovery must use deadlines, not blocking sleep");
 const cancellableCalls = (cooperative.match(/recover_minimal_cancellable/g) ?? []).length;
 if (cancellableCalls !== 1) throw new Error(`ARCH-020 cooperative monitor must execute at most one reconnect attempt per advancement, found ${cancellableCalls} call sites`);
 for (const required of ["RecoveryScope::Tunnel", "RecoveryScope::PolicyAndTunnel", "RecoveryScope::FullRuntime", "confirm_pep_ready", "confirm_mcp_ready"]) if (!orchestrator.includes(required)) process.exit(5);
 for (const required of ["confirm_mcp_ready_for_recovery", "confirm_pep_ready_for_recovery", "confirm_tunnel_ready_for_recovery", "RecoveryPermit"]) if (!orchestrator.includes(required)) throw new Error(`ARCH-020 cancellable recovery stage missing: ${required}`);
+const cancellableStart = orchestrator.indexOf("pub fn recover_minimal_cancellable");
+const cancellableEnd = orchestrator.indexOf("pub fn switch_workspace_to", cancellableStart);
+if (cancellableStart < 0 || cancellableEnd <= cancellableStart) throw new Error("ARCH-020 cancellable recovery implementation missing");
+const cancellable = orchestrator.slice(cancellableStart, cancellableEnd);
+for (const required of [
+  "permit.is_cancelled()",
+  "error.fault == RuntimeFault::UserStopped",
+  "error.cleanup_fault.is_none()",
+  "self.state = RuntimeState::Recovering { component, attempt }",
+]) if (!cancellable.includes(required)) throw new Error(`ARCH-020 control cancellation can terminalize cooperative recovery: ${required}`);
 if (/while\s*\([^)]*reconnect|loop\s*\{[\s\S]{0,200}recover_minimal/.test(recovery)) throw new Error("ARCH-020 unbounded reconnect loop detected");
-console.log("ARCH-020_VERIFY=PASS sync_attempts=5 cooperative_deadlines=1,2,5,10,30 cooperative_sleep=false post_attempt_retryability=true cancellable=true same_generation_exhaustion_terminal=true minimal_layer_health_gate=true");
+console.log("ARCH-020_VERIFY=PASS sync_attempts=5 cooperative_deadlines=1,2,5,10,30 cooperative_sleep=false post_attempt_retryability=true cancellable=true control_interrupt_resume=true same_generation_exhaustion_terminal=true minimal_layer_health_gate=true");

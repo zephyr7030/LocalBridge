@@ -474,6 +474,14 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
                 self.state = RuntimeState::Ready;
                 Ok(())
             }
+            Err(error)
+                if permit.is_cancelled()
+                    && error.fault == RuntimeFault::UserStopped
+                    && error.cleanup_fault.is_none() =>
+            {
+                self.state = RuntimeState::Recovering { component, attempt };
+                Err(error)
+            }
             Err(error) => {
                 self.state = RuntimeState::Faulted(error.fault.clone());
                 Err(error)

@@ -314,8 +314,7 @@ where
         &mut self,
         mode: PermissionMode,
     ) -> Result<(), DesktopRuntimeControlError> {
-        self.orchestrator_mut()
-            .set_permission_mode(mode)
+        self.set_permission_mode_after_control_cancellation(mode)
             .map_err(DesktopRuntimeControlError::Runtime)
     }
 
