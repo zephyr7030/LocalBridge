@@ -54,6 +54,23 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-004",
+      "scope": [
+        "vite.config.ts",
+        "scripts/test-start-localbridge.mjs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Pin the Vite development listener to the same 127.0.0.1:1420 endpoint already required by Tauri devUrl and enable strictPort so Vite cannot silently select a mismatched port",
+        "Extend the one-click launcher regression test to verify Vite/Tauri endpoint parity and actual loopback readiness on port 1420 with deterministic process cleanup"
+      ],
+      "reason": "Human manual testing showed the one-click launcher hanging because Vite defaulted to localhost:5173 while Tauri waited indefinitely for 127.0.0.1:1420.",
+      "evidence_ref": "User manual-test screenshot on 2026-08-12 showing Vite ready on localhost:5173 and Tauri repeatedly waiting for 127.0.0.1:1420",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }
