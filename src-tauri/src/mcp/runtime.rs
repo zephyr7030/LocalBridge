@@ -106,6 +106,7 @@ pub enum CodingToolsRuntimeError {
     UpstreamRpcError,
     McpExited,
     HealthTimeout,
+    Cancelled,
 }
 
 impl CodingToolsRuntimeError {
@@ -128,6 +129,7 @@ impl CodingToolsRuntimeError {
                 RuntimeFault::McpHealthTimeout
             }
             Self::McpExited => RuntimeFault::McpExited,
+            Self::Cancelled => RuntimeFault::UserStopped,
         }
     }
 }
@@ -148,6 +150,7 @@ impl fmt::Display for CodingToolsRuntimeError {
             Self::UpstreamRpcError => f.write_str("coding runtime returned an MCP RPC error"),
             Self::McpExited => f.write_str("coding runtime exited before readiness"),
             Self::HealthTimeout => f.write_str("coding runtime readiness timed out"),
+            Self::Cancelled => f.write_str("coding runtime recovery was cancelled"),
         }
     }
 }
@@ -181,6 +184,40 @@ impl CodingToolsRuntime {
         config: CodingToolsRuntimeConfig,
         bearer: InternalBearer,
         readiness_timeout: Duration,
+    ) -> Result<Self, CodingToolsRuntimeError> {
+        let mut runtime = Self::spawn_unready(config, bearer)?;
+        if let Err(error) = runtime.wait_ready(readiness_timeout) {
+            let _ = runtime.supervisor.force_stop();
+            return Err(error);
+        }
+        Ok(runtime)
+    }
+
+    pub fn start_for_recovery(
+        config: CodingToolsRuntimeConfig,
+        bearer: InternalBearer,
+        readiness_timeout: Duration,
+        probe_timeout: Duration,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<Self, CodingToolsRuntimeError> {
+        if cancelled() {
+            return Err(CodingToolsRuntimeError::Cancelled);
+        }
+        let mut runtime = Self::spawn_unready(config, bearer)?;
+        if let Err(error) = runtime.wait_ready_for_recovery(
+            readiness_timeout,
+            probe_timeout,
+            &cancelled,
+        ) {
+            let _ = runtime.supervisor.force_stop();
+            return Err(error);
+        }
+        Ok(runtime)
+    }
+
+    fn spawn_unready(
+        config: CodingToolsRuntimeConfig,
+        bearer: InternalBearer,
     ) -> Result<Self, CodingToolsRuntimeError> {
         validate_workspace(&config.workspace)?;
         if config.port == 0 {
@@ -224,16 +261,11 @@ impl CodingToolsRuntime {
 
         let supervisor = WindowsProcessSupervisor::spawn(&spec)?;
         let session = McpSession::new(config.port, bearer);
-        let mut runtime = Self {
+        Ok(Self {
             supervisor,
             session,
             port: config.port,
-        };
-        if let Err(error) = runtime.wait_ready(readiness_timeout) {
-            let _ = runtime.supervisor.force_stop();
-            return Err(error);
-        }
-        Ok(runtime)
+        })
     }
 
     pub fn endpoint(&self) -> String {
@@ -299,6 +331,40 @@ impl CodingToolsRuntime {
                 Err(CodingToolsRuntimeError::ConnectionUnavailable) => {}
                 Err(CodingToolsRuntimeError::HttpStatus(503)) => {}
                 Err(error) => return Err(error),
+            }
+            if Instant::now() >= deadline {
+                return Err(CodingToolsRuntimeError::HealthTimeout);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn wait_ready_for_recovery(
+        &mut self,
+        timeout: Duration,
+        probe_timeout: Duration,
+        cancelled: &impl Fn() -> bool,
+    ) -> Result<(), CodingToolsRuntimeError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if cancelled() {
+                return Err(CodingToolsRuntimeError::Cancelled);
+            }
+            if !self.supervisor.root_is_running()? {
+                return Err(CodingToolsRuntimeError::McpExited);
+            }
+            match self.session.initialize_with_timeout(probe_timeout) {
+                Ok(_) => return if cancelled() {
+                    Err(CodingToolsRuntimeError::Cancelled)
+                } else {
+                    Ok(())
+                },
+                Err(CodingToolsRuntimeError::ConnectionUnavailable) => {}
+                Err(CodingToolsRuntimeError::HttpStatus(503)) => {}
+                Err(error) => return Err(error),
+            }
+            if cancelled() {
+                return Err(CodingToolsRuntimeError::Cancelled);
             }
             if Instant::now() >= deadline {
                 return Err(CodingToolsRuntimeError::HealthTimeout);

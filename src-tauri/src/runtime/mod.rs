@@ -1,8 +1,11 @@
 #[cfg(windows)]
 mod windows_supervisor;
 
+mod cancellation;
 mod orchestrator;
 mod recovery;
+
+pub use cancellation::{RecoveryCancellation, RecoveryPermit};
 
 pub use orchestrator::{
     OrchestratorError, OutageGeneration, OutageGenerationId, OutageTracker,

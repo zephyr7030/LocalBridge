@@ -100,6 +100,33 @@ impl McpSession {
         Ok(result)
     }
 
+    pub(crate) fn initialize_with_timeout(
+        &mut self,
+        transport_timeout: Duration,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        let result = self.request_with_id_and_timeout(
+            "initialize",
+            json!({
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "localbridge", "version": "0.1.0"}
+            }),
+            Value::from(id),
+            transport_timeout,
+        )?;
+        if result.get("protocolVersion").and_then(Value::as_str) != Some(PROTOCOL_VERSION)
+            || result.pointer("/serverInfo/name").and_then(Value::as_str) != Some("coding-tools-mcp")
+            || result.pointer("/serverInfo/version").and_then(Value::as_str) != Some(CODING_TOOLS_VERSION)
+            || self.session_id.is_none()
+        {
+            return Err(CodingToolsRuntimeError::ProtocolMismatch);
+        }
+        self.notify_with_timeout("notifications/initialized", json!({}), transport_timeout)?;
+        Ok(result)
+    }
+
     pub(crate) fn list_tools(&mut self) -> Result<Value, CodingToolsRuntimeError> {
         self.request("tools/list", json!({}))
     }
@@ -180,6 +207,42 @@ impl McpSession {
             .ok_or(CodingToolsRuntimeError::ProtocolMismatch)
     }
 
+    fn request_with_id_and_timeout(
+        &mut self,
+        method: &str,
+        params: Value,
+        id: Value,
+        transport_timeout: Duration,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        let payload = json!({"jsonrpc":"2.0","method":method,"params":params,"id":id});
+        let response = post_json_with_timeouts(
+            self.port,
+            Some(&self.bearer),
+            self.session_id.as_deref(),
+            &payload,
+            transport_timeout,
+            transport_timeout,
+        )?;
+        if response.status != 200 {
+            return Err(CodingToolsRuntimeError::HttpStatus(response.status));
+        }
+        if let Some(session) = response.session_id {
+            if self.session_id.as_deref().is_some_and(|existing| existing != session) {
+                return Err(CodingToolsRuntimeError::ProtocolMismatch);
+            }
+            self.session_id = Some(Arc::from(session));
+        }
+        let reply: Value = serde_json::from_slice(&response.body)
+            .map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
+        if reply.get("error").is_some() {
+            return Err(CodingToolsRuntimeError::UpstreamRpcError);
+        }
+        reply
+            .get("result")
+            .cloned()
+            .ok_or(CodingToolsRuntimeError::ProtocolMismatch)
+    }
+
     fn notify(&mut self, method: &str, params: Value) -> Result<(), CodingToolsRuntimeError> {
         let payload = json!({"jsonrpc":"2.0","method":method,"params":params});
         let response = post_json(
@@ -187,6 +250,28 @@ impl McpSession {
             Some(&self.bearer),
             self.session_id.as_deref(),
             &payload,
+        )?;
+        if response.status == 202 {
+            Ok(())
+        } else {
+            Err(CodingToolsRuntimeError::HttpStatus(response.status))
+        }
+    }
+
+    fn notify_with_timeout(
+        &mut self,
+        method: &str,
+        params: Value,
+        transport_timeout: Duration,
+    ) -> Result<(), CodingToolsRuntimeError> {
+        let payload = json!({"jsonrpc":"2.0","method":method,"params":params});
+        let response = post_json_with_timeouts(
+            self.port,
+            Some(&self.bearer),
+            self.session_id.as_deref(),
+            &payload,
+            transport_timeout,
+            transport_timeout,
         )?;
         if response.status == 202 {
             Ok(())
@@ -229,14 +314,32 @@ fn post_json(
     session_id: Option<&str>,
     payload: &Value,
 ) -> Result<HttpResponse, CodingToolsRuntimeError> {
+    post_json_with_timeouts(
+        port,
+        bearer,
+        session_id,
+        payload,
+        Duration::from_millis(500),
+        Duration::from_secs(2),
+    )
+}
+
+fn post_json_with_timeouts(
+    port: u16,
+    bearer: Option<&InternalBearer>,
+    session_id: Option<&str>,
+    payload: &Value,
+    connect_timeout: Duration,
+    io_timeout: Duration,
+) -> Result<HttpResponse, CodingToolsRuntimeError> {
     let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
-    let mut stream = TcpStream::connect_timeout(&address.into(), Duration::from_millis(500))
+    let mut stream = TcpStream::connect_timeout(&address.into(), connect_timeout)
         .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
+        .set_read_timeout(Some(io_timeout))
         .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
     stream
-        .set_write_timeout(Some(Duration::from_secs(2)))
+        .set_write_timeout(Some(io_timeout))
         .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
 
     let mut body = serde_json::to_vec(payload).map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;

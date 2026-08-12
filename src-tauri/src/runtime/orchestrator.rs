@@ -15,6 +15,8 @@ use crate::state::{
 };
 use crate::tunnel::{PreparedTunnelStart, TunnelId, TunnelRuntime, TunnelRuntimeConfig};
 
+use super::RecoveryPermit;
+
 pub trait RuntimeDriver {
     type Mcp;
     type Pep;
@@ -29,6 +31,45 @@ pub trait RuntimeDriver {
 
     fn start_tunnel(&mut self, pep: &Self::Pep) -> Result<Self::Tunnel, RuntimeFault>;
     fn confirm_tunnel_ready(&mut self, tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault>;
+
+    fn start_mcp_for_recovery(
+        &mut self,
+        permit: &RecoveryPermit,
+    ) -> Result<Self::Mcp, RuntimeFault> {
+        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.start_mcp() }
+    }
+
+    fn confirm_mcp_ready_for_recovery(
+        &mut self,
+        mcp: &mut Self::Mcp,
+        permit: &RecoveryPermit,
+    ) -> Result<(), RuntimeFault> {
+        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.confirm_mcp_ready(mcp) }
+    }
+
+    fn confirm_pep_ready_for_recovery(
+        &mut self,
+        pep: &Self::Pep,
+        permit: &RecoveryPermit,
+    ) -> Result<(), RuntimeFault> {
+        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.confirm_pep_ready(pep) }
+    }
+
+    fn start_tunnel_for_recovery(
+        &mut self,
+        pep: &Self::Pep,
+        permit: &RecoveryPermit,
+    ) -> Result<Self::Tunnel, RuntimeFault> {
+        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.start_tunnel(pep) }
+    }
+
+    fn confirm_tunnel_ready_for_recovery(
+        &mut self,
+        tunnel: &mut Self::Tunnel,
+        permit: &RecoveryPermit,
+    ) -> Result<(), RuntimeFault> {
+        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.confirm_tunnel_ready(tunnel) }
+    }
 
     fn stop_tunnel(&mut self, tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault>;
     fn stop_pep(&mut self, pep: Self::Pep) -> Result<Self::Mcp, RuntimeFault>;
@@ -53,6 +94,10 @@ pub trait RuntimeDriver {
     }
 
     fn configure_workspace(&mut self, _workspace: PathBuf) -> Result<(), RuntimeFault> {
+        Err(RuntimeFault::ConfigurationInvalid)
+    }
+
+    fn configure_permission_mode(&mut self, _mode: PermissionMode) -> Result<(), RuntimeFault> {
         Err(RuntimeFault::ConfigurationInvalid)
     }
 
@@ -209,8 +254,13 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
     }
 
     pub fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), RuntimeFault> {
-        let ready = self.ready.as_ref().ok_or(RuntimeFault::ConfigurationInvalid)?;
-        self.driver.set_permission_mode(&ready.pep, mode)
+        if let Some(ready) = self.ready.as_ref() {
+            return self.driver.set_permission_mode(&ready.pep, mode);
+        }
+        if let Some(pep) = self.recovering_pep.as_ref() {
+            return self.driver.set_permission_mode(pep, mode);
+        }
+        self.driver.configure_permission_mode(mode)
     }
 
     pub fn start(&mut self) -> Result<(), OrchestratorError> {
@@ -401,6 +451,36 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
     }
 
+    pub fn recover_minimal_cancellable(
+        &mut self,
+        scope: RecoveryScope,
+        attempt: u32,
+        permit: &RecoveryPermit,
+    ) -> Result<(), OrchestratorError> {
+        Self::check_recovery_permit(permit)?;
+        let component = match scope {
+            RecoveryScope::Tunnel => RuntimeComponent::Tunnel,
+            RecoveryScope::PolicyAndTunnel => RuntimeComponent::PolicyEnforcement,
+            RecoveryScope::FullRuntime => RuntimeComponent::CodingRuntime,
+        };
+        self.state = RuntimeState::Recovering { component, attempt };
+        let result = match scope {
+            RecoveryScope::Tunnel => self.recover_tunnel_only_cancellable(permit),
+            RecoveryScope::PolicyAndTunnel => self.recover_policy_and_tunnel_cancellable(permit),
+            RecoveryScope::FullRuntime => self.recover_full_runtime_cancellable(permit),
+        };
+        match result {
+            Ok(()) => {
+                self.state = RuntimeState::Ready;
+                Ok(())
+            }
+            Err(error) => {
+                self.state = RuntimeState::Faulted(error.fault.clone());
+                Err(error)
+            }
+        }
+    }
+
     pub fn switch_workspace_to(
         &mut self,
         candidate: &Path,
@@ -470,6 +550,37 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         self.start_tunnel_from_recovering_pep()
     }
 
+    fn recover_tunnel_only_cancellable(
+        &mut self,
+        permit: &RecoveryPermit,
+    ) -> Result<(), OrchestratorError> {
+        Self::check_recovery_permit(permit)?;
+        if let Some(mut ready) = self.ready.take() {
+            if let Err(fault) = self.driver.stop_tunnel(&mut ready.tunnel) {
+                self.ready = Some(ready);
+                return Err(OrchestratorError { fault, cleanup_fault: None });
+            }
+            self.recovering_pep = Some(ready.pep);
+        }
+        Self::check_recovery_permit(permit)?;
+        if self.recovering_pep.is_none() {
+            return if self.recovering_mcp.is_some() {
+                self.recover_policy_and_tunnel_cancellable(permit)
+            } else {
+                self.recover_full_runtime_cancellable(permit)
+            };
+        }
+        let pep = self.recovering_pep.as_ref().expect("checked retained PEP");
+        if let Err(fault) = self.driver.confirm_pep_ready_for_recovery(pep, permit) {
+            if fault == RuntimeFault::UserStopped {
+                return Err(OrchestratorError { fault, cleanup_fault: None });
+            }
+            return self.recover_policy_and_tunnel_cancellable(permit);
+        }
+        Self::check_recovery_permit(permit)?;
+        self.start_tunnel_from_recovering_pep_cancellable(permit)
+    }
+
     fn start_tunnel_from_recovering_pep(&mut self) -> Result<(), OrchestratorError> {
         let pep = self
             .recovering_pep
@@ -486,6 +597,48 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
             let cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
             return Err(OrchestratorError {
                 fault,
+                cleanup_fault,
+            });
+        }
+        let pep = self
+            .recovering_pep
+            .take()
+            .expect("PEP remains owned through tunnel-only recovery");
+        self.ready = Some(ReadyHandles { pep, tunnel });
+        Ok(())
+    }
+
+    fn start_tunnel_from_recovering_pep_cancellable(
+        &mut self,
+        permit: &RecoveryPermit,
+    ) -> Result<(), OrchestratorError> {
+        Self::check_recovery_permit(permit)?;
+        let pep = self
+            .recovering_pep
+            .as_ref()
+            .expect("tunnel recovery requires retained PEP");
+        let mut tunnel = self
+            .driver
+            .start_tunnel_for_recovery(pep, permit)
+            .map_err(|fault| OrchestratorError { fault, cleanup_fault: None })?;
+        if permit.is_cancelled() {
+            let cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
+            return Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
+                cleanup_fault,
+            });
+        }
+        if let Err(fault) = self
+            .driver
+            .confirm_tunnel_ready_for_recovery(&mut tunnel, permit)
+        {
+            let cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
+            return Err(OrchestratorError { fault, cleanup_fault });
+        }
+        if permit.is_cancelled() {
+            let cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
+            return Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
                 cleanup_fault,
             });
         }
@@ -552,6 +705,76 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         self.start_tunnel_from_recovering_pep()
     }
 
+    fn recover_policy_and_tunnel_cancellable(
+        &mut self,
+        permit: &RecoveryPermit,
+    ) -> Result<(), OrchestratorError> {
+        Self::check_recovery_permit(permit)?;
+        if let Some(mut ready) = self.ready.take() {
+            if let Err(fault) = self.driver.stop_tunnel(&mut ready.tunnel) {
+                self.ready = Some(ready);
+                return Err(OrchestratorError { fault, cleanup_fault: None });
+            }
+            self.recovering_pep = Some(ready.pep);
+        }
+        Self::check_recovery_permit(permit)?;
+        if let Some(pep) = self.recovering_pep.take() {
+            match self.driver.stop_pep(pep) {
+                Ok(mcp) => self.recovering_mcp = Some(mcp),
+                Err(fault) => return Err(OrchestratorError { fault, cleanup_fault: None }),
+            }
+        }
+        Self::check_recovery_permit(permit)?;
+        let Some(mut mcp) = self.recovering_mcp.take() else {
+            return self.recover_full_runtime_cancellable(permit);
+        };
+        if let Err(fault) = self.driver.confirm_mcp_ready_for_recovery(&mut mcp, permit) {
+            self.recovering_mcp = Some(mcp);
+            if fault == RuntimeFault::UserStopped {
+                return Err(OrchestratorError { fault, cleanup_fault: None });
+            }
+            return self.recover_full_runtime_cancellable(permit);
+        }
+        if permit.is_cancelled() {
+            self.recovering_mcp = Some(mcp);
+            return Self::check_recovery_permit(permit);
+        }
+        let pep = self
+            .driver
+            .start_pep(mcp)
+            .map_err(|fault| OrchestratorError { fault, cleanup_fault: None })?;
+        if permit.is_cancelled() {
+            return match self.driver.stop_pep(pep) {
+                Ok(mcp) => {
+                    self.recovering_mcp = Some(mcp);
+                    Err(OrchestratorError {
+                        fault: RuntimeFault::UserStopped,
+                        cleanup_fault: None,
+                    })
+                }
+                Err(cleanup_fault) => Err(OrchestratorError {
+                    fault: RuntimeFault::UserStopped,
+                    cleanup_fault: Some(cleanup_fault),
+                }),
+            };
+        }
+        if let Err(fault) = self.driver.confirm_pep_ready_for_recovery(&pep, permit) {
+            return match self.driver.stop_pep(pep) {
+                Ok(mcp) => {
+                    self.recovering_mcp = Some(mcp);
+                    Err(OrchestratorError { fault, cleanup_fault: None })
+                }
+                Err(cleanup_fault) => Err(OrchestratorError {
+                    fault,
+                    cleanup_fault: Some(cleanup_fault),
+                }),
+            };
+        }
+        self.recovering_pep = Some(pep);
+        Self::check_recovery_permit(permit)?;
+        self.start_tunnel_from_recovering_pep_cancellable(permit)
+    }
+
     fn recover_full_runtime(&mut self) -> Result<(), OrchestratorError> {
         let cleanup_fault = self.stop().err().map(|error| error.fault);
         if let Some(fault) = cleanup_fault {
@@ -562,6 +785,116 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
         self.state = RuntimeState::Stopped;
         self.start()
+    }
+
+    fn recover_full_runtime_cancellable(
+        &mut self,
+        permit: &RecoveryPermit,
+    ) -> Result<(), OrchestratorError> {
+        let cleanup_fault = self.stop().err().map(|error| error.fault);
+        if let Some(fault) = cleanup_fault {
+            return Err(OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            });
+        }
+        Self::check_recovery_permit(permit)?;
+        self.state = RuntimeState::Stopped;
+        self.start_for_recovery(permit)
+    }
+
+    fn start_for_recovery(&mut self, permit: &RecoveryPermit) -> Result<(), OrchestratorError> {
+        Self::check_recovery_permit(permit)?;
+        let mut mcp = self
+            .driver
+            .start_mcp_for_recovery(permit)
+            .map_err(|fault| OrchestratorError { fault, cleanup_fault: None })?;
+        if permit.is_cancelled() {
+            let cleanup_fault = self.driver.stop_mcp(&mut mcp).err();
+            return Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
+                cleanup_fault,
+            });
+        }
+        if let Err(fault) = self.driver.confirm_mcp_ready_for_recovery(&mut mcp, permit) {
+            let cleanup_fault = self.driver.stop_mcp(&mut mcp).err();
+            return Err(OrchestratorError { fault, cleanup_fault });
+        }
+        if permit.is_cancelled() {
+            let cleanup_fault = self.driver.stop_mcp(&mut mcp).err();
+            return Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
+                cleanup_fault,
+            });
+        }
+
+        let pep = self
+            .driver
+            .start_pep(mcp)
+            .map_err(|fault| OrchestratorError { fault, cleanup_fault: None })?;
+        if permit.is_cancelled() {
+            let cleanup_fault = self.cleanup_pep(pep);
+            return Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
+                cleanup_fault,
+            });
+        }
+        if let Err(fault) = self.driver.confirm_pep_ready_for_recovery(&pep, permit) {
+            let cleanup_fault = self.cleanup_pep(pep);
+            return Err(OrchestratorError { fault, cleanup_fault });
+        }
+        if permit.is_cancelled() {
+            let cleanup_fault = self.cleanup_pep(pep);
+            return Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
+                cleanup_fault,
+            });
+        }
+
+        let mut tunnel = match self.driver.start_tunnel_for_recovery(&pep, permit) {
+            Ok(tunnel) => tunnel,
+            Err(fault) => {
+                let cleanup_fault = self.cleanup_pep(pep);
+                return Err(OrchestratorError { fault, cleanup_fault });
+            }
+        };
+        if permit.is_cancelled() {
+            let mut cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
+            merge_cleanup_fault(&mut cleanup_fault, self.cleanup_pep(pep));
+            return Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
+                cleanup_fault,
+            });
+        }
+        if let Err(fault) = self
+            .driver
+            .confirm_tunnel_ready_for_recovery(&mut tunnel, permit)
+        {
+            let mut cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
+            merge_cleanup_fault(&mut cleanup_fault, self.cleanup_pep(pep));
+            return Err(OrchestratorError { fault, cleanup_fault });
+        }
+        if permit.is_cancelled() {
+            let mut cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
+            merge_cleanup_fault(&mut cleanup_fault, self.cleanup_pep(pep));
+            return Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
+                cleanup_fault,
+            });
+        }
+        self.ready = Some(ReadyHandles { pep, tunnel });
+        Ok(())
+    }
+
+    fn check_recovery_permit(permit: &RecoveryPermit) -> Result<(), OrchestratorError> {
+        if permit.is_cancelled() {
+            Err(OrchestratorError {
+                fault: RuntimeFault::UserStopped,
+                cleanup_fault: None,
+            })
+        } else {
+            Ok(())
+        }
     }
 
     fn rollback_workspace(&mut self, previous: Option<PathBuf>) -> Option<RuntimeFault> {
@@ -823,6 +1156,30 @@ where
         Ok(())
     }
 
+    fn start_mcp_for_recovery(
+        &mut self,
+        permit: &RecoveryPermit,
+    ) -> Result<Self::Mcp, RuntimeFault> {
+        if permit.is_cancelled() {
+            return Err(RuntimeFault::UserStopped);
+        }
+        let port = available_loopback_port()?;
+        let bearer = (self.bearer_factory)()?;
+        CodingToolsRuntime::start_for_recovery(
+            CodingToolsRuntimeConfig::new(
+                &self.config.install_root,
+                &self.config.workspace,
+                port,
+                CodingToolsPermissionMode::Trusted,
+            ),
+            bearer,
+            self.config.mcp_readiness_timeout,
+            Duration::from_millis(250),
+            || permit.is_cancelled(),
+        )
+        .map_err(|error| error.runtime_fault())
+    }
+
     fn start_pep(&mut self, mcp: Self::Mcp) -> Result<Self::Pep, RuntimeFault> {
         let policy = CapabilityPolicy::load(&self.config.install_root.join("runtime-policy.toml"))
             .map_err(|_| RuntimeFault::PolicyInvalid)?;
@@ -865,6 +1222,49 @@ where
             .map_err(|error| error.runtime_fault())
     }
 
+    fn start_tunnel_for_recovery(
+        &mut self,
+        pep: &Self::Pep,
+        permit: &RecoveryPermit,
+    ) -> Result<Self::Tunnel, RuntimeFault> {
+        if permit.is_cancelled() {
+            return Err(RuntimeFault::UserStopped);
+        }
+        let config = TunnelRuntimeConfig::new(
+            &self.config.install_root,
+            &self.config.health_state_dir,
+            self.config.tunnel_id.clone(),
+            pep.port(),
+        )
+        .map_err(|error| error.runtime_fault())?;
+        let tunnel = PreparedTunnelStart::prepare(config, self.credential_store.as_ref())
+            .and_then(PreparedTunnelStart::spawn)
+            .map_err(|error| error.runtime_fault())?;
+        if permit.is_cancelled() {
+            let mut tunnel = tunnel;
+            let _ = tunnel.stop();
+            return Err(RuntimeFault::UserStopped);
+        }
+        Ok(tunnel)
+    }
+
+    fn confirm_tunnel_ready_for_recovery(
+        &mut self,
+        tunnel: &mut Self::Tunnel,
+        permit: &RecoveryPermit,
+    ) -> Result<(), RuntimeFault> {
+        let result = tunnel.wait_ready_for_recovery(
+            self.config.tunnel_readiness_timeout,
+            Duration::from_millis(250),
+            || permit.is_cancelled(),
+        );
+        if permit.is_cancelled() {
+            Err(RuntimeFault::UserStopped)
+        } else {
+            result.map_err(|error| error.runtime_fault())
+        }
+    }
+
     fn stop_tunnel(&mut self, tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> {
         tunnel.stop().map(|_| ()).map_err(|error| error.runtime_fault())
     }
@@ -901,7 +1301,7 @@ where
 
     fn probe_tunnel_health(&mut self, tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> {
         tunnel
-            .wait_ready(Duration::ZERO)
+            .wait_ready_for_recovery(Duration::ZERO, Duration::from_millis(250), || false)
             .map_err(|error| error.runtime_fault())
     }
 
@@ -914,6 +1314,11 @@ where
             return Err(RuntimeFault::WorkspaceInvalid);
         }
         self.config.workspace = workspace;
+        Ok(())
+    }
+
+    fn configure_permission_mode(&mut self, mode: PermissionMode) -> Result<(), RuntimeFault> {
+        self.config.permission_mode = mode;
         Ok(())
     }
 

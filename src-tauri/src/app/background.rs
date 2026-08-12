@@ -1,5 +1,5 @@
 use std::ffi::OsStr;
-use std::sync::{Arc, Mutex, TryLockError, mpsc};
+use std::sync::{Arc, Mutex, RwLock, TryLockError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -11,8 +11,9 @@ use crate::privilege::PrivilegeController;
 #[cfg(windows)]
 use crate::privilege::{SESSION_NONCE_BYTES, random_session_nonce};
 use crate::runtime::{
-    AutoRecoveryRuntime, OrchestratorError, RecoveryClock, RecoveryController, RecoveryOutcome,
-    RuntimeDriver, RuntimeOrchestrator, RuntimeOutage, SystemRecoveryClock, WorkspaceSwitchError,
+    AutoRecoveryRuntime, OrchestratorError, RecoveryCancellation, RecoveryClock,
+    RecoveryController, RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator, RuntimeOutage,
+    SystemRecoveryClock, WorkspaceSwitchError,
 };
 #[cfg(windows)]
 use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver};
@@ -191,6 +192,13 @@ impl ProductionRuntimeOwner {
 
     fn take_active(&mut self) -> Option<Box<dyn ExitRuntime + Send>> {
         self.active.take()
+    }
+
+    fn snapshot(&self) -> DesktopRuntimeSnapshot {
+        self.active
+            .as_deref()
+            .map(ExitRuntime::runtime_snapshot)
+            .unwrap_or_else(DesktopRuntimeSnapshot::inactive)
     }
 }
 
@@ -371,6 +379,8 @@ pub struct DesktopLifecycle {
     privilege: PrivilegeController,
     runtime_operation: Arc<Mutex<()>>,
     runtime: Arc<Mutex<ProductionRuntimeOwner>>,
+    recovery_cancellation: RecoveryCancellation,
+    runtime_snapshot_cache: Arc<RwLock<DesktopRuntimeSnapshot>>,
     watchdog_shutdown: Mutex<Option<mpsc::Sender<()>>>,
     watchdog_thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -381,14 +391,7 @@ impl std::fmt::Debug for DesktopLifecycle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DesktopLifecycle")
             .field("privilege", &self.privilege)
-            .field(
-                "production_runtime_active",
-                &self
-                    .runtime
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .is_active(),
-            )
+            .field("production_runtime_active", &self.runtime_snapshot().active)
             .finish()
     }
 }
@@ -397,8 +400,11 @@ impl DesktopLifecycle {
     pub fn new(privilege: PrivilegeController) -> Self {
         let runtime_operation = Arc::new(Mutex::new(()));
         let runtime = Arc::new(Mutex::new(ProductionRuntimeOwner::default()));
+        let recovery_cancellation = RecoveryCancellation::default();
+        let runtime_snapshot_cache = Arc::new(RwLock::new(DesktopRuntimeSnapshot::inactive()));
         let monitor_operation = Arc::clone(&runtime_operation);
         let monitor_runtime = Arc::clone(&runtime);
+        let monitor_snapshot = Arc::clone(&runtime_snapshot_cache);
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
         let watchdog_thread = thread::Builder::new()
             .name("localbridge-runtime-watchdog".into())
@@ -418,12 +424,19 @@ impl DesktopLifecycle {
                 if let Some(runtime) = owner.active.as_deref_mut() {
                     let _ = runtime.monitor_recovery();
                 }
+                let snapshot = owner.snapshot();
+                drop(owner);
+                *monitor_snapshot
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
             })
             .expect("runtime watchdog thread must start");
         Self {
             privilege,
             runtime_operation,
             runtime,
+            recovery_cancellation,
+            runtime_snapshot_cache,
             watchdog_shutdown: Mutex::new(Some(shutdown_tx)),
             watchdog_thread: Mutex::new(Some(watchdog_thread)),
         }
@@ -438,6 +451,7 @@ impl DesktopLifecycle {
         &self,
         config: ProductionRuntimeConfig,
     ) -> Result<(), DesktopRuntimeStartError> {
+        self.recovery_cancellation.cancel();
         let _operation = self
             .runtime_operation
             .lock()
@@ -461,11 +475,17 @@ impl DesktopLifecycle {
         runtime
             .start()
             .map_err(DesktopRuntimeStartError::Runtime)?;
-        let runtime = AutoRecoveryRuntime::new(runtime, SystemRecoveryClock::default());
-        self.runtime
+        let runtime = AutoRecoveryRuntime::new_with_cancellation(
+            runtime,
+            SystemRecoveryClock::default(),
+            self.recovery_cancellation.clone(),
+        );
+        let mut owner = self.runtime
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .activate(runtime)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        owner.activate(runtime)?;
+        self.write_snapshot_cache(owner.snapshot());
+        Ok(())
     }
 
     pub fn shutdown(&self) -> ShutdownReport {
@@ -473,6 +493,7 @@ impl DesktopLifecycle {
     }
 
     pub fn stop_services_for_manual_action(&self) -> ShutdownReport {
+        self.recovery_cancellation.cancel();
         let _operation = self
             .runtime_operation
             .lock()
@@ -482,10 +503,13 @@ impl DesktopLifecycle {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take_active();
-        shutdown_in_security_order(active.as_deref_mut(), &self.privilege)
+        let report = shutdown_in_security_order(active.as_deref_mut(), &self.privilege);
+        self.write_snapshot_cache(DesktopRuntimeSnapshot::inactive());
+        report
     }
 
     pub fn stop_runtime_for_control_plane(&self) -> Result<(), DesktopRuntimeControlError> {
+        self.recovery_cancellation.cancel();
         let _operation = self
             .runtime_operation
             .lock()
@@ -498,6 +522,7 @@ impl DesktopLifecycle {
             .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?;
         let tunnel = active.stop_tunnel_for_exit();
         let lower = active.finish_exit_after_tunnel();
+        self.write_snapshot_cache(DesktopRuntimeSnapshot::inactive());
         if tunnel.is_err() || lower.is_err() {
             return Err(DesktopRuntimeControlError::Runtime(RuntimeFault::Unknown));
         }
@@ -505,19 +530,17 @@ impl DesktopLifecycle {
     }
 
     pub fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
-        self.runtime
-            .lock()
+        self.runtime_snapshot_cache
+            .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .active
-            .as_deref()
-            .map(ExitRuntime::runtime_snapshot)
-            .unwrap_or_else(DesktopRuntimeSnapshot::inactive)
+            .clone()
     }
 
     pub fn set_runtime_permission_mode(
         &self,
         mode: PermissionMode,
     ) -> Result<(), DesktopRuntimeControlError> {
+        self.recovery_cancellation.cancel();
         let _operation = self
             .runtime_operation
             .lock()
@@ -526,11 +549,15 @@ impl DesktopLifecycle {
             .runtime
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        owner
+        let result = owner
             .active
             .as_deref_mut()
             .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?
-            .set_permission_mode(mode)
+            .set_permission_mode(mode);
+        let snapshot = owner.snapshot();
+        drop(owner);
+        self.write_snapshot_cache(snapshot);
+        result
     }
 
     pub fn switch_runtime_workspace(
@@ -538,6 +565,7 @@ impl DesktopLifecycle {
         candidate: &Path,
         rollback: Option<&Path>,
     ) -> Result<(), DesktopRuntimeControlError> {
+        self.recovery_cancellation.cancel();
         let _operation = self
             .runtime_operation
             .lock()
@@ -546,16 +574,21 @@ impl DesktopLifecycle {
             .runtime
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        owner
+        let result = owner
             .active
             .as_deref_mut()
             .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?
-            .switch_workspace(candidate, rollback)
+            .switch_workspace(candidate, rollback);
+        let snapshot = owner.snapshot();
+        drop(owner);
+        self.write_snapshot_cache(snapshot);
+        result
     }
 
     pub fn manual_retry_after_attention(
         &self,
     ) -> Result<RecoveryOutcome, DesktopRuntimeControlError> {
+        self.recovery_cancellation.cancel();
         let _operation = self
             .runtime_operation
             .lock()
@@ -564,17 +597,22 @@ impl DesktopLifecycle {
             .runtime
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        owner
+        let result = owner
             .active
             .as_deref_mut()
             .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?
-            .manual_retry()
+            .manual_retry();
+        let snapshot = owner.snapshot();
+        drop(owner);
+        self.write_snapshot_cache(snapshot);
+        result
     }
 
     fn shutdown_with_privilege<P>(&self, privilege: &P) -> ShutdownReport
     where
         P: PrivilegeExit + ?Sized,
     {
+        self.recovery_cancellation.cancel();
         let _operation = self
             .runtime_operation
             .lock()
@@ -583,7 +621,9 @@ impl DesktopLifecycle {
             .runtime
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        shutdown_in_security_order(Some(&mut *runtime), privilege)
+        let report = shutdown_in_security_order(Some(&mut *runtime), privilege);
+        self.write_snapshot_cache(DesktopRuntimeSnapshot::inactive());
+        report
     }
 
     #[cfg(test)]
@@ -591,14 +631,17 @@ impl DesktopLifecycle {
     where
         R: ExitRuntime + Send + 'static,
     {
+        self.recovery_cancellation.cancel();
         let _operation = self
             .runtime_operation
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.runtime
+        let mut owner = self.runtime
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .activate(runtime)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        owner.activate(runtime)?;
+        self.write_snapshot_cache(owner.snapshot());
+        Ok(())
     }
 
     #[cfg(test)]
@@ -607,6 +650,13 @@ impl DesktopLifecycle {
         P: PrivilegeExit + ?Sized,
     {
         self.shutdown_with_privilege(privilege)
+    }
+
+    fn write_snapshot_cache(&self, snapshot: DesktopRuntimeSnapshot) {
+        *self
+            .runtime_snapshot_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
     }
 }
 

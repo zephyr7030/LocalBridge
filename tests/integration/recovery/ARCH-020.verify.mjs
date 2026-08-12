@@ -40,9 +40,32 @@ const loopEnd = recovery.indexOf("runtime.record_fault(final_fault.clone())", lo
 if (loopStart < 0 || loopEnd <= loopStart) process.exit(4);
 const loop = recovery.slice(loopStart, loopEnd);
 if (loop.indexOf("self.clock.sleep") > loop.indexOf("runtime.recover_minimal")) throw new Error("ARCH-020 attempt backoff must precede reconnect attempt");
-if (loop.includes("mark_user_attention_required")) throw new Error("ARCH-020 user attention emitted before reconnect exhaustion");
+for (const required of [
+  "RuntimeOutage::classify(component, final_fault.clone())",
+  "classified.disposition == RecoveryDisposition::NonRecoverable",
+  "return RecoveryOutcome::NonRecoverable",
+]) if (!loop.includes(required)) throw new Error(`ARCH-020 missing post-attempt typed retryability gate: ${required}`);
 const afterLoop = recovery.slice(loopEnd, recovery.indexOf("RecoveryOutcome::Exhausted", loopEnd) + 200);
 if (!afterLoop.includes("runtime.mark_user_attention_required(generation)")) throw new Error("ARCH-020 missing final attention after fifth failure");
+const cooperativeStart = recovery.indexOf("fn begin_cooperative_auto");
+const cooperativeAdvanceStart = recovery.indexOf("fn advance_pending_auto", cooperativeStart);
+const cooperativeEnd = recovery.indexOf("impl<C: RecoveryClock> RecoveryController", cooperativeAdvanceStart);
+if (cooperativeStart < 0 || cooperativeAdvanceStart <= cooperativeStart || cooperativeEnd <= cooperativeAdvanceStart) throw new Error("ARCH-020 cooperative automatic recovery state machine missing");
+const cooperative = recovery.slice(cooperativeStart, cooperativeEnd);
+for (const required of [
+  "PendingAutoRecovery",
+  "next_deadline",
+  "RECONNECT_BACKOFF_SECONDS[0]",
+  "RECONNECT_BACKOFF_SECONDS[(next_attempt - 1) as usize]",
+  "recover_minimal_cancellable(scope, attempt, &permit)",
+  "attempt >= RECONNECT_BACKOFF_SECONDS.len() as u32",
+  "classified.disposition == RecoveryDisposition::NonRecoverable",
+  "permit.is_cancelled()",
+]) if (!recovery.includes(required)) throw new Error(`ARCH-020 missing cooperative reconnect invariant: ${required}`);
+if (cooperative.includes(".sleep(")) throw new Error("ARCH-020 cooperative automatic recovery must use deadlines, not blocking sleep");
+const cancellableCalls = (cooperative.match(/recover_minimal_cancellable/g) ?? []).length;
+if (cancellableCalls !== 1) throw new Error(`ARCH-020 cooperative monitor must execute at most one reconnect attempt per advancement, found ${cancellableCalls} call sites`);
 for (const required of ["RecoveryScope::Tunnel", "RecoveryScope::PolicyAndTunnel", "RecoveryScope::FullRuntime", "confirm_pep_ready", "confirm_mcp_ready"]) if (!orchestrator.includes(required)) process.exit(5);
+for (const required of ["confirm_mcp_ready_for_recovery", "confirm_pep_ready_for_recovery", "confirm_tunnel_ready_for_recovery", "RecoveryPermit"]) if (!orchestrator.includes(required)) throw new Error(`ARCH-020 cancellable recovery stage missing: ${required}`);
 if (/while\s*\([^)]*reconnect|loop\s*\{[\s\S]{0,200}recover_minimal/.test(recovery)) throw new Error("ARCH-020 unbounded reconnect loop detected");
-console.log("ARCH-020_VERIFY=PASS attempts=5 backoff=1,2,5,10,30 same_generation_exhaustion_terminal=true typed_retryability=true minimal_layer_health_gate=true");
+console.log("ARCH-020_VERIFY=PASS sync_attempts=5 cooperative_deadlines=1,2,5,10,30 cooperative_sleep=false post_attempt_retryability=true cancellable=true same_generation_exhaustion_terminal=true minimal_layer_health_gate=true");

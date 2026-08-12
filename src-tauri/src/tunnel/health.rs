@@ -39,14 +39,56 @@ impl HealthEndpoint {
         }
         Ok(admin.tunnel_metadata.is_some())
     }
+
+    pub(crate) fn probe_ready_with_timeout(&self, transport_timeout: Duration) -> Result<bool, TunnelError> {
+        if get_with_timeouts(
+            self.port,
+            "/readyz",
+            transport_timeout,
+            transport_timeout,
+            Some(transport_timeout),
+        )?.status != 200 { return Ok(false); }
+        let status = get_with_timeouts(
+            self.port,
+            "/api/status",
+            transport_timeout,
+            transport_timeout,
+            Some(transport_timeout),
+        )?;
+        if status.status != 200 { return Err(TunnelError::HealthProtocol); }
+        let admin: AdminStatus = serde_json::from_slice(&status.body).map_err(|_| TunnelError::HealthProtocol)?;
+        if let Some(error) = admin.tunnel_metadata_error.filter(|value| !value.trim().is_empty()) {
+            return Err(TunnelError::ControlPlane(classify_control_plane_error(&error)));
+        }
+        Ok(admin.tunnel_metadata.is_some())
+    }
 }
 
 struct HttpResponse { status: u16, body: Vec<u8> }
 
 fn get(port: u16, path: &str) -> Result<HttpResponse, TunnelError> {
+    get_with_timeouts(
+        port,
+        path,
+        Duration::from_millis(500),
+        Duration::from_secs(2),
+        None,
+    )
+}
+
+fn get_with_timeouts(
+    port: u16,
+    path: &str,
+    connect_timeout: Duration,
+    read_timeout: Duration,
+    write_timeout: Option<Duration>,
+) -> Result<HttpResponse, TunnelError> {
     let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
-    let mut stream = TcpStream::connect_timeout(&address.into(), Duration::from_millis(500)).map_err(|_| TunnelError::HealthUnavailable)?;
-    stream.set_read_timeout(Some(Duration::from_secs(2))).map_err(|_| TunnelError::HealthUnavailable)?;
+    let mut stream = TcpStream::connect_timeout(&address.into(), connect_timeout).map_err(|_| TunnelError::HealthUnavailable)?;
+    stream.set_read_timeout(Some(read_timeout)).map_err(|_| TunnelError::HealthUnavailable)?;
+    if let Some(write_timeout) = write_timeout {
+        stream.set_write_timeout(Some(write_timeout)).map_err(|_| TunnelError::HealthUnavailable)?;
+    }
     let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).map_err(|_| TunnelError::HealthUnavailable)?;
     let mut bytes = Vec::new();

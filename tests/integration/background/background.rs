@@ -144,6 +144,94 @@ fn shutdown_continues_after_each_stage_failure() {
 }
 
 #[cfg(windows)]
+struct BlockingMonitorRuntime {
+    entered: Option<Sender<()>>,
+    release: mpsc::Receiver<()>,
+}
+
+#[cfg(windows)]
+impl ExitRuntime for BlockingMonitorRuntime {
+    fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError> {
+        Ok(())
+    }
+
+    fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError> {
+        Ok(())
+    }
+
+    fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
+        DesktopRuntimeSnapshot {
+            active: true,
+            state: RuntimeState::Ready,
+            current_task: CurrentTaskStatus::Idle,
+            configured_workspace: None,
+            outage: None,
+        }
+    }
+
+    fn monitor_recovery(&mut self) -> Option<RecoveryOutcome> {
+        if let Some(entered) = self.entered.take() {
+            let _ = entered.send(());
+            let _ = self.release.recv_timeout(Duration::from_secs(5));
+        }
+        None
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn explicit_control_cancels_before_owner_lock_and_snapshot_remains_responsive() {
+    let lifecycle = Arc::new(DesktopLifecycle::new(PrivilegeController::new()));
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    lifecycle
+        .install_runtime_for_test(BlockingMonitorRuntime {
+            entered: Some(entered_tx),
+            release: release_rx,
+        })
+        .unwrap();
+    let permit = lifecycle.recovery_cancellation.permit();
+
+    entered_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("watchdog deliberately holds runtime owner during monitor");
+
+    let control_lifecycle = Arc::clone(&lifecycle);
+    let (control_done_tx, control_done_rx) = mpsc::channel();
+    let control_thread = thread::spawn(move || {
+        let result = control_lifecycle.stop_runtime_for_control_plane();
+        let _ = control_done_tx.send(result);
+    });
+    let cancel_deadline = Instant::now() + Duration::from_secs(1);
+    while !permit.is_cancelled() && Instant::now() < cancel_deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    let cancelled_before_release = permit.is_cancelled();
+
+    let snapshot_lifecycle = Arc::clone(&lifecycle);
+    let (snapshot_tx, snapshot_rx) = mpsc::channel();
+    let snapshot_thread = thread::spawn(move || {
+        let _ = snapshot_tx.send(snapshot_lifecycle.runtime_snapshot());
+    });
+    let snapshot_result = snapshot_rx.recv_timeout(Duration::from_secs(1));
+
+    let _ = release_tx.send(());
+    let control_result = control_done_rx.recv_timeout(Duration::from_secs(2));
+    snapshot_thread.join().unwrap();
+    control_thread.join().unwrap();
+
+    assert!(
+        cancelled_before_release,
+        "explicit control must cancel recovery before waiting for runtime_operation"
+    );
+    let snapshot = snapshot_result.expect("snapshot cache must not wait for runtime owner mutex");
+    assert!(snapshot.active);
+    assert_eq!(snapshot.state, RuntimeState::Ready);
+    assert!(control_result.expect("control thread returns").is_ok());
+    assert!(!lifecycle.runtime_snapshot().active);
+}
+
+#[cfg(windows)]
 const ACTUAL_TUNNEL_ID: &str = "tunnel_01301301301301301301301301301301";
 #[cfg(windows)]
 const ACTUAL_RUNTIME_KEY: &str = "LB013_SYNTHETIC_RUNTIME_KEY_DO_NOT_LEAK";

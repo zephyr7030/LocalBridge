@@ -7,6 +7,8 @@ use std::rc::Rc;
 type SharedEvents = Rc<RefCell<Vec<&'static str>>>;
 type SharedFailures = Rc<RefCell<usize>>;
 type SharedHealth = Rc<RefCell<bool>>;
+type SharedFault = Rc<RefCell<RuntimeFault>>;
+type SharedCancellation = Rc<RefCell<Option<RecoveryCancellation>>>;
 
 #[derive(Debug, Default)]
 struct FakeClock {
@@ -27,6 +29,8 @@ impl RecoveryClock for FakeClock {
 struct RecoveryDriver {
     events: SharedEvents,
     fail_tunnel_starts: SharedFailures,
+    tunnel_start_fault: SharedFault,
+    cancel_on_tunnel_recovery_ready: SharedCancellation,
     pep_healthy: SharedHealth,
     mcp_healthy: SharedHealth,
     tunnel_healthy: SharedHealth,
@@ -37,6 +41,8 @@ impl RecoveryDriver {
     fn new() -> (Self, SharedEvents, SharedFailures, SharedHealth, SharedHealth) {
         let events = Rc::new(RefCell::new(Vec::new()));
         let fail_tunnel_starts = Rc::new(RefCell::new(0));
+        let tunnel_start_fault = Rc::new(RefCell::new(RuntimeFault::TunnelExited));
+        let cancel_on_tunnel_recovery_ready = Rc::new(RefCell::new(None));
         let pep_healthy = Rc::new(RefCell::new(true));
         let mcp_healthy = Rc::new(RefCell::new(true));
         let tunnel_healthy = Rc::new(RefCell::new(true));
@@ -44,6 +50,8 @@ impl RecoveryDriver {
             Self {
                 events: events.clone(),
                 fail_tunnel_starts: fail_tunnel_starts.clone(),
+                tunnel_start_fault,
+                cancel_on_tunnel_recovery_ready,
                 pep_healthy: pep_healthy.clone(),
                 mcp_healthy: mcp_healthy.clone(),
                 tunnel_healthy,
@@ -56,6 +64,12 @@ impl RecoveryDriver {
         )
     }
     fn event(&self, value: &'static str) { self.events.borrow_mut().push(value); }
+    fn set_tunnel_start_fault(&self, fault: RuntimeFault) {
+        *self.tunnel_start_fault.borrow_mut() = fault;
+    }
+    fn cancel_during_tunnel_recovery_ready(&self, cancellation: RecoveryCancellation) {
+        *self.cancel_on_tunnel_recovery_ready.borrow_mut() = Some(cancellation);
+    }
 }
 
 impl RuntimeDriver for RecoveryDriver {
@@ -76,11 +90,27 @@ impl RuntimeDriver for RecoveryDriver {
     fn start_tunnel(&mut self, _pep: &Self::Pep) -> Result<Self::Tunnel, RuntimeFault> {
         self.event("tunnel.start");
         let mut remaining = self.fail_tunnel_starts.borrow_mut();
-        if *remaining > 0 { *remaining -= 1; return Err(RuntimeFault::TunnelExited); }
+        if *remaining > 0 {
+            *remaining -= 1;
+            return Err(self.tunnel_start_fault.borrow().clone());
+        }
         *self.tunnel_healthy.borrow_mut() = true;
         Ok("tunnel")
     }
     fn confirm_tunnel_ready(&mut self, _tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> { self.event("tunnel.ready"); Ok(()) }
+    fn confirm_tunnel_ready_for_recovery(
+        &mut self,
+        _tunnel: &mut Self::Tunnel,
+        permit: &RecoveryPermit,
+    ) -> Result<(), RuntimeFault> {
+        self.event("tunnel.ready");
+        if let Some(cancellation) = self.cancel_on_tunnel_recovery_ready.borrow_mut().take() {
+            cancellation.cancel();
+            assert!(permit.is_cancelled());
+            return Err(RuntimeFault::UserStopped);
+        }
+        Ok(())
+    }
     fn stop_tunnel(&mut self, _tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> { self.event("tunnel.stop"); Ok(()) }
     fn stop_pep(&mut self, _pep: Self::Pep) -> Result<Self::Mcp, RuntimeFault> { self.event("pep.stop"); Ok("mcp") }
     fn stop_mcp(&mut self, _mcp: &mut Self::Mcp) -> Result<(), RuntimeFault> { self.event("mcp.stop"); Ok(()) }
@@ -194,6 +224,50 @@ fn exact_five_attempts_backoff_nonretryable_and_manual_generation_are_determinis
 }
 
 #[test]
+fn recoverable_generation_stops_immediately_when_attempt_becomes_nonrecoverable() {
+    let (driver, events, fail_counter, _, _) = RecoveryDriver::new();
+    driver.set_tunnel_start_fault(RuntimeFault::RuntimeKeyMissing);
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    events.borrow_mut().clear();
+    *fail_counter.borrow_mut() = 5;
+    let mut controller = RecoveryController::new(FakeClock::default());
+
+    let outcome = controller.recover_auto(
+        &mut runtime,
+        RuntimeOutage::classify(RuntimeComponent::Tunnel, RuntimeFault::TunnelExited),
+    );
+    let generation = match outcome {
+        RecoveryOutcome::NonRecoverable {
+            generation,
+            fault,
+            user_attention_required,
+        } => {
+            assert_eq!(fault, RuntimeFault::RuntimeKeyMissing);
+            assert!(user_attention_required);
+            generation
+        }
+        other => panic!("expected post-attempt nonrecoverable stop, got {other:?}"),
+    };
+
+    assert_eq!(controller.current_attempt(), 1);
+    assert_eq!(controller.clock().sleeps, [Duration::from_secs(1)]);
+    assert_eq!(
+        events
+            .borrow()
+            .iter()
+            .filter(|event| **event == "tunnel.start")
+            .count(),
+        1
+    );
+    let outage = runtime.active_outage().expect("terminal outage remains observable");
+    assert_eq!(outage.id, generation);
+    assert_eq!(outage.fault, RuntimeFault::RuntimeKeyMissing);
+    assert!(outage.user_attention_emitted());
+    assert!(!runtime.mark_user_attention_required(generation));
+}
+
+#[test]
 fn successful_recovery_keeps_generation_until_sixty_seconds_of_stable_ready() {
     let (driver, _, _, _, _) = RecoveryDriver::new();
     let mut runtime = RuntimeOrchestrator::new(driver);
@@ -223,7 +297,14 @@ fn monitor_automatically_detects_post_ready_tunnel_failure_and_resets_after_stab
     events.borrow_mut().clear();
     *tunnel_healthy.borrow_mut() = false;
 
-    let outcome = monitored.monitor_once().expect("watchdog must detect post-Ready Tunnel outage");
+    assert!(monitored.monitor_once().is_none(), "detection schedules attempt 1 instead of sleeping in the watchdog");
+    assert!(monitored.recovery_clock().sleeps.is_empty());
+    assert_eq!(
+        &*events.borrow(),
+        &["mcp.monitor", "pep.monitor", "tunnel.monitor"]
+    );
+    monitored.recovery_clock_mut().advance(Duration::from_secs(1));
+    let outcome = monitored.monitor_once().expect("deadline performs exactly one recovery attempt");
     let generation = match outcome {
         RecoveryOutcome::Recovered { generation, attempt } => {
             assert_eq!(attempt, 1);
@@ -264,23 +345,34 @@ fn monitor_exhaustion_is_terminal_until_persistent_controller_manual_retry() {
     *tunnel_healthy.borrow_mut() = false;
     *fail_counter.borrow_mut() = 5;
 
-    let exhausted_generation = match monitored.monitor_once().expect("outage must be detected") {
+    assert!(monitored.monitor_once().is_none(), "outage detection only schedules attempt 1");
+    let delays = [1, 2, 5, 10, 30];
+    let mut exhausted = None;
+    for (index, delay) in delays.into_iter().enumerate() {
+        monitored
+            .recovery_clock_mut()
+            .advance(Duration::from_secs(delay));
+        let outcome = monitored.monitor_once();
+        if index < 4 {
+            assert!(outcome.is_none(), "attempt {} schedules the next deadline", index + 1);
+        } else {
+            exhausted = outcome;
+        }
+        assert!(monitored.recovery_clock().sleeps.is_empty(), "cooperative auto recovery never sleeps");
+    }
+    let exhausted_generation = match exhausted.expect("fifth cooperative attempt exhausts the generation") {
         RecoveryOutcome::Exhausted { generation, user_attention_required, .. } => {
             assert!(user_attention_required);
             generation
         }
         other => panic!("expected exhausted automatic recovery, got {other:?}"),
     };
-    assert_eq!(
-        monitored.recovery_clock().sleeps,
-        [1, 2, 5, 10, 30].map(Duration::from_secs)
-    );
+    assert!(monitored.recovery_clock().sleeps.is_empty());
     let event_count = events.borrow().len();
-    let sleep_count = monitored.recovery_clock().sleeps.len();
 
     assert!(monitored.monitor_once().is_none(), "Faulted exhausted runtime must not auto-start another generation");
     assert_eq!(events.borrow().len(), event_count);
-    assert_eq!(monitored.recovery_clock().sleeps.len(), sleep_count);
+    assert!(monitored.recovery_clock().sleeps.is_empty());
 
     *fail_counter.borrow_mut() = 0;
     let manual_generation = match monitored
@@ -295,6 +387,121 @@ fn monitor_exhaustion_is_terminal_until_persistent_controller_manual_retry() {
     };
     assert_ne!(manual_generation, exhausted_generation);
     assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
+}
+
+#[test]
+fn cooperative_auto_cancellation_during_backoff_consumes_no_attempt_or_attention() {
+    let (driver, events, _, _, _) = RecoveryDriver::new();
+    let tunnel_healthy = driver.tunnel_healthy.clone();
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
+    events.borrow_mut().clear();
+    *tunnel_healthy.borrow_mut() = false;
+
+    assert!(monitored.monitor_once().is_none());
+    let generation = monitored
+        .runtime()
+        .active_outage()
+        .expect("detection creates one outage generation")
+        .id;
+    let cancellation = monitored.cancellation();
+    cancellation.cancel();
+    monitored.recovery_clock_mut().advance(Duration::from_secs(30));
+    assert!(monitored.monitor_once().is_none());
+    assert_eq!(monitored.controller.current_attempt(), 0);
+    assert!(monitored.recovery_clock().sleeps.is_empty());
+    assert_eq!(
+        events.borrow().iter().filter(|event| **event == "tunnel.start").count(),
+        0
+    );
+    let outage = monitored.runtime().active_outage().unwrap();
+    assert_eq!(outage.id, generation);
+    assert!(!outage.user_attention_emitted());
+}
+
+#[test]
+fn cooperative_attempt_stops_on_new_nonrecoverable_fault_without_later_deadlines() {
+    let (driver, events, fail_counter, _, _) = RecoveryDriver::new();
+    let tunnel_healthy = driver.tunnel_healthy.clone();
+    driver.set_tunnel_start_fault(RuntimeFault::RuntimeKeyMissing);
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
+    events.borrow_mut().clear();
+    *tunnel_healthy.borrow_mut() = false;
+    *fail_counter.borrow_mut() = 5;
+
+    assert!(monitored.monitor_once().is_none());
+    monitored.recovery_clock_mut().advance(Duration::from_secs(1));
+    let outcome = monitored.monitor_once().expect("attempt 1 becomes terminal");
+    assert!(matches!(
+        outcome,
+        RecoveryOutcome::NonRecoverable {
+            fault: RuntimeFault::RuntimeKeyMissing,
+            user_attention_required: true,
+            ..
+        }
+    ));
+    assert!(monitored.recovery_clock().sleeps.is_empty());
+    assert_eq!(
+        events.borrow().iter().filter(|event| **event == "tunnel.start").count(),
+        1
+    );
+    monitored.recovery_clock_mut().advance(Duration::from_secs(60));
+    assert!(monitored.monitor_once().is_none());
+    assert_eq!(
+        events.borrow().iter().filter(|event| **event == "tunnel.start").count(),
+        1
+    );
+}
+
+#[test]
+fn cooperative_inflight_readiness_cancellation_cleans_new_child_and_keeps_lower_ownership_stoppable() {
+    let (driver, events, _, _, _) = RecoveryDriver::new();
+    let tunnel_healthy = driver.tunnel_healthy.clone();
+    let cancellation = RecoveryCancellation::default();
+    driver.cancel_during_tunnel_recovery_ready(cancellation.clone());
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new_with_cancellation(
+        runtime,
+        FakeClock::default(),
+        cancellation,
+    );
+    events.borrow_mut().clear();
+    *tunnel_healthy.borrow_mut() = false;
+
+    assert!(monitored.monitor_once().is_none());
+    let generation = monitored.runtime().active_outage().unwrap().id;
+    monitored.recovery_clock_mut().advance(Duration::from_secs(1));
+    assert!(monitored.monitor_once().is_none(), "UserStopped cancellation is silent");
+    assert!(matches!(
+        monitored.runtime().state(),
+        RuntimeState::Faulted(RuntimeFault::UserStopped)
+    ));
+    let outage = monitored.runtime().active_outage().unwrap();
+    assert_eq!(outage.id, generation);
+    assert!(!outage.user_attention_emitted());
+    assert_eq!(
+        events.borrow().iter().filter(|event| **event == "tunnel.start").count(),
+        1
+    );
+    assert_eq!(
+        events.borrow().iter().filter(|event| **event == "tunnel.stop").count(),
+        2,
+        "old Tunnel and cancelled replacement are both owned and stopped"
+    );
+
+    monitored.recovery_clock_mut().advance(Duration::from_secs(60));
+    assert!(monitored.monitor_once().is_none());
+    assert_eq!(events.borrow().iter().filter(|event| **event == "tunnel.start").count(), 1);
+    monitored
+        .orchestrator_mut()
+        .stop()
+        .expect("explicit stop cleans retained PEP/MCP after cancelled attempt");
+    assert!(events.borrow().contains(&"pep.stop"));
+    assert!(events.borrow().contains(&"mcp.stop"));
 }
 
 #[test]

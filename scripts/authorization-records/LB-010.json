@@ -22,6 +22,47 @@
       "least_privilege_reviewed": true,
       "not_used_for_unrelated_work": true,
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB010-002",
+      "scope": [
+        "src-tauri/src/app/background.rs",
+        "src-tauri/src/mcp/runtime.rs",
+        "src-tauri/src/mcp/http.rs",
+        "src-tauri/src/tunnel/runtime.rs",
+        "src-tauri/src/tunnel/health.rs",
+        "scripts/authorization-records/LB-010.json"
+      ],
+      "actions": [
+        "Add cooperative cancellation and bounded recovery-readiness probes required to interrupt an automatic recovery attempt",
+        "Decouple DesktopLifecycle runtime snapshot reads and explicit-control cancellation from the recovery runtime-owner lock without changing policy, raw MCP, secret, or process-ownership semantics"
+      ],
+      "reason": "The formal G2 generation 4 independent adversarial review found that production automatic recovery held DesktopLifecycle synchronization across retry backoff and readiness, blocking snapshots and explicit controls. The current MCP readiness HTTP request can block for about two seconds and a Tunnel readiness health probe can issue two such requests, so a cancellation token alone cannot satisfy the frozen user-control interruption contract without narrowly bounded recovery-only transport seams.",
+      "evidence_ref": "G2 generation 4 review provenance commit d2d4e990faf6841c12033d5f223c4bbae1a036bd plus current src-tauri/src/mcp/http.rs and src-tauri/src/tunnel/health.rs timeout implementations inspected before this repair.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "required_to_satisfy_frozen_contract": true,
+      "least_privilege_reviewed": true,
+      "not_used_for_unrelated_work": true,
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB010-003",
+      "scope": [
+        "tests/integration/background/background.rs",
+        "scripts/authorization-records/LB-010.json"
+      ],
+      "actions": [
+        "Add the deterministic DesktopLifecycle concurrency regression that deliberately holds the watchdog runtime owner while verifying cached runtime_snapshot responsiveness and explicit-control recovery cancellation before lifecycle lock acquisition"
+      ],
+      "reason": "The formal G2 generation 4 independent adversarial review found that automatic recovery could block runtime snapshots and explicit manual controls. The production synchronization seam is owned by DesktopLifecycle in app/background.rs, so proving the repair dynamically requires one adjacent background integration test outside LB-010's normal recovery test path.",
+      "evidence_ref": "G2 generation 4 review provenance commit d2d4e990faf6841c12033d5f223c4bbae1a036bd and tests/integration/background/background.rs::explicit_control_cancels_before_owner_lock_and_snapshot_remains_responsive",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "required_to_satisfy_frozen_contract": true,
+      "least_privilege_reviewed": true,
+      "not_used_for_unrelated_work": true,
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

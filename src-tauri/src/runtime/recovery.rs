@@ -2,7 +2,10 @@ use std::time::{Duration, Instant};
 
 use crate::state::{RuntimeComponent, RuntimeFault, RuntimeState};
 
-use super::{OutageGenerationId, RecoveryScope, RuntimeDriver, RuntimeOrchestrator};
+use super::{
+    OutageGenerationId, RecoveryCancellation, RecoveryPermit, RecoveryScope, RuntimeDriver,
+    RuntimeOrchestrator,
+};
 
 pub const RECONNECT_BACKOFF_SECONDS: [u64; 5] = [1, 2, 5, 10, 30];
 pub const STABILITY_RESET_SECONDS: u64 = 60;
@@ -119,13 +122,35 @@ pub struct RecoveryController<C: RecoveryClock> {
 pub struct AutoRecoveryRuntime<D: RuntimeDriver, C: RecoveryClock> {
     runtime: RuntimeOrchestrator<D>,
     controller: RecoveryController<C>,
+    cancellation: RecoveryCancellation,
+    pending_auto: Option<PendingAutoRecovery>,
+}
+
+#[derive(Debug)]
+struct PendingAutoRecovery {
+    generation: OutageGenerationId,
+    component: RuntimeComponent,
+    scope: RecoveryScope,
+    next_attempt: u32,
+    next_deadline: Duration,
+    permit: RecoveryPermit,
 }
 
 impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
     pub fn new(runtime: RuntimeOrchestrator<D>, clock: C) -> Self {
+        Self::new_with_cancellation(runtime, clock, RecoveryCancellation::default())
+    }
+
+    pub fn new_with_cancellation(
+        runtime: RuntimeOrchestrator<D>,
+        clock: C,
+        cancellation: RecoveryCancellation,
+    ) -> Self {
         Self {
             runtime,
             controller: RecoveryController::new(clock),
+            cancellation,
+            pending_auto: None,
         }
     }
 
@@ -145,7 +170,14 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
         self.controller.clock_mut()
     }
 
+    pub fn cancellation(&self) -> RecoveryCancellation {
+        self.cancellation.clone()
+    }
+
     pub fn monitor_once(&mut self) -> Option<RecoveryOutcome> {
+        if self.pending_auto.is_some() {
+            return self.advance_pending_auto();
+        }
         if self.runtime.state() != &RuntimeState::Ready {
             return None;
         }
@@ -154,19 +186,139 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
                 let _ = self.controller.observe_stable_ready(&mut self.runtime);
                 None
             }
-            Err(failure) => Some(self.controller.recover_auto(
-                &mut self.runtime,
-                RuntimeOutage::classify(failure.component, failure.fault),
+            Err(failure) => self.begin_cooperative_auto(RuntimeOutage::classify(
+                failure.component,
+                failure.fault,
             )),
         }
     }
 
     pub fn manual_retry_current_outage(&mut self) -> Option<RecoveryOutcome> {
+        self.cancellation.cancel();
+        self.pending_auto = None;
         let outage = self.runtime.active_outage().cloned()?;
         Some(self.controller.manual_retry(
             &mut self.runtime,
             RuntimeOutage::classify(outage.component, outage.fault),
         ))
+    }
+
+    fn begin_cooperative_auto(&mut self, outage: RuntimeOutage) -> Option<RecoveryOutcome> {
+        let generation = self
+            .controller
+            .begin_or_refresh_generation(&mut self.runtime, &outage);
+        self.controller.stable_since = None;
+        if outage.disposition == RecoveryDisposition::NonRecoverable {
+            self.runtime.record_fault(outage.fault.clone());
+            let user_attention_required = self.runtime.mark_user_attention_required(generation);
+            return Some(RecoveryOutcome::NonRecoverable {
+                generation,
+                fault: outage.fault,
+                user_attention_required,
+            });
+        }
+        if let Some(exhausted) = self.controller.exhausted_generation.as_ref() {
+            if exhausted.generation == generation {
+                return Some(RecoveryOutcome::Exhausted {
+                    generation,
+                    final_fault: exhausted.final_fault.clone(),
+                    user_attention_required: false,
+                });
+            }
+        }
+        self.controller.current_attempt = 0;
+        self.pending_auto = Some(PendingAutoRecovery {
+            generation,
+            component: outage.component,
+            scope: outage.recovery_scope(),
+            next_attempt: 1,
+            next_deadline: self.controller.clock.now()
+                + Duration::from_secs(RECONNECT_BACKOFF_SECONDS[0]),
+            permit: self.cancellation.permit(),
+        });
+        None
+    }
+
+    fn advance_pending_auto(&mut self) -> Option<RecoveryOutcome> {
+        let pending = self.pending_auto.as_ref()?;
+        if pending.permit.is_cancelled() {
+            self.pending_auto = None;
+            self.controller.current_attempt = 0;
+            return None;
+        }
+        let now = self.controller.clock.now();
+        if now < pending.next_deadline {
+            return None;
+        }
+        let generation = pending.generation;
+        let component = pending.component;
+        let scope = pending.scope;
+        let attempt = pending.next_attempt;
+        let permit = pending.permit.clone();
+        self.controller.current_attempt = attempt;
+
+        match self
+            .runtime
+            .recover_minimal_cancellable(scope, attempt, &permit)
+        {
+            Ok(()) => {
+                self.pending_auto = None;
+                self.controller.current_attempt = 0;
+                self.controller.stable_since = Some(self.controller.clock.now());
+                self.controller.exhausted_generation = None;
+                Some(RecoveryOutcome::Recovered {
+                    generation,
+                    attempt,
+                })
+            }
+            Err(error) if permit.is_cancelled() || error.fault == RuntimeFault::UserStopped => {
+                self.pending_auto = None;
+                self.controller.current_attempt = 0;
+                None
+            }
+            Err(error) => {
+                let classified = RuntimeOutage::classify(component, error.fault);
+                let _ = self.runtime.refresh_outage(
+                    generation,
+                    classified.component,
+                    classified.fault.clone(),
+                );
+                if classified.disposition == RecoveryDisposition::NonRecoverable {
+                    self.pending_auto = None;
+                    self.runtime.record_fault(classified.fault.clone());
+                    let user_attention_required =
+                        self.runtime.mark_user_attention_required(generation);
+                    return Some(RecoveryOutcome::NonRecoverable {
+                        generation,
+                        fault: classified.fault,
+                        user_attention_required,
+                    });
+                }
+                if attempt >= RECONNECT_BACKOFF_SECONDS.len() as u32 {
+                    self.pending_auto = None;
+                    self.runtime.record_fault(classified.fault.clone());
+                    let user_attention_required =
+                        self.runtime.mark_user_attention_required(generation);
+                    self.controller.exhausted_generation = Some(ExhaustedGeneration {
+                        generation,
+                        final_fault: classified.fault.clone(),
+                    });
+                    return Some(RecoveryOutcome::Exhausted {
+                        generation,
+                        final_fault: classified.fault,
+                        user_attention_required,
+                    });
+                }
+                let next_attempt = attempt + 1;
+                let next_delay = RECONNECT_BACKOFF_SECONDS[(next_attempt - 1) as usize];
+                if let Some(pending) = self.pending_auto.as_mut() {
+                    pending.next_attempt = next_attempt;
+                    pending.next_deadline = self.controller.clock.now()
+                        + Duration::from_secs(next_delay);
+                }
+                None
+            }
+        }
     }
 }
 
@@ -202,7 +354,29 @@ impl<C: RecoveryClock> RecoveryController<C> {
         runtime: &mut RuntimeOrchestrator<D>,
         outage: RuntimeOutage,
     ) -> RecoveryOutcome {
-        let generation = match self.generation {
+        let generation = self.begin_or_refresh_generation(runtime, &outage);
+        self.stable_since = None;
+        if outage.disposition == RecoveryDisposition::Recoverable {
+            if let Some(exhausted) = &self.exhausted_generation {
+                if exhausted.generation == generation {
+                    return RecoveryOutcome::Exhausted {
+                        generation,
+                        final_fault: exhausted.final_fault.clone(),
+                        user_attention_required: false,
+                    };
+                }
+            }
+        }
+        self.current_attempt = 0;
+        self.run_generation(runtime, generation, outage)
+    }
+
+    fn begin_or_refresh_generation<D: RuntimeDriver>(
+        &mut self,
+        runtime: &mut RuntimeOrchestrator<D>,
+        outage: &RuntimeOutage,
+    ) -> OutageGenerationId {
+        match self.generation {
             Some(generation) => {
                 if !runtime.refresh_outage(generation, outage.component, outage.fault.clone()) {
                     let fresh = runtime.begin_outage(outage.component, outage.fault.clone());
@@ -219,21 +393,7 @@ impl<C: RecoveryClock> RecoveryController<C> {
                 self.exhausted_generation = None;
                 fresh
             }
-        };
-        self.stable_since = None;
-        if outage.disposition == RecoveryDisposition::Recoverable {
-            if let Some(exhausted) = &self.exhausted_generation {
-                if exhausted.generation == generation {
-                    return RecoveryOutcome::Exhausted {
-                        generation,
-                        final_fault: exhausted.final_fault.clone(),
-                        user_attention_required: false,
-                    };
-                }
-            }
         }
-        self.current_attempt = 0;
-        self.run_generation(runtime, generation, outage)
     }
 
     pub fn manual_retry<D: RuntimeDriver>(
@@ -291,6 +451,7 @@ impl<C: RecoveryClock> RecoveryController<C> {
             };
         }
 
+        let component = outage.component;
         let scope = outage.recovery_scope();
         let mut final_fault = outage.fault;
         for (index, seconds) in RECONNECT_BACKOFF_SECONDS.into_iter().enumerate() {
@@ -304,7 +465,25 @@ impl<C: RecoveryClock> RecoveryController<C> {
                     self.exhausted_generation = None;
                     return RecoveryOutcome::Recovered { generation, attempt };
                 }
-                Err(error) => final_fault = error.fault,
+                Err(error) => {
+                    final_fault = error.fault;
+                    let classified = RuntimeOutage::classify(component, final_fault.clone());
+                    let _ = runtime.refresh_outage(
+                        generation,
+                        classified.component,
+                        classified.fault.clone(),
+                    );
+                    if classified.disposition == RecoveryDisposition::NonRecoverable {
+                        runtime.record_fault(classified.fault.clone());
+                        let user_attention_required =
+                            runtime.mark_user_attention_required(generation);
+                        return RecoveryOutcome::NonRecoverable {
+                            generation,
+                            fault: classified.fault,
+                            user_attention_required,
+                        };
+                    }
+                }
             }
         }
         runtime.record_fault(final_fault.clone());

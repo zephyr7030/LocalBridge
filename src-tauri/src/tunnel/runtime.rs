@@ -202,6 +202,37 @@ impl TunnelRuntime {
         }
     }
 
+    pub fn wait_ready_for_recovery(
+        &mut self,
+        timeout: Duration,
+        probe_timeout: Duration,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<(), TunnelError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if cancelled() { return Err(TunnelError::HealthUnavailable); }
+            if !self.supervisor.root_is_running().map_err(classify_supervisor)? { return Err(TunnelError::TunnelExited); }
+            if self.health.is_none() {
+                match fs::read_to_string(&self.health_url_file) {
+                    Ok(value) => self.health = Some(HealthEndpoint::parse(&value)?),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => return Err(TunnelError::HealthStateIo),
+                }
+            }
+            if cancelled() { return Err(TunnelError::HealthUnavailable); }
+            if let Some(health) = self.health {
+                match health.probe_ready_with_timeout(probe_timeout) {
+                    Ok(true) => return if cancelled() { Err(TunnelError::HealthUnavailable) } else { Ok(()) },
+                    Ok(false) | Err(TunnelError::HealthUnavailable) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            if cancelled() { return Err(TunnelError::HealthUnavailable); }
+            if Instant::now() >= deadline { return Err(TunnelError::HealthTimeout); }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     pub const fn process_snapshot(&self) -> &ProcessSnapshot { self.supervisor.snapshot() }
     pub fn root_is_running(&self) -> Result<bool, TunnelError> { self.supervisor.root_is_running().map_err(classify_supervisor) }
     pub fn active_processes(&self) -> Result<u32, TunnelError> { self.supervisor.active_processes().map_err(classify_supervisor) }
