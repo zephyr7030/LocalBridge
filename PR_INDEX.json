@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": "LB-010",
+    "current_pr": "LB-011",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -169,7 +169,7 @@
         "LB-009"
       ],
       "gate": "G2",
-      "status": "REWORK_REQUIRED"
+      "status": "PASS"
     },
     {
       "id": "LB-011",
@@ -181,7 +181,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "BLOCKED"
+      "status": "READY"
     },
     {
       "id": "LB-012",
