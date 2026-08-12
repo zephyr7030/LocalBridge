@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -124,7 +124,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Revalidate LB-017 after LB-016 onboarding manual-test repair; G3 remains REWORK_REQUIRED until LB-017 PASS and adversarial review generation 2"
+    "next_action": "Rework LB-008: ordinary Tunnel startup must not force optional managed Cloudflare mode; after G2 revalidation, apply the user-authorized six-screen onboarding governance revision before LB-016 rework"
   },
   "current_task_ui": {
     "enabled": true,
@@ -163,7 +163,7 @@
     "auto_select_other_on_remove": false,
     "mcp_can_mutate_registry": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "recovery_policy": {
     "automatic_reconnect": true,
     "attempts": 5,
