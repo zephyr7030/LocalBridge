@@ -66,6 +66,16 @@ const toolsList = server.slice(toolsListStart, toolsCallStart);
 if (!toolsList.includes("gateway.state().accepts_privileged_calls()")) {
   throw new Error("LB-012 tools/list exposes elevated_exec without an Active Broker state check");
 }
+const gatewayImplStart = control.indexOf("impl PrivilegedExecutionGateway");
+const gatewayStateStart = control.indexOf("pub fn state(&self) -> PrivilegeState", gatewayImplStart);
+const gatewayExecuteStart = control.indexOf("pub fn execute", gatewayStateStart);
+if (gatewayImplStart < 0 || gatewayStateStart < 0 || gatewayExecuteStart <= gatewayStateStart) {
+  throw new Error("LB-012 privileged gateway state method missing");
+}
+const gatewayState = control.slice(gatewayStateStart, gatewayExecuteStart);
+if (!gatewayState.includes("refresh_broker_liveness")) {
+  throw new Error("LB-012 tools/list can observe cached Active without refreshing Broker process liveness");
+}
 for (const required of ["privileged.start_execute", "privileged.poll_execute", "PrivilegeState::Active", "TaskExecutionState::AwaitingAuthorization", "TaskExecutionState::Blocked", "SafeTaskSummary::Omitted"]) {
   const source = required === "SafeTaskSummary::Omitted" ? server : handler;
   if (!source.includes(required)) throw new Error(`LB-012 broker route missing: ${required}`);

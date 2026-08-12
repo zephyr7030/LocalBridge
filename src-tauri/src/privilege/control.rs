@@ -38,6 +38,51 @@ impl Default for PrivilegeShared {
     }
 }
 
+impl PrivilegeShared {
+    fn cached_state(&self) -> PrivilegeState {
+        self.state
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn set_state(&self, state: PrivilegeState) {
+        *self
+            .state
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = state;
+    }
+
+    fn apply_broker_liveness(&self, running: bool) {
+        if running || !self.gate_open.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        self.active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        self.set_state(PrivilegeState::Faulted(PrivilegeFault::BrokerExited));
+    }
+
+    fn refresh_broker_liveness(&self) -> PrivilegeState {
+        if !self.gate_open.load(Ordering::Acquire) {
+            return self.cached_state();
+        }
+        let running = {
+            let active = self
+                .active
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            active
+                .as_ref()
+                .and_then(|active| active.process.is_running().ok())
+                .unwrap_or(false)
+        };
+        self.apply_broker_liveness(running);
+        self.cached_state()
+    }
+}
+
 #[derive(Clone)]
 pub struct PrivilegeController {
     shared: Arc<PrivilegeShared>,
@@ -62,7 +107,7 @@ impl PrivilegeController {
     }
 
     pub fn state(&self) -> PrivilegeState {
-        self.shared.state.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+        self.shared.refresh_broker_liveness()
     }
 
     pub fn gateway(&self) -> PrivilegedExecutionGateway {
@@ -120,23 +165,7 @@ impl PrivilegeController {
     }
 
     pub fn refresh_broker_state(&self) -> PrivilegeState {
-        if !self.shared.gate_open.load(Ordering::Acquire) {
-            return self.state();
-        }
-        let running = {
-            let active = self.shared.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            active.as_ref().and_then(|active| active.process.is_running().ok()).unwrap_or(false)
-        };
-        self.apply_broker_liveness(running);
         self.state()
-    }
-
-    fn apply_broker_liveness(&self, running: bool) {
-        if running || !self.shared.gate_open.swap(false, Ordering::AcqRel) {
-            return;
-        }
-        self.shared.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-        self.set_state(PrivilegeState::Faulted(PrivilegeFault::BrokerExited));
     }
 
     fn fail(&self, fault: PrivilegeFault) -> PrivilegeFault {
@@ -147,7 +176,7 @@ impl PrivilegeController {
     }
 
     fn set_state(&self, state: PrivilegeState) {
-        *self.shared.state.write().unwrap_or_else(std::sync::PoisonError::into_inner) = state;
+        self.shared.set_state(state);
     }
 }
 
@@ -187,7 +216,7 @@ impl fmt::Debug for PrivilegedExecutionGateway {
 
 impl PrivilegedExecutionGateway {
     pub fn state(&self) -> PrivilegeState {
-        self.shared.state.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+        self.shared.refresh_broker_liveness()
     }
 
     pub fn execute(
@@ -223,13 +252,22 @@ impl PrivilegedExecutionGateway {
     ) -> Result<T, PrivilegedExecError> {
         let mut active = self.shared.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !self.shared.gate_open.load(Ordering::Acquire) {
-            return Err(PrivilegedExecError::GateClosed(self.state()));
+            return Err(PrivilegedExecError::GateClosed(self.shared.cached_state()));
         }
-        let broker = active.as_mut().ok_or_else(|| PrivilegedExecError::GateClosed(self.state()))?;
+        let Some(broker) = active.as_mut() else {
+            let state = if self.shared.gate_open.swap(false, Ordering::AcqRel) {
+                let state = PrivilegeState::Faulted(PrivilegeFault::BrokerExited);
+                self.shared.set_state(state.clone());
+                state
+            } else {
+                self.shared.cached_state()
+            };
+            return Err(PrivilegedExecError::GateClosed(state));
+        };
         operation(&mut broker.session).map_err(|error| {
             let fault = map_broker_fault(error);
             self.shared.gate_open.store(false, Ordering::Release);
-            *self.shared.state.write().unwrap_or_else(std::sync::PoisonError::into_inner) = PrivilegeState::Faulted(fault.clone());
+            self.shared.set_state(PrivilegeState::Faulted(fault.clone()));
             PrivilegedExecError::Broker(fault)
         })
     }
@@ -312,7 +350,21 @@ mod tests {
         let controller = PrivilegeController::new();
         controller.shared.gate_open.store(true, Ordering::Release);
         controller.set_state(PrivilegeState::Active { broker_generation: GenerationId::new(9) });
-        controller.apply_broker_liveness(false);
+        controller.shared.apply_broker_liveness(false);
+        assert!(!controller.shared.gate_open.load(Ordering::Acquire));
+        assert_eq!(controller.state(), PrivilegeState::Faulted(PrivilegeFault::BrokerExited));
+    }
+
+    #[test]
+    fn gateway_state_refreshes_stale_active_without_ui_or_diagnostics_poll() {
+        let controller = PrivilegeController::new();
+        controller.shared.gate_open.store(true, Ordering::Release);
+        controller.set_state(PrivilegeState::Active { broker_generation: GenerationId::new(10) });
+
+        assert_eq!(
+            controller.gateway().state(),
+            PrivilegeState::Faulted(PrivilegeFault::BrokerExited)
+        );
         assert!(!controller.shared.gate_open.load(Ordering::Acquire));
         assert_eq!(controller.state(), PrivilegeState::Faulted(PrivilegeFault::BrokerExited));
     }
