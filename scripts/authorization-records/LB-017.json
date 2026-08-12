@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "pr": "LB-017",
+  "records": [
+    {
+      "authorization_id": "EXEC-PREAUTH-LB017-001",
+      "scope": [
+        "src/App.tsx",
+        "src-tauri/src/lib.rs",
+        "scripts/authorization-records/LB-017.json"
+      ],
+      "actions": [
+        "compose the LB-017 diagnostics feature into the already-accepted dashboard diagnostics entry",
+        "register LB-017 diagnostics Tauri commands in the existing build_app invoke handler"
+      ],
+      "evidence_ref": "LB-017 owns diagnostics feature/model/commands/tests but production composition remains in accepted App.tsx and src-tauri/src/lib.rs",
+      "recorded_by": "executor",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    }
+  ]
+}

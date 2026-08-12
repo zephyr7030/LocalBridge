@@ -30,6 +30,9 @@ pub fn build_app() -> tauri::Builder<tauri::Wry> {
         commands::onboarding::save_onboarding_connection,
         commands::onboarding::open_chatgpt_mcp_page,
         commands::onboarding::complete_onboarding,
+        commands::diagnostics::get_diagnostics,
+        commands::diagnostics::diagnostics_retry_connection,
+        commands::diagnostics::export_diagnostics,
     ])
 }
 
