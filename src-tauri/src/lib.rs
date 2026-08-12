@@ -26,6 +26,10 @@ pub fn build_app() -> tauri::Builder<tauri::Wry> {
         commands::ui::add_project,
         commands::ui::select_project,
         commands::ui::remove_project,
+        commands::onboarding::get_onboarding_state,
+        commands::onboarding::save_onboarding_connection,
+        commands::onboarding::open_chatgpt_mcp_page,
+        commands::onboarding::complete_onboarding,
     ])
 }
 

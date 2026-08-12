@@ -2,12 +2,26 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { APP_NAME } from "./appModel";
 import { bridge, type AccessCode, type MainProjection, type ProjectProjection } from "./bridge";
 import { accessText, privilegeText, serviceText, taskText, uiText } from "./presentation";
+import { Onboarding } from "./features/onboarding/Onboarding";
+import { onboardingApi, type OnboardingState } from "./features/onboarding/api";
 import "./styles.css";
 
 type View = "main" | "settings" | "diagnostics";
 function errorText(value: unknown): string { return typeof value === "string" && value.trim() ? value : "操作未完成"; }
 
 export function App() {
+  const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
+  const [onboardingError, setOnboardingError] = useState(false);
+  useEffect(() => {
+    void onboardingApi.read().then(setOnboarding).catch(() => setOnboardingError(true));
+  }, []);
+  if (onboardingError) return <main className="onboarding-loading">无法读取首次设置状态</main>;
+  if (!onboarding) return <main className="onboarding-loading">正在准备 LocalBridge…</main>;
+  if (!onboarding.complete) return <Onboarding initial={onboarding} onComplete={() => setOnboarding({ ...onboarding, complete: true })} />;
+  return <Dashboard />;
+}
+
+function Dashboard() {
   const [projection, setProjection] = useState<MainProjection | null>(null);
   const [view, setView] = useState<View>("main");
   const [error, setError] = useState<string | null>(null);

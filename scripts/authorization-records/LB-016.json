@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "pr": "LB-016",
+  "records": [
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-001",
+      "scope": [
+        "src/App.tsx",
+        "src-tauri/src/lib.rs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "compose the first-run onboarding shell ahead of the already-accepted dashboard in src/App.tsx",
+        "register LB-016 onboarding Tauri commands in the existing build_app invoke handler"
+      ],
+      "evidence_ref": "LB-016 requires a production first-run flow but its normal writable paths contain only onboarding/components/commands/tests; production composition remains in the accepted App and Tauri builder files",
+      "recorded_by": "executor",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    }
+  ]
+}
