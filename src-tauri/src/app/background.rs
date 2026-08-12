@@ -1,5 +1,7 @@
 use std::ffi::OsStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError, mpsc};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 #[cfg(windows)]
 use crate::credentials::WindowsCredentialStore;
@@ -9,8 +11,8 @@ use crate::privilege::PrivilegeController;
 #[cfg(windows)]
 use crate::privilege::{SESSION_NONCE_BYTES, random_session_nonce};
 use crate::runtime::{
-    OrchestratorError, RecoveryController, RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator,
-    RuntimeOutage, SystemRecoveryClock, WorkspaceSwitchError,
+    AutoRecoveryRuntime, OrchestratorError, RecoveryClock, RecoveryController, RecoveryOutcome,
+    RuntimeDriver, RuntimeOrchestrator, RuntimeOutage, SystemRecoveryClock, WorkspaceSwitchError,
 };
 #[cfg(windows)]
 use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver};
@@ -122,6 +124,10 @@ pub trait ExitRuntime {
 
     fn manual_retry(&mut self) -> Result<RecoveryOutcome, DesktopRuntimeControlError> {
         Err(DesktopRuntimeControlError::NoActiveOutage)
+    }
+
+    fn monitor_recovery(&mut self) -> Option<RecoveryOutcome> {
+        None
     }
 }
 
@@ -262,6 +268,69 @@ where
     }
 }
 
+impl<D, C> ExitRuntime for AutoRecoveryRuntime<D, C>
+where
+    D: RuntimeDriver,
+    C: RecoveryClock + Send,
+    AutoRecoveryRuntime<D, C>: Send,
+{
+    fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError> {
+        self.orchestrator_mut()
+            .stop_tunnel_for_exit()
+            .map_err(|_| DesktopExitError::Runtime)
+    }
+
+    fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError> {
+        self.orchestrator_mut()
+            .finish_exit_after_tunnel()
+            .map_err(|_| DesktopExitError::Runtime)
+    }
+
+    fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
+        let runtime = self.runtime();
+        DesktopRuntimeSnapshot {
+            active: true,
+            state: runtime.state().clone(),
+            current_task: runtime.current_task(),
+            configured_workspace: runtime.configured_workspace().map(Path::to_path_buf),
+            outage: runtime.active_outage().map(|outage| DesktopOutageSnapshot {
+                generation: outage.id.get(),
+                component: outage.component,
+                fault: outage.fault.clone(),
+                user_attention_required: outage.user_attention_emitted(),
+            }),
+        }
+    }
+
+    fn set_permission_mode(
+        &mut self,
+        mode: PermissionMode,
+    ) -> Result<(), DesktopRuntimeControlError> {
+        self.orchestrator_mut()
+            .set_permission_mode(mode)
+            .map_err(DesktopRuntimeControlError::Runtime)
+    }
+
+    fn switch_workspace(
+        &mut self,
+        candidate: &Path,
+        rollback: Option<&Path>,
+    ) -> Result<(), DesktopRuntimeControlError> {
+        self.orchestrator_mut()
+            .switch_workspace_to(candidate, rollback)
+            .map_err(DesktopRuntimeControlError::Workspace)
+    }
+
+    fn manual_retry(&mut self) -> Result<RecoveryOutcome, DesktopRuntimeControlError> {
+        self.manual_retry_current_outage()
+            .ok_or(DesktopRuntimeControlError::NoActiveOutage)
+    }
+
+    fn monitor_recovery(&mut self) -> Option<RecoveryOutcome> {
+        self.monitor_once()
+    }
+}
+
 pub trait PrivilegeExit {
     fn close_gate_and_stop_broker(&self) -> Result<(), DesktopExitError>;
 }
@@ -300,9 +369,13 @@ where
 
 pub struct DesktopLifecycle {
     privilege: PrivilegeController,
-    runtime_operation: Mutex<()>,
-    runtime: Mutex<ProductionRuntimeOwner>,
+    runtime_operation: Arc<Mutex<()>>,
+    runtime: Arc<Mutex<ProductionRuntimeOwner>>,
+    watchdog_shutdown: Mutex<Option<mpsc::Sender<()>>>,
+    watchdog_thread: Mutex<Option<JoinHandle<()>>>,
 }
+
+const RUNTIME_WATCHDOG_INTERVAL: Duration = Duration::from_millis(500);
 
 impl std::fmt::Debug for DesktopLifecycle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -322,10 +395,37 @@ impl std::fmt::Debug for DesktopLifecycle {
 
 impl DesktopLifecycle {
     pub fn new(privilege: PrivilegeController) -> Self {
+        let runtime_operation = Arc::new(Mutex::new(()));
+        let runtime = Arc::new(Mutex::new(ProductionRuntimeOwner::default()));
+        let monitor_operation = Arc::clone(&runtime_operation);
+        let monitor_runtime = Arc::clone(&runtime);
+        let (shutdown_tx, shutdown_rx) = mpsc::channel();
+        let watchdog_thread = thread::Builder::new()
+            .name("localbridge-runtime-watchdog".into())
+            .spawn(move || loop {
+                match shutdown_rx.recv_timeout(RUNTIME_WATCHDOG_INTERVAL) {
+                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                let _operation = match monitor_operation.try_lock() {
+                    Ok(operation) => operation,
+                    Err(TryLockError::WouldBlock) => continue,
+                    Err(TryLockError::Poisoned(error)) => error.into_inner(),
+                };
+                let mut owner = monitor_runtime
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(runtime) = owner.active.as_deref_mut() {
+                    let _ = runtime.monitor_recovery();
+                }
+            })
+            .expect("runtime watchdog thread must start");
         Self {
             privilege,
-            runtime_operation: Mutex::new(()),
-            runtime: Mutex::new(ProductionRuntimeOwner::default()),
+            runtime_operation,
+            runtime,
+            watchdog_shutdown: Mutex::new(Some(shutdown_tx)),
+            watchdog_thread: Mutex::new(Some(watchdog_thread)),
         }
     }
 
@@ -361,6 +461,7 @@ impl DesktopLifecycle {
         runtime
             .start()
             .map_err(DesktopRuntimeStartError::Runtime)?;
+        let runtime = AutoRecoveryRuntime::new(runtime, SystemRecoveryClock::default());
         self.runtime
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -506,6 +607,27 @@ impl DesktopLifecycle {
         P: PrivilegeExit + ?Sized,
     {
         self.shutdown_with_privilege(privilege)
+    }
+}
+
+impl Drop for DesktopLifecycle {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self
+            .watchdog_shutdown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            let _ = shutdown.send(());
+        }
+        if let Some(thread) = self
+            .watchdog_thread
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            let _ = thread.join();
+        }
     }
 }
 

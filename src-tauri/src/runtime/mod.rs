@@ -7,11 +7,12 @@ mod recovery;
 pub use orchestrator::{
     OrchestratorError, OutageGeneration, OutageGenerationId, OutageTracker,
     ProductionRuntimeConfig, ProductionRuntimeDriver, RecoveryScope, RuntimeDriver,
-    RuntimeOrchestrator, WorkspaceSwitchError,
+    RuntimeHealthFailure, RuntimeOrchestrator, WorkspaceSwitchError,
 };
 pub use recovery::{
-    RECONNECT_BACKOFF_SECONDS, RecoveryClock, RecoveryController, RecoveryDisposition,
-    RecoveryOutcome, RuntimeOutage, STABILITY_RESET_SECONDS, SystemRecoveryClock,
+    AutoRecoveryRuntime, RECONNECT_BACKOFF_SECONDS, RecoveryClock, RecoveryController,
+    RecoveryDisposition, RecoveryOutcome, RuntimeOutage, STABILITY_RESET_SECONDS,
+    SystemRecoveryClock,
 };
 
 #[cfg(windows)]

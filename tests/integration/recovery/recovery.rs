@@ -29,6 +29,7 @@ struct RecoveryDriver {
     fail_tunnel_starts: SharedFailures,
     pep_healthy: SharedHealth,
     mcp_healthy: SharedHealth,
+    tunnel_healthy: SharedHealth,
     workspace: PathBuf,
 }
 
@@ -38,12 +39,14 @@ impl RecoveryDriver {
         let fail_tunnel_starts = Rc::new(RefCell::new(0));
         let pep_healthy = Rc::new(RefCell::new(true));
         let mcp_healthy = Rc::new(RefCell::new(true));
+        let tunnel_healthy = Rc::new(RefCell::new(true));
         (
             Self {
                 events: events.clone(),
                 fail_tunnel_starts: fail_tunnel_starts.clone(),
                 pep_healthy: pep_healthy.clone(),
                 mcp_healthy: mcp_healthy.clone(),
+                tunnel_healthy,
                 workspace: PathBuf::from(r"D:\project\active"),
             },
             events,
@@ -74,6 +77,7 @@ impl RuntimeDriver for RecoveryDriver {
         self.event("tunnel.start");
         let mut remaining = self.fail_tunnel_starts.borrow_mut();
         if *remaining > 0 { *remaining -= 1; return Err(RuntimeFault::TunnelExited); }
+        *self.tunnel_healthy.borrow_mut() = true;
         Ok("tunnel")
     }
     fn confirm_tunnel_ready(&mut self, _tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> { self.event("tunnel.ready"); Ok(()) }
@@ -81,6 +85,18 @@ impl RuntimeDriver for RecoveryDriver {
     fn stop_pep(&mut self, _pep: Self::Pep) -> Result<Self::Mcp, RuntimeFault> { self.event("pep.stop"); Ok("mcp") }
     fn stop_mcp(&mut self, _mcp: &mut Self::Mcp) -> Result<(), RuntimeFault> { self.event("mcp.stop"); Ok(()) }
     fn current_task(&self, _pep: &Self::Pep) -> CurrentTaskStatus { CurrentTaskStatus::Idle }
+    fn probe_mcp_health(&mut self, _pep: &Self::Pep) -> Result<(), RuntimeFault> {
+        self.event("mcp.monitor");
+        if *self.mcp_healthy.borrow() { Ok(()) } else { Err(RuntimeFault::McpExited) }
+    }
+    fn probe_pep_health(&mut self, _pep: &Self::Pep) -> Result<(), RuntimeFault> {
+        self.event("pep.monitor");
+        if *self.pep_healthy.borrow() { Ok(()) } else { Err(RuntimeFault::PolicyBindFailed) }
+    }
+    fn probe_tunnel_health(&mut self, _tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> {
+        self.event("tunnel.monitor");
+        if *self.tunnel_healthy.borrow() { Ok(()) } else { Err(RuntimeFault::TunnelExited) }
+    }
     fn current_workspace(&self) -> Option<&Path> { Some(&self.workspace) }
     fn configure_workspace(&mut self, workspace: PathBuf) -> Result<(), RuntimeFault> { self.workspace = workspace; Ok(()) }
 }
@@ -195,6 +211,90 @@ fn successful_recovery_keeps_generation_until_sixty_seconds_of_stable_ready() {
     assert!(controller.observe_stable_ready(&mut runtime));
     assert_eq!(controller.active_generation(), None);
     assert!(runtime.active_outage().is_none());
+}
+
+#[test]
+fn monitor_automatically_detects_post_ready_tunnel_failure_and_resets_after_stability() {
+    let (driver, events, _, _, _) = RecoveryDriver::new();
+    let tunnel_healthy = driver.tunnel_healthy.clone();
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
+    events.borrow_mut().clear();
+    *tunnel_healthy.borrow_mut() = false;
+
+    let outcome = monitored.monitor_once().expect("watchdog must detect post-Ready Tunnel outage");
+    let generation = match outcome {
+        RecoveryOutcome::Recovered { generation, attempt } => {
+            assert_eq!(attempt, 1);
+            generation
+        }
+        other => panic!("expected automatic recovery, got {other:?}"),
+    };
+    assert_eq!(
+        &*events.borrow(),
+        &[
+            "mcp.monitor",
+            "pep.monitor",
+            "tunnel.monitor",
+            "tunnel.stop",
+            "pep.ready",
+            "tunnel.start",
+            "tunnel.ready",
+        ]
+    );
+    assert_eq!(monitored.runtime().active_outage().map(|outage| outage.id), Some(generation));
+
+    monitored.recovery_clock_mut().advance(Duration::from_secs(59));
+    assert!(monitored.monitor_once().is_none());
+    assert!(monitored.runtime().active_outage().is_some());
+    monitored.recovery_clock_mut().advance(Duration::from_secs(1));
+    assert!(monitored.monitor_once().is_none());
+    assert!(monitored.runtime().active_outage().is_none());
+}
+
+#[test]
+fn monitor_exhaustion_is_terminal_until_persistent_controller_manual_retry() {
+    let (driver, events, fail_counter, _, _) = RecoveryDriver::new();
+    let tunnel_healthy = driver.tunnel_healthy.clone();
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
+    events.borrow_mut().clear();
+    *tunnel_healthy.borrow_mut() = false;
+    *fail_counter.borrow_mut() = 5;
+
+    let exhausted_generation = match monitored.monitor_once().expect("outage must be detected") {
+        RecoveryOutcome::Exhausted { generation, user_attention_required, .. } => {
+            assert!(user_attention_required);
+            generation
+        }
+        other => panic!("expected exhausted automatic recovery, got {other:?}"),
+    };
+    assert_eq!(
+        monitored.recovery_clock().sleeps,
+        [1, 2, 5, 10, 30].map(Duration::from_secs)
+    );
+    let event_count = events.borrow().len();
+    let sleep_count = monitored.recovery_clock().sleeps.len();
+
+    assert!(monitored.monitor_once().is_none(), "Faulted exhausted runtime must not auto-start another generation");
+    assert_eq!(events.borrow().len(), event_count);
+    assert_eq!(monitored.recovery_clock().sleeps.len(), sleep_count);
+
+    *fail_counter.borrow_mut() = 0;
+    let manual_generation = match monitored
+        .manual_retry_current_outage()
+        .expect("manual retry must use retained outage")
+    {
+        RecoveryOutcome::Recovered { generation, attempt } => {
+            assert_eq!(attempt, 1);
+            generation
+        }
+        other => panic!("expected manual recovery, got {other:?}"),
+    };
+    assert_ne!(manual_generation, exhausted_generation);
+    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
 }
 
 #[test]

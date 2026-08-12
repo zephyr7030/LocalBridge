@@ -3,7 +3,7 @@ use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, mpsc};
+use std::sync::{Arc, Mutex, RwLock, TryLockError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -105,6 +105,7 @@ pub struct PolicyEnforcementRuntime {
     port: u16,
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
+    guard: Option<Arc<Mutex<McpGuard<CodingToolsRuntime>>>>,
     shutdown: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<McpGuard<CodingToolsRuntime>>>,
 }
@@ -180,6 +181,7 @@ impl PolicyEnforcementRuntime {
             port,
             permission_mode,
             current_task,
+            guard: Some(guard),
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         })
@@ -208,8 +210,22 @@ impl PolicyEnforcementRuntime {
         self.thread.as_ref().is_some_and(|thread| !thread.is_finished())
     }
 
+    pub fn upstream_root_is_running(
+        &self,
+    ) -> Result<Option<bool>, super::runtime::CodingToolsRuntimeError> {
+        let Some(guard) = self.guard.as_ref() else {
+            return Ok(Some(false));
+        };
+        match guard.try_lock() {
+            Ok(guard) => guard.runtime_root_is_running(),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Poisoned(error)) => error.into_inner().runtime_root_is_running(),
+        }
+    }
+
     pub fn stop(mut self) -> Result<CodingToolsRuntime, PolicyEnforcementError> {
         self.signal_shutdown();
+        drop(self.guard.take());
         let thread = self.thread.take().ok_or(PolicyEnforcementError::ThreadTerminated)?;
         let guard = thread.join().map_err(|_| PolicyEnforcementError::ThreadTerminated)?;
         Ok(guard.into_runtime())
@@ -225,6 +241,7 @@ impl PolicyEnforcementRuntime {
 impl Drop for PolicyEnforcementRuntime {
     fn drop(&mut self) {
         self.signal_shutdown();
+        drop(self.guard.take());
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }

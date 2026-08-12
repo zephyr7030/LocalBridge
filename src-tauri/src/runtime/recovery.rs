@@ -115,6 +115,61 @@ pub struct RecoveryController<C: RecoveryClock> {
     exhausted_generation: Option<ExhaustedGeneration>,
 }
 
+#[derive(Debug)]
+pub struct AutoRecoveryRuntime<D: RuntimeDriver, C: RecoveryClock> {
+    runtime: RuntimeOrchestrator<D>,
+    controller: RecoveryController<C>,
+}
+
+impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
+    pub fn new(runtime: RuntimeOrchestrator<D>, clock: C) -> Self {
+        Self {
+            runtime,
+            controller: RecoveryController::new(clock),
+        }
+    }
+
+    pub fn runtime(&self) -> &RuntimeOrchestrator<D> {
+        &self.runtime
+    }
+
+    pub fn orchestrator_mut(&mut self) -> &mut RuntimeOrchestrator<D> {
+        &mut self.runtime
+    }
+
+    pub fn recovery_clock(&self) -> &C {
+        self.controller.clock()
+    }
+
+    pub fn recovery_clock_mut(&mut self) -> &mut C {
+        self.controller.clock_mut()
+    }
+
+    pub fn monitor_once(&mut self) -> Option<RecoveryOutcome> {
+        if self.runtime.state() != &RuntimeState::Ready {
+            return None;
+        }
+        match self.runtime.probe_ready_health() {
+            Ok(()) => {
+                let _ = self.controller.observe_stable_ready(&mut self.runtime);
+                None
+            }
+            Err(failure) => Some(self.controller.recover_auto(
+                &mut self.runtime,
+                RuntimeOutage::classify(failure.component, failure.fault),
+            )),
+        }
+    }
+
+    pub fn manual_retry_current_outage(&mut self) -> Option<RecoveryOutcome> {
+        let outage = self.runtime.active_outage().cloned()?;
+        Some(self.controller.manual_retry(
+            &mut self.runtime,
+            RuntimeOutage::classify(outage.component, outage.fault),
+        ))
+    }
+}
+
 impl<C: RecoveryClock> RecoveryController<C> {
     pub fn new(clock: C) -> Self {
         Self {

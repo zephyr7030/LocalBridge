@@ -17,6 +17,10 @@ pub trait GuardRuntime {
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, CodingToolsRuntimeError>;
+
+    fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
+        Ok(None)
+    }
 }
 
 impl GuardRuntime for CodingToolsRuntime {
@@ -31,6 +35,10 @@ impl GuardRuntime for CodingToolsRuntime {
         request_id: Option<&Value>,
     ) -> Result<Value, CodingToolsRuntimeError> {
         self.call_tool_with_request_id(name, arguments, request_id)
+    }
+
+    fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
+        CodingToolsRuntime::root_is_running(self).map(Some)
     }
 }
 
@@ -176,6 +184,10 @@ impl<R: GuardRuntime> McpGuard<R> {
 
     pub fn privileged_tool_visible(&self, mode: PermissionMode, name: &str) -> bool {
         self.policy.privileged_tool_visible(mode, name)
+    }
+
+    pub fn runtime_root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
+        self.runtime.root_is_running()
     }
 
     pub(crate) fn into_runtime(self) -> R {

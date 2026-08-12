@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "pr_id": "LB-010",
+  "records": [
+    {
+      "authorization_id": "EXEC-PREAUTH-LB010-001",
+      "scope": [
+        "src-tauri/src/app/background.rs",
+        "src-tauri/src/mcp/guard.rs",
+        "src-tauri/src/mcp/server.rs",
+        "scripts/authorization-records/LB-010.json"
+      ],
+      "actions": [
+        "Wire the existing LB-010 RecoveryController into the single DesktopLifecycle-owned production runtime through one stoppable watchdog",
+        "Expose a nonblocking liveness read for the actual CodingToolsRuntime already owned behind the PEP so MCP/PEP/Tunnel post-Ready failures can be classified without a second runtime or PID-only ownership"
+      ],
+      "reason": "The formal G2 generation 3 independent adversarial review found that the accepted LB-010 RecoveryController had no production recover_auto/observe_stable_ready caller and no post-Ready MCP/PEP/Tunnel watchdog. The production runtime is owned in app/background.rs and the actual CodingToolsRuntime is intentionally encapsulated behind the PEP, so these adjacent seams are the minimum required composition points.",
+      "evidence_ref": "G2 generation 3 review provenance commit 863a197fe20b5e6735aa7bdc847181f66e26df8d plus current source search showing no production recover_auto/observe_stable_ready caller before this repair.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "required_to_satisfy_frozen_contract": true,
+      "least_privilege_reviewed": true,
+      "not_used_for_unrelated_work": true,
+      "does_not_expand_future_pr_writable_paths": true
+    }
+  ]
+}

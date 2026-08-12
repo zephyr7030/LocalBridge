@@ -36,6 +36,18 @@ pub trait RuntimeDriver {
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus;
 
+    fn probe_mcp_health(&mut self, _pep: &Self::Pep) -> Result<(), RuntimeFault> {
+        Ok(())
+    }
+
+    fn probe_pep_health(&mut self, pep: &Self::Pep) -> Result<(), RuntimeFault> {
+        self.confirm_pep_ready(pep)
+    }
+
+    fn probe_tunnel_health(&mut self, tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> {
+        self.confirm_tunnel_ready(tunnel)
+    }
+
     fn current_workspace(&self) -> Option<&Path> {
         None
     }
@@ -51,6 +63,12 @@ pub trait RuntimeDriver {
     ) -> Result<(), RuntimeFault> {
         Err(RuntimeFault::ConfigurationInvalid)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeHealthFailure {
+    pub component: RuntimeComponent,
+    pub fault: RuntimeFault,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +175,37 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
 
     pub fn configured_workspace(&self) -> Option<&Path> {
         self.driver.current_workspace()
+    }
+
+    pub fn probe_ready_health(&mut self) -> Result<(), RuntimeHealthFailure> {
+        if self.state != RuntimeState::Ready {
+            return Ok(());
+        }
+        let Some(ready) = self.ready.as_mut() else {
+            return Err(RuntimeHealthFailure {
+                component: RuntimeComponent::CodingRuntime,
+                fault: RuntimeFault::ConfigurationInvalid,
+            });
+        };
+        self.driver
+            .probe_mcp_health(&ready.pep)
+            .map_err(|fault| RuntimeHealthFailure {
+                component: RuntimeComponent::CodingRuntime,
+                fault,
+            })?;
+        self.driver
+            .probe_pep_health(&ready.pep)
+            .map_err(|fault| RuntimeHealthFailure {
+                component: RuntimeComponent::PolicyEnforcement,
+                fault,
+            })?;
+        self.driver
+            .probe_tunnel_health(&mut ready.tunnel)
+            .map_err(|fault| RuntimeHealthFailure {
+                component: RuntimeComponent::Tunnel,
+                fault,
+            })?;
+        Ok(())
     }
 
     pub fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), RuntimeFault> {
@@ -830,6 +879,30 @@ where
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus {
         pep.current_task_projection().snapshot()
+    }
+
+    fn probe_mcp_health(&mut self, pep: &Self::Pep) -> Result<(), RuntimeFault> {
+        match pep
+            .upstream_root_is_running()
+            .map_err(|error| error.runtime_fault())?
+        {
+            Some(true) | None => Ok(()),
+            Some(false) => Err(RuntimeFault::McpExited),
+        }
+    }
+
+    fn probe_pep_health(&mut self, pep: &Self::Pep) -> Result<(), RuntimeFault> {
+        if pep.is_running() {
+            Ok(())
+        } else {
+            Err(RuntimeFault::PolicyBindFailed)
+        }
+    }
+
+    fn probe_tunnel_health(&mut self, tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> {
+        tunnel
+            .wait_ready(Duration::ZERO)
+            .map_err(|error| error.runtime_fault())
     }
 
     fn current_workspace(&self) -> Option<&Path> {
