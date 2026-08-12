@@ -23,6 +23,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tauri = { version = "2", features = [] }
+toml = "0.9"
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Security",
@@ -59,6 +60,14 @@ path = "../tests/unit/credentials/credential_store.rs"
 [[test]]
 name = "lb006_coding_runtime"
 path = "../tests/integration/mcp/coding_runtime.rs"
+
+[[test]]
+name = "lb007_policy_contracts"
+path = "../tests/unit/policy/policy_contracts.rs"
+
+[[test]]
+name = "lb007_policy_enforcement"
+path = "../tests/integration/policy/policy_enforcement.rs"
 
 [profile.release]
 strip = true

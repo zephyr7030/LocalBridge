@@ -73,3 +73,18 @@ Any upstream upgrade must regenerate structural and capability diffs before the 
 This adds a small first-party MCP protocol boundary, but avoids both insecure list-only filtering and a long-lived fork of upstream. It also makes cached `tools/list`, future workflow-like tools, and upstream permission semantic changes fail closed.
 
 The LB-000 live Tunnel credential blocker does not affect this decision because the PEP conclusion derives from direct local execution of the pinned coding-tools runtime.
+
+## LB-007 production boundary
+
+LB-007 implements the accepted decision as `src-tauri/src/mcp/{policy,guard}.rs` in front of the LB-006 stable runtime adapter. `runtime-policy.toml` schema 4 is parsed and semantically validated against the pinned coding-tools-mcp 0.2.2 review surface before a Guard is constructed.
+
+- `tools/list` filtering is UX-only and never grants authority.
+- every `tools/call` receives the current `PermissionMode` and is re-authorized immediately before forwarding, so a cached Full-mode catalog cannot bypass a later switch to Edit.
+- the exact 20-tool v0.2.2 review surface is classified in Rust; future or unknown tools are denied until compatibility review updates both baseline and policy.
+- `request_permissions` and LocalBridge workspace/permission/credential/tunnel/MCP configuration names are `ControlPlane` and denied in every mode.
+- workflow/compound callers must declare indirect capabilities; indirect `ProcessExec` is denied in Edit and indirect unknown/control-plane/privileged capabilities fail closed.
+- denied calls project `Blocked` without first projecting `Running`; allowed calls project `Running` only immediately before the real upstream call, then return to `Idle` (or briefly `Failed` then `Idle` on runtime failure).
+- task summaries use minimal request fields and always pass through `SafeTaskSummary`; patch bodies and stdin payloads are never UI summaries.
+- MCP policy modules do not mutate `WorkspaceRegistry` or active workspace state. Session-local `set_default_cwd` is distinct from LocalBridge workspace authorization and remains constrained by the upstream active-workspace runtime.
+
+Raw LB-006 transport methods remain for adapter regression compatibility, while architecture verification forbids production callers outside `src-tauri/src/mcp/**`; application code enters through `McpGuard`.

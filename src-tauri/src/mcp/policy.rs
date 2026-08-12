@@ -1,0 +1,290 @@
+use std::collections::HashSet;
+use std::fmt;
+use std::fs;
+use std::path::Path;
+
+use serde::Deserialize;
+
+use crate::state::{Capability, PermissionMode, TaskKind};
+
+const PINNED_RUNTIME_VERSION: &str = "0.2.2";
+const CONTROL_PLANE_NAMES: &[&str] = &[
+    "request_permissions",
+    "workspace_select",
+    "workspace_add",
+    "workspace_remove",
+    "permission_mode_change",
+    "credential_reset",
+    "tunnel_config_write",
+    "mcp_config_write",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolDescriptor {
+    pub name: &'static str,
+    pub capability: Capability,
+    pub task_kind: TaskKind,
+}
+
+pub const PINNED_TOOLS: &[ToolDescriptor] = &[
+    ToolDescriptor { name: "server_info", capability: Capability::Read, task_kind: TaskKind::Other },
+    ToolDescriptor { name: "check_exec_environment", capability: Capability::Read, task_kind: TaskKind::Other },
+    ToolDescriptor { name: "get_default_cwd", capability: Capability::Read, task_kind: TaskKind::Other },
+    ToolDescriptor { name: "set_default_cwd", capability: Capability::Write, task_kind: TaskKind::Other },
+    ToolDescriptor { name: "read_file", capability: Capability::Read, task_kind: TaskKind::ReadFile },
+    ToolDescriptor { name: "list_dir", capability: Capability::Read, task_kind: TaskKind::ReadFile },
+    ToolDescriptor { name: "list_files", capability: Capability::Read, task_kind: TaskKind::ReadFile },
+    ToolDescriptor { name: "search_text", capability: Capability::Read, task_kind: TaskKind::SearchCode },
+    ToolDescriptor { name: "apply_patch", capability: Capability::Write, task_kind: TaskKind::ModifyFile },
+    ToolDescriptor { name: "exec_command", capability: Capability::ProcessExec, task_kind: TaskKind::ExecuteCommand },
+    ToolDescriptor { name: "write_stdin", capability: Capability::ProcessExec, task_kind: TaskKind::ExecuteCommand },
+    ToolDescriptor { name: "kill_session", capability: Capability::ProcessExec, task_kind: TaskKind::ExecuteCommand },
+    ToolDescriptor { name: "read_output", capability: Capability::ProcessExec, task_kind: TaskKind::ExecuteCommand },
+    ToolDescriptor { name: "git_status", capability: Capability::Git, task_kind: TaskKind::GitOperation },
+    ToolDescriptor { name: "git_diff", capability: Capability::Git, task_kind: TaskKind::GitOperation },
+    ToolDescriptor { name: "git_log", capability: Capability::Git, task_kind: TaskKind::GitOperation },
+    ToolDescriptor { name: "git_show", capability: Capability::Git, task_kind: TaskKind::GitOperation },
+    ToolDescriptor { name: "git_blame", capability: Capability::Git, task_kind: TaskKind::GitOperation },
+    ToolDescriptor { name: "request_permissions", capability: Capability::ControlPlane, task_kind: TaskKind::Other },
+    ToolDescriptor { name: "view_image", capability: Capability::Read, task_kind: TaskKind::ReadFile },
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PolicyError {
+    ReadFailed,
+    InvalidToml,
+    ContractMismatch(&'static str),
+}
+
+impl fmt::Display for PolicyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ReadFailed => f.write_str("runtime policy could not be read"),
+            Self::InvalidToml => f.write_str("runtime policy TOML is invalid"),
+            Self::ContractMismatch(field) => write!(f, "runtime policy contract mismatch: {field}"),
+        }
+    }
+}
+
+impl std::error::Error for PolicyError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DenyReason {
+    UnknownTool,
+    ControlPlane,
+    ToolNotAllowedInMode,
+    IndirectProcessExecInEdit,
+    IndirectControlPlane,
+    IndirectUnknownCapability,
+    PrivilegedRouteNotAvailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolicyDecision {
+    pub descriptor: ToolDescriptor,
+    pub allowed: bool,
+    pub deny_reason: Option<DenyReason>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapabilityPolicy {
+    edit_allowed: HashSet<String>,
+    full_allowed: HashSet<String>,
+    elevated_allowed: HashSet<String>,
+    blocked: HashSet<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PolicyDocument {
+    schema_version: u32,
+    runtime_version: String,
+    status: String,
+    edit_allowed_tools: Vec<String>,
+    full_allowed_tools: Vec<String>,
+    elevated_allowed_tools: Vec<String>,
+    blocked_tools: Vec<String>,
+    capabilities: CapabilitySection,
+    enforcement: EnforcementSection,
+    upstream_coding_tools: UpstreamSection,
+    workspace_registry: WorkspaceSection,
+}
+
+#[derive(Debug, Deserialize)]
+struct CapabilitySection {
+    unknown: String,
+    process_exec_in_edit: String,
+    process_exec_in_full: String,
+    workflow_with_process_exec_in_edit: String,
+    control_plane: String,
+    privileged_external_runtime: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EnforcementSection {
+    tools_list_filter: String,
+    tools_call_check: String,
+    implementation: String,
+    privileged_route: String,
+    upstream_direct_tunnel_target: String,
+    unknown_tool: String,
+    request_permissions: String,
+    transitive_exec_classification: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpstreamSection {
+    permission_mode: String,
+    dangerously_skip_all_permissions: bool,
+    telemetry: String,
+    listener: String,
+    internal_auth: String,
+    direct_external_exposure: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspaceSection {
+    remembered_projects_are_authorized_roots: bool,
+    max_active_authorized_roots: u32,
+    mcp_mutation: String,
+    filesystem_delete_on_remove: String,
+    auto_select_other_after_active_remove: bool,
+}
+
+impl CapabilityPolicy {
+    pub fn load(path: &Path) -> Result<Self, PolicyError> {
+        let text = fs::read_to_string(path).map_err(|_| PolicyError::ReadFailed)?;
+        Self::from_toml(&text)
+    }
+
+    pub fn from_toml(text: &str) -> Result<Self, PolicyError> {
+        let document: PolicyDocument = toml::from_str(text).map_err(|_| PolicyError::InvalidToml)?;
+        validate_document(&document)?;
+        Ok(Self {
+            edit_allowed: document.edit_allowed_tools.into_iter().collect(),
+            full_allowed: document.full_allowed_tools.into_iter().collect(),
+            elevated_allowed: document.elevated_allowed_tools.into_iter().collect(),
+            blocked: document.blocked_tools.into_iter().collect(),
+        })
+    }
+
+    pub fn classify(&self, name: &str) -> ToolDescriptor {
+        if is_control_plane_name(name) {
+            return ToolDescriptor {
+                name: "control-plane",
+                capability: Capability::ControlPlane,
+                task_kind: TaskKind::Other,
+            };
+        }
+        PINNED_TOOLS
+            .iter()
+            .copied()
+            .find(|descriptor| descriptor.name == name)
+            .unwrap_or(ToolDescriptor {
+                name: "unknown",
+                capability: Capability::Unknown,
+                task_kind: TaskKind::Other,
+            })
+    }
+
+    pub fn decide(
+        &self,
+        mode: PermissionMode,
+        tool_name: &str,
+        indirect_capabilities: &[Capability],
+    ) -> PolicyDecision {
+        let descriptor = self.classify(tool_name);
+        if descriptor.capability == Capability::Unknown {
+            return denied(descriptor, DenyReason::UnknownTool);
+        }
+        if descriptor.capability == Capability::ControlPlane || self.blocked.contains(tool_name) {
+            return denied(descriptor, DenyReason::ControlPlane);
+        }
+        if indirect_capabilities.contains(&Capability::ControlPlane) {
+            return denied(descriptor, DenyReason::IndirectControlPlane);
+        }
+        if indirect_capabilities.contains(&Capability::Unknown) {
+            return denied(descriptor, DenyReason::IndirectUnknownCapability);
+        }
+        if indirect_capabilities.iter().any(|cap| {
+            matches!(cap, Capability::ElevatedExec | Capability::PrivilegedExternalRuntime)
+        }) {
+            return denied(descriptor, DenyReason::PrivilegedRouteNotAvailable);
+        }
+        if mode == PermissionMode::Edit
+            && indirect_capabilities.contains(&Capability::ProcessExec)
+        {
+            return denied(descriptor, DenyReason::IndirectProcessExecInEdit);
+        }
+        let allowed = match mode {
+            PermissionMode::Edit => &self.edit_allowed,
+            PermissionMode::Full => &self.full_allowed,
+            PermissionMode::Elevated => &self.elevated_allowed,
+        };
+        if !allowed.contains(tool_name) {
+            return denied(descriptor, DenyReason::ToolNotAllowedInMode);
+        }
+        PolicyDecision { descriptor, allowed: true, deny_reason: None }
+    }
+
+    pub fn tool_allowed_for_list(&self, mode: PermissionMode, tool_name: &str) -> bool {
+        self.decide(mode, tool_name, &[]).allowed
+    }
+}
+
+fn denied(descriptor: ToolDescriptor, reason: DenyReason) -> PolicyDecision {
+    PolicyDecision { descriptor, allowed: false, deny_reason: Some(reason) }
+}
+
+fn is_control_plane_name(name: &str) -> bool {
+    CONTROL_PLANE_NAMES.contains(&name)
+        || name.starts_with("localbridge.")
+        || name.starts_with("localbridge_")
+}
+
+fn exact_set(actual: &[String], expected: &[&str]) -> bool {
+    let actual = actual.iter().map(String::as_str).collect::<HashSet<_>>();
+    let expected = expected.iter().copied().collect::<HashSet<_>>();
+    actual.len() == expected.len() && actual == expected
+}
+
+fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
+    if document.schema_version != 4 || document.runtime_version != PINNED_RUNTIME_VERSION || document.status != "LB_000_VERIFIED" {
+        return Err(PolicyError::ContractMismatch("identity"));
+    }
+    let edit = ["server_info","check_exec_environment","get_default_cwd","set_default_cwd","read_file","list_dir","list_files","search_text","apply_patch","git_status","git_diff","git_log","git_show","git_blame","view_image"];
+    let full = ["server_info","check_exec_environment","get_default_cwd","set_default_cwd","read_file","list_dir","list_files","search_text","apply_patch","exec_command","write_stdin","kill_session","read_output","git_status","git_diff","git_log","git_show","git_blame","view_image"];
+    if !exact_set(&document.edit_allowed_tools, &edit) { return Err(PolicyError::ContractMismatch("edit_allowed_tools")); }
+    if !exact_set(&document.full_allowed_tools, &full) { return Err(PolicyError::ContractMismatch("full_allowed_tools")); }
+    if !exact_set(&document.elevated_allowed_tools, &full) { return Err(PolicyError::ContractMismatch("elevated_allowed_tools")); }
+    if !exact_set(&document.blocked_tools, &["request_permissions"]) { return Err(PolicyError::ContractMismatch("blocked_tools")); }
+    if document.capabilities.unknown != "deny"
+        || document.capabilities.process_exec_in_edit != "deny"
+        || document.capabilities.process_exec_in_full != "allow_if_reviewed"
+        || document.capabilities.workflow_with_process_exec_in_edit != "deny"
+        || document.capabilities.control_plane != "deny_always"
+        || document.capabilities.privileged_external_runtime != "review_required"
+    { return Err(PolicyError::ContractMismatch("capabilities")); }
+    if document.enforcement.tools_list_filter != "ux_only"
+        || document.enforcement.tools_call_check != "mandatory"
+        || document.enforcement.implementation != "first_party_rust_mcp_guard"
+        || document.enforcement.privileged_route != "broker_only"
+        || document.enforcement.upstream_direct_tunnel_target != "forbidden"
+        || document.enforcement.unknown_tool != "deny"
+        || document.enforcement.request_permissions != "deny_always"
+        || document.enforcement.transitive_exec_classification != "required"
+    { return Err(PolicyError::ContractMismatch("enforcement")); }
+    if document.upstream_coding_tools.permission_mode != "trusted_behind_guard"
+        || document.upstream_coding_tools.dangerously_skip_all_permissions
+        || document.upstream_coding_tools.telemetry != "disabled"
+        || document.upstream_coding_tools.listener != "loopback_ephemeral"
+        || document.upstream_coding_tools.internal_auth != "runtime_generated_bearer_required"
+        || document.upstream_coding_tools.direct_external_exposure
+    { return Err(PolicyError::ContractMismatch("upstream_coding_tools")); }
+    if document.workspace_registry.remembered_projects_are_authorized_roots
+        || document.workspace_registry.max_active_authorized_roots != 1
+        || document.workspace_registry.mcp_mutation != "deny_always"
+        || document.workspace_registry.filesystem_delete_on_remove != "deny_always"
+        || document.workspace_registry.auto_select_other_after_active_remove
+    { return Err(PolicyError::ContractMismatch("workspace_registry")); }
+    Ok(())
+}
