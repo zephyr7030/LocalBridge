@@ -79,6 +79,7 @@ pub struct ManagedProcessSpec {
     args: Vec<OsString>,
     current_dir: Option<PathBuf>,
     environment: Vec<(OsString, SecretEnvironmentValue)>,
+    environment_removals: Vec<OsString>,
 }
 
 impl fmt::Debug for ManagedProcessSpec {
@@ -88,12 +89,18 @@ impl fmt::Debug for ManagedProcessSpec {
             .iter()
             .map(|(key, _)| key.to_string_lossy())
             .collect::<Vec<_>>();
+        let environment_removed_keys = self
+            .environment_removals
+            .iter()
+            .map(|key| key.to_string_lossy())
+            .collect::<Vec<_>>();
         f.debug_struct("ManagedProcessSpec")
             .field("role", &self.role)
             .field("executable", &self.executable)
             .field("args", &self.args)
             .field("current_dir", &self.current_dir)
             .field("environment_keys", &environment_keys)
+            .field("environment_removed_keys", &environment_removed_keys)
             .finish()
     }
 }
@@ -155,6 +162,7 @@ impl ManagedProcessSpec {
             args: Vec::new(),
             current_dir: None,
             environment: Vec::new(),
+            environment_removals: Vec::new(),
         })
     }
 
@@ -178,11 +186,11 @@ impl ManagedProcessSpec {
     }
 
     pub fn env(mut self, key: &str, value: &str) -> Result<Self, SupervisorError> {
-        if key.is_empty() || key.contains('=') || key.contains('\0') {
-            return Err(SupervisorError::InvalidSpec("invalid environment name"));
-        }
+        validate_environment_name(key)?;
         let key = OsString::from(key);
         let value = SecretEnvironmentValue::from_str(value)?;
+        self.environment_removals
+            .retain(|candidate| !env_names_equal(candidate, &key));
         if let Some(existing) = self
             .environment
             .iter_mut()
@@ -191,6 +199,21 @@ impl ManagedProcessSpec {
             *existing = (key, value);
         } else {
             self.environment.push((key, value));
+        }
+        Ok(self)
+    }
+
+    pub fn env_remove(mut self, key: &str) -> Result<Self, SupervisorError> {
+        validate_environment_name(key)?;
+        let key = OsString::from(key);
+        self.environment
+            .retain(|(candidate, _)| !env_names_equal(candidate, &key));
+        if !self
+            .environment_removals
+            .iter()
+            .any(|candidate| env_names_equal(candidate, &key))
+        {
+            self.environment_removals.push(key);
         }
         Ok(self)
     }
@@ -256,7 +279,7 @@ impl WindowsProcessSupervisor {
         let job = create_kill_on_close_job()?;
         let mut command_line = build_command_line(&spec.executable, &spec.args);
         let application = wide_null(spec.executable.as_os_str());
-        let environment = build_environment_block(&spec.environment);
+        let environment = build_environment_block(&spec.environment, &spec.environment_removals);
         let creation_flags = CREATE_SUSPENDED
             | if environment.is_some() {
                 CREATE_UNICODE_ENVIRONMENT
@@ -535,10 +558,19 @@ fn env_names_equal(left: &OsStr, right: &OsStr) -> bool {
         .eq_ignore_ascii_case(&right.to_string_lossy())
 }
 
+fn validate_environment_name(key: &str) -> Result<(), SupervisorError> {
+    if key.is_empty() || key.contains('=') || key.contains('\0') {
+        Err(SupervisorError::InvalidSpec("invalid environment name"))
+    } else {
+        Ok(())
+    }
+}
+
 fn build_environment_block(
     overrides: &[(OsString, SecretEnvironmentValue)],
+    removals: &[OsString],
 ) -> Option<EnvironmentBlock> {
-    if overrides.is_empty() {
+    if overrides.is_empty() && removals.is_empty() {
         return None;
     }
 
@@ -552,6 +584,9 @@ fn build_environment_block(
             !overrides
                 .iter()
                 .any(|(override_key, _)| env_names_equal(key, override_key))
+                && !removals
+                    .iter()
+                    .any(|removed_key| env_names_equal(key, removed_key))
         })
         .map(|(key, value)| (key, Value::Inherited(value)))
         .collect::<Vec<_>>();
@@ -641,7 +676,7 @@ mod tests {
         assert!(debug.contains("Path"));
         assert!(!debug.contains("LB006_ENV_SECRET_SENTINEL"));
 
-        let block = build_environment_block(&spec.environment).unwrap();
+        let block = build_environment_block(&spec.environment, &spec.environment_removals).unwrap();
         let entries = block
             .0
             .split(|value| *value == 0)
@@ -663,5 +698,48 @@ mod tests {
             .env("BAD=NAME", "value")
             .unwrap_err();
         assert!(matches!(error, SupervisorError::InvalidSpec("invalid environment name")));
+    }
+
+    #[test]
+    fn child_environment_removal_is_case_insensitive_and_not_an_empty_override() {
+        let spec = ManagedProcessSpec::new("env-remove-test", r"C:\Windows\System32\cmd.exe")
+            .unwrap()
+            .env_remove("PaTh")
+            .unwrap();
+        let debug = format!("{spec:?}");
+        assert!(debug.contains("PaTh"));
+
+        let block = build_environment_block(&spec.environment, &spec.environment_removals).unwrap();
+        let entries = block
+            .0
+            .split(|value| *value == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(String::from_utf16_lossy)
+            .collect::<Vec<_>>();
+        assert!(!entries.iter().any(|entry| {
+            entry
+                .split_once('=')
+                .is_some_and(|(key, _)| key.eq_ignore_ascii_case("path"))
+        }));
+        assert!(!entries.iter().any(|entry| entry.eq_ignore_ascii_case("path=")));
+    }
+
+    #[test]
+    fn explicit_environment_override_supersedes_prior_removal() {
+        let spec = ManagedProcessSpec::new("env-remove-test", r"C:\Windows\System32\cmd.exe")
+            .unwrap()
+            .env_remove("LOCALBRIDGE_TEST_ENV")
+            .unwrap()
+            .env("localbridge_test_env", "synthetic-value")
+            .unwrap();
+        assert!(spec.environment_removals.is_empty());
+        let block = build_environment_block(&spec.environment, &spec.environment_removals).unwrap();
+        let entries = block
+            .0
+            .split(|value| *value == 0)
+            .filter(|entry| !entry.is_empty())
+            .map(String::from_utf16_lossy)
+            .collect::<Vec<_>>();
+        assert!(entries.iter().any(|entry| entry == "localbridge_test_env=synthetic-value"));
     }
 }
