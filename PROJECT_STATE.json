@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -71,7 +71,10 @@
     "admin_ttl": null,
     "user_controls_enable_disable": true,
     "background_auto_uac": false,
-    "generic_elevated_exec": true
+    "generic_elevated_exec": true,
+    "generic_elevated_exec_semantics": "reviewed_structured_gateway_only",
+    "arbitrary_elevated_program_execution": false,
+    "elevated_exec_indirect_control_plane_mutation": "deny_always"
   },
   "distribution_architecture": {
     "target": "Windows 11 x64",
@@ -83,7 +86,10 @@
     "runtime_self_update": false,
     "application_auto_update_v0_1": false,
     "telemetry": false,
-    "runtime_upgrade_model": "whole LocalBridge release"
+    "runtime_upgrade_model": "whole LocalBridge release",
+    "installer_scope": "perMachine",
+    "privileged_broker_install_root": "protected_machine_program_files",
+    "privileged_broker_uac_target": "canonical_current_install_sibling"
   },
   "ui_language_policy": {
     "default_locale": "zh-CN",
@@ -124,7 +130,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Rework LB-010 after G2 independent adversarial review generation 6 FAIL: a successful explicit workspace switch must terminate/reset the previous workspace outage generation, pending/exhausted recovery budget, and prior attention state so the new workspace receives an independent five-attempt recovery generation; then revalidate LB-011/LB-012 before a fresh G2 review"
+    "next_action": "Run G2 independent adversarial review generation 7 before LB-013"
   },
   "current_task_ui": {
     "enabled": true,
@@ -177,7 +183,10 @@
     "ui_before_exhaustion": false,
     "error_window_after_exhaustion": true,
     "single_error_per_generation": true,
-    "manual_retry_new_generation": true
+    "manual_retry_new_generation": true,
+    "successful_workspace_switch_new_generation": true,
+    "failed_workspace_switch_preserves_previous_generation": true,
+    "workspace_rollback_cleanup_faults_typed": true
   },
   "ui_visual_policy": {
     "style": "Apple-inspired minimal",
