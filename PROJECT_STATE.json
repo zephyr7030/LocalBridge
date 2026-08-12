@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-010",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -124,7 +124,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run G2 independent adversarial review generation 6 before LB-013"
+    "next_action": "Rework LB-010 after G2 independent adversarial review generation 6 FAIL: a successful explicit workspace switch must terminate/reset the previous workspace outage generation, pending/exhausted recovery budget, and prior attention state so the new workspace receives an independent five-attempt recovery generation; then revalidate LB-011/LB-012 before a fresh G2 review"
   },
   "current_task_ui": {
     "enabled": true,
