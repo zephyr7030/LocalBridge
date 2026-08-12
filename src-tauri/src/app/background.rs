@@ -116,6 +116,10 @@ impl ProductionRuntimeOwner {
         self.active = Some(Box::new(runtime));
         Ok(())
     }
+
+    fn take_active(&mut self) -> Option<Box<dyn ExitRuntime + Send>> {
+        self.active.take()
+    }
 }
 
 impl ExitRuntime for ProductionRuntimeOwner {
@@ -255,6 +259,19 @@ impl DesktopLifecycle {
 
     pub fn shutdown(&self) -> ShutdownReport {
         self.shutdown_with_privilege(&self.privilege)
+    }
+
+    pub fn stop_services_for_manual_action(&self) -> ShutdownReport {
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take_active();
+        shutdown_in_security_order(active.as_deref_mut(), &self.privilege)
     }
 
     fn shutdown_with_privilege<P>(&self, privilege: &P) -> ShutdownReport

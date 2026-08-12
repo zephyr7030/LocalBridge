@@ -69,6 +69,12 @@ impl PrivilegeController {
         PrivilegedExecutionGateway { shared: Arc::clone(&self.shared) }
     }
 
+    pub fn request_without_uac(&self) -> Result<(), PrivilegeFault> {
+        self.disable()?;
+        self.set_state(PrivilegeState::Requested);
+        Ok(())
+    }
+
     pub fn enable_from_explicit_user_action(
         &self,
         broker_executable: &Path,
@@ -309,6 +315,26 @@ mod tests {
         controller.apply_broker_liveness(false);
         assert!(!controller.shared.gate_open.load(Ordering::Acquire));
         assert_eq!(controller.state(), PrivilegeState::Faulted(PrivilegeFault::BrokerExited));
+    }
+
+    #[test]
+    fn background_request_sets_requested_without_opening_privileged_gate() {
+        let controller = PrivilegeController::new();
+        controller.request_without_uac().unwrap();
+        assert_eq!(controller.state(), PrivilegeState::Requested);
+        assert!(matches!(
+            controller.gateway().execute(
+                "background-request".into(),
+                ElevatedExecSpec {
+                    program: r"C:\Windows\System32\cmd.exe".into(),
+                    args: vec![],
+                    workdir: None,
+                    timeout_ms: 1,
+                    max_output_bytes: 1,
+                }
+            ),
+            Err(PrivilegedExecError::GateClosed(PrivilegeState::Requested))
+        ));
     }
 
     #[test]
