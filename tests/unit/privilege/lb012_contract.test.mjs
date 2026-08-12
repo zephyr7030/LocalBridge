@@ -59,6 +59,13 @@ const handlerStart = server.indexOf("fn handle_elevated_exec");
 const handlerEnd = server.indexOf("fn request_id", handlerStart);
 if (handlerStart < 0 || handlerEnd <= handlerStart) throw new Error("LB-012 elevated_exec PEP handler missing");
 const handler = server.slice(handlerStart, handlerEnd);
+const toolsListStart = server.indexOf('"tools/list" =>');
+const toolsCallStart = server.indexOf('"tools/call" =>', toolsListStart);
+if (toolsListStart < 0 || toolsCallStart <= toolsListStart) throw new Error("LB-012 tools/list branch missing");
+const toolsList = server.slice(toolsListStart, toolsCallStart);
+if (!toolsList.includes("gateway.state().accepts_privileged_calls()")) {
+  throw new Error("LB-012 tools/list exposes elevated_exec without an Active Broker state check");
+}
 for (const required of ["privileged.start_execute", "privileged.poll_execute", "PrivilegeState::Active", "TaskExecutionState::AwaitingAuthorization", "TaskExecutionState::Blocked", "SafeTaskSummary::Omitted"]) {
   const source = required === "SafeTaskSummary::Omitted" ? server : handler;
   if (!source.includes(required)) throw new Error(`LB-012 broker route missing: ${required}`);

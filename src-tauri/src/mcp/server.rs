@@ -501,7 +501,9 @@ fn handle_connection(
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             match guard.filtered_tools(mode) {
                 Ok(mut result) => {
-                    if privileged.is_some() && guard.privileged_tool_visible(mode, "elevated_exec") {
+                    if privileged.is_some_and(|gateway| gateway.state().accepts_privileged_calls())
+                        && guard.privileged_tool_visible(mode, "elevated_exec")
+                    {
                         append_elevated_exec_tool(&mut result);
                     }
                     write_rpc_result(&mut stream, id, result, Some(session))
@@ -1429,6 +1431,23 @@ mod tests {
             .count();
         assert_eq!(elevated_count, 1);
 
+        fake.set_state(PrivilegeState::AwaitingUac);
+        let awaiting_tools = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":306,"method":"tools/list","params":{}}),
+        );
+        assert!(
+            awaiting_tools.body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|tool| tool["name"] != "elevated_exec")
+        );
+        fake.set_state(PrivilegeState::Active {
+            broker_generation: crate::state::GenerationId::new(77),
+        });
+
         let secret = "LB012_SYNTHETIC_PEP_SECRET";
         let port = pep.port();
         let call_session = session.clone();
@@ -1492,6 +1511,18 @@ mod tests {
         assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
 
         pep.set_permission_mode(PermissionMode::Full);
+        let full_tools = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":307,"method":"tools/list","params":{}}),
+        );
+        assert!(
+            full_tools.body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|tool| tool["name"] != "elevated_exec")
+        );
         let full_denied = post(
             pep.port(),
             Some(&session),
