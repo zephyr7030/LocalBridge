@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -124,7 +124,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run independent adversarial review for G3 — Desktop & Minimal UI"
+    "next_action": "Resolve LB-016 machine-contract semantic conflict (6-screen vs exact five-screen) and re-run LB-016/LB-017 before G3 adversarial review generation 2"
   },
   "current_task_ui": {
     "enabled": true,
