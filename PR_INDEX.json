@@ -329,7 +329,13 @@
       ],
       "status": "REWORK_REQUIRED",
       "review_status": "FAIL",
-      "review_generation": 1
+      "review_generation": 1,
+      "review_provenance": {
+        "generation": 1,
+        "kind": "independent_adversarial",
+        "commit": "3ec194efc8cdd5c5d11149168123d126dd50ff47",
+        "invalidated_generations": []
+      }
     },
     {
       "id": "G3",
