@@ -211,17 +211,43 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
     where
         F: FnMut(&RuntimeState),
     {
-        let mut cleanup_fault = None;
-        if let Some(mut ready) = self.ready.take() {
-            merge_cleanup_fault(
-                &mut cleanup_fault,
-                self.driver.stop_tunnel(&mut ready.tunnel).err(),
-            );
-            match self.driver.stop_pep(ready.pep) {
-                Ok(mcp) => self.recovering_mcp = Some(mcp),
-                Err(fault) => merge_cleanup_fault(&mut cleanup_fault, Some(fault)),
-            }
+        let tunnel_fault = self.stop_tunnel_for_exit().err().map(|error| error.fault);
+        let remaining = self.finish_exit_after_tunnel_with_state_projection(&mut project);
+        match (tunnel_fault, remaining) {
+            (None, result) => result,
+            (Some(fault), Ok(())) => Err(self.fail(fault, None, &mut project)),
+            (Some(fault), Err(error)) => Err(self.fail(fault, Some(error.fault), &mut project)),
         }
+    }
+
+    /// Stops only Tunnel and retains lower-layer ownership for desktop exit ordering.
+    pub fn stop_tunnel_for_exit(&mut self) -> Result<(), OrchestratorError> {
+        let Some(ready) = self.ready.take() else {
+            return Ok(());
+        };
+        let ReadyHandles { pep, mut tunnel } = ready;
+        let tunnel_stop = self.driver.stop_tunnel(&mut tunnel);
+        drop(tunnel);
+        self.recovering_pep = Some(pep);
+        tunnel_stop.map_err(|fault| OrchestratorError {
+            fault,
+            cleanup_fault: None,
+        })
+    }
+
+    /// Completes desktop exit after Tunnel shutdown by releasing PEP then MCP.
+    pub fn finish_exit_after_tunnel(&mut self) -> Result<(), OrchestratorError> {
+        self.finish_exit_after_tunnel_with_state_projection(&mut |_| {})
+    }
+
+    fn finish_exit_after_tunnel_with_state_projection<F>(
+        &mut self,
+        project: &mut F,
+    ) -> Result<(), OrchestratorError>
+    where
+        F: FnMut(&RuntimeState),
+    {
+        let mut cleanup_fault = None;
         if let Some(pep) = self.recovering_pep.take() {
             match self.driver.stop_pep(pep) {
                 Ok(mcp) => self.recovering_mcp = Some(mcp),
@@ -233,9 +259,9 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
 
         if let Some(fault) = cleanup_fault {
-            Err(self.fail(fault, None, &mut project))
+            Err(self.fail(fault, None, project))
         } else {
-            self.transition(RuntimeState::Stopped, &mut project);
+            self.transition(RuntimeState::Stopped, project);
             Ok(())
         }
     }

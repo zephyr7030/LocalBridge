@@ -10,14 +10,7 @@
     "frontendDist": "../tests/artifacts/frontend-dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "LocalBridge",
-        "width": 900,
-        "height": 620,
-        "resizable": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

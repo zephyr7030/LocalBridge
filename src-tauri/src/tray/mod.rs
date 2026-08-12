@@ -1,1 +1,98 @@
-//! Tray/background integration is implemented by LB-013/LB-014.
+use std::fmt;
+
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+use crate::app::DesktopLifecycle;
+
+pub const MAIN_WINDOW_LABEL: &str = "main";
+const TRAY_ID: &str = "localbridge-tray";
+const MENU_OPEN_ID: &str = "open";
+const MENU_EXIT_ID: &str = "exit";
+
+#[derive(Debug)]
+pub enum TraySetupError {
+    Tauri(tauri::Error),
+    MissingFrozenApplicationIcon,
+}
+
+impl fmt::Display for TraySetupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tauri(error) => write!(f, "tray setup failed: {error}"),
+            Self::MissingFrozenApplicationIcon => {
+                f.write_str("frozen LocalBridge application icon is unavailable")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TraySetupError {}
+
+impl From<tauri::Error> for TraySetupError {
+    fn from(value: tauri::Error) -> Self {
+        Self::Tauri(value)
+    }
+}
+
+pub fn ensure_main_window<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<WebviewWindow<R>, tauri::Error> {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        window.show()?;
+        window.set_focus()?;
+        return Ok(window);
+    }
+
+    let window =
+        WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
+            .title("LocalBridge")
+            .inner_size(900.0, 620.0)
+            .resizable(true)
+            .build()?;
+    window.show()?;
+    window.set_focus()?;
+    Ok(window)
+}
+
+pub fn install_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), TraySetupError> {
+    let open = MenuItem::with_id(app, MENU_OPEN_ID, "打开 LocalBridge", true, None::<&str>)?;
+    let exit = MenuItem::with_id(app, MENU_EXIT_ID, "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &exit])?;
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or(TraySetupError::MissingFrozenApplicationIcon)?;
+
+    TrayIconBuilder::with_id(TRAY_ID)
+        .icon(icon)
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            MENU_OPEN_ID => {
+                let _ = ensure_main_window(app);
+            }
+            MENU_EXIT_ID => {
+                if let Some(lifecycle) = app.try_state::<DesktopLifecycle>() {
+                    let _ = lifecycle.shutdown();
+                }
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if matches!(
+                event,
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+            ) {
+                let _ = ensure_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "authorization_id": "EXEC-PREAUTH-LB013-001",
+      "scope": [
+        "src-tauri/tauri.conf.json",
+        "scripts/authorization-records/LB-013.json"
+      ],
+      "actions": [
+        "Remove the static main-window declaration from tauri.conf.json",
+        "Require foreground startup and tray-open to create the main window dynamically in Rust",
+        "Ensure --background reaches Tauri setup without creating the main WebView window"
+      ],
+      "reason": "LB-013 requires --background to create no visible/main window from process entry; the inherited static tauri.conf.json window would be created before Rust could hide it, which violates the frozen background lifecycle contract.",
+      "evidence_ref": "Standing user authorization permits concrete executor pre-authorizations with later audit; LB-013 contract requires '--background no visible window' and docs/02_ARCHITECTURE_RUNTIME.md requires entry-time background mode rather than create-then-hide.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB013-002",
+      "scope": [
+        "src-tauri/src/runtime/orchestrator.rs",
+        "scripts/authorization-records/LB-013.json"
+      ],
+      "actions": [
+        "Add staged shutdown primitives that stop Tunnel first and retain PEP/MCP ownership",
+        "Allow the desktop exit coordinator to close the privileged call gate and stop Broker between Tunnel shutdown and PEP/MCP shutdown",
+        "Keep RuntimeOrchestrator::stop() externally compatible by composing the same staged shutdown primitives"
+      ],
+      "reason": "The frozen privileged lifecycle requires Tray Exit ordering Tunnel -> privileged request gate closed -> Broker -> PEP -> MCP. The existing monolithic RuntimeOrchestrator::stop() performs Tunnel -> PEP -> MCP without an insertion point for Broker shutdown, so the production lifecycle could not satisfy the documented security ordering.",
+      "evidence_ref": "Standing user authorization permits concrete executor pre-authorizations with later audit; docs/12_PRIVILEGED_BROKER.md freezes Tray Exit as Tunnel then privileged gate/Broker then PEP then MCP, while current RuntimeOrchestrator::stop() is monolithic.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    }
+  ]
+}
