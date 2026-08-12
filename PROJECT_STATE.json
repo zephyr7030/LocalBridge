@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -124,7 +124,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Repair LB-016 onboarding manual-test defect: persist project before external Tunnel startup, then re-run LB-016/LB-017 and G3 adversarial review generation 2"
+    "next_action": "Revalidate LB-017 after LB-016 onboarding manual-test repair; G3 remains REWORK_REQUIRED until LB-017 PASS and adversarial review generation 2"
   },
   "current_task_ui": {
     "enabled": true,
