@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 
 use localbridge_lib::privilege::{
     BROKER_PROTOCOL_VERSION, BrokerClientSession, BrokerReady, BrokerRejectCode, BrokerRequest,
-    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, NamedPipeClient, NamedPipeServer,
-    PrivilegeIpcError, ServerHello, decode_frame, encode_frame, random_session_nonce,
+    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, ElevatedExecOutcome,
+    ElevatedExecResult, ElevatedExecSpec, NamedPipeClient, NamedPipeServer, PrivilegeIpcError,
+    ServerHello, decode_frame, encode_frame, random_session_nonce,
 };
 
 const BROKER_EXE: &str = env!("CARGO_BIN_EXE_localbridge-privileged-broker");
@@ -63,6 +64,39 @@ fn spawn_broker(server: &NamedPipeServer, generation: u64) -> std::process::Chil
         .stderr(Stdio::null())
         .spawn()
         .unwrap()
+}
+
+fn authenticated_broker(generation: u64) -> (std::process::Child, BrokerClientSession) {
+    let server = NamedPipeServer::create().unwrap();
+    let child = spawn_broker(&server, generation);
+    let connection = server.accept_expected_client(child.id()).unwrap();
+    let session = BrokerClientSession::handshake(connection, generation).unwrap();
+    (child, session)
+}
+
+fn exec_spec(args: &[&str], timeout_ms: u32, max_output_bytes: u32) -> ElevatedExecSpec {
+    ElevatedExecSpec {
+        program: r"C:\Windows\System32\cmd.exe".to_string(),
+        args: args.iter().map(|value| value.to_string()).collect(),
+        workdir: Some(r"C:\Windows\Temp".to_string()),
+        timeout_ms,
+        max_output_bytes,
+    }
+}
+
+fn poll_until_complete(
+    session: &mut BrokerClientSession,
+    request_id: &str,
+    timeout: Duration,
+) -> ElevatedExecResult {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(result) = session.poll_exec(request_id.to_string()).unwrap() {
+            return result;
+        }
+        assert!(Instant::now() < deadline, "broker execution did not complete in time");
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]
@@ -135,4 +169,71 @@ fn broker_does_not_outlive_localbridge_pipe_session() {
         assert!(Instant::now() < deadline, "broker outlived disconnected LocalBridge session");
         thread::sleep(Duration::from_millis(20));
     }
+}
+
+#[test]
+fn actual_broker_structured_execution_supports_completion_timeout_cancel_limit_and_redaction() {
+    let (mut child, mut session) = authenticated_broker(41);
+
+    session
+        .start_exec(
+            "complete".to_string(),
+            exec_spec(&["/d", "/c", "echo LB012_BROKER_EXEC"], 5_000, 4096),
+        )
+        .unwrap();
+    let complete = poll_until_complete(&mut session, "complete", Duration::from_secs(5));
+    assert_eq!(complete.outcome, ElevatedExecOutcome::Completed);
+    assert!(complete.output.contains("LB012_BROKER_EXEC"));
+
+    session
+        .start_exec(
+            "timeout".to_string(),
+            exec_spec(&["/d", "/c", "ping -n 6 127.0.0.1 >nul"], 100, 4096),
+        )
+        .unwrap();
+    let timed = poll_until_complete(&mut session, "timeout", Duration::from_secs(5));
+    assert_eq!(timed.outcome, ElevatedExecOutcome::TimedOut);
+
+    session
+        .start_exec(
+            "cancel".to_string(),
+            exec_spec(&["/d", "/c", "ping -n 6 127.0.0.1 >nul"], 10_000, 4096),
+        )
+        .unwrap();
+    thread::sleep(Duration::from_millis(80));
+    session.cancel_exec("cancel".to_string()).unwrap();
+    let cancelled = poll_until_complete(&mut session, "cancel", Duration::from_secs(5));
+    assert_eq!(cancelled.outcome, ElevatedExecOutcome::Cancelled);
+
+    session
+        .start_exec(
+            "limit".to_string(),
+            exec_spec(
+                &["/d", "/c", "for /L %i in (1,1,1000) do @echo 1234567890"],
+                5_000,
+                128,
+            ),
+        )
+        .unwrap();
+    let limited = poll_until_complete(&mut session, "limit", Duration::from_secs(5));
+    assert!(limited.output.len() <= 128);
+    assert!(limited.truncated);
+
+    let secret = "LB012_SYNTHETIC_BROKER_SECRET";
+    session
+        .start_exec(
+            "redact".to_string(),
+            exec_spec(
+                &["/d", "/c", &format!("echo {secret}"), "--api-key", secret],
+                5_000,
+                4096,
+            ),
+        )
+        .unwrap();
+    let redacted = poll_until_complete(&mut session, "redact", Duration::from_secs(5));
+    assert_eq!(redacted.output, "[REDACTED]");
+    assert!(!redacted.output.contains(secret));
+
+    session.shutdown().unwrap();
+    assert!(child.wait().unwrap().success());
 }

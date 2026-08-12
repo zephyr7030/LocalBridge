@@ -1,12 +1,22 @@
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::mpsc::{self, TryRecvError};
+use std::thread;
 
 use super::{
     BROKER_PROTOCOL_VERSION, BrokerProtocolError, BrokerReady, BrokerRejectCode, BrokerRequest,
-    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, BrokerSession,
+    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, BrokerSession, ElevatedExecResult,
+    ElevatedExecSpec,
     NamedPipeClient, NamedPipeConnection, PrivilegeIpcError, ServerHello, SessionNonce, decode_frame,
-    encode_frame, random_session_nonce,
+    encode_frame, random_session_nonce, valid_elevated_request_id,
 };
 use super::protocol::is_valid_broker_pipe_name;
+use super::{ExecutionCancel, run_elevated_exec};
+
+struct ActiveExecution {
+    cancel: ExecutionCancel,
+    result: mpsc::Receiver<Result<ElevatedExecResult, super::execution::ExecutionError>>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrokerProcessArgs {
@@ -80,6 +90,7 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
     };
     pipe.write_frame(&encode_frame(&ready)?)?;
     let mut session = BrokerSession::new(args.generation, hello.session_nonce)?;
+    let mut executions = HashMap::<String, ActiveExecution>::new();
 
     loop {
         let payload = pipe.read_frame()?;
@@ -96,7 +107,65 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
         }
         let response = match envelope.request {
             BrokerRequest::Ping => BrokerResponse::Pong,
-            BrokerRequest::Shutdown => BrokerResponse::ShutdownAck,
+            BrokerRequest::Shutdown => {
+                for execution in executions.values() {
+                    execution.cancel.cancel();
+                }
+                BrokerResponse::ShutdownAck
+            }
+            BrokerRequest::StartExec { request_id, spec } => {
+                if !valid_elevated_request_id(&request_id) || spec.validate().is_err() {
+                    BrokerResponse::Rejected { code: BrokerRejectCode::Malformed }
+                } else {
+                    match executions.entry(request_id) {
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            let cancel = ExecutionCancel::default();
+                            let worker_cancel = cancel.clone();
+                            let (tx, rx) = mpsc::channel();
+                            thread::Builder::new()
+                                .name("localbridge-elevated-exec".into())
+                                .spawn(move || {
+                                    let _ = tx.send(run_elevated_exec(spec, worker_cancel));
+                                })
+                                .map_err(|_| BrokerRunError::UnexpectedResponse)?;
+                            entry.insert(ActiveExecution { cancel, result: rx });
+                            BrokerResponse::ExecAccepted
+                        }
+                        std::collections::hash_map::Entry::Occupied(_) => {
+                            BrokerResponse::Rejected { code: BrokerRejectCode::DuplicateRequest }
+                        }
+                    }
+                }
+            }
+            BrokerRequest::PollExec { request_id } => {
+                if !valid_elevated_request_id(&request_id) {
+                    BrokerResponse::Rejected { code: BrokerRejectCode::Malformed }
+                } else if let Some(execution) = executions.get(&request_id) {
+                    match execution.result.try_recv() {
+                        Ok(Ok(execution_result)) => {
+                            executions.remove(&request_id);
+                            BrokerResponse::ExecCompleted { execution: execution_result }
+                        }
+                        Ok(Err(_)) | Err(TryRecvError::Disconnected) => {
+                            executions.remove(&request_id);
+                            BrokerResponse::Rejected { code: BrokerRejectCode::ExecutionFailed }
+                        }
+                        Err(TryRecvError::Empty) => BrokerResponse::ExecPending,
+                    }
+                } else {
+                    BrokerResponse::Rejected { code: BrokerRejectCode::RequestNotFound }
+                }
+            }
+            BrokerRequest::CancelExec { request_id } => {
+                if !valid_elevated_request_id(&request_id) {
+                    BrokerResponse::Rejected { code: BrokerRejectCode::Malformed }
+                } else if let Some(execution) = executions.get(&request_id) {
+                    execution.cancel.cancel();
+                    BrokerResponse::CancelAck
+                } else {
+                    BrokerResponse::Rejected { code: BrokerRejectCode::RequestNotFound }
+                }
+            }
         };
         let shutdown = matches!(response, BrokerResponse::ShutdownAck);
         pipe.write_frame(&encode_frame(&BrokerResponseEnvelope {
@@ -168,6 +237,35 @@ impl BrokerClientSession {
     pub fn shutdown(&mut self) -> Result<(), BrokerRunError> {
         match self.request(BrokerRequest::Shutdown)? {
             BrokerResponse::ShutdownAck => Ok(()),
+            _ => Err(BrokerRunError::UnexpectedResponse),
+        }
+    }
+
+    pub fn start_exec(
+        &mut self,
+        request_id: String,
+        spec: ElevatedExecSpec,
+    ) -> Result<(), BrokerRunError> {
+        match self.request(BrokerRequest::StartExec { request_id, spec })? {
+            BrokerResponse::ExecAccepted => Ok(()),
+            _ => Err(BrokerRunError::UnexpectedResponse),
+        }
+    }
+
+    pub fn poll_exec(
+        &mut self,
+        request_id: String,
+    ) -> Result<Option<ElevatedExecResult>, BrokerRunError> {
+        match self.request(BrokerRequest::PollExec { request_id })? {
+            BrokerResponse::ExecPending => Ok(None),
+            BrokerResponse::ExecCompleted { execution } => Ok(Some(execution)),
+            _ => Err(BrokerRunError::UnexpectedResponse),
+        }
+    }
+
+    pub fn cancel_exec(&mut self, request_id: String) -> Result<(), BrokerRunError> {
+        match self.request(BrokerRequest::CancelExec { request_id })? {
+            BrokerResponse::CancelAck => Ok(()),
             _ => Err(BrokerRunError::UnexpectedResponse),
         }
     }

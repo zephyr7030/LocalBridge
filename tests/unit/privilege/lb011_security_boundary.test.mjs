@@ -20,7 +20,9 @@ for (const source of [appMain, lib]) {
   if (source.includes("launch_broker_with_explicit_uac") || source.includes('"runas"')) throw new Error("LB-011 normal/background startup auto-invokes UAC");
 }
 if (/requireAdministrator|highestAvailable/i.test(tauri)) throw new Error("LB-011 whole LocalBridge app requests elevation");
-if (!protocol.includes("pub enum BrokerRequest { Ping, Shutdown }") || /ElevatedExec|elevated_exec|Command\s*\{|program:\s*String/.test(protocol)) throw new Error("LB-011 foundation protocol exposes an execution operation");
+if (!/pub enum BrokerRequest\s*\{[\s\S]*\bPing\b[\s\S]*\bShutdown\b/.test(protocol)) {
+  throw new Error("LB-011 typed Ping/Shutdown foundation operations are missing");
+}
 for (const forbidden of ["--nonce", "--secret", "--token", "--password", "--api-key"]) {
   if (broker.includes(forbidden) || brokerMain.includes(forbidden) || windows.includes(forbidden)) throw new Error(`LB-011 secret-like broker CLI flag detected: ${forbidden}`);
 }

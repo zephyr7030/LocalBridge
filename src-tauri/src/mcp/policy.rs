@@ -107,6 +107,7 @@ struct PolicyDocument {
     enforcement: EnforcementSection,
     upstream_coding_tools: UpstreamSection,
     workspace_registry: WorkspaceSection,
+    elevated_exec: ElevatedExecSection,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,9 +115,25 @@ struct CapabilitySection {
     unknown: String,
     process_exec_in_edit: String,
     process_exec_in_full: String,
+    elevated_exec_in_edit: String,
+    elevated_exec_in_full: String,
+    elevated_exec_in_elevated: String,
     workflow_with_process_exec_in_edit: String,
     control_plane: String,
     privileged_external_runtime: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ElevatedExecSection {
+    enabled: bool,
+    canonical_request: String,
+    shell_true_default: bool,
+    requires_broker: bool,
+    requires_explicit_elevated_mode: bool,
+    timeout_required: bool,
+    output_limit_required: bool,
+    cancellation_required: bool,
+    redaction_required: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,6 +185,13 @@ impl CapabilityPolicy {
     }
 
     pub fn classify(&self, name: &str) -> ToolDescriptor {
+        if name == "elevated_exec" {
+            return ToolDescriptor {
+                name: "elevated_exec",
+                capability: Capability::ElevatedExec,
+                task_kind: TaskKind::ElevatedOperation,
+            };
+        }
         if is_control_plane_name(name) {
             return ToolDescriptor {
                 name: "control-plane",
@@ -229,6 +253,14 @@ impl CapabilityPolicy {
     pub fn tool_allowed_for_list(&self, mode: PermissionMode, tool_name: &str) -> bool {
         self.decide(mode, tool_name, &[]).allowed
     }
+
+    pub fn privileged_tool_visible(&self, mode: PermissionMode, tool_name: &str) -> bool {
+        mode == PermissionMode::Elevated
+            && tool_name == "elevated_exec"
+            && self.elevated_allowed.contains(tool_name)
+            && self.classify(tool_name).capability == Capability::ElevatedExec
+    }
+
 }
 
 fn denied(descriptor: ToolDescriptor, reason: DenyReason) -> PolicyDecision {
@@ -253,17 +285,31 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
     }
     let edit = ["server_info","check_exec_environment","get_default_cwd","set_default_cwd","read_file","list_dir","list_files","search_text","apply_patch","git_status","git_diff","git_log","git_show","git_blame","view_image"];
     let full = ["server_info","check_exec_environment","get_default_cwd","set_default_cwd","read_file","list_dir","list_files","search_text","apply_patch","exec_command","write_stdin","kill_session","read_output","git_status","git_diff","git_log","git_show","git_blame","view_image"];
+    let elevated = ["server_info","check_exec_environment","get_default_cwd","set_default_cwd","read_file","list_dir","list_files","search_text","apply_patch","exec_command","write_stdin","kill_session","read_output","git_status","git_diff","git_log","git_show","git_blame","view_image","elevated_exec"];
     if !exact_set(&document.edit_allowed_tools, &edit) { return Err(PolicyError::ContractMismatch("edit_allowed_tools")); }
     if !exact_set(&document.full_allowed_tools, &full) { return Err(PolicyError::ContractMismatch("full_allowed_tools")); }
-    if !exact_set(&document.elevated_allowed_tools, &full) { return Err(PolicyError::ContractMismatch("elevated_allowed_tools")); }
+    if !exact_set(&document.elevated_allowed_tools, &elevated) { return Err(PolicyError::ContractMismatch("elevated_allowed_tools")); }
     if !exact_set(&document.blocked_tools, &["request_permissions"]) { return Err(PolicyError::ContractMismatch("blocked_tools")); }
     if document.capabilities.unknown != "deny"
         || document.capabilities.process_exec_in_edit != "deny"
         || document.capabilities.process_exec_in_full != "allow_if_reviewed"
+        || document.capabilities.elevated_exec_in_edit != "deny"
+        || document.capabilities.elevated_exec_in_full != "deny"
+        || document.capabilities.elevated_exec_in_elevated != "allow_if_reviewed_and_broker_active"
         || document.capabilities.workflow_with_process_exec_in_edit != "deny"
         || document.capabilities.control_plane != "deny_always"
         || document.capabilities.privileged_external_runtime != "review_required"
     { return Err(PolicyError::ContractMismatch("capabilities")); }
+    if !document.elevated_exec.enabled
+        || document.elevated_exec.canonical_request != "structured_program_args"
+        || document.elevated_exec.shell_true_default
+        || !document.elevated_exec.requires_broker
+        || !document.elevated_exec.requires_explicit_elevated_mode
+        || !document.elevated_exec.timeout_required
+        || !document.elevated_exec.output_limit_required
+        || !document.elevated_exec.cancellation_required
+        || !document.elevated_exec.redaction_required
+    { return Err(PolicyError::ContractMismatch("elevated_exec")); }
     if document.enforcement.tools_list_filter != "ux_only"
         || document.enforcement.tools_call_check != "mandatory"
         || document.enforcement.implementation != "first_party_rust_mcp_guard"

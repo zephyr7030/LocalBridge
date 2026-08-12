@@ -9,7 +9,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use crate::state::{CurrentTaskStatus, PermissionMode};
+use crate::privilege::{
+    ElevatedExecOutcome, ElevatedExecSpec, PrivilegedExecError, PrivilegedExecution,
+};
+use crate::state::{
+    Capability, CurrentTaskStatus, PermissionMode, PrivilegeState, SafeTaskSummary,
+    TaskExecutionState, TaskKind,
+};
 
 use super::guard::{GuardError, McpGuard, ToolCallRequest};
 use super::http::McpCancellationClient;
@@ -24,6 +30,7 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const ACCEPT_IDLE: Duration = Duration::from_millis(10);
 const MAX_CONNECTION_WORKERS: usize = 32;
 static SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
+static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct ConnectionContext<'a> {
     guard: &'a Mutex<McpGuard<CodingToolsRuntime>>,
@@ -32,6 +39,17 @@ struct ConnectionContext<'a> {
     current_task: &'a CurrentTaskProjection,
     sessions: &'a Mutex<HashMap<String, String>>,
     active_requests: &'a Mutex<Vec<Value>>,
+    privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
+    privileged_requests: &'a Mutex<Vec<(Value, String)>>,
+    stopping: &'a AtomicBool,
+}
+
+struct ElevatedCallContext<'a> {
+    guard: &'a Mutex<McpGuard<CodingToolsRuntime>>,
+    privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
+    current_task: &'a CurrentTaskProjection,
+    active_requests: &'a Mutex<Vec<Value>>,
+    privileged_requests: &'a Mutex<Vec<(Value, String)>>,
     stopping: &'a AtomicBool,
 }
 
@@ -107,6 +125,24 @@ impl PolicyEnforcementRuntime {
         policy: CapabilityPolicy,
         permission_mode: PermissionMode,
     ) -> Result<Self, PolicyEnforcementError> {
+        Self::start_inner(coding_runtime, policy, permission_mode, None)
+    }
+
+    pub fn start_with_privilege(
+        coding_runtime: CodingToolsRuntime,
+        policy: CapabilityPolicy,
+        permission_mode: PermissionMode,
+        privileged: Arc<dyn PrivilegedExecution>,
+    ) -> Result<Self, PolicyEnforcementError> {
+        Self::start_inner(coding_runtime, policy, permission_mode, Some(privileged))
+    }
+
+    fn start_inner(
+        coding_runtime: CodingToolsRuntime,
+        policy: CapabilityPolicy,
+        permission_mode: PermissionMode,
+        privileged: Option<Arc<dyn PrivilegedExecution>>,
+    ) -> Result<Self, PolicyEnforcementError> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| PolicyEnforcementError::BindFailed)?;
         listener
@@ -135,6 +171,7 @@ impl PolicyEnforcementRuntime {
                     cancellation,
                     thread_mode,
                     thread_task,
+                    privileged,
                     shutdown_rx,
                 )
             })
@@ -200,10 +237,12 @@ fn serve(
     cancellation: McpCancellationClient,
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
+    privileged: Option<Arc<dyn PrivilegedExecution>>,
     shutdown: mpsc::Receiver<()>,
 ) -> McpGuard<CodingToolsRuntime> {
     let sessions = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     let active_requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let privileged_requests = Arc::new(Mutex::new(Vec::<(Value, String)>::new()));
     let stopping = Arc::new(AtomicBool::new(false));
     let mut workers = Vec::<JoinHandle<()>>::new();
     loop {
@@ -230,6 +269,8 @@ fn serve(
                 let worker_task = current_task.clone();
                 let worker_sessions = Arc::clone(&sessions);
                 let worker_active = Arc::clone(&active_requests);
+                let worker_privileged = privileged.as_ref().map(Arc::clone);
+                let worker_privileged_requests = Arc::clone(&privileged_requests);
                 let worker_stopping = Arc::clone(&stopping);
                 let worker_cancellation = cancellation.clone();
                 if let Ok(worker) = thread::Builder::new()
@@ -242,6 +283,8 @@ fn serve(
                             current_task: &worker_task,
                             sessions: &worker_sessions,
                             active_requests: &worker_active,
+                            privileged: worker_privileged.as_ref(),
+                            privileged_requests: &worker_privileged_requests,
                             stopping: &worker_stopping,
                         };
                         let _ = handle_connection(stream, context);
@@ -265,9 +308,26 @@ fn serve(
             break;
         }
         for request_id in &active {
-            let _ = cancellation.cancel_request(request_id);
+            if let Some(broker_request_id) = privileged_request_id(&privileged_requests, request_id) {
+                if let Some(privileged) = privileged.as_ref() {
+                    let _ = privileged.cancel_execute(broker_request_id);
+                }
+            } else {
+                let _ = cancellation.cancel_request(request_id);
+            }
         }
         thread::sleep(Duration::from_millis(25));
+    }
+    if let Some(privileged) = privileged.as_ref() {
+        let requests = privileged_requests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|(_, broker_request_id)| broker_request_id.clone())
+            .collect::<Vec<_>>();
+        for broker_request_id in requests {
+            let _ = privileged.cancel_execute(broker_request_id);
+        }
     }
     for worker in workers {
         let _ = worker.join();
@@ -291,6 +351,8 @@ fn handle_connection(
         current_task,
         sessions,
         active_requests,
+        privileged,
+        privileged_requests,
         stopping,
     } = context;
     stream.set_read_timeout(Some(CONNECTION_TIMEOUT)).map_err(|_| ())?;
@@ -403,6 +465,15 @@ fn handle_connection(
                 .and_then(|params| params.get("requestId"))
                 .filter(|request_id| valid_downstream_request_id(request_id))
             {
+                if let Some(broker_request_id) = privileged_request_id(privileged_requests, request_id) {
+                    let Some(privileged) = privileged else {
+                        return write_empty(&mut stream, 503, Some(session));
+                    };
+                    if privileged.cancel_execute(broker_request_id).is_err() {
+                        return write_empty(&mut stream, 503, Some(session));
+                    }
+                    return write_empty(&mut stream, 202, Some(session));
+                }
                 if cancellation.cancel_request(request_id).is_err() {
                     return write_empty(&mut stream, 503, Some(session));
                 }
@@ -429,7 +500,12 @@ fn handle_connection(
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             match guard.filtered_tools(mode) {
-                Ok(result) => write_rpc_result(&mut stream, id, result, Some(session)),
+                Ok(mut result) => {
+                    if privileged.is_some() && guard.privileged_tool_visible(mode, "elevated_exec") {
+                        append_elevated_exec_tool(&mut result);
+                    }
+                    write_rpc_result(&mut stream, id, result, Some(session))
+                }
                 Err(_) => write_rpc_error(&mut stream, id, -32603, "Policy enforcement failed", Some(session)),
             }
         }
@@ -453,6 +529,23 @@ fn handle_connection(
             let mode = *permission_mode
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if name == "elevated_exec" {
+                return handle_elevated_exec(
+                    &mut stream,
+                    id,
+                    session,
+                    mode,
+                    arguments,
+                    ElevatedCallContext {
+                        guard,
+                        privileged,
+                        current_task,
+                        active_requests,
+                        privileged_requests,
+                        stopping,
+                    },
+                );
+            }
             active_requests
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -486,6 +579,212 @@ fn handle_connection(
         }
         _ => write_rpc_error(&mut stream, id, -32601, "Method not found", Some(session)),
     }
+}
+
+fn append_elevated_exec_tool(result: &mut Value) {
+    let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) else {
+        return;
+    };
+    if tools
+        .iter()
+        .any(|tool| tool.get("name").and_then(Value::as_str) == Some("elevated_exec"))
+    {
+        return;
+    }
+    tools.push(json!({
+        "name": "elevated_exec",
+        "description": "Run a reviewed structured program through the active LocalBridge privileged broker.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "program": {"type": "string"},
+                "args": {"type": "array", "items": {"type": "string"}},
+                "workdir": {"type": ["string", "null"]},
+                "timeout_ms": {"type": "integer", "minimum": 1},
+                "max_output_bytes": {"type": "integer", "minimum": 1}
+            },
+            "required": ["program", "args", "timeout_ms", "max_output_bytes"],
+            "additionalProperties": false
+        }
+    }));
+}
+
+fn privileged_request_id(
+    requests: &Mutex<Vec<(Value, String)>>,
+    downstream_request_id: &Value,
+) -> Option<String> {
+    requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .find(|(candidate, _)| candidate == downstream_request_id)
+        .map(|(_, broker_request_id)| broker_request_id.clone())
+}
+
+fn remove_privileged_request(
+    requests: &Mutex<Vec<(Value, String)>>,
+    downstream_request_id: &Value,
+) {
+    requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .retain(|(candidate, _)| candidate != downstream_request_id);
+}
+
+fn project_elevated_task(current_task: &CurrentTaskProjection, state: TaskExecutionState) {
+    current_task.project(
+        CurrentTaskStatus::project(
+            TaskKind::ElevatedOperation,
+            SafeTaskSummary::Omitted,
+            state,
+        )
+        .expect("elevated task state is a valid active task state"),
+    );
+}
+
+fn finish_elevated_task(current_task: &CurrentTaskProjection, terminal: Option<TaskExecutionState>) {
+    if let Some(state) = terminal {
+        project_elevated_task(current_task, state);
+    }
+    current_task.project(CurrentTaskStatus::Idle);
+}
+
+fn elevated_exec_spec(arguments: Value) -> Result<ElevatedExecSpec, ()> {
+    let spec: ElevatedExecSpec = serde_json::from_value(arguments).map_err(|_| ())?;
+    spec.validate().map_err(|_| ())?;
+    Ok(spec)
+}
+
+fn handle_elevated_exec(
+    stream: &mut TcpStream,
+    id: Value,
+    session: &str,
+    mode: PermissionMode,
+    arguments: Value,
+    context: ElevatedCallContext<'_>,
+) -> Result<(), ()> {
+    let ElevatedCallContext {
+        guard,
+        privileged,
+        current_task,
+        active_requests,
+        privileged_requests,
+        stopping,
+    } = context;
+    let decision = guard
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .decision(
+            mode,
+            &ToolCallRequest::new("elevated_exec", json!({})),
+        );
+    if !decision.allowed || decision.descriptor.capability != Capability::ElevatedExec {
+        finish_elevated_task(current_task, Some(TaskExecutionState::Blocked));
+        return write_rpc_error(
+            stream,
+            id,
+            -32001,
+            "Tool call denied by LocalBridge policy",
+            Some(session),
+        );
+    }
+
+    let Some(privileged) = privileged else {
+        finish_elevated_task(current_task, Some(TaskExecutionState::AwaitingAuthorization));
+        return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
+    };
+    if !matches!(privileged.state(), PrivilegeState::Active { .. }) {
+        finish_elevated_task(current_task, Some(TaskExecutionState::AwaitingAuthorization));
+        return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
+    }
+    let spec = match elevated_exec_spec(arguments) {
+        Ok(spec) => spec,
+        Err(()) => {
+            finish_elevated_task(current_task, Some(TaskExecutionState::Blocked));
+            return write_rpc_error(
+                stream,
+                id,
+                -32602,
+                "Invalid elevated_exec arguments",
+                Some(session),
+            );
+        }
+    };
+
+    let generation = PRIVILEGED_REQUEST_GENERATION.fetch_add(1, Ordering::Relaxed);
+    let broker_request_id = format!("mcp-elevated-{generation:x}");
+    active_requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(id.clone());
+    privileged_requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((id.clone(), broker_request_id.clone()));
+    project_elevated_task(current_task, TaskExecutionState::Running);
+
+    if let Err(error) = privileged.start_execute(broker_request_id.clone(), spec) {
+        remove_active_request(active_requests, &id);
+        remove_privileged_request(privileged_requests, &id);
+        return match error {
+            PrivilegedExecError::GateClosed(_) => {
+                finish_elevated_task(current_task, Some(TaskExecutionState::AwaitingAuthorization));
+                write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session))
+            }
+            PrivilegedExecError::Broker(_) => {
+                finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
+                write_rpc_error(stream, id, -32603, "Privileged broker execution failed", Some(session))
+            }
+        };
+    }
+
+    let execution = loop {
+        if stopping.load(Ordering::Acquire) {
+            let _ = privileged.cancel_execute(broker_request_id.clone());
+        }
+        match privileged.poll_execute(broker_request_id.clone()) {
+            Ok(Some(result)) => break Ok(result),
+            Ok(None) => thread::sleep(Duration::from_millis(25)),
+            Err(error) => break Err(error),
+        }
+    };
+    remove_active_request(active_requests, &id);
+    remove_privileged_request(privileged_requests, &id);
+
+    let execution = match execution {
+        Ok(execution) => execution,
+        Err(PrivilegedExecError::GateClosed(_)) => {
+            finish_elevated_task(current_task, Some(TaskExecutionState::AwaitingAuthorization));
+            return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
+        }
+        Err(PrivilegedExecError::Broker(_)) => {
+            finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
+            return write_rpc_error(stream, id, -32603, "Privileged broker execution failed", Some(session));
+        }
+    };
+
+    let outcome = match execution.outcome {
+        ElevatedExecOutcome::Completed => "completed",
+        ElevatedExecOutcome::TimedOut => "timed_out",
+        ElevatedExecOutcome::Cancelled => "cancelled",
+    };
+    let terminal = match execution.outcome {
+        ElevatedExecOutcome::Completed => None,
+        ElevatedExecOutcome::TimedOut => Some(TaskExecutionState::Failed),
+        ElevatedExecOutcome::Cancelled => Some(TaskExecutionState::Cancelled),
+    };
+    let is_error = !matches!(execution.outcome, ElevatedExecOutcome::Completed);
+    let response = json!({
+        "content": [{"type": "text", "text": execution.output}],
+        "structuredContent": {
+            "outcome": outcome,
+            "exit_code": execution.exit_code,
+            "truncated": execution.truncated
+        },
+        "isError": is_error
+    });
+    finish_elevated_task(current_task, terminal);
+    write_rpc_result(stream, id, response, Some(session))
 }
 
 fn request_id(object: &serde_json::Map<String, Value>) -> Value {
@@ -685,6 +984,95 @@ mod tests {
     use super::super::runtime::{CodingToolsPermissionMode, CodingToolsRuntimeConfig, InternalBearer};
 
     const SYNTHETIC_BEARER: &str = "LB009_PEP_INTERNAL_BEARER_SYNTHETIC_DO_NOT_LEAK";
+
+    #[derive(Debug)]
+    struct FakePrivilegedExecution {
+        state: RwLock<PrivilegeState>,
+        starts: Mutex<Vec<ElevatedExecSpec>>,
+        cancelled: AtomicBool,
+        complete: AtomicBool,
+    }
+
+    impl FakePrivilegedExecution {
+        fn active() -> Self {
+            Self {
+                state: RwLock::new(PrivilegeState::Active {
+                    broker_generation: crate::state::GenerationId::new(77),
+                }),
+                starts: Mutex::new(Vec::new()),
+                cancelled: AtomicBool::new(false),
+                complete: AtomicBool::new(false),
+            }
+        }
+
+        fn set_state(&self, state: PrivilegeState) {
+            *self
+                .state
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = state;
+        }
+
+        fn start_count(&self) -> usize {
+            self.starts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len()
+        }
+    }
+
+    impl PrivilegedExecution for FakePrivilegedExecution {
+        fn state(&self) -> PrivilegeState {
+            self.state
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+
+        fn start_execute(
+            &self,
+            _request_id: String,
+            spec: ElevatedExecSpec,
+        ) -> Result<(), PrivilegedExecError> {
+            let state = self.state();
+            if !state.accepts_privileged_calls() {
+                return Err(PrivilegedExecError::GateClosed(state));
+            }
+            self.cancelled.store(false, Ordering::Release);
+            self.starts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(spec);
+            Ok(())
+        }
+
+        fn poll_execute(
+            &self,
+            _request_id: String,
+        ) -> Result<Option<crate::privilege::ElevatedExecResult>, PrivilegedExecError> {
+            if self.cancelled.load(Ordering::Acquire) {
+                return Ok(Some(crate::privilege::ElevatedExecResult {
+                    outcome: ElevatedExecOutcome::Cancelled,
+                    exit_code: None,
+                    output: String::new(),
+                    truncated: false,
+                }));
+            }
+            if self.complete.load(Ordering::Acquire) {
+                return Ok(Some(crate::privilege::ElevatedExecResult {
+                    outcome: ElevatedExecOutcome::Completed,
+                    exit_code: Some(0),
+                    output: "LB012_FAKE_PRIVILEGED_OK".to_string(),
+                    truncated: false,
+                }));
+            }
+            Ok(None)
+        }
+
+        fn cancel_execute(&self, _request_id: String) -> Result<(), PrivilegedExecError> {
+            self.cancelled.store(true, Ordering::Release);
+            Ok(())
+        }
+    }
 
     struct ClientResponse {
         status: u16,
@@ -997,6 +1385,182 @@ mod tests {
         let mut coding = pep.stop().expect("PEP stop after cancellation");
         coding.stop().expect("MCP Job stop after cancellation");
         assert_eq!(coding.active_processes().unwrap(), 0);
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn elevated_exec_is_broker_only_mode_gated_cancelable_and_secret_safe() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let fake = Arc::new(FakePrivilegedExecution::active());
+        let privileged: Arc<dyn PrivilegedExecution> = fake.clone();
+        let pep = PolicyEnforcementRuntime::start_with_privilege(
+            coding,
+            policy(&root),
+            PermissionMode::Elevated,
+            privileged,
+        )
+        .expect("PEP with privileged route ready");
+        let initialized = initialize(pep.port(), 300);
+        let session = initialized.session.expect("downstream MCP session");
+
+        let tools = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":301,"method":"tools/list","params":{}}),
+        );
+        let elevated_count = tools.body["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|tool| tool["name"] == "elevated_exec")
+            .count();
+        assert_eq!(elevated_count, 1);
+
+        let secret = "LB012_SYNTHETIC_PEP_SECRET";
+        let port = pep.port();
+        let call_session = session.clone();
+        let call = thread::spawn(move || {
+            post(
+                port,
+                Some(&call_session),
+                &json!({
+                    "jsonrpc":"2.0",
+                    "id":"elevated-cancel",
+                    "method":"tools/call",
+                    "params":{
+                        "name":"elevated_exec",
+                        "arguments":{
+                            "program":"C:/Windows/System32/cmd.exe",
+                            "args":["/d","/c",format!("echo {secret}"),"--api-key",secret],
+                            "workdir":"C:/Windows/Temp",
+                            "timeout_ms":10000,
+                            "max_output_bytes":4096
+                        }
+                    }
+                }),
+            )
+        });
+        let running_deadline = std::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            match pep.current_task_projection().snapshot() {
+                CurrentTaskStatus::Active(ref task)
+                    if task.kind == TaskKind::ElevatedOperation
+                        && task.state == TaskExecutionState::Running =>
+                {
+                    assert_eq!(task.summary, SafeTaskSummary::Omitted);
+                    assert!(!format!("{task:?}").contains(secret));
+                    break;
+                }
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < running_deadline,
+                "elevated call never projected Running"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(fake.start_count(), 1);
+        let cancelled = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0",
+                "method":"notifications/cancelled",
+                "params":{"requestId":"elevated-cancel","reason":"LB-012 test"}
+            }),
+        );
+        assert_eq!(cancelled.status, 202);
+        let cancelled_result = call.join().unwrap();
+        assert_eq!(
+            cancelled_result.body["result"]["structuredContent"]["outcome"],
+            "cancelled"
+        );
+        assert_eq!(cancelled_result.body["result"]["isError"], true);
+        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+
+        pep.set_permission_mode(PermissionMode::Full);
+        let full_denied = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":302,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "program":"C:/Windows/System32/cmd.exe","args":[],
+                    "timeout_ms":1000,"max_output_bytes":1024
+                }}
+            }),
+        );
+        assert_eq!(full_denied.body["error"]["code"], -32001);
+        assert_eq!(fake.start_count(), 1);
+
+        pep.set_permission_mode(PermissionMode::Elevated);
+        fake.set_state(PrivilegeState::AwaitingUac);
+        let awaiting = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":303,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "program":"C:/Windows/System32/cmd.exe","args":[],
+                    "timeout_ms":1000,"max_output_bytes":1024
+                }}
+            }),
+        );
+        assert_eq!(awaiting.body["error"]["code"], -32002);
+        assert_eq!(awaiting.body["error"]["message"], "ElevationRequired");
+        assert_eq!(fake.start_count(), 1);
+        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+
+        let control_plane = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":304,"method":"tools/call",
+                "params":{"name":"request_permissions","arguments":{"permission":"admin"}}
+            }),
+        );
+        assert_eq!(control_plane.body["error"]["code"], -32001);
+
+        fake.set_state(PrivilegeState::Active {
+            broker_generation: crate::state::GenerationId::new(78),
+        });
+        fake.complete.store(true, Ordering::Release);
+        let completed = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":305,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "program":"C:/Windows/System32/cmd.exe","args":["/c","echo ok"],
+                    "timeout_ms":1000,"max_output_bytes":1024
+                }}
+            }),
+        );
+        assert_eq!(
+            completed.body["result"]["structuredContent"]["outcome"],
+            "completed"
+        );
+        assert_eq!(
+            completed.body["result"]["content"][0]["text"],
+            "LB012_FAKE_PRIVILEGED_OK"
+        );
+        assert_eq!(fake.start_count(), 2);
+
+        let mut coding = pep.stop().expect("PEP stop after privileged routing");
+        coding.stop().expect("MCP stop after privileged routing");
         drop(coding);
         cleanup_test_directory(&workspace);
     }

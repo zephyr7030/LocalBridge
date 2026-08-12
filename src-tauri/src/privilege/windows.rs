@@ -30,7 +30,7 @@ use windows_sys::Win32::System::Pipes::{
     WaitNamedPipeW,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetProcessId, OpenProcessToken, WaitForSingleObject,
+    GetCurrentProcess, GetProcessId, OpenProcessToken, TerminateProcess, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 
@@ -132,10 +132,27 @@ impl ElevatedBrokerProcess {
             _ => Err(UacLaunchError::LaunchFailed(last_error_code())),
         }
     }
+
+    pub fn terminate(&mut self) -> Result<(), UacLaunchError> {
+        if unsafe { TerminateProcess(self.handle, 0x4C42_1203) } == 0 {
+            Err(UacLaunchError::LaunchFailed(last_error_code()))
+        } else {
+            Ok(())
+        }
+    }
 }
 
+// Win32 kernel handles are process-wide rather than thread-affine. Ownership moves as a unit.
+unsafe impl Send for ElevatedBrokerProcess {}
+
 impl Drop for ElevatedBrokerProcess {
-    fn drop(&mut self) { close_if_valid(&mut self.handle); }
+    fn drop(&mut self) {
+        if self.is_running().unwrap_or(false) {
+            let _ = self.terminate();
+            let _ = self.wait_for_exit(Duration::from_secs(5));
+        }
+        close_if_valid(&mut self.handle);
+    }
 }
 
 pub fn launch_broker_with_explicit_uac(
@@ -347,6 +364,9 @@ pub struct NamedPipeConnection {
     handle: HANDLE,
     server_side: bool,
 }
+
+// Win32 pipe HANDLE ownership may move between threads; higher layers serialize all I/O.
+unsafe impl Send for NamedPipeConnection {}
 
 impl fmt::Debug for NamedPipeConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -105,7 +105,9 @@ impl<R: GuardRuntime> McpGuard<R> {
         tools.retain(|tool| {
             tool.get("name")
                 .and_then(Value::as_str)
-                .is_some_and(|name| self.policy.tool_allowed_for_list(mode, name))
+                .is_some_and(|name| {
+                    name != "elevated_exec" && self.policy.tool_allowed_for_list(mode, name)
+                })
         });
         Ok(response)
     }
@@ -125,6 +127,16 @@ impl<R: GuardRuntime> McpGuard<R> {
             .decide(mode, &request.name, &indirect_capabilities);
         let kind = refined_task_kind(decision.descriptor, &request.arguments);
         let summary = safe_summary(&request.name, &request.arguments);
+        if decision.descriptor.capability == Capability::ElevatedExec {
+            let blocked = CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
+                .expect("Blocked is a valid active task state");
+            project(blocked);
+            project(CurrentTaskStatus::Idle);
+            return Err(GuardError::Denied(PolicyDenied {
+                reason: DenyReason::PrivilegedRouteNotAvailable,
+                capability: Capability::ElevatedExec,
+            }));
+        }
         if !decision.allowed {
             let blocked = CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
                 .expect("Blocked is a valid active task state");
@@ -160,6 +172,10 @@ impl<R: GuardRuntime> McpGuard<R> {
         let indirect_capabilities = effective_indirect_capabilities(request);
         self.policy
             .decide(mode, &request.name, &indirect_capabilities)
+    }
+
+    pub fn privileged_tool_visible(&self, mode: PermissionMode, name: &str) -> bool {
+        self.policy.privileged_tool_visible(mode, name)
     }
 
     pub(crate) fn into_runtime(self) -> R {

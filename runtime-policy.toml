@@ -4,7 +4,7 @@ status = "LB_000_VERIFIED"
 
 edit_allowed_tools = ["server_info", "check_exec_environment", "get_default_cwd", "set_default_cwd", "read_file", "list_dir", "list_files", "search_text", "apply_patch", "git_status", "git_diff", "git_log", "git_show", "git_blame", "view_image"]
 full_allowed_tools = ["server_info", "check_exec_environment", "get_default_cwd", "set_default_cwd", "read_file", "list_dir", "list_files", "search_text", "apply_patch", "exec_command", "write_stdin", "kill_session", "read_output", "git_status", "git_diff", "git_log", "git_show", "git_blame", "view_image"]
-elevated_allowed_tools = ["server_info", "check_exec_environment", "get_default_cwd", "set_default_cwd", "read_file", "list_dir", "list_files", "search_text", "apply_patch", "exec_command", "write_stdin", "kill_session", "read_output", "git_status", "git_diff", "git_log", "git_show", "git_blame", "view_image"]
+elevated_allowed_tools = ["server_info", "check_exec_environment", "get_default_cwd", "set_default_cwd", "read_file", "list_dir", "list_files", "search_text", "apply_patch", "exec_command", "write_stdin", "kill_session", "read_output", "git_status", "git_diff", "git_log", "git_show", "git_blame", "view_image", "elevated_exec"]
 blocked_tools = ["request_permissions"]
 
 [capabilities]

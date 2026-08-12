@@ -1,10 +1,16 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 pub const BROKER_PROTOCOL_VERSION: u16 = 1;
 pub const MAX_BROKER_FRAME_BYTES: usize = 64 * 1024;
 pub const SESSION_NONCE_BYTES: usize = 32;
+pub const MAX_ELEVATED_ARGS: usize = 128;
+pub const MAX_ELEVATED_STRING_BYTES: usize = 32 * 1024;
+pub const MAX_ELEVATED_TIMEOUT_MS: u32 = 120_000;
+pub const MAX_ELEVATED_OUTPUT_BYTES: u32 = 1024 * 1024;
+pub const MAX_ELEVATED_REQUEST_ID_BYTES: usize = 128;
 const BROKER_PIPE_PREFIX: &str = r"\\.\pipe\LocalBridge-Privileged-";
 
 pub(crate) fn is_valid_broker_pipe_name(value: &str) -> bool {
@@ -41,7 +47,13 @@ pub struct BrokerReady { pub version: u16, pub generation: u64, pub session_nonc
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
-pub enum BrokerRequest { Ping, Shutdown }
+pub enum BrokerRequest {
+    Ping,
+    Shutdown,
+    StartExec { request_id: String, spec: ElevatedExecSpec },
+    PollExec { request_id: String },
+    CancelExec { request_id: String },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrokerRequestEnvelope {
@@ -54,11 +66,95 @@ pub struct BrokerRequestEnvelope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BrokerRejectCode { ProtocolMismatch, StaleGeneration, SessionMismatch, Replay, Malformed, Oversized }
+pub enum BrokerRejectCode {
+    ProtocolMismatch,
+    StaleGeneration,
+    SessionMismatch,
+    Replay,
+    Malformed,
+    Oversized,
+    DuplicateRequest,
+    RequestNotFound,
+    ExecutionFailed,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case", deny_unknown_fields)]
-pub enum BrokerResponse { Pong, ShutdownAck, Rejected { code: BrokerRejectCode } }
+pub enum BrokerResponse {
+    Pong,
+    ShutdownAck,
+    ExecAccepted,
+    ExecPending,
+    ExecCompleted { execution: ElevatedExecResult },
+    CancelAck,
+    Rejected { code: BrokerRejectCode },
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElevatedExecSpec {
+    pub program: String,
+    pub args: Vec<String>,
+    pub workdir: Option<String>,
+    pub timeout_ms: u32,
+    pub max_output_bytes: u32,
+}
+
+impl fmt::Debug for ElevatedExecSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ElevatedExecSpec")
+            .field("program", &self.program)
+            .field("arg_count", &self.args.len())
+            .field("args", &"[REDACTED]")
+            .field("workdir", &self.workdir)
+            .field("timeout_ms", &self.timeout_ms)
+            .field("max_output_bytes", &self.max_output_bytes)
+            .finish()
+    }
+}
+
+impl ElevatedExecSpec {
+    pub fn validate(&self) -> Result<(), BrokerProtocolError> {
+        if self.program.is_empty()
+            || self.program.len() > MAX_ELEVATED_STRING_BYTES
+            || !Path::new(&self.program).is_absolute()
+            || self.args.len() > MAX_ELEVATED_ARGS
+            || self.args.iter().any(|arg| arg.len() > MAX_ELEVATED_STRING_BYTES || arg.as_bytes().contains(&0))
+            || self.program.as_bytes().contains(&0)
+            || self.workdir.as_ref().is_some_and(|value| {
+                value.is_empty()
+                    || value.len() > MAX_ELEVATED_STRING_BYTES
+                    || value.as_bytes().contains(&0)
+                    || !Path::new(value).is_absolute()
+            })
+            || self.timeout_ms == 0
+            || self.timeout_ms > MAX_ELEVATED_TIMEOUT_MS
+            || self.max_output_bytes == 0
+            || self.max_output_bytes > MAX_ELEVATED_OUTPUT_BYTES
+        {
+            return Err(BrokerProtocolError::MalformedFrame);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ElevatedExecOutcome { Completed, TimedOut, Cancelled }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ElevatedExecResult {
+    pub outcome: ElevatedExecOutcome,
+    pub exit_code: Option<u32>,
+    pub output: String,
+    pub truncated: bool,
+}
+
+pub fn valid_elevated_request_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_ELEVATED_REQUEST_ID_BYTES
+        && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.'))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrokerResponseEnvelope { pub version: u16, pub generation: u64, pub sequence: u64, pub response: BrokerResponse }
