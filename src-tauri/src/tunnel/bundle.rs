@@ -19,7 +19,6 @@ const LICENSE_SHA256: &str =
 #[derive(Debug, Clone)]
 pub(crate) struct VerifiedTunnelBundle {
     pub(crate) executable: PathBuf,
-    pub(crate) cloudflared: PathBuf,
 }
 
 pub(crate) fn verify_bundle(install_root: &Path) -> Result<VerifiedTunnelBundle, TunnelError> {
@@ -35,7 +34,7 @@ pub(crate) fn verify_bundle(install_root: &Path) -> Result<VerifiedTunnelBundle,
         verify_file(path, expected)?;
     }
     verify_cloudflared_manifest_version(&root.join("cloudflared-manifest.json"))?;
-    Ok(VerifiedTunnelBundle { executable, cloudflared })
+    Ok(VerifiedTunnelBundle { executable })
 }
 
 fn verify_file(path: &Path, expected: &str) -> Result<(), TunnelError> {
@@ -87,7 +86,7 @@ mod tests {
     fn pinned_bundle_hashes_and_cloudflared_manifest_version_are_valid() {
         let verified = verify_bundle(&repo_root()).expect("vendored LB-008 bundle must verify");
         assert!(verified.executable.ends_with("tunnel-client.exe"));
-        assert!(verified.cloudflared.ends_with("cloudflared.exe"));
+        assert!(repo_root().join("runtime/tunnel-client/cloudflared.exe").is_file());
     }
 
     #[test]

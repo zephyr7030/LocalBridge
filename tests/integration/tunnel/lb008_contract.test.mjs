@@ -17,6 +17,34 @@ for (const [path, hash] of expected) {
 const cloudflaredManifest = JSON.parse(readFileSync("runtime/tunnel-client/cloudflared-manifest.json", "utf8"));
 if (cloudflaredManifest.version !== "2026.7.2") throw new Error("LB-008 cloudflared manifest version mismatch");
 
+const runHelp = readFileSync("compatibility/tunnel-client/0.0.11/run-help.txt", "utf8");
+const runtimeSource = readFileSync("src-tauri/src/tunnel/runtime.rs", "utf8");
+const managedHelpLine = runHelp
+  .split(/\r?\n/)
+  .find((line) => line.includes("CLOUDFLARED_MANAGED") && line.includes("(optional)"));
+if (!managedHelpLine) {
+  throw new Error("LB-008 pinned 0.0.11 help no longer proves managed Cloudflare is optional");
+}
+const quickstartLine = runHelp
+  .split(/\r?\n/)
+  .find((line) => line.includes("tunnel-client run --embedded-mcp-stub"));
+if (!quickstartLine) throw new Error("LB-008 pinned 0.0.11 quickstart line missing");
+const managedFlags = ["--cloudflared.managed", "--cloudflared.path", "--cloudflared.token"];
+for (const forbidden of managedFlags) {
+  if (quickstartLine.includes(forbidden)) {
+    throw new Error(`LB-008 pinned ordinary quickstart unexpectedly requires ${forbidden}`);
+  }
+}
+const argvStart = runtimeSource.indexOf("pub fn command_line_arguments");
+const argvEnd = runtimeSource.indexOf("pub fn health_url_file", argvStart);
+if (argvStart < 0 || argvEnd <= argvStart) throw new Error("LB-008 could not isolate ordinary tunnel argv builder");
+const argvBuilder = runtimeSource.slice(argvStart, argvEnd);
+for (const forbidden of managedFlags) {
+  if (argvBuilder.includes(forbidden)) {
+    throw new Error(`LB-008 ordinary Tunnel startup must not force optional managed Cloudflare flag ${forbidden}`);
+  }
+}
+
 const tunnelVersion = spawnSync("runtime/tunnel-client/tunnel-client.exe", ["--version"], {
   encoding: "utf8",
   windowsHide: true,
@@ -53,4 +81,4 @@ for (const line of [
   if (!manifest.includes(line)) throw new Error(`LB-008 runtime manifest contract missing: ${line}`);
 }
 
-console.log("LB008_TUNNEL_CONTRACT=PASS tunnel=0.0.11 cloudflared=2026.7.2 exact_hashes=true env_only_api_key=true");
+console.log("LB008_TUNNEL_CONTRACT=PASS tunnel=0.0.11 cloudflared=2026.7.2 exact_hashes=true env_only_api_key=true ordinary_tunnel_no_managed_cloudflare=true");

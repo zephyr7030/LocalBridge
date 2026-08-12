@@ -54,6 +54,11 @@ const argvBuilder = runtime.slice(argsStart, argsEnd);
 if (/expose_secret\s*\(/.test(argvBuilder)) {
   throw new Error("ARCH-016 secret exposure appears in command-line builder");
 }
+for (const forbidden of ["--cloudflared.managed", "--cloudflared.path", "--cloudflared.token"]) {
+  if (argvBuilder.includes(forbidden)) {
+    throw new Error(`ARCH-016 ordinary Tunnel startup must not force optional managed Cloudflare flag: ${forbidden}`);
+  }
+}
 if (/LOCALBRIDGE_RUNTIME_API_KEY_ONE|LB008_SYNTHETIC_RUNTIME_KEY/.test(argvBuilder)) {
   throw new Error("ARCH-016 synthetic/raw secret literal appears in command-line builder");
 }
@@ -63,4 +68,4 @@ if (exposeUses !== 1) throw new Error(`ARCH-016 unexpected secret exposure call 
 const envInjection = /spec\s*=\s*spec\.env\(API_KEY_ENV,\s*self\.secret\.expose_secret\(\)\)/s;
 if (!envInjection.test(runtime)) throw new Error("ARCH-016 secret exposure is not confined to child env injection");
 
-console.log("ARCH-016_VERIFY=PASS env_only_secret=true os_command_line_regression=true tunnel_id_env_only=true inherited_override_removal=true");
+console.log("ARCH-016_VERIFY=PASS env_only_secret=true os_command_line_regression=true tunnel_id_env_only=true inherited_override_removal=true ordinary_tunnel_no_managed_cloudflare=true");

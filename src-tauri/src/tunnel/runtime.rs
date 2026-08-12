@@ -113,9 +113,6 @@ impl PreparedTunnelStart {
             "127.0.0.1:0".into(),
             "--health.url-file".into(),
             self.health_url_file.to_string_lossy().into_owned(),
-            "--cloudflared.managed".into(),
-            "--cloudflared.path".into(),
-            self.bundle.cloudflared.to_string_lossy().into_owned(),
             "--log.format".into(),
             "struct-text".into(),
             "--log.level".into(),
@@ -394,6 +391,9 @@ mod tests {
         assert!(rendered.contains(API_KEY_REFERENCE));
         assert!(!rendered.contains(SECRET_ONE));
         assert!(!rendered.contains(TUNNEL_ID));
+        assert!(!rendered.contains("--cloudflared.managed"));
+        assert!(!rendered.contains("--cloudflared.path"));
+        assert!(!rendered.contains("--cloudflared.token"));
         let debug = format!("{prepared:?}");
         assert!(!debug.contains(SECRET_ONE));
         assert!(matches!(
@@ -484,6 +484,9 @@ mod tests {
         assert!(command_line.contains(API_KEY_REFERENCE));
         assert!(!command_line.contains(SECRET_ONE));
         assert!(!command_line.contains(TUNNEL_ID));
+        assert!(!command_line.contains("--cloudflared.managed"));
+        assert!(!command_line.contains("--cloudflared.path"));
+        assert!(!command_line.contains("--cloudflared.token"));
         assert!(!format!("{runtime:?}").contains(SECRET_ONE));
 
         let _ = release_control_plane.send(());
