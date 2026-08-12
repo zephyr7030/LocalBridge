@@ -6,7 +6,7 @@ function walk(dir) {
     return s.isDirectory() ? walk(p) : /\.(tsx|ts|html)$/.test(name) ? [p] : [];
   });
 }
-const forbidden = ["Dashboard", "Settings", "Diagnostics", "Elevated", "Broker", "Runtime"];
+const forbidden = ["Dashboard", "Settings", "Diagnostics", "Elevated", "Broker", "Runtime", "Generation"];
 const findings = [];
 for (const file of walk("src")) {
   if (file.includes("__tests__")) continue;

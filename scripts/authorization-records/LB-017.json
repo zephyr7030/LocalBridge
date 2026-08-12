@@ -17,6 +17,21 @@
       "recorded_by": "executor",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB017-002",
+      "scope": [
+        "scripts/verify-ui-language/index.mjs",
+        "scripts/authorization-records/LB-017.json"
+      ],
+      "actions": [
+        "Add Generation to the global user-facing English UI deny-list so Diagnostics and future UI cannot silently regress to this unmapped label"
+      ],
+      "reason": "G3 independent adversarial review generation 1 found two user-visible Generation labels that the existing UI-language verifier failed to detect.",
+      "evidence_ref": "G3 review generation 1 provenance commit 81ba816428fa9a4e0e1f3b7f383940a7764922fd and explicit user repair instruction on 2026-08-12",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

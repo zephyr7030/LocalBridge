@@ -64,12 +64,12 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
             <div className="diagnostics-section">
               <h3>管理员组件</h3>
               <div className="diagnostics-line"><span>状态</span><span>{brokerText[snapshot.broker.state]}</span></div>
-              {snapshot.broker.generation !== null ? <div className="diagnostics-line"><span>Generation</span><span>{snapshot.broker.generation}</span></div> : null}
+              {snapshot.broker.generation !== null ? <div className="diagnostics-line"><span>实例代次</span><span>{snapshot.broker.generation}</span></div> : null}
             </div>
             {snapshot.reconnect ? (
               <div className="diagnostics-section">
                 <h3>连接恢复</h3>
-                <div className="diagnostics-line"><span>Generation</span><span>{snapshot.reconnect.generation}</span></div>
+                <div className="diagnostics-line"><span>恢复代次</span><span>{snapshot.reconnect.generation}</span></div>
                 <div className="diagnostics-line"><span>组件</span><span>{snapshot.reconnect.component}</span></div>
                 {snapshot.reconnect.attempts.length ? <div className="diagnostics-attempts">{snapshot.reconnect.attempts.map((attempt) => <span key={attempt.attempt}>第 {attempt.attempt} 次 · {attemptText[attempt.state]}</span>)}</div> : <p className="diagnostics-muted">此故障没有自动重试记录。</p>}
               </div>

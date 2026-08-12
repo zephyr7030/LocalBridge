@@ -8,6 +8,10 @@ const app = readFileSync("src/App.tsx", "utf8");
 const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
 const auth = JSON.parse(readFileSync("scripts/authorization-records/LB-017.json", "utf8"));
 
+const generationLabels = (ui.match(/>\s*Generation\s*</g) ?? []).length;
+if (generationLabels !== 0) throw new Error(`LB-017 user-visible Generation labels remain: ${generationLabels}`);
+for (const required of [">实例代次<", ">恢复代次<"]) if (!ui.includes(required)) throw new Error(`LB-017 Chinese generation label missing: ${required}`);
+
 for (const required of ["DiagnosticLevel", "DiagnosticCheck", "BrokerDiagnostics", "ReconnectDiagnostics", "DIAGNOSTICS_SCHEMA_VERSION", "export_snapshot"]) if (!model.includes(required)) throw new Error(`LB-017 typed diagnostics missing: ${required}`);
 for (const forbidden of ["SecretString", "expose_secret", "credential_id", "pipe_name", "process_snapshot", "expected_pid", "SessionNonce"]) if (model.includes(forbidden)) throw new Error(`LB-017 diagnostics model contains forbidden secret/internal surface: ${forbidden}`);
 if (model.includes("process::id") || commands.includes("process::id")) throw new Error("LB-017 diagnostics exposes process ID in export/artifact naming");
@@ -31,4 +35,7 @@ if (!app.includes('<Diagnostics onClose={() => setView("main")} />')) throw new 
 const record = auth.records.find((candidate) => candidate.authorization_id === "EXEC-PREAUTH-LB017-001");
 const expectedScope = ["src/App.tsx", "src-tauri/src/lib.rs", "scripts/authorization-records/LB-017.json"];
 if (!record || record.user_audit_status !== "PENDING" || record.does_not_expand_future_pr_writable_paths !== true || JSON.stringify(record.scope) !== JSON.stringify(expectedScope)) throw new Error("LB-017 preauthorization invalid");
-console.log("LB017_CONTRACT=PASS typed_checks=true redacted_export=true broker_generation_safe=true reconnect_history_diagnostics_only=true safe_repair_retry_only=true preauth_pending=1");
+
+const languageRecord = auth.records.find((candidate) => candidate.authorization_id === "EXEC-PREAUTH-LB017-002");
+if (!languageRecord || languageRecord.user_audit_status !== "PENDING" || languageRecord.does_not_expand_future_pr_writable_paths !== true || !languageRecord.scope.includes("scripts/verify-ui-language/index.mjs")) throw new Error("LB-017 UI-language preauthorization invalid");
+console.log("LB017_CONTRACT=PASS typed_checks=true redacted_export=true broker_generation_safe=true reconnect_history_diagnostics_only=true safe_repair_retry_only=true user_visible_generation=0 preauth_pending=2");
