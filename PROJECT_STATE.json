@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-010",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -124,7 +124,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run fresh independent G2 adversarial review generation 3 before LB-013; G3 remains blocked"
+    "next_action": "Rework LB-010 after G2 independent adversarial review generation 3 FAIL: wire automatic runtime fault detection/recovery into production lifecycle; later revalidate LB-011 and fix LB-012 broker-liveness state refresh before a fresh G2 review"
   },
   "current_task_ui": {
     "enabled": true,
