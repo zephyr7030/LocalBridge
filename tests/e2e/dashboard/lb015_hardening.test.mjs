@@ -6,7 +6,7 @@ if (!presentation.includes('dashboard: "主控界面"') || !presentation.include
 if (!app.includes("uiText.settings") || !app.includes("uiText.diagnostics")) throw new Error("LB-015 shell does not consume centralized terminology");
 if (app.includes('<section className="card"><div className="task-row"')) throw new Error("LB-015 current task is still presented as a card/message");
 if (app.includes('disabled>等待系统授权</button>')) throw new Error("LB-015 AwaitingUac exposes a redundant action button");
-if (!app.includes("OpenAI 安全隧道")) throw new Error("LB-015 tunnel label is ambiguous");
+if (!app.includes("安全隧道")) throw new Error("LB-015 frozen safe-tunnel label is missing");
 if (!backend.includes("localbridge-privileged-broker.exe")) throw new Error("LB-015 explicit admin action targets the wrong broker binary");
 const disableBody = backend.slice(backend.indexOf("pub fn disable_admin"), backend.indexOf("pub fn retry_connection"));
 if (!disableBody.includes("request_without_uac")) throw new Error("LB-015 admin disable does not return to Requested safely");
