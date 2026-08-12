@@ -690,7 +690,6 @@
         "runtime/**"
       ],
       "required_artifacts": [
-        "6-screen wizard",
         "five-screen onboarding flow",
         "runtime-check gated confirm button"
       ],

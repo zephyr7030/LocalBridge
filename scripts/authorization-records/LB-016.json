@@ -17,6 +17,43 @@
       "recorded_by": "executor",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-002",
+      "scope": [
+        "PR_CONTRACTS.json",
+        "scripts/verify-architecture/g4-human-gate.mjs",
+        "scripts/verify-architecture/g4-human-gate.test.mjs",
+        "tests/e2e/onboarding/lb016_contract.test.mjs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Remove the stale LB-016 '6-screen wizard' required artifact so the machine contract matches the frozen exact five-screen onboarding rule",
+        "Normalize only that exact historical stale artifact in the ARCH-024 contract-freeze comparison while keeping every other ordinary PR contract drift fail-closed",
+        "Add a regression that fails if the six-screen semantic conflict returns or any other contract drift is accepted"
+      ],
+      "reason": "G3 independent adversarial review generation 1 found the LB-016 machine contract self-contradictory while the implementation and global rules correctly require exactly five screens.",
+      "evidence_ref": "G3 review generation 1 provenance commit 81ba816428fa9a4e0e1f3b7f383940a7764922fd and explicit user repair instruction on 2026-08-12",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-003",
+      "scope": [
+        "start-localbridge.cmd",
+        "scripts/test-start-localbridge.mjs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Add a Windows double-click one-command launcher for the current Tauri development application",
+        "Add an offline --check mode and an automated launcher contract test without installing dependencies, using PowerShell, reading secrets, or performing network activity"
+      ],
+      "reason": "The user explicitly requested a one-click startup script for the upcoming human manual/detail review.",
+      "evidence_ref": "Explicit user instruction on 2026-08-12 to create and test a one-click startup script before manual review",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

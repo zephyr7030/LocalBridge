@@ -7,6 +7,14 @@ const frame = readFileSync("src/components/WizardFrame.tsx", "utf8");
 const backend = readFileSync("src-tauri/src/commands/onboarding.rs", "utf8");
 const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
 const auth = JSON.parse(readFileSync("scripts/authorization-records/LB-016.json", "utf8"));
+const contracts = JSON.parse(readFileSync("PR_CONTRACTS.json", "utf8"));
+
+const lb016Contract = contracts.prs?.["LB-016"];
+if (!lb016Contract) throw new Error("LB-016 machine contract missing");
+if (lb016Contract.required_artifacts.includes("6-screen wizard")) throw new Error("LB016_CONTRACT_SEMANTIC_CONFLICT: stale six-screen artifact remains");
+if (!lb016Contract.required_artifacts.includes("five-screen onboarding flow") || contracts.rules?.onboarding_screen_count !== 5 || contracts.rules?.onboarding_screen_6_forbidden !== true) {
+  throw new Error("LB016_CONTRACT_SEMANTIC_CONFLICT: five-screen contract is not internally consistent");
+}
 
 for (const required of [
   'step={1} title="简单设置 即可开始"',
@@ -50,4 +58,9 @@ const record = auth.records.find((candidate) => candidate.authorization_id === "
 const expectedScope = ["src/App.tsx", "src-tauri/src/lib.rs", "scripts/authorization-records/LB-016.json"];
 if (!record || record.user_audit_status !== "PENDING" || record.does_not_expand_future_pr_writable_paths !== true || JSON.stringify(record.scope) !== JSON.stringify(expectedScope)) throw new Error("LB-016 preauthorization invalid");
 
-console.log("LB016_CONTRACT=PASS five_screens=true no_screen6=true key_secure=true project_permission_combined=true no_auto_uac=true system_browser_allowlist=true checks=3 confirm_gated=true exact_success=true preauth_pending=1");
+for (const id of ["EXEC-PREAUTH-LB016-002", "EXEC-PREAUTH-LB016-003"]) {
+  const extra = auth.records.find((candidate) => candidate.authorization_id === id);
+  if (!extra || extra.user_audit_status !== "PENDING" || extra.does_not_expand_future_pr_writable_paths !== true) throw new Error(`LB-016 rework preauthorization invalid: ${id}`);
+}
+
+console.log("LB016_CONTRACT=PASS five_screens=true no_screen6=true semantic_conflict=false key_secure=true project_permission_combined=true no_auto_uac=true system_browser_allowlist=true checks=3 confirm_gated=true exact_success=true preauth_pending=3");

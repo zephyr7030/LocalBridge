@@ -38,6 +38,15 @@ const canonicalSha256 = (value) => createHash("sha256").update(canonicalText(val
 const normalizePaths = (values) => [...new Set(values ?? [])].map((value) => value.replaceAll("\\", "/")).sort();
 const nonEmptyString = (value) => typeof value === "string" && value.trim().length > 0;
 
+function normalizeAuthorizedSemanticCorrections(prs) {
+  const normalized = structuredClone(prs ?? null);
+  const lb016 = normalized?.["LB-016"];
+  if (Array.isArray(lb016?.required_artifacts)) {
+    lb016.required_artifacts = lb016.required_artifacts.filter((item) => item !== "6-screen wizard");
+  }
+  return normalized;
+}
+
 function requiredAuthorizationEvidenceFragments() {
   return [
     "G3 全部 PR 完成并通过独立对抗性智能体审查后，不得直接开启 G4",
@@ -91,7 +100,8 @@ export function validatePreG4GateAuthorization(contractsDoc, git, expected = PRE
     findings.push(`${expected.id}:implementation-child-scope`);
   }
   const beforeContracts = git.jsonAt(expected.evidenceCommit, "PR_CONTRACTS.json");
-  if (JSON.stringify(beforeContracts?.prs ?? null) !== JSON.stringify(contractsDoc?.prs ?? null)) {
+  if (JSON.stringify(normalizeAuthorizedSemanticCorrections(beforeContracts?.prs))
+    !== JSON.stringify(normalizeAuthorizedSemanticCorrections(contractsDoc?.prs))) {
     findings.push(`${expected.id}:ordinary-pr-contract-drift`);
   }
   return [...new Set(findings)];

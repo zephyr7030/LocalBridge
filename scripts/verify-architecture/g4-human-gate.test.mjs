@@ -21,9 +21,15 @@ const expected = {
   evidenceCanonicalSha256: createHash("sha256").update(evidence, "utf8").digest("hex"),
   authorizedPaths: ["PR_CONTRACTS.json", "PR_INDEX.json", "scripts/verify-architecture/g4-human-gate.mjs"],
 };
-const beforePrContracts = { prs: { "LB-018": { writable_paths: ["src-tauri/**"] } } };
+const beforePrContracts = { prs: {
+  "LB-016": { required_artifacts: ["6-screen wizard", "five-screen onboarding flow", "runtime-check gated confirm button"] },
+  "LB-018": { writable_paths: ["src-tauri/**"] },
+} };
 const contracts = {
-  ...beforePrContracts,
+  prs: {
+    "LB-016": { required_artifacts: ["five-screen onboarding flow", "runtime-check gated confirm button"] },
+    "LB-018": { writable_paths: ["src-tauri/**"] },
+  },
   rules: { governance_authorizations: [{
     id: expected.id,
     scheme: expected.scheme,
@@ -50,6 +56,9 @@ assert.deepEqual(validatePreG4GateAuthorization(contracts, authGit, expected), [
 const widenedContracts = structuredClone(contracts);
 widenedContracts.prs["LB-018"].writable_paths.push("src/**");
 assert.match(validatePreG4GateAuthorization(widenedContracts, authGit, expected).join("|"), /ordinary-pr-contract-drift/);
+const widenedLb016 = structuredClone(contracts);
+widenedLb016.prs["LB-016"].required_artifacts.push("unexpected sixth-screen replacement");
+assert.match(validatePreG4GateAuthorization(widenedLb016, authGit, expected).join("|"), /ordinary-pr-contract-drift/);
 const badAuthGit = { ...authGit, commitPaths: (commit) => commit === implementationCommit ? [...expected.authorizedPaths, "src-tauri/src/lib.rs"] : authGit.commitPaths(commit) };
 assert.match(validatePreG4GateAuthorization(contracts, badAuthGit, expected).join("|"), /implementation-child-scope/);
 
