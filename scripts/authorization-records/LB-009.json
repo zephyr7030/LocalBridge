@@ -26,7 +26,7 @@
       "reason": "LB-009 composition audit proved LB-007 had only an in-process McpGuard and no production listener, while LB-008 TunnelRuntime always targets 127.0.0.1:<mcp_guard_port>/mcp. Without this correction the runtime could report staged readiness while the configured PEP endpoint did not exist.",
       "evidence_ref": "Current-disk search during LB-009: McpGuard::new existed only in tests and no production PEP TcpListener existed; ADR-0001 requires Tunnel -> loopback Rust MCP Guard/PEP -> authenticated coding-tools-mcp. Pinned coding-tools-mcp v0.2.2 uses ThreadingHTTPServer, supports notifications/cancelled, and maps JSON-RPC request_id to exec sessions; tunnel-client v0.0.11 allows concurrent MCP requests. Deterministic Windows regression with actual bundled coding-tools-mcp proved a 10-second exec_command can be cancelled through the new PEP on a second downstream connection using the same request id while CurrentTask returns to Idle.",
       "recorded_by": "LocalBridge Development Agent",
-      "user_audit_status": "PENDING",
+      "user_audit_status": "PASS",
       "does_not_expand_future_pr_writable_paths": true
     }
   ]

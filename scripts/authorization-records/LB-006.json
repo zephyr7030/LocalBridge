@@ -15,7 +15,7 @@
       "reason": "LB-006 requires CODING_TOOLS_MCP_AUTH_TOKEN to be injected only into the coding-tools child process; the LB-004 supervisor had no per-child environment API, while CLI secrets, plaintext temporary files, process-global environment mutation, and a duplicate process launcher were rejected.",
       "evidence_ref": "User instruction in active LocalBridge execution: executor may self-authorize during execution but must report authorization content and concrete actions at task completion.",
       "recorded_by": "LocalBridge Development Agent",
-      "user_audit_status": "PENDING",
+      "user_audit_status": "PASS",
       "does_not_expand_future_pr_writable_paths": true
     },
     {
@@ -30,7 +30,7 @@
       "reason": "LB-006 actual-runtime testing proved that Job active-process accounting can reach zero before the root process has fully signaled and released its loopback listener; returning stop success at that point is premature.",
       "evidence_ref": "LB-006 integration reproduction: after force_stop returned and active_processes reported zero, a new TCP connection to the coding-tools loopback listener still succeeded.",
       "recorded_by": "LocalBridge Development Agent",
-      "user_audit_status": "PENDING",
+      "user_audit_status": "PASS",
       "does_not_expand_future_pr_writable_paths": true
     }
   ]
