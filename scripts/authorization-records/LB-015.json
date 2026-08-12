@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "pr_id": "LB-015",
+  "records": [
+    {
+      "authorization_id": "EXEC-PREAUTH-LB015-001",
+      "scope": [
+        "src-tauri/src/lib.rs",
+        "scripts/authorization-records/LB-015.json"
+      ],
+      "actions": [
+        "Wire the LB-015 Tauri command invoke handler through build_app without moving lifecycle ownership into the frontend"
+      ],
+      "reason": "LB-015 owns src-tauri/src/commands/** but the Tauri Builder that must register those commands is in src-tauri/src/lib.rs outside the normal LB-015 writable paths.",
+      "evidence_ref": "PR_CONTRACTS LB-015 requires a functional UI shell backed by Rust truth; current src-tauri/src/lib.rs build_app returns Builder::default() with no invoke handler.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB015-002",
+      "scope": [
+        "src-tauri/src/app/background.rs",
+        "scripts/authorization-records/LB-015.json"
+      ],
+      "actions": [
+        "Expose a UI-safe snapshot of the real owned runtime state/current task/outage",
+        "Route live permission change, workspace switch, manual retry, and runtime-only transactional cleanup through the same DesktopLifecycle-owned production orchestrator while preserving Tray Exit ordering"
+      ],
+      "reason": "The accepted LB-013 ProductionRuntimeOwner stores the real orchestrator behind ExitRuntime, which currently erases RuntimeState, CurrentTaskStatus and runtime control operations. LB-015 must render Rust truth and submit user intents without creating fake frontend state or a second runtime owner.",
+      "evidence_ref": "Current src-tauri/src/app/background.rs ExitRuntime only exposes staged shutdown methods while RuntimeOrchestrator already owns state/current_task/active_outage/switch_workspace_to; LB-015 UI contract requires those truths and actions.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB015-003",
+      "scope": [
+        "src-tauri/src/runtime/orchestrator.rs",
+        "scripts/authorization-records/LB-015.json"
+      ],
+      "actions": [
+        "Add a stable permission-mode mutation port to RuntimeDriver/RuntimeOrchestrator",
+        "Make ProductionRuntimeDriver update both the live PEP permission mode and its ProductionRuntimeConfig immediately"
+      ],
+      "reason": "LB-015 permission changes must become effective at the mandatory tools/call PEP immediately; persisting only the preference would leave a running runtime enforcing a stale mode and violate the cached-list security boundary.",
+      "evidence_ref": "PolicyEnforcementRuntime already exposes set_permission_mode, but RuntimeOrchestrator/RuntimeDriver currently expose no stable application-layer port to reach it.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    }
+  ]
+}

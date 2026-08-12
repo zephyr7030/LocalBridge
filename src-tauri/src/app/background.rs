@@ -8,10 +8,16 @@ use crate::mcp::InternalBearer;
 use crate::privilege::PrivilegeController;
 #[cfg(windows)]
 use crate::privilege::{SESSION_NONCE_BYTES, random_session_nonce};
-use crate::runtime::{OrchestratorError, RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator};
+use crate::runtime::{
+    OrchestratorError, RecoveryController, RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator,
+    RuntimeOutage, SystemRecoveryClock, WorkspaceSwitchError,
+};
 #[cfg(windows)]
 use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver};
-use crate::state::RuntimeFault;
+use crate::state::{
+    CurrentTaskStatus, PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState,
+};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupMode {
@@ -94,6 +100,66 @@ impl std::error::Error for DesktopRuntimeStartError {}
 pub trait ExitRuntime {
     fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError>;
     fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError>;
+
+    fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
+        DesktopRuntimeSnapshot::inactive()
+    }
+
+    fn set_permission_mode(
+        &mut self,
+        _mode: PermissionMode,
+    ) -> Result<(), DesktopRuntimeControlError> {
+        Err(DesktopRuntimeControlError::NoActiveRuntime)
+    }
+
+    fn switch_workspace(
+        &mut self,
+        _candidate: &Path,
+        _rollback: Option<&Path>,
+    ) -> Result<(), DesktopRuntimeControlError> {
+        Err(DesktopRuntimeControlError::NoActiveRuntime)
+    }
+
+    fn manual_retry(&mut self) -> Result<RecoveryOutcome, DesktopRuntimeControlError> {
+        Err(DesktopRuntimeControlError::NoActiveOutage)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopOutageSnapshot {
+    pub generation: u64,
+    pub component: RuntimeComponent,
+    pub fault: RuntimeFault,
+    pub user_attention_required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopRuntimeSnapshot {
+    pub active: bool,
+    pub state: RuntimeState,
+    pub current_task: CurrentTaskStatus,
+    pub configured_workspace: Option<PathBuf>,
+    pub outage: Option<DesktopOutageSnapshot>,
+}
+
+impl DesktopRuntimeSnapshot {
+    fn inactive() -> Self {
+        Self {
+            active: false,
+            state: RuntimeState::Stopped,
+            current_task: CurrentTaskStatus::Idle,
+            configured_workspace: None,
+            outage: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopRuntimeControlError {
+    NoActiveRuntime,
+    NoActiveOutage,
+    Runtime(RuntimeFault),
+    Workspace(WorkspaceSwitchError),
 }
 
 #[derive(Default)]
@@ -149,6 +215,50 @@ where
 
     fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError> {
         RuntimeOrchestrator::finish_exit_after_tunnel(self).map_err(|_| DesktopExitError::Runtime)
+    }
+
+    fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
+        DesktopRuntimeSnapshot {
+            active: true,
+            state: self.state().clone(),
+            current_task: self.current_task(),
+            configured_workspace: self.configured_workspace().map(Path::to_path_buf),
+            outage: self.active_outage().map(|outage| DesktopOutageSnapshot {
+                generation: outage.id.get(),
+                component: outage.component,
+                fault: outage.fault.clone(),
+                user_attention_required: outage.user_attention_emitted(),
+            }),
+        }
+    }
+
+    fn set_permission_mode(
+        &mut self,
+        mode: PermissionMode,
+    ) -> Result<(), DesktopRuntimeControlError> {
+        RuntimeOrchestrator::set_permission_mode(self, mode)
+            .map_err(DesktopRuntimeControlError::Runtime)
+    }
+
+    fn switch_workspace(
+        &mut self,
+        candidate: &Path,
+        rollback: Option<&Path>,
+    ) -> Result<(), DesktopRuntimeControlError> {
+        RuntimeOrchestrator::switch_workspace_to(self, candidate, rollback)
+            .map_err(DesktopRuntimeControlError::Workspace)
+    }
+
+    fn manual_retry(&mut self) -> Result<RecoveryOutcome, DesktopRuntimeControlError> {
+        let outage = self
+            .active_outage()
+            .cloned()
+            .ok_or(DesktopRuntimeControlError::NoActiveOutage)?;
+        let mut controller = RecoveryController::new(SystemRecoveryClock::default());
+        Ok(controller.manual_retry(
+            self,
+            RuntimeOutage::classify(outage.component, outage.fault),
+        ))
     }
 }
 
@@ -272,6 +382,92 @@ impl DesktopLifecycle {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take_active();
         shutdown_in_security_order(active.as_deref_mut(), &self.privilege)
+    }
+
+    pub fn stop_runtime_for_control_plane(&self) -> Result<(), DesktopRuntimeControlError> {
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take_active()
+            .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?;
+        let tunnel = active.stop_tunnel_for_exit();
+        let lower = active.finish_exit_after_tunnel();
+        if tunnel.is_err() || lower.is_err() {
+            return Err(DesktopRuntimeControlError::Runtime(RuntimeFault::Unknown));
+        }
+        Ok(())
+    }
+
+    pub fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
+        self.runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
+            .as_deref()
+            .map(ExitRuntime::runtime_snapshot)
+            .unwrap_or_else(DesktopRuntimeSnapshot::inactive)
+    }
+
+    pub fn set_runtime_permission_mode(
+        &self,
+        mode: PermissionMode,
+    ) -> Result<(), DesktopRuntimeControlError> {
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut owner = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        owner
+            .active
+            .as_deref_mut()
+            .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?
+            .set_permission_mode(mode)
+    }
+
+    pub fn switch_runtime_workspace(
+        &self,
+        candidate: &Path,
+        rollback: Option<&Path>,
+    ) -> Result<(), DesktopRuntimeControlError> {
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut owner = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        owner
+            .active
+            .as_deref_mut()
+            .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?
+            .switch_workspace(candidate, rollback)
+    }
+
+    pub fn manual_retry_after_attention(
+        &self,
+    ) -> Result<RecoveryOutcome, DesktopRuntimeControlError> {
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut owner = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        owner
+            .active
+            .as_deref_mut()
+            .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?
+            .manual_retry()
     }
 
     fn shutdown_with_privilege<P>(&self, privilege: &P) -> ShutdownReport

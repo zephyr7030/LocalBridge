@@ -1,1 +1,1 @@
-//! Tauri command adapters are implemented by later runtime/UI PRs.
+pub mod ui;

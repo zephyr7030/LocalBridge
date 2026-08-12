@@ -43,6 +43,14 @@ pub trait RuntimeDriver {
     fn configure_workspace(&mut self, _workspace: PathBuf) -> Result<(), RuntimeFault> {
         Err(RuntimeFault::ConfigurationInvalid)
     }
+
+    fn set_permission_mode(
+        &mut self,
+        _pep: &Self::Pep,
+        _mode: PermissionMode,
+    ) -> Result<(), RuntimeFault> {
+        Err(RuntimeFault::ConfigurationInvalid)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +157,11 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
 
     pub fn configured_workspace(&self) -> Option<&Path> {
         self.driver.current_workspace()
+    }
+
+    pub fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), RuntimeFault> {
+        let ready = self.ready.as_ref().ok_or(RuntimeFault::ConfigurationInvalid)?;
+        self.driver.set_permission_mode(&ready.pep, mode)
     }
 
     pub fn start(&mut self) -> Result<(), OrchestratorError> {
@@ -828,6 +841,16 @@ where
             return Err(RuntimeFault::WorkspaceInvalid);
         }
         self.config.workspace = workspace;
+        Ok(())
+    }
+
+    fn set_permission_mode(
+        &mut self,
+        pep: &Self::Pep,
+        mode: PermissionMode,
+    ) -> Result<(), RuntimeFault> {
+        pep.set_permission_mode(mode);
+        self.config.permission_mode = mode;
         Ok(())
     }
 }

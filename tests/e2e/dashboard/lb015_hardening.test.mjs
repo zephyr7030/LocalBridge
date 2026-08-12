@@ -1,0 +1,13 @@
+import { readFileSync } from "node:fs";
+const app = readFileSync("src/App.tsx", "utf8");
+const presentation = readFileSync("src/presentation.ts", "utf8");
+const backend = readFileSync("src-tauri/src/commands/ui.rs", "utf8");
+if (!presentation.includes('dashboard: "主控界面"') || !presentation.includes('settings: "设置"') || !presentation.includes('diagnostics: "诊断"')) throw new Error("LB-015 terminology map incomplete");
+if (!app.includes("uiText.settings") || !app.includes("uiText.diagnostics")) throw new Error("LB-015 shell does not consume centralized terminology");
+if (app.includes('<section className="card"><div className="task-row"')) throw new Error("LB-015 current task is still presented as a card/message");
+if (app.includes('disabled>等待系统授权</button>')) throw new Error("LB-015 AwaitingUac exposes a redundant action button");
+if (!app.includes("OpenAI 安全隧道")) throw new Error("LB-015 tunnel label is ambiguous");
+if (!backend.includes("localbridge-privileged-broker.exe")) throw new Error("LB-015 explicit admin action targets the wrong broker binary");
+const disableBody = backend.slice(backend.indexOf("pub fn disable_admin"), backend.indexOf("pub fn retry_connection"));
+if (!disableBody.includes("request_without_uac")) throw new Error("LB-015 admin disable does not return to Requested safely");
+console.log("LB015_HARDENING=PASS task_inline=true terminology_map=true awaiting_no_button=true broker_name=true disable_requested=true");

@@ -1,0 +1,78 @@
+use super::*;
+use crate::runtime::{RuntimeDriver, RuntimeOrchestrator};
+use crate::state::{CurrentTaskStatus, RuntimeFault, SafeTaskSummary, TaskExecutionState, TaskKind};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+#[test]
+fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
+    assert_eq!(stored_permission_code(StoredPermissionMode::Edit), "edit");
+    assert_eq!(stored_permission_code(StoredPermissionMode::Full), "full");
+    assert_eq!(stored_permission_code(StoredPermissionMode::Elevated), "admin");
+    assert_eq!(privilege_code(&PrivilegeState::Disabled), "off");
+    assert_eq!(privilege_code(&PrivilegeState::Requested), "requested");
+    assert_eq!(privilege_code(&PrivilegeState::AwaitingUac), "awaiting");
+    assert_eq!(privilege_code(&PrivilegeState::Active { broker_generation: crate::state::GenerationId::new(99) }), "active");
+    assert_eq!(privilege_code(&PrivilegeState::Faulted(crate::state::PrivilegeFault::BrokerExited)), "fault");
+    for (state, expected) in [
+        (RuntimeState::Stopped, ("off", "off")),
+        (RuntimeState::StartingMcp, ("off", "starting")),
+        (RuntimeState::StartingTunnel, ("starting", "online")),
+        (RuntimeState::Ready, ("online", "online")),
+        (RuntimeState::Recovering { component: RuntimeComponent::Tunnel, attempt: 2 }, ("recovering", "online")),
+        (RuntimeState::Faulted(RuntimeFault::Unknown), ("fault", "fault")),
+    ] {
+        assert_eq!(service_codes(&state), expected);
+    }
+    let rendered = serde_json::to_string(&MainProjection {
+        permission: "admin", privilege: "active", tunnel_service: "online", coding_service: "online",
+        current_project: None, projects: vec![], current_task: None, runtime_key_saved: true,
+        auto_start: true, reconnect: None,
+    }).unwrap();
+    for forbidden in ["Elevated", "AwaitingUac", "BrokerExited", "RuntimeState", "PrivilegeState", "broker_generation", "nonce", "pid"] {
+        assert!(!rendered.contains(forbidden));
+    }
+}
+
+#[test]
+fn current_task_projection_uses_only_pre_redacted_summary() {
+    let safe = CurrentTaskStatus::project(TaskKind::Test, SafeTaskSummary::from_untrusted("cargo test"), TaskExecutionState::Running).unwrap();
+    let projected = task_projection(&safe).unwrap();
+    assert_eq!(projected.kind, "test");
+    assert_eq!(projected.summary.as_deref(), Some("cargo test"));
+    assert_eq!(projected.state, "running");
+    let secret = CurrentTaskStatus::project(TaskKind::ExecuteCommand, SafeTaskSummary::from_untrusted("--api-key=synthetic-secret"), TaskExecutionState::Blocked).unwrap();
+    let projected = task_projection(&secret).unwrap();
+    assert_eq!(projected.summary, None);
+    assert_eq!(projected.state, "blocked");
+    assert_eq!(task_projection(&CurrentTaskStatus::Idle), None);
+}
+
+#[derive(Clone)]
+struct ModeDriver { observed: Rc<RefCell<Vec<PermissionMode>>> }
+impl RuntimeDriver for ModeDriver {
+    type Mcp = (); type Pep = (); type Tunnel = ();
+    fn start_mcp(&mut self) -> Result<Self::Mcp, RuntimeFault> { Ok(()) }
+    fn confirm_mcp_ready(&mut self, _: &mut Self::Mcp) -> Result<(), RuntimeFault> { Ok(()) }
+    fn start_pep(&mut self, _: Self::Mcp) -> Result<Self::Pep, RuntimeFault> { Ok(()) }
+    fn confirm_pep_ready(&mut self, _: &Self::Pep) -> Result<(), RuntimeFault> { Ok(()) }
+    fn start_tunnel(&mut self, _: &Self::Pep) -> Result<Self::Tunnel, RuntimeFault> { Ok(()) }
+    fn confirm_tunnel_ready(&mut self, _: &mut Self::Tunnel) -> Result<(), RuntimeFault> { Ok(()) }
+    fn stop_tunnel(&mut self, _: &mut Self::Tunnel) -> Result<(), RuntimeFault> { Ok(()) }
+    fn stop_pep(&mut self, _: Self::Pep) -> Result<Self::Mcp, RuntimeFault> { Ok(()) }
+    fn stop_mcp(&mut self, _: &mut Self::Mcp) -> Result<(), RuntimeFault> { Ok(()) }
+    fn current_task(&self, _: &Self::Pep) -> CurrentTaskStatus { CurrentTaskStatus::Idle }
+    fn set_permission_mode(&mut self, _: &Self::Pep, mode: PermissionMode) -> Result<(), RuntimeFault> {
+        self.observed.borrow_mut().push(mode); Ok(())
+    }
+}
+
+#[test]
+fn live_permission_port_immediately_reaches_ready_driver() {
+    let observed = Rc::new(RefCell::new(Vec::new()));
+    let mut runtime = RuntimeOrchestrator::new(ModeDriver { observed: observed.clone() });
+    runtime.start().unwrap();
+    runtime.set_permission_mode(PermissionMode::Full).unwrap();
+    runtime.set_permission_mode(PermissionMode::Elevated).unwrap();
+    assert_eq!(&*observed.borrow(), &[PermissionMode::Full, PermissionMode::Elevated]);
+}
