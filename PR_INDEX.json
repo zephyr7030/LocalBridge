@@ -353,9 +353,9 @@
       "human_review_status": "BLOCKED",
       "human_review_generation": 1,
       "review_provenance": {
-        "generation": 3,
+        "generation": 4,
         "kind": "independent_adversarial",
-        "commit": "6605cf23ffabad8048a66b35e9f80665ad639c05",
+        "commit": "e2e8317f631c5932a779908850b78e6a49f368c0",
         "invalidated_generations": []
       },
       "reopen_from_pr": "LB-015"

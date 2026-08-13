@@ -454,6 +454,7 @@
       "cargo_test_locked": "PASS"
     },
     "g4_unlocked": false,
-    "next_required_adversarial_generation": 5
+    "next_required_adversarial_generation": 5,
+    "review_decision_commit": "e2e8317f631c5932a779908850b78e6a49f368c0"
   }
 }
