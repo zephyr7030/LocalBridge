@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -138,7 +138,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Revalidate LB-017 diagnostics against the fixed 900x620 borderless single-custom-chrome G3 baseline, then return G3 to REVIEW_REQUIRED"
+    "next_action": "Revalidate LB-014 autostart and single-instance wake behavior against the DPI-independent physical 900x620 LB-013 window baseline without allowing background startup UAC"
   },
   "current_task_ui": {
     "enabled": true,

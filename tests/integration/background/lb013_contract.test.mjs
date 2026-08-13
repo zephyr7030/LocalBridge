@@ -18,19 +18,30 @@ const modeGuard = main.indexOf("creates_main_window_at_startup");
 const createCall = main.indexOf("ensure_main_window", modeGuard);
 if (!(modeGuard >= 0 && createCall > modeGuard)) throw new Error("LB-013 foreground window creation is not startup-mode gated");
 for (const required of [
-  ".inner_size(900.0, 620.0)",
-  ".min_inner_size(900.0, 620.0)",
-  ".max_inner_size(900.0, 620.0)",
+  "MAIN_WINDOW_PHYSICAL_WIDTH: u32 = 900",
+  "MAIN_WINDOW_PHYSICAL_HEIGHT: u32 = 620",
+  ".visible(false)",
+  "PhysicalSize::new(MAIN_WINDOW_PHYSICAL_WIDTH, MAIN_WINDOW_PHYSICAL_HEIGHT)",
+  "window.set_min_size(Some(physical))?",
+  "window.set_max_size(Some(physical))?",
+  "window.set_size(physical)?",
+  "window.set_zoom(1.0 / scale)?",
   ".resizable(false)",
   ".maximizable(false)",
   ".decorations(false)",
+  "enforce_main_window_metrics(app)?",
   "sync_main_webview_to_client(app, window.inner_size()?)?",
 ]) if (!tray.includes(required)) throw new Error(`LB-013 fixed borderless main-window contract missing: ${required}`);
 for (const forbidden of [
+  ".inner_size(900.0, 620.0)",
+  ".min_inner_size(900.0, 620.0)",
+  ".max_inner_size(900.0, 620.0)",
   ".min_inner_size(720.0, 500.0)",
   ".resizable(true)",
   ".maximizable(true)",
 ]) if (tray.includes(forbidden)) throw new Error(`LB-013 stale native window behavior remains: ${forbidden}`);
+for (const required of ["WindowEvent::ScaleFactorChanged", "enforce_main_window_metrics(window.app_handle())"])
+  if (!main.includes(required)) throw new Error(`LB-013 DPI-change physical lock missing: ${required}`);
 if (main.includes("WindowEvent::Resized") || main.includes("window.maximize()") || main.includes("window.unmaximize()"))
   throw new Error("LB-013 fixed window still carries resize/maximize runtime behavior");
 if (/notification|toast|banner/i.test(`${main}\n${tray}\n${background}`)) throw new Error("LB-013 added pre-exhaustion notification surface");
@@ -39,8 +50,10 @@ for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required",
 if (background.includes("Mutex<Option<Box<dyn ExitRuntime")) throw new Error("LB-013 still permits the production lifecycle owner itself to be absent");
 if (!main.includes("DesktopLifecycle::new(PrivilegeController::new())")) throw new Error("LB-013 production app setup does not construct the runtime owner");
 
-for (const required of ["TrayIconBuilder", "default_window_icon", "tray_icon_from_frozen", "TRAY_ICON_CROP_PERCENT: u32 = 90", "let icon = tray_icon_from_frozen(&icon)", '"打开 LocalBridge"', '"退出"'])
+for (const required of ["TrayIconBuilder", "FROZEN_TRAY_ICON_ICO", "include_bytes!", "select_frozen_ico_frame", "TRAY_LOGICAL_ICON_SIZE", "primary_monitor", "monitor.scale_factor()", "Image::from_bytes(frame.bytes)", '"打开 LocalBridge"', '"退出"'])
   if (!tray.includes(required)) throw new Error(`LB-013 tray contract missing: ${required}`);
+for (const forbidden of ["TRAY_ICON_CROP_PERCENT", "tray_icon_from_frozen(&icon)", "default_window_icon()"])
+  if (tray.includes(forbidden)) throw new Error(`LB-013 stale tray resampling path remains: ${forbidden}`);
 if (/emoji|placeholder|lucide|heroicon|react-icons/i.test(tray)) throw new Error("LB-013 tray uses placeholder/third-party icon surface");
 if (!config.bundle?.icon?.includes("../assets/icons/localbridge.ico")) throw new Error("LB-013 bundle icon is not frozen localbridge.ico");
 const ico = readFileSync("assets/icons/localbridge.ico");
@@ -62,4 +75,4 @@ for (const id of ["EXEC-PREAUTH-LB013-001", "EXEC-PREAUTH-LB013-002", "EXEC-PREA
   if (!record || record.user_audit_status !== "PENDING" || record.does_not_expand_future_pr_writable_paths !== true)
     throw new Error(`LB-013 preauthorization record invalid: ${id}`);
 }
-console.log("LB013_CONTRACT=PASS background_no_window=true fixed_window=900x620 resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true close_to_hide=true tray_frozen_icon=true tray_visual_zoom=true exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=4");
+console.log("LB013_CONTRACT=PASS background_no_window=true physical_fixed_window=900x620 dpi_independent=true inverse_webview_zoom=true resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true close_to_hide=true tray_frozen_ico=true tray_native_dpi_frame=true tray_resample_hack=false exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=4");

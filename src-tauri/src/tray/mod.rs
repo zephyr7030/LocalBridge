@@ -11,23 +11,27 @@ use tauri::{
 use crate::app::DesktopLifecycle;
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
+pub const MAIN_WINDOW_PHYSICAL_WIDTH: u32 = 900;
+pub const MAIN_WINDOW_PHYSICAL_HEIGHT: u32 = 620;
 const TRAY_ID: &str = "localbridge-tray";
 const MENU_OPEN_ID: &str = "open";
 const MENU_EXIT_ID: &str = "exit";
-const TRAY_ICON_CROP_PERCENT: u32 = 90;
+const TRAY_LOGICAL_ICON_SIZE: f64 = 16.0;
+const FROZEN_TRAY_ICON_ICO: &[u8] = include_bytes!("../../../assets/icons/localbridge.ico");
+const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
 #[derive(Debug)]
 pub enum TraySetupError {
     Tauri(tauri::Error),
-    MissingFrozenApplicationIcon,
+    InvalidFrozenIcon(&'static str),
 }
 
 impl fmt::Display for TraySetupError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Tauri(error) => write!(f, "tray setup failed: {error}"),
-            Self::MissingFrozenApplicationIcon => {
-                f.write_str("frozen LocalBridge application icon is unavailable")
+            Self::InvalidFrozenIcon(reason) => {
+                write!(f, "invalid frozen LocalBridge tray icon: {reason}")
             }
         }
     }
@@ -45,6 +49,7 @@ pub fn ensure_main_window<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<WebviewWindow<R>, tauri::Error> {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        enforce_main_window_metrics(app)?;
         window.show()?;
         window.set_focus()?;
         return Ok(window);
@@ -53,17 +58,31 @@ pub fn ensure_main_window<R: Runtime>(
     let window =
         WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
             .title("LocalBridge")
-            .inner_size(900.0, 620.0)
-            .min_inner_size(900.0, 620.0)
-            .max_inner_size(900.0, 620.0)
+            .visible(false)
             .resizable(false)
             .maximizable(false)
             .decorations(false)
             .build()?;
-    sync_main_webview_to_client(app, window.inner_size()?)?;
+    enforce_main_window_metrics(app)?;
     window.show()?;
     window.set_focus()?;
     Ok(window)
+}
+
+pub fn enforce_main_window_metrics<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Error> {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        let physical = PhysicalSize::new(MAIN_WINDOW_PHYSICAL_WIDTH, MAIN_WINDOW_PHYSICAL_HEIGHT);
+        window.set_min_size(Some(physical))?;
+        window.set_max_size(Some(physical))?;
+        window.set_size(physical)?;
+
+        let scale = window.scale_factor()?;
+        if scale.is_finite() && scale > 0.0 {
+            window.set_zoom(1.0 / scale)?;
+        }
+        sync_main_webview_to_client(app, window.inner_size()?)?;
+    }
+    Ok(())
 }
 
 pub fn sync_main_webview_to_client<R: Runtime>(
@@ -84,11 +103,11 @@ pub fn install_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), TraySetupError
     let open = MenuItem::with_id(app, MENU_OPEN_ID, "打开 LocalBridge", true, None::<&str>)?;
     let exit = MenuItem::with_id(app, MENU_EXIT_ID, "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &exit])?;
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or(TraySetupError::MissingFrozenApplicationIcon)?;
-    let icon = tray_icon_from_frozen(&icon);
+    let scale_factor = app
+        .primary_monitor()?
+        .map(|monitor| monitor.scale_factor())
+        .unwrap_or(1.0);
+    let icon = tray_icon_from_frozen_ico(FROZEN_TRAY_ICON_ICO, scale_factor)?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
@@ -122,28 +141,105 @@ pub fn install_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), TraySetupError
     Ok(())
 }
 
-fn tray_icon_from_frozen(icon: &Image<'_>) -> Image<'static> {
-    let width = icon.width();
-    let height = icon.height();
-    let rgba = icon.rgba();
-    if width < 4
-        || height < 4
-        || rgba.len() != width as usize * height as usize * 4
+#[derive(Clone, Copy, Debug)]
+struct FrozenIcoFrame<'a> {
+    size: u32,
+    bytes: &'a [u8],
+}
+
+fn tray_icon_from_frozen_ico(
+    ico: &'static [u8],
+    scale_factor: f64,
+) -> Result<Image<'static>, TraySetupError> {
+    let frame = select_frozen_ico_frame(ico, scale_factor)?;
+    let image = Image::from_bytes(frame.bytes)?;
+    if image.width() != frame.size || image.height() != frame.size {
+        return Err(TraySetupError::InvalidFrozenIcon(
+            "decoded frame dimensions do not match ICO directory",
+        ));
+    }
+    Ok(image.to_owned())
+}
+
+fn select_frozen_ico_frame(
+    ico: &[u8],
+    scale_factor: f64,
+) -> Result<FrozenIcoFrame<'_>, TraySetupError> {
+    if ico.len() < 6
+        || u16::from_le_bytes([ico[0], ico[1]]) != 0
+        || u16::from_le_bytes([ico[2], ico[3]]) != 1
     {
-        return icon.clone().to_owned();
+        return Err(TraySetupError::InvalidFrozenIcon("invalid ICO header"));
+    }
+    let count = usize::from(u16::from_le_bytes([ico[4], ico[5]]));
+    let directory_end = 6usize
+        .checked_add(
+            count
+                .checked_mul(16)
+                .ok_or(TraySetupError::InvalidFrozenIcon("ICO directory overflow"))?,
+        )
+        .ok_or(TraySetupError::InvalidFrozenIcon("ICO directory overflow"))?;
+    if count == 0 || directory_end > ico.len() {
+        return Err(TraySetupError::InvalidFrozenIcon("truncated ICO directory"));
     }
 
-    let crop_width = (width * TRAY_ICON_CROP_PERCENT / 100).max(1);
-    let crop_height = (height * TRAY_ICON_CROP_PERCENT / 100).max(1);
-    let left = (width - crop_width) / 2;
-    let top = (height - crop_height) / 2;
-    let row_bytes = crop_width as usize * 4;
-    let mut cropped = Vec::with_capacity(row_bytes * crop_height as usize);
-    for y in 0..crop_height {
-        let start = (((top + y) * width + left) * 4) as usize;
-        cropped.extend_from_slice(&rgba[start..start + row_bytes]);
+    let scale = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
+    let target = (TRAY_LOGICAL_ICON_SIZE * scale).round().max(1.0) as u32;
+    let mut best_above: Option<FrozenIcoFrame<'_>> = None;
+    let mut largest_below: Option<FrozenIcoFrame<'_>> = None;
+
+    for index in 0..count {
+        let entry = 6 + index * 16;
+        let width = if ico[entry] == 0 {
+            256
+        } else {
+            u32::from(ico[entry])
+        };
+        let height = if ico[entry + 1] == 0 {
+            256
+        } else {
+            u32::from(ico[entry + 1])
+        };
+        if width != height {
+            continue;
+        }
+        let bytes_len = u32::from_le_bytes(
+            ico[entry + 8..entry + 12]
+                .try_into()
+                .expect("fixed ICO directory slice"),
+        ) as usize;
+        let bytes_offset = u32::from_le_bytes(
+            ico[entry + 12..entry + 16]
+                .try_into()
+                .expect("fixed ICO directory slice"),
+        ) as usize;
+        let bytes_end = match bytes_offset.checked_add(bytes_len) {
+            Some(end) if end <= ico.len() => end,
+            _ => continue,
+        };
+        let bytes = &ico[bytes_offset..bytes_end];
+        if !bytes.starts_with(PNG_SIGNATURE) {
+            continue;
+        }
+        let frame = FrozenIcoFrame { size: width, bytes };
+        if width >= target {
+            if best_above.is_none_or(|current| width < current.size) {
+                best_above = Some(frame);
+            }
+        } else if largest_below.is_none_or(|current| width > current.size) {
+            largest_below = Some(frame);
+        }
     }
-    Image::new(&cropped, crop_width, crop_height).to_owned()
+
+    best_above
+        .or(largest_below)
+        .ok_or(TraySetupError::InvalidFrozenIcon(
+            "no usable PNG frame in frozen ICO",
+        ))
 }
 
 #[cfg(test)]
@@ -151,22 +247,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tray_icon_zooms_frozen_source_without_replacing_asset() {
-        let mut rgba = vec![0u8; 20 * 20 * 4];
-        for y in 0..20usize {
-            for x in 0..20usize {
-                let offset = (y * 20 + x) * 4;
-                rgba[offset] = x as u8;
-                rgba[offset + 1] = y as u8;
-                rgba[offset + 3] = 255;
-            }
-        }
-        let source = Image::new(&rgba, 20, 20);
+    fn frozen_tray_icon_selects_native_dpi_frames() {
+        assert_eq!(
+            select_frozen_ico_frame(FROZEN_TRAY_ICON_ICO, 1.0)
+                .unwrap()
+                .size,
+            16
+        );
+        assert_eq!(
+            select_frozen_ico_frame(FROZEN_TRAY_ICON_ICO, 1.25)
+                .unwrap()
+                .size,
+            24
+        );
+        assert_eq!(
+            select_frozen_ico_frame(FROZEN_TRAY_ICON_ICO, 1.5)
+                .unwrap()
+                .size,
+            24
+        );
+        assert_eq!(
+            select_frozen_ico_frame(FROZEN_TRAY_ICON_ICO, 2.0)
+                .unwrap()
+                .size,
+            32
+        );
+    }
 
-        let zoomed = tray_icon_from_frozen(&source);
-
-        assert_eq!(zoomed.width(), 18);
-        assert_eq!(zoomed.height(), 18);
-        assert_eq!(&zoomed.rgba()[..4], &[1, 1, 0, 255]);
+    #[test]
+    fn frozen_tray_icon_decodes_selected_frame_without_resampling() {
+        let image = tray_icon_from_frozen_ico(FROZEN_TRAY_ICON_ICO, 1.5).unwrap();
+        assert_eq!((image.width(), image.height()), (24, 24));
     }
 }
