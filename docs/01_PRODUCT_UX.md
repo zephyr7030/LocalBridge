@@ -325,9 +325,7 @@ Tunnel start → ready
 
 失败时只显示一句最关键错误和一个必要动作。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。所有提示遵循最小必要原则。
 
-主窗口默认 900×620，最小 720×500，保持可缩放。向导卡片不得依赖固定 `min-height`；布局必须随可用 viewport 高度收缩，主体内容区在空间不足时内部滚动，标题和底部操作保持可达。
-
-窗口 resize/maximize 后，主 WebView 必须重新绑定到 native main-window 的完整 client area；不能只让原生窗口外壳变大。主控界面与 onboarding 都必须按 live WebView viewport 重新布局。`.inner_size/.min_inner_size/.resizable`、`100dvh`、`overflow-y:auto`、无固定 `min-height` 等静态源码检查只属于辅助回归，不能单独构成响应式验收。必须有真实 Windows Tauri/WebView2 resize E2E：至少设置两个不同 native size 并执行 maximize，交叉比较 Tauri `inner_size()` 与 live JS `window.innerWidth/innerHeight × devicePixelRatio`，同时证明 Dashboard/onboarding 的实际 DOM rect 随 viewport 改变。
+主窗口固定为 900×620。minimum inner size 与 maximum inner size 均固定为 900×620，`resizable=false`、`maximizable=false`。原生 Windows 窗口 decorations 必须关闭；LocalBridge 只允许一层自定义风格化窗口 chrome，并且外框必须从 client area 的 `(0,0)` 开始、以 100% 宽高贴合整个窗口，不能在原生边框内部再绘制一个内缩“假窗口”。自定义 chrome 必须提供窗口拖拽区、最小化和关闭；不提供最大化。Dashboard 与 onboarding 必须在该固定 client area 内完整可操作。
 ## 权限
 
 ```text

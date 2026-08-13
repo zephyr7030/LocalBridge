@@ -210,6 +210,8 @@
 | A195 | UI 实现 | 不因品牌图标引入第三方 icon library |
 | A196 | 资产完整性 | PNG SHA256 = `710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a` |
 | A197 | 资产完整性 | ICO SHA256 = `c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78` |
-| A198 | 向导窗口缩放 | 默认 900×620、最小 720×500；缩放后内容完整可操作，主体按 viewport 高度滚动且无固定 500/540px 卡片最小高度 |
-| A199 | native window resize/maximize | 主 WebView 始终等于完整 client area；Dashboard 与 onboarding 随 live viewport 重排，不出现只放大原生外壳的旧画布 |
-| A200 | 真实 resize E2E | Windows Tauri/WebView2 实机覆盖至少两个 native size + maximize；Tauri `inner_size()` 与 live JS `window.innerWidth/innerHeight × DPR` 一致并验证 Dashboard/onboarding rect 变化；静态配置/CSS 标记单独通过不得视为验收通过 |
+| A198 | 主窗口尺寸 | inner/minimum/maximum size 均为 900×620，窗口始终保持该尺寸 |
+| A199 | 窗口缩放 | `resizable=false`；拖拽边框不能改变窗口尺寸 |
+| A200 | 窗口最大化 | `maximizable=false`；最大化入口不可用，Dashboard/onboarding 在固定 900×620 client area 内完整可操作 |
+| A201 | 窗口外框 | native `decorations=false`；仅存在一层 edge-to-edge 自定义 chrome，不出现原生标题栏/边框 + 自定义边框的双框 |
+| A202 | 自定义标题栏 | 可拖拽窗口；提供最小化与关闭；不提供最大化；chrome 从 client `(0,0)` 覆盖 100% 宽高 |

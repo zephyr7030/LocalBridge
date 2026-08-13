@@ -167,16 +167,25 @@
       620
     ],
     "onboarding_window_min_inner_size": [
-      720,
-      500
+      900,
+      620
     ],
-    "onboarding_window_resizable": true,
-    "onboarding_viewport_responsive_required": true,
-    "onboarding_fixed_card_min_height_forbidden": true,
-    "main_webview_matches_native_client_area_on_resize_required": true,
-    "dashboard_viewport_responsive_required": true,
-    "real_windows_tauri_resize_e2e_required": true,
-    "static_resize_markers_alone_are_insufficient": true
+    "onboarding_window_max_inner_size": [
+      900,
+      620
+    ],
+    "onboarding_window_resizable": false,
+    "onboarding_window_maximizable": false,
+    "onboarding_window_fixed_size": true,
+    "main_window_native_decorations": false,
+    "main_window_custom_chrome_required": true,
+    "main_window_custom_chrome_edge_to_edge": true,
+    "main_window_double_frame_forbidden": true,
+    "main_window_custom_drag_region_required": true,
+    "main_window_custom_controls": [
+      "minimize",
+      "close"
+    ]
   },
   "prs": {
     "LB-000": {
@@ -727,8 +736,8 @@
         "native Windows workspace folder picker",
         "ChatGPT custom connector system-browser setup flow",
         "runtime-check gated confirm button",
-        "viewport-responsive resizable onboarding layout",
-        "native-window/WebView client-area resize synchronization"
+        "fixed 900x620 non-resizable non-maximizable main window",
+        "single edge-to-edge custom window chrome with native decorations disabled"
       ],
       "required_tests": [
         "screen 4 custom connector setup button",
@@ -761,8 +770,8 @@
         "screen 6 confirm enters main UI after readiness",
         "onboarding has no seventh screen",
         "screens 4 and 5 use Local Bridge as the user-facing connector term",
-        "resizable onboarding window has a 720x500 minimum and wizard body adapts to viewport height without fixed card minimum height",
-        "real Windows Tauri resize E2E cross-checks native client area against live WebView JS viewport for two native sizes plus maximize and proves Dashboard and onboarding reflow"
+        "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
+        "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame"
       ],
       "non_goals": [
         "new dashboard pages",

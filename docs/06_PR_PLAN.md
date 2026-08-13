@@ -203,9 +203,9 @@ Dashboard 必须直接显示：
 - 复制成功反馈不得造成布局位移；
 - Screen 6 只检查本地运行环境、编码服务、OpenAI Tunnel，三项全绿前 `确定` disabled，不自动跳转；
 - Screen 6 全绿后完成提示严格为 `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`；
-- 主窗口默认 900×620、最小 720×500 且可缩放；向导随 viewport 高度响应，主体可滚动，禁止固定 500/540px 卡片最小高度；
-- native window resize/maximize 后，主 WebView bounds 必须等于完整 client area，Dashboard 与 onboarding 必须随 live viewport 重排；
-- LB-016 必须有真实 Windows Tauri/WebView2 resize E2E：至少两个 native size + maximize，交叉验证 Tauri `inner_size()`、live JS viewport×DPR 与 Dashboard/onboarding rect；静态 CSS/Tauri 配置检查不得单独作为 PASS；
+- 主窗口固定 900×620；minimum/maximum inner size 均为 900×620，`resizable=false`、`maximizable=false`，不允许用户改变窗口尺寸；
+- native decorations 关闭；全产品共享唯一自定义 chrome，外框 edge-to-edge 绑定完整 client area，禁止原生边框与风格化边框同时存在；自定义 chrome 负责拖拽、最小化、关闭且无最大化；
+- Dashboard 与 onboarding 必须在固定 900×620 client area 内完整可操作；不再要求 resize/maximize 响应式布局或真实 resize E2E；
 - 权限包含编辑/完整/管理员三档；向导不自动触发 UAC。
 
 ## LB-017 — Diagnostics

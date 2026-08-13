@@ -16,7 +16,6 @@ const orchestrator = read("src-tauri/src/runtime/orchestrator.rs");
 const background = read("src-tauri/src/app/background.rs");
 const tray = read("src-tauri/src/tray/mod.rs");
 const main = read("src-tauri/src/main.rs");
-const resizeE2e = read("tests/e2e/onboarding/resize_runtime_e2e.mjs");
 const lib = read("src-tauri/src/lib.rs");
 const auth = JSON.parse(read("scripts/authorization-records/LB-016.json"));
 const contracts = JSON.parse(read("PR_CONTRACTS.json"));
@@ -33,25 +32,26 @@ if (lb016.required_artifacts.some((item) => /five-screen|5-screen/i.test(item)))
 if (contracts.rules?.onboarding_user_facing_connector_term !== "Local Bridge"
   || contracts.rules?.onboarding_screen_6_success_message !== exactSuccessCopy
   || JSON.stringify(contracts.rules?.onboarding_window_default_inner_size) !== JSON.stringify([900, 620])
-  || JSON.stringify(contracts.rules?.onboarding_window_min_inner_size) !== JSON.stringify([720, 500])
-  || contracts.rules?.onboarding_window_resizable !== true
-  || contracts.rules?.onboarding_viewport_responsive_required !== true
-  || contracts.rules?.onboarding_fixed_card_min_height_forbidden !== true
-  || contracts.rules?.main_webview_matches_native_client_area_on_resize_required !== true
-  || contracts.rules?.dashboard_viewport_responsive_required !== true
-  || contracts.rules?.real_windows_tauri_resize_e2e_required !== true
-  || contracts.rules?.static_resize_markers_alone_are_insufficient !== true) {
-  throw new Error("LB-016 machine contract does not freeze Local Bridge success/responsive semantics");
+  || JSON.stringify(contracts.rules?.onboarding_window_min_inner_size) !== JSON.stringify([900, 620])
+  || JSON.stringify(contracts.rules?.onboarding_window_max_inner_size) !== JSON.stringify([900, 620])
+  || contracts.rules?.onboarding_window_resizable !== false
+  || contracts.rules?.onboarding_window_maximizable !== false
+  || contracts.rules?.onboarding_window_fixed_size !== true
+  || contracts.rules?.main_window_native_decorations !== false
+  || contracts.rules?.main_window_custom_chrome_required !== true
+  || contracts.rules?.main_window_custom_chrome_edge_to_edge !== true
+  || contracts.rules?.main_window_double_frame_forbidden !== true
+  || contracts.rules?.main_window_custom_drag_region_required !== true
+  || JSON.stringify(contracts.rules?.main_window_custom_controls) !== JSON.stringify(["minimize", "close"])) {
+  throw new Error("LB-016 machine contract does not freeze Local Bridge success/fixed-window semantics");
 }
-for (const artifact of [
-  "viewport-responsive resizable onboarding layout",
-  "native-window/WebView client-area resize synchronization",
-]) if (!lb016.required_artifacts.includes(artifact)) throw new Error(`LB-016 responsive runtime artifact is not frozen: ${artifact}`);
+if (!lb016.required_artifacts.includes("fixed 900x620 non-resizable non-maximizable main window")) throw new Error("LB-016 fixed-window artifact is not frozen");
+if (!lb016.required_artifacts.includes("single edge-to-edge custom window chrome with native decorations disabled")) throw new Error("LB-016 single custom chrome artifact is not frozen");
 for (const required of [
   `screen 6 success message is ${exactSuccessCopy}`,
   "screens 4 and 5 use Local Bridge as the user-facing connector term",
-  "resizable onboarding window has a 720x500 minimum and wizard body adapts to viewport height without fixed card minimum height",
-  "real Windows Tauri resize E2E cross-checks native client area against live WebView JS viewport for two native sizes plus maximize and proves Dashboard and onboarding reflow",
+  "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
+  "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
 ]) if (!lb016.required_tests.includes(required)) throw new Error(`LB-016 authorized rework test contract missing: ${required}`);
 
 for (const required of [
@@ -121,17 +121,8 @@ const success = `allGreen ? <p className="onboarding-success">${exactSuccessCopy
 if (!onboarding.includes(success)) throw new Error("LB-016 exact Screen 6 success message is not conditional on all green");
 if (onboarding.includes("设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！")) throw new Error("LB-016 stale Screen 6 success copy remains in production");
 
-for (const marker of [".inner_size(900.0, 620.0)", ".min_inner_size(720.0, 500.0)", ".resizable(true)"]) if (!tray.includes(marker)) throw new Error(`LB-016 resizable window contract missing: ${marker}`);
-for (const marker of ["sync_main_webview_to_client", "PhysicalPosition::new(0, 0)", "webview.set_bounds"]) if (!tray.includes(marker)) throw new Error(`LB-016 native WebView client-area synchronization missing: ${marker}`);
-if (!main.includes("WindowEvent::Resized(client_size)") || !main.includes("sync_main_webview_to_client(window.app_handle(), *client_size)")) throw new Error("LB-016 native resize event is not bound to WebView client-area synchronization");
-for (const marker of ["tauri.cmd dev --no-watch", "LOCALBRIDGE_RESIZE_E2E_VIEW", "CARGO_TARGET_DIR", "LB016_REAL_RESIZE_E2E=PASS"]) if (!resizeE2e.includes(marker)) throw new Error(`LB-016 true runtime resize E2E runner missing: ${marker}`);
-for (const marker of ["window.inner_size()", "window.eval(RESIZE_E2E_METRICS_SCRIPT)", "invoke('resize_e2e_report'", "ResizeE2eMetricsSink::new", "window.innerWidth", "window.innerHeight", "document.documentElement.clientWidth", "document.getElementById('root')", ".onboarding-shell", ".shell", "window.maximize()", "LB016_REAL_RESIZE_E2E=PASS"]) if (!main.includes(marker)) throw new Error(`LB-016 live Tauri/WebView resize assertions missing: ${marker}`);
-for (const marker of ["ResizeE2eMetricsSink", "resize_e2e_report", "cfg(debug_assertions)", "cfg(not(debug_assertions))", "localbridge_invoke_handler![]"]) if (!lib.includes(marker)) throw new Error(`LB-016 debug-only resize IPC contract missing: ${marker}`);
-if (!/\.onboarding-shell\{[^}]*min-height:100vh[^}]*height:100dvh[^}]*overflow:hidden/is.test(onboardingCss.replace(/\s+/g, ""))) throw new Error("LB-016 onboarding shell is not viewport-height constrained");
-if (!/\.onboarding-card\{[^}]*max-height:100%[^}]*min-height:0/is.test(onboardingCss.replace(/\s+/g, ""))) throw new Error("LB-016 onboarding card still relies on a rigid minimum height");
-if (!/\.onboarding-body\{[^}]*min-height:0[^}]*overflow-y:auto/is.test(onboardingCss.replace(/\s+/g, ""))) throw new Error("LB-016 wizard body cannot scroll within a resized viewport");
-if (/min-height:(?:500|540)px/i.test(onboardingCss.replace(/\s+/g, ""))) throw new Error("LB-016 stale fixed wizard card minimum height remains");
-if (!/@media\(max-height:560px\)/i.test(onboardingCss.replace(/\s+/g, ""))) throw new Error("LB-016 lacks viewport-height responsive spacing rules");
+for (const marker of [".inner_size(900.0, 620.0)", ".min_inner_size(900.0, 620.0)", ".max_inner_size(900.0, 620.0)", ".resizable(false)", ".maximizable(false)", ".decorations(false)"]) if (!tray.includes(marker)) throw new Error(`LB-016 fixed/custom window contract missing: ${marker}`);
+if (tray.includes(".resizable(true)") || tray.includes(".maximizable(true)")) throw new Error("LB-016 main window remains user-resizable/maximizable");
 const completionCalls = [...onboarding.matchAll(/onboardingApi\.complete\(\)/g)];
 const finishStart = onboarding.indexOf("const finish = async () =>");
 const screenStart = onboarding.indexOf("if (step === 1)", finishStart);

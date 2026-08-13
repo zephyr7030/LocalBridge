@@ -75,9 +75,9 @@ UI 冻结补充：
 Local Bridge设置= 系统浏览器固定 deep link；禁止 WebView/任意 URL
 项目选择       = 原生 Windows 文件夹选择器为主交互
 按钮           = 统一且可辨识；禁止白底白按钮
-窗口           = 默认 900×620；最小 720×500；可缩放；向导随 viewport 高度响应且不依赖固定卡片高度
-WebView同步     = resize/maximize 后始终铺满 native client area；Dashboard/onboarding 随 live viewport 重排
-resize验收      = 必须真实运行 Windows Tauri/WebView2：至少两个 native size + maximize；静态 CSS/Tauri 配置断言不能单独 PASS
+窗口           = 固定 900×620；minimum=maximum=900×620；禁止缩放与最大化
+窗口验收       = `resizable=false`、`maximizable=false`；拖拽边框/最大化均不能改变 client size
+窗口边框       = `decorations=false`；唯一自定义 chrome 必须贴满 client area；禁止原生+自定义双边框；保留拖拽/最小化/关闭
 ```
 
 ```text

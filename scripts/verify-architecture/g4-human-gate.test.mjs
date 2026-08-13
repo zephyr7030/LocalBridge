@@ -94,8 +94,8 @@ const ratifiedGit = {
 assert.deepEqual(validatePreG4GateAuthorization(ratifiedContracts, ratifiedGit, expected, ratification), []);
 const authorizedLb016Rework = structuredClone(ratifiedContracts);
 authorizedLb016Rework.prs["LB-016"].required_artifacts.push(
-  "viewport-responsive resizable onboarding layout",
-  "native-window/WebView client-area resize synchronization",
+  "fixed 900x620 non-resizable non-maximizable main window",
+  "single edge-to-edge custom window chrome with native decorations disabled",
 );
 authorizedLb016Rework.prs["LB-016"].required_tests = authorizedLb016Rework.prs["LB-016"].required_tests
   .map((item) => item === "screen 6 success message is 设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！"
@@ -103,16 +103,16 @@ authorizedLb016Rework.prs["LB-016"].required_tests = authorizedLb016Rework.prs["
     : item);
 authorizedLb016Rework.prs["LB-016"].required_tests.push(
   "screens 4 and 5 use Local Bridge as the user-facing connector term",
-  "resizable onboarding window has a 720x500 minimum and wizard body adapts to viewport height without fixed card minimum height",
-  "real Windows Tauri resize E2E cross-checks native client area against live WebView JS viewport for two native sizes plus maximize and proves Dashboard and onboarding reflow",
+  "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
+  "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
 );
 assert.deepEqual(validatePreG4GateAuthorization(authorizedLb016Rework, ratifiedGit, expected, ratification), []);
-const alteredResizeRequirement = structuredClone(authorizedLb016Rework);
-alteredResizeRequirement.prs["LB-016"].required_tests = alteredResizeRequirement.prs["LB-016"].required_tests
-  .map((item) => item.startsWith("real Windows Tauri resize E2E cross-checks")
-    ? "real Windows Tauri resize E2E with weakened unchecked semantics"
+const alteredFixedWindowRequirement = structuredClone(authorizedLb016Rework);
+alteredFixedWindowRequirement.prs["LB-016"].required_tests = alteredFixedWindowRequirement.prs["LB-016"].required_tests
+  .map((item) => item.startsWith("main window is fixed to 900x620")
+    ? "main window has an unauthorized variable-size contract"
     : item);
-assert.match(validatePreG4GateAuthorization(alteredResizeRequirement, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+assert.match(validatePreG4GateAuthorization(alteredFixedWindowRequirement, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
 const alteredAuthorizedCopy = structuredClone(authorizedLb016Rework);
 alteredAuthorizedCopy.prs["LB-016"].required_tests = alteredAuthorizedCopy.prs["LB-016"].required_tests
   .map((item) => item.startsWith("screen 6 success message is ")

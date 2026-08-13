@@ -23,8 +23,7 @@
     "Current-task UI is status-only; no recent activity feed or history list",
     "Task summary is grounded in actual MCP/Broker execution and secret-redacted",
     "Onboarding screens 4 and 5 use Local Bridge as the user-facing connector term",
-    "Resizable onboarding defaults to 900x620, has a 720x500 minimum, and adapts to viewport height without fixed card minimum height",
-    "Native main-window client area and WebView stay synchronized while resizing/maximizing, and Dashboard/onboarding reflow to the live viewport"
+    "Main window is fixed at 900x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area"
   ],
   "known_blockers": [],
   "known_risks": [
@@ -293,16 +292,25 @@
         620
       ],
       "minimum_inner_size": [
-        720,
-        500
+        900,
+        620
       ],
-      "resizable": true,
-      "viewport_responsive": true,
-      "fixed_card_min_height": false,
-      "native_webview_client_sync": true,
-      "dashboard_reflow": true,
-      "real_resize_e2e_required": true,
-      "static_markers_sufficient": false
+      "maximum_inner_size": [
+        900,
+        620
+      ],
+      "resizable": false,
+      "maximizable": false,
+      "fixed_size": true,
+      "native_decorations": false,
+      "custom_chrome_required": true,
+      "custom_chrome_edge_to_edge": true,
+      "double_frame_forbidden": true,
+      "custom_drag_region": true,
+      "custom_window_controls": [
+        "minimize",
+        "close"
+      ]
     }
   },
   "brand_icon": {

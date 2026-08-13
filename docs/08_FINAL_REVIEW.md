@@ -59,9 +59,10 @@ Additional UI freeze (superseded by explicit user contract amendment on 2026-08-
 - no screen 7;
 - screen 6 confirm disabled until all three checks are green;
 - completion hint appears only after readiness and is exactly `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`;
-- onboarding window defaults to 900×620, has a 720×500 minimum, remains resizable and adapts to viewport height without fixed card minimum height;
-- native main-window resize/maximize keeps the main WebView equal to the complete client area, and both Dashboard/onboarding reflow against the live WebView viewport;
-- resize acceptance requires a real Windows Tauri/WebView2 E2E with at least two native sizes plus maximize, cross-checking Tauri `inner_size()` against live JS `window.innerWidth/innerHeight × devicePixelRatio` and component rectangles; static Tauri/CSS markers alone are insufficient;
+- main window is fixed at 900×620; minimum and maximum inner size are both 900×620;
+- `resizable=false` and `maximizable=false`; ordinary user interaction cannot change the main-window size;
+- native Windows decorations are disabled; exactly one custom edge-to-edge chrome fills the client area and provides drag/minimize/close without maximize or a double frame;
+- Dashboard/onboarding must remain complete and operable inside that fixed client area; no resize/maximize responsive E2E is required;
 - user clicks confirm to enter main UI;
 - buttons use one coherent visible affordance system; white-on-white ambiguous controls and layout-shifting copy feedback are forbidden.
 

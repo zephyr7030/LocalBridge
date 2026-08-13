@@ -171,6 +171,8 @@
 | A176 | 6/6 | 三项全绿前确定 disabled；全绿后才显示完成提示，不自动跳转 |
 | A177 | G3 按钮 | 一致且可辨识；禁止白底白按钮 |
 | A178 | G3 提示 | 最小必要，不重复堆叠自解释说明 |
-| A179 | 向导窗口缩放 | 默认 900×620、最小 720×500；随 viewport 高度响应，主体可滚动且不依赖固定卡片最小高度 |
-| A180 | native/WebView resize | resize/maximize 后主 WebView 与 native client area 同尺寸，Dashboard/onboarding 使用 live viewport 重排 |
-| A181 | 真实 resize E2E | Windows Tauri/WebView2 覆盖两个 native size + maximize，交叉验证 native `inner_size()`、JS viewport×DPR 和组件 rect；静态 CSS/Tauri 标记不足以单独 PASS |
+| A179 | 固定窗口尺寸 | inner/minimum/maximum size 均为 900×620 |
+| A180 | 禁止缩放 | `resizable=false`，拖拽边框不能改变窗口尺寸 |
+| A181 | 禁止最大化 | `maximizable=false`，最大化入口不可用；Dashboard/onboarding 在固定 client area 内完整可操作 |
+| A182 | 单层窗口 chrome | native `decorations=false`；自定义 chrome edge-to-edge 覆盖 client area，不存在双边框 |
+| A183 | 自定义窗口控制 | 有拖拽区、最小化、关闭，无最大化 |

@@ -110,15 +110,16 @@ OpenAI Tunnel
 
 三项未全绿时 `确定` disabled 且不显示完成提示；全绿后才显示 `配置完成，在插件中选择刚刚添加的Local Bridge试试吧` 并启用 `确定`。禁止自动跳转。
 
-## 窗口缩放
+## 固定窗口
 
-- 主窗口默认 900×620，最小 720×500，保持 `resizable`；
-- 向导布局必须以可用 viewport 为约束，不依赖固定卡片最小高度；
-- 高度不足时主体内容区内部滚动，标题与底部按钮保持可达；
-- 小高度 viewport 通过减少 padding/gap 适配，不得反向提高卡片最小高度。
-- 每次 native window resize/maximize 都必须把主 WebView bounds 同步到完整 client area；Dashboard 与 onboarding 都必须依据 live WebView viewport 重排；
-- 静态检查 `.inner_size/.min_inner_size/.resizable`、`100dvh`、`overflow` 或旧固定高度是否消失，只能作为辅助证据；
-- 必须运行真实 Windows Tauri/WebView2 resize E2E，至少覆盖两个 native size 与 maximize，并验证 Tauri `inner_size()` ≈ `window.innerWidth/innerHeight × devicePixelRatio`，同时验证 Dashboard/onboarding 实际 rect 发生对应变化。
+- 主窗口固定 900×620；
+- minimum inner size = 900×620；maximum inner size = 900×620；
+- `resizable=false`，用户不能拖拽边框改变窗口尺寸；
+- `maximizable=false`，最大化入口不可用；
+- native `decorations=false`，不得同时显示 Windows 原生标题栏/边框与产品风格化边框；
+- 自定义 chrome 必须是唯一窗口外框，`inset:0` 且覆盖 100% client area，不允许二次内缩形成“窗口里的窗口”；
+- 自定义 chrome 提供可用拖拽区、最小化按钮、关闭按钮，不提供最大化按钮；
+- Dashboard 与 onboarding 必须在固定 900×620 client area 内完整可操作，不再要求 resize/maximize 响应式布局或 resize E2E。
 
 ## 按钮与提示
 

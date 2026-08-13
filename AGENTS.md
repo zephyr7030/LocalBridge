@@ -32,5 +32,4 @@ PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRE
 25. 执行智能体可使用预授权，但每项实际使用的预授权必须记录 `authorization_id/scope/actions/evidence_ref/recorded_by/user_audit_status`；人工 Gate PASS 前，所有记录的预授权都必须经用户审核为 `PASS`。
 26. Local Bridge 设置入口只允许系统默认浏览器打开固定 ChatGPT custom-connector URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView、任意前端 URL 或伪造 ChatGPT 连接状态。
 27. 第 3 屏项目选择以原生 Windows 文件夹选择器为主交互；按钮必须使用一致且可辨识的视觉系统，禁止白底上的纯白/近不可见按钮；提示遵循最小必要原则，复制成功反馈不得引起布局位移。
-28. 主窗口默认 900×620、最小 720×500 且允许缩放；向导必须随可用 viewport 高度调整，内容区可滚动，禁止依赖固定卡片最小高度保证完整性。
-29. 窗口 resize/maximize 时，主 WebView bounds 必须始终等于 native main-window client area，Dashboard 与 onboarding 必须随 live viewport 重排。`.inner_size/.min_inner_size/.resizable`、`100dvh`、`overflow` 等静态源码断言只能作为辅助证据，不能单独验收；LB-016 必须执行真实 Windows Tauri/WebView2 resize E2E，覆盖至少两个 native size 与 maximize，并交叉验证 Tauri `inner_size()`、live JS `window.innerWidth/innerHeight × devicePixelRatio` 和组件 rect。
+28. 主窗口固定为 900×620；minimum/maximum inner size 均为 900×620，`resizable=false`、`maximizable=false`。原生 Windows decorations 必须关闭；产品只能显示一层自定义风格化窗口 chrome，并以 `inset:0` / 100%×100% 精确贴合 native client area，禁止“原生边框 + 自定义边框”双层窗口。自定义 chrome 提供拖拽区、最小化和关闭，不提供最大化；Dashboard 与 onboarding 必须在固定 client area 内完整可操作。
