@@ -33,3 +33,4 @@ PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRE
 26. Local Bridge 设置入口只允许系统默认浏览器打开固定 ChatGPT custom-connector URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView、任意前端 URL 或伪造 ChatGPT 连接状态。
 27. 第 3 屏项目选择以原生 Windows 文件夹选择器为主交互；按钮必须使用一致且可辨识的视觉系统，禁止白底上的纯白/近不可见按钮；提示遵循最小必要原则，复制成功反馈不得引起布局位移。
 28. 主窗口固定为 900×620；minimum/maximum inner size 均为 900×620，`resizable=false`、`maximizable=false`。原生 Windows decorations 必须关闭；产品只能显示一层自定义风格化窗口 chrome，并以 `inset:0` / 100%×100% 精确贴合 native client area，禁止“原生边框 + 自定义边框”双层窗口。自定义 chrome 提供拖拽区、最小化和关闭，不提供最大化；Dashboard 与 onboarding 必须在固定 client area 内完整可操作。
+29. 首次 onboarding 本身就是窗口内容页，必须直接占满自定义 chrome 的可用内容区；禁止在大面积空白背景中再居中放置作为整个向导外壳的 card/modal/dialog，也禁止用圆角、阴影或边框制造“窗口里的弹窗”。允许页面级 padding、字段分组和局部控件，但 6 屏共同外壳必须是整页布局。

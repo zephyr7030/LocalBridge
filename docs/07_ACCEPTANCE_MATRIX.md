@@ -176,3 +176,4 @@
 | A181 | 禁止最大化 | `maximizable=false`，最大化入口不可用；Dashboard/onboarding 在固定 client area 内完整可操作 |
 | A182 | 单层窗口 chrome | native `decorations=false`；自定义 chrome edge-to-edge 覆盖 client area，不存在双边框 |
 | A183 | 自定义窗口控制 | 有拖拽区、最小化、关闭，无最大化 |
+| A184 | onboarding 整页布局 | 6 屏直接使用 custom chrome 内容区；不得用居中 floating card/modal/dialog 或大圆角+整体阴影/边框制造“窗口里的窗口” |

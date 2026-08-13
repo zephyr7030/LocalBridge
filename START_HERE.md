@@ -78,6 +78,7 @@ Local Bridge设置= 系统浏览器固定 deep link；禁止 WebView/任意 URL
 窗口           = 固定 900×620；minimum=maximum=900×620；禁止缩放与最大化
 窗口验收       = `resizable=false`、`maximizable=false`；拖拽边框/最大化均不能改变 client size
 窗口边框       = `decorations=false`；唯一自定义 chrome 必须贴满 client area；禁止原生+自定义双边框；保留拖拽/最小化/关闭
+引导页布局     = 整页；直接使用 custom chrome 内容区；禁止空白页面中居中再套 card/modal/dialog 式向导外壳
 ```
 
 ```text

@@ -30,3 +30,5 @@
 按钮必须统一且可辨识，禁止白底白按钮；提示只保留当前动作所需的最少信息。
 
 窗口固定 900×620；minimum/maximum inner size 都是 900×620，`resizable=false`、`maximizable=false`。native `decorations=false`；只允许一层 edge-to-edge 自定义 chrome，必须贴满 client area，禁止双边框。自定义 chrome 提供拖拽、最小化、关闭，无最大化。Dashboard 和 onboarding 必须在固定 client area 内完整可操作。
+
+首次 onboarding 必须是整页内容，不是弹窗：直接使用 custom chrome 内容区，禁止空白画布中再套居中的整体 `.card` / modal / dialog，也禁止用大圆角、整体阴影或边框形成二级窗口。正常页面 padding、字段和局部分组不受此限制。

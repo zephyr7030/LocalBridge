@@ -23,7 +23,8 @@
     "Current-task UI is status-only; no recent activity feed or history list",
     "Task summary is grounded in actual MCP/Broker execution and secret-redacted",
     "Onboarding screens 4 and 5 use Local Bridge as the user-facing connector term",
-    "Main window is fixed at 900x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area"
+    "Main window is fixed at 900x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
+    "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [],
   "known_risks": [
@@ -286,6 +287,14 @@
       "extra_chatgpt_check": false
     },
     "user_facing_connector_term": "Local Bridge",
+    "layout": {
+      "presentation": "full_page",
+      "uses_full_custom_chrome_content_area": true,
+      "centered_floating_wizard_shell": false,
+      "modal_or_dialog_wizard_shell": false,
+      "large_empty_surrounding_canvas": false,
+      "page_padding_and_local_field_groups_allowed": true
+    },
     "window": {
       "default_inner_size": [
         900,

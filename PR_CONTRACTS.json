@@ -185,7 +185,11 @@
     "main_window_custom_controls": [
       "minimize",
       "close"
-    ]
+    ],
+    "onboarding_full_page_layout_required": true,
+    "onboarding_centered_floating_shell_forbidden": true,
+    "onboarding_modal_or_dialog_shell_forbidden": true,
+    "onboarding_large_empty_surrounding_canvas_forbidden": true
   },
   "prs": {
     "LB-000": {
@@ -737,7 +741,8 @@
         "ChatGPT custom connector system-browser setup flow",
         "runtime-check gated confirm button",
         "fixed 900x620 non-resizable non-maximizable main window",
-        "single edge-to-edge custom window chrome with native decorations disabled"
+        "single edge-to-edge custom window chrome with native decorations disabled",
+        "full-page onboarding layout using the fixed custom-chrome content area"
       ],
       "required_tests": [
         "screen 4 custom connector setup button",
@@ -771,7 +776,8 @@
         "onboarding has no seventh screen",
         "screens 4 and 5 use Local Bridge as the user-facing connector term",
         "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
-        "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame"
+        "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
+        "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas"
       ],
       "non_goals": [
         "new dashboard pages",

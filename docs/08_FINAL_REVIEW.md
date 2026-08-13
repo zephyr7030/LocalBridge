@@ -63,6 +63,7 @@ Additional UI freeze (superseded by explicit user contract amendment on 2026-08-
 - `resizable=false` and `maximizable=false`; ordinary user interaction cannot change the main-window size;
 - native Windows decorations are disabled; exactly one custom edge-to-edge chrome fills the client area and provides drag/minimize/close without maximize or a double frame;
 - Dashboard/onboarding must remain complete and operable inside that fixed client area; no resize/maximize responsive E2E is required;
+- onboarding itself is a full-page single-content layout inside the custom chrome content area; a centered floating wizard card/modal/dialog surrounded by a large empty canvas is forbidden;
 - user clicks confirm to enter main UI;
 - buttons use one coherent visible affordance system; white-on-white ambiguous controls and layout-shifting copy feedback are forbidden.
 

@@ -62,11 +62,13 @@ const LB016_AUTHORIZED_G3_REWORK_2026_08_13 = Object.freeze({
   addedArtifacts: [
     "fixed 900x620 non-resizable non-maximizable main window",
     "single edge-to-edge custom window chrome with native decorations disabled",
+    "full-page onboarding layout using the fixed custom-chrome content area",
   ],
   addedTests: [
     "screens 4 and 5 use Local Bridge as the user-facing connector term",
     "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
     "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
+    "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
   ],
 });
 

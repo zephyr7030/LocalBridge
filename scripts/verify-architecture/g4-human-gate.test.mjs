@@ -96,6 +96,7 @@ const authorizedLb016Rework = structuredClone(ratifiedContracts);
 authorizedLb016Rework.prs["LB-016"].required_artifacts.push(
   "fixed 900x620 non-resizable non-maximizable main window",
   "single edge-to-edge custom window chrome with native decorations disabled",
+  "full-page onboarding layout using the fixed custom-chrome content area",
 );
 authorizedLb016Rework.prs["LB-016"].required_tests = authorizedLb016Rework.prs["LB-016"].required_tests
   .map((item) => item === "screen 6 success message is 设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！"
@@ -105,6 +106,7 @@ authorizedLb016Rework.prs["LB-016"].required_tests.push(
   "screens 4 and 5 use Local Bridge as the user-facing connector term",
   "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
   "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
+  "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
 );
 assert.deepEqual(validatePreG4GateAuthorization(authorizedLb016Rework, ratifiedGit, expected, ratification), []);
 const alteredFixedWindowRequirement = structuredClone(authorizedLb016Rework);

@@ -45,16 +45,22 @@ if (contracts.rules?.onboarding_user_facing_connector_term !== "Local Bridge"
   || contracts.rules?.main_window_custom_chrome_edge_to_edge !== true
   || contracts.rules?.main_window_double_frame_forbidden !== true
   || contracts.rules?.main_window_custom_drag_region_required !== true
+  || contracts.rules?.onboarding_full_page_layout_required !== true
+  || contracts.rules?.onboarding_centered_floating_shell_forbidden !== true
+  || contracts.rules?.onboarding_modal_or_dialog_shell_forbidden !== true
+  || contracts.rules?.onboarding_large_empty_surrounding_canvas_forbidden !== true
   || JSON.stringify(contracts.rules?.main_window_custom_controls) !== JSON.stringify(["minimize", "close"])) {
   throw new Error("LB-016 machine contract does not freeze Local Bridge success/fixed-window semantics");
 }
 if (!lb016.required_artifacts.includes("fixed 900x620 non-resizable non-maximizable main window")) throw new Error("LB-016 fixed-window artifact is not frozen");
 if (!lb016.required_artifacts.includes("single edge-to-edge custom window chrome with native decorations disabled")) throw new Error("LB-016 single custom chrome artifact is not frozen");
+if (!lb016.required_artifacts.includes("full-page onboarding layout using the fixed custom-chrome content area")) throw new Error("LB-016 full-page onboarding artifact is not frozen");
 for (const required of [
   `screen 6 success message is ${exactSuccessCopy}`,
   "screens 4 and 5 use Local Bridge as the user-facing connector term",
   "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
   "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
+  "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
 ]) if (!lb016.required_tests.includes(required)) throw new Error(`LB-016 authorized rework test contract missing: ${required}`);
 
 for (const required of [
@@ -156,6 +162,11 @@ if (windowCapability.identifier !== "window-chrome"
 if (windowCapability.permissions.some((permission) => /maximize|resize|decorations|set-size/i.test(permission))) throw new Error("LB-016 custom chrome capability grants forbidden maximize/window mutation permission");
 if (!/\.onboarding-shell\{[^}]*width:100%[^}]*height:100%[^}]*min-height:0/is.test(onboardingCss.replace(/\s+/g, ""))
   || /\.onboarding-shell\{[^}]*(?:100dvh|100vh)/is.test(onboardingCss.replace(/\s+/g, ""))) throw new Error("LB-016 onboarding is not constrained to the fixed custom-chrome content area");
+if (frame.includes('className="onboarding-card"') || /\.onboarding-card\b/.test(onboardingCss)) throw new Error("LB-016 onboarding still uses a centered floating card shell instead of a full-page layout");
+if (!frame.includes('className="onboarding-page"')) throw new Error("LB-016 onboarding does not expose the frozen full-page root");
+const onboardingPageRule = onboardingCss.replace(/\s+/g, "").match(/\.onboarding-page\{([^}]*)\}/)?.[1] ?? "";
+for (const marker of ["width:100%", "height:100%"] ) if (!onboardingPageRule.includes(marker)) throw new Error(`LB-016 full-page onboarding root does not fill the content area: ${marker}`);
+for (const forbidden of ["box-shadow:", "border-radius:"]) if (onboardingPageRule.includes(forbidden)) throw new Error(`LB-016 full-page onboarding root still looks like a floating dialog: ${forbidden}`);
 if (existsSync("tests/e2e/onboarding/resize_runtime_e2e.mjs")) throw new Error("LB-016 obsolete resizable/maximize runtime E2E still exists");
 for (const marker of ["tauri.cmd dev --no-watch", "LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW", "CARGO_TARGET_DIR", "LB016_FIXED_WINDOW_E2E=PASS", "logical_fixed=900x620", "native_dpi_scaling=true", "maximizable=false", "single_custom_chrome=true"]) if (!fixedWindowE2e.includes(marker)) throw new Error(`LB-016 real fixed-window E2E runner missing: ${marker}`);
 if (/\.maximize\(|\.unmaximize\(|\.set_size\(|LOCALBRIDGE_RESIZE_E2E_VIEW|LB016_REAL_RESIZE_E2E/.test(fixedWindowE2e)) throw new Error("LB-016 fixed-window E2E runner contains obsolete resize/maximize semantics");

@@ -206,6 +206,7 @@ Dashboard 必须直接显示：
 - 主窗口固定 900×620；minimum/maximum inner size 均为 900×620，`resizable=false`、`maximizable=false`，不允许用户改变窗口尺寸；
 - native decorations 关闭；全产品共享唯一自定义 chrome，外框 edge-to-edge 绑定完整 client area，禁止原生边框与风格化边框同时存在；自定义 chrome 负责拖拽、最小化、关闭且无最大化；
 - Dashboard 与 onboarding 必须在固定 900×620 client area 内完整可操作；不再要求 resize/maximize 响应式布局或真实 resize E2E；
+- onboarding 采用整页布局并直接使用 custom chrome 内容区；禁止将整个向导做成居中 floating card/modal/dialog，也禁止大面积空白背景包围一个带圆角/阴影/边框的二级“窗口”；
 - 权限包含编辑/完整/管理员三档；向导不自动触发 UAC。
 
 ## LB-017 — Diagnostics
