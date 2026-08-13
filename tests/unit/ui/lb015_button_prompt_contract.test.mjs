@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 const css = readFileSync("src/styles.css", "utf8");
 const app = readFileSync("src/App.tsx", "utf8");
+const chrome = readFileSync("src/components/WindowChrome.tsx", "utf8");
+const onboardingCss = readFileSync("src/features/onboarding/onboarding.css", "utf8");
 const diagnostics = readFileSync("src/features/diagnostics/Diagnostics.tsx", "utf8");
 const ui = `${app}\n${diagnostics}`;
 
@@ -39,19 +41,17 @@ if (!app.includes("不会删除项目文件。")) {
 }
 
 const compactCss = css.replace(/\s+/g, "");
-if (!compactCss.includes("html,body,#root{width:100%;min-width:0;min-height:100%}")) {
-  throw new Error("LB-015 document/root surface is not bound to the WebView viewport");
-}
-if (!compactCss.includes("body{margin:0;min-width:320px;min-height:100dvh}")
-  || !compactCss.includes("#root{min-height:100dvh;background:#f5f5f7}")) {
-  throw new Error("LB-015 body/root does not fill the viewport background surface");
-}
+if (!compactCss.includes("html,body,#root{width:100%;min-width:0;height:100%;min-height:0}")) throw new Error("LB-015 document/root does not exactly fill the fixed client area");
+if (!compactCss.includes("body{margin:0;min-width:320px;height:100%;overflow:hidden}") || !compactCss.includes("#root{height:100%;min-height:0;background:#f5f5f7}")) throw new Error("LB-015 body/root is not bound to the single custom chrome");
 const shellRule = compactCss.match(/\.shell\{([^}]*)\}/)?.[1] ?? "";
-if (!shellRule.includes("width:calc(100%-clamp(32px,6vw,72px))") || !shellRule.includes("max-width:1180px")) {
-  throw new Error("LB-015 Dashboard shell is not viewport-responsive on wide windows");
-}
-if (/\.shell\{[^}]*760px/.test(compactCss)) {
-  throw new Error("LB-015 Dashboard regressed to the obsolete 760px narrow-column cap");
-}
+if (!shellRule.includes("width:calc(100%-clamp(32px,6vw,72px))") || !shellRule.includes("max-width:1180px") || !shellRule.includes("min-height:100%")) throw new Error("LB-015 Dashboard shell does not fit the fixed chrome content area");
+if (/\.shell\{[^}]*760px/.test(compactCss) || /100dvh|100vh/.test(shellRule)) throw new Error("LB-015 Dashboard escaped the fixed chrome content area");
+const compactOnboarding = onboardingCss.replace(/\s+/g, "");
+const onboardingRule = compactOnboarding.match(/\.onboarding-shell\{([^}]*)\}/)?.[1] ?? "";
+for (const token of ["width:100%", "height:100%", "min-height:0"]) if (!onboardingRule.includes(token)) throw new Error(`LB-015 onboarding fixed-content sizing missing: ${token}`);
+if (/100dvh|100vh/.test(onboardingRule)) throw new Error("LB-015 onboarding escaped the fixed chrome content area");
+if ((app.match(/<WindowChrome>/g) ?? []).length !== 1 || (app.match(/<\/WindowChrome>/g) ?? []).length !== 1) throw new Error("LB-015 must compose exactly one shared custom chrome");
+for (const marker of ["getCurrentWindow", "startDragging()", "minimize()", "close()", 'aria-label="最小化"', 'aria-label="关闭"']) if (!chrome.includes(marker)) throw new Error(`LB-015 custom titlebar behavior missing: ${marker}`);
+if (/maximize|toggleMaximize/i.test(chrome)) throw new Error("LB-015 custom titlebar exposes forbidden maximize behavior");
 
-console.log("LB015_BUTTON_PROMPT_CONTRACT=PASS coherent_geometry=true white_surface_affordance=true states=true minimal_prompt=true safety_copy_preserved=true viewport_surface=true responsive_dashboard=true");
+console.log("LB015_BUTTON_PROMPT_CONTRACT=PASS coherent_geometry=true white_surface_affordance=true states=true minimal_prompt=true safety_copy_preserved=true single_custom_chrome=true fixed_content_area=true drag=true minimize=true close=true maximize=false");

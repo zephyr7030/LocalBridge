@@ -5,6 +5,7 @@ import { accessText, privilegeText, serviceText, taskText, uiText } from "./pres
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { onboardingApi, type OnboardingState } from "./features/onboarding/api";
 import { Diagnostics } from "./features/diagnostics/Diagnostics";
+import { WindowChrome } from "./components/WindowChrome";
 import "./styles.css";
 
 type View = "main" | "settings" | "diagnostics";
@@ -16,10 +17,14 @@ export function App() {
   useEffect(() => {
     void onboardingApi.read().then(setOnboarding).catch(() => setOnboardingError(true));
   }, []);
-  if (onboardingError) return <main className="onboarding-loading">无法读取首次设置状态</main>;
-  if (!onboarding) return <main className="onboarding-loading">正在准备 LocalBridge…</main>;
-  if (!onboarding.complete) return <Onboarding initial={onboarding} onComplete={() => setOnboarding({ ...onboarding, complete: true })} />;
-  return <Dashboard />;
+  return (
+    <WindowChrome>
+      {onboardingError ? <main className="onboarding-loading">无法读取首次设置状态</main>
+        : !onboarding ? <main className="onboarding-loading">正在准备 LocalBridge…</main>
+          : !onboarding.complete ? <Onboarding initial={onboarding} onComplete={() => setOnboarding({ ...onboarding, complete: true })} />
+            : <Dashboard />}
+    </WindowChrome>
+  );
 }
 
 function Dashboard() {

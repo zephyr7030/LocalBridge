@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -138,7 +138,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Implement the single edge-to-edge custom window chrome in LB-015 on top of the fixed borderless native window"
+    "next_action": "Rework LB-016 tests/runtime E2E for the frozen fixed 900x620 borderless single-custom-chrome contract"
   },
   "current_task_ui": {
     "enabled": true,

@@ -48,6 +48,22 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB015-004",
+      "scope": [
+        "src-tauri/capabilities/window-chrome.json",
+        "scripts/authorization-records/LB-015.json"
+      ],
+      "actions": [
+        "Grant the dynamically-created main window only the Tauri core window permissions required by the frozen custom titlebar: start dragging, minimize, and close",
+        "Keep maximize, toggle-maximize, resize, decoration mutation, and window-size mutation permissions absent"
+      ],
+      "reason": "The fixed borderless window contract requires a functional custom titlebar, while Tauri v2 core:window:default does not grant close, minimize, or start_dragging. The capability file is outside LB-015 normal writable paths and must remain least-privilege.",
+      "evidence_ref": "Explicit user G3 generation-2 repair instruction on 2026-08-13 requiring a fixed 900x620 decorations=false window with one custom titlebar providing drag, minimize and close and no maximize; frozen contract baseline 2eb11fc.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }
