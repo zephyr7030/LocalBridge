@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -159,7 +159,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run a fresh independent G3 adversarial review generation 5 from REVIEW_REQUIRED against the current committed/disk baseline. Do not unlock G4/LB-018. If generation 5 passes, G3 enters the separate human manual/detail Gate; subjective onboarding permission-button spacing remains a human 900x620 acceptance item."
+    "next_action": "G3 adversarial generation 5 failed with MAJOR findings in LB-015. Rework LB-015 first, then re-execute LB-016 and LB-017 in strict order, then run independent G3 adversarial generation 6. Keep G4/LB-018 and the separate human Gate blocked until a fresh adversarial PASS."
   },
   "current_task_ui": {
     "enabled": true,
@@ -464,40 +464,40 @@
   },
   "g3_adversarial_review": {
     "status": "FAIL",
-    "generation": 4,
-    "date": "2026-08-13",
-    "baseline_commit": "f83ea6907df38c8c493135e1b85f8e648636e315",
+    "generation": 5,
+    "date": "2026-08-14",
+    "baseline_commit": "b9fa6bae4ef697bf65bab02544c4dcdbb77a3ed1",
     "severity": "MAJOR",
     "reopen_from_pr": "LB-015",
-    "finding": "Dashboard 的“选择其他文件夹”仍打开前端手填绝对路径对话框，而不是原生 Windows 文件夹选择器，违反全局新项目主交互硬合同。",
+    "finding": "Generation 5 found two LB-015 contract bypasses: post-onboarding permission editing is still reachable through onboarding preview, and connection changes during asynchronous Starting/connecting can skip the required controlled reconnect and continue with captured old startup configuration.",
     "evidence": [
-      "PROJECT_STATE.json:12 freezes native Windows folder picker as the primary new-project interaction.",
-      "START_HERE.md:78 freezes project selection to the native Windows folder picker as the primary interaction.",
-      "src/App.tsx:64 opens pathEditor from the Dashboard “选择其他文件夹” action.",
-      "src/App.tsx:74 renders a text input for 文件夹路径 and calls bridge.addProject(newPath.trim()) instead of invoking the native picker.",
-      "src-tauri/src/commands/onboarding.rs:130-134 already exposes choose_onboarding_workspace_folder backed by the native Windows picker path."
+      "PR_CONTRACTS.json freezes permission_mode_post_onboarding_edit_surface=settings_only and AGENTS.md rule 43 says onboarding Screen3 is first-run selection while Settings is the only post-onboarding editor.",
+      "src/App.tsx:27 opens the complete Onboarding component with previewMode after onboarding; src/App.tsx:74 exposes 打开欢迎页 from Settings.",
+      "src/features/onboarding/Onboarding.tsx:111-119 keeps Screen3 choosePermission active in previewMode and calls bridge.setAccess(mode); previewMode is only consulted by finish() around line 141, so reopened onboarding can mutate PermissionMode after onboarding completion.",
+      "PR_CONTRACTS.json requires Settings save to perform controlled reconnect when effective connection configuration changes while runtime is active/connecting.",
+      "src-tauri/src/app/background.rs:733-752 publishes RuntimeState::StartingMcp with active=false before the asynchronous startup thread consumes its captured ProductionRuntimeConfig.",
+      "src-tauri/src/commands/ui.rs:519-525 reconnect_after_connection_change returns Ok immediately whenever snapshot.active is false; therefore save_tunnel_id/save_runtime_key during Starting/connecting can skip cancellation/restart while the old captured startup continues.",
+      "tests/e2e/dashboard/lb015_contract.test.mjs validates Dashboard itself has no permission controls but does not exercise Settings -> 打开欢迎页 -> preview Screen3; current G3 tests also contain no Starting/connecting connection-change regression for reconnect_after_connection_change."
     ],
     "reproduction": [
-      "Open the Dashboard main UI.",
-      "Click “选择其他文件夹”.",
-      "Observe a LocalBridge text-entry dialog requesting 文件夹路径 instead of the Windows native folder picker.",
-      "Expected: invoke the native Windows folder picker and use its selected directory as the new-project path."
+      "Complete onboarding, open Settings, click 打开欢迎页, navigate to Screen3, then click 编辑模式/完整模式/管理员模式. The preview Onboarding calls bridge.setAccess and changes permission state. Expected: after onboarding completion, Settings is the only permission-mode editor; preview/welcome flow must not provide a second mutation surface.",
+      "Start a configured foreground launch and observe the backend projection in StartingMcp/connecting before the runtime owner becomes active. Change Tunnel ID or Runtime API Key in Settings. reconnect_after_connection_change sees active=false and returns without controlled restart while the already spawned startup thread retains the old startup config. Expected: active OR connecting configuration change cancels/restarts/queues startup so effective configuration matches saved configuration."
     ],
     "independent_verification": {
       "npm_test": "PASS",
-      "frontend_build": "PASS",
+      "frontend_build": "PASS (npm build command exited 0; generic build wrapper separately reported no newly timestamped artifact)",
       "architecture_verify": "PASS before recording this FAIL decision",
-      "lb015_status_accent_contract": "PASS",
+      "lb013_contract": "PASS",
+      "lb014_contract": "PASS",
+      "lb015_contract": "PASS but missing both adversarial paths found by generation 5",
       "lb016_contract": "PASS",
-      "g4_human_gate_verifier_test": "PASS",
-      "cargo_test_locked": "PASS"
+      "lb017_contract": "PASS",
+      "cargo_test_locked": "PASS: 120 library tests plus integration suites; no failures",
+      "cargo_clippy_all_targets_deny_warnings": "PASS"
     },
     "g4_unlocked": false,
-    "next_required_adversarial_generation": 5,
-    "review_decision_commit": "e2e8317f631c5932a779908850b78e6a49f368c0",
-    "rework_status": "COMPLETED_AWAITING_FRESH_G3_REVIEW",
-    "rework_completed_date": "2026-08-13",
-    "latest_executor_revalidation": "FRESH_EXECUTOR_REVALIDATION_2026-08-13: LB-013 contract + 8 background/lifecycle Rust tests PASS; LB-014 contract + startup/single-instance/autostart/startup-profile tests PASS; LB-015 contract + frontend tests/build + real bundled MCP→PEP CurrentTask path + slow-backend responsiveness tests PASS; LB-016 contract + onboarding Rust tests + fresh Tauri fixed-window onboarding/dashboard runtime E2E at 150% DPI PASS, while subjective Screen-3 whitespace remains correctly reserved for the later human Gate; LB-017 contract + 4 diagnostics Rust tests including bounded typed redacted timestamped events and redacted export PASS; full cargo test PASS; cargo clippy --all-targets -D warnings PASS; UI language, runtime manifest and architecture verifiers PASS. Repository-wide cargo fmt --check still reports pre-existing out-of-G3 formatting debt; all G3 Rust files touched by this repair pass direct rustfmt --check."
+    "next_required_adversarial_generation": 6,
+    "rework_status": "REOPENED_BY_G3_ADVERSARIAL_GENERATION_5"
   },
   "ui_backend_separation": {
     "frontend_role": "typed_projection_and_user_intent_only",
