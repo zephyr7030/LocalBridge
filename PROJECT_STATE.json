@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-014",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -139,7 +139,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Revalidate LB-014 autostart and single-instance behavior against the restored logical/DIP 900x620 fixed-window baseline; keep G4 blocked and continue G3 sequential revalidation afterward"
+    "next_action": "Revalidate LB-015 single custom chrome, shared UI shell, visible button system, and fixed-content layout against the full-page onboarding contract; keep G3 in rework until sequential revalidation reaches LB-017"
   },
   "current_task_ui": {
     "enabled": true,
