@@ -15,7 +15,7 @@
 12. listener 只允许 127.0.0.1/::1。
 13. recoverable 故障自动重连 5 次，1/2/5/10/30s；成功静默；5 次失败才一次错误窗口；禁止 restart storm。
 14. UI 中文、极简、Apple-inspired；视觉只用 React/Tauri + 原生 CSS/SVG/system fonts；不得新增 UI/动画/图标/CSS/字体依赖。
-15. 当前执行只显示单行状态；无 feed/history；摘要脱敏。无活动任务时该行必须可见并固定显示 `等待命令`，不得显示 `空闲` 或隐藏；活动/等待/阻止/失败状态只能来自真实 backend `CurrentTaskStatus` 投影，前端不得伪造。
+15. 当前执行只显示单行状态；无 feed/history；摘要脱敏。活动/等待/阻止/失败状态必须绑定真实 backend MCP/Broker 工具执行生命周期，前端轮询不得成为可能漏掉短任务的唯一事实来源。执行中显示真实任务持续时间；无活动任务时该行必须可见并显示 `等待命令`，若已有上一条真实命令则同时显示其相对时间（秒级 `nS前`、分钟级 `n分钟前`、超过一小时显示 `大于1小时`、按天显示 `大于n天`），从未执行过命令时只显示 `等待命令`。只允许保留“当前任务 + 上一条任务时间元数据”，禁止 feed/history/list；前端不得伪造 task truth。
 16. `--background` 从入口不显示窗口；管理员偏好不自动 UAC。
 17. 捆绑 Python/coding-tools/tunnel-client；无系统 Python fallback；无独立 runtime/app updater v0.1。
 18. 普通 PR 使用 deterministic fake sidecars；真实 external test 只属于明确 Gate；安全边界必须 negative/adversarial。
@@ -47,4 +47,8 @@ PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRE
 40. UI/backend 必须是独立执行边界：WebView 主线程只做 render/input；所有可能耗时的 Rust/Tauri command 必须投递到 backend worker/async task/`spawn_blocking` 等非 UI 执行上下文。onboarding 的 runtime start + readiness wait、foreground startup、workspace switch、UAC、recovery 等状态机属于 backend；React 只观察 typed projection。必须有“故意延迟 backend 工作时 UI 仍可响应/刷新状态”的回归测试。
 41. Dashboard “选择其他文件夹”与 onboarding 一致，必须调用原生 Windows 文件夹选择器；手填绝对路径不得作为主流程。
 42. Cloudflare/cloudflared 从 LocalBridge 最终发行路径退休：LB-018 必须确保最终 runtime bundle、`runtime-manifest.toml`、packaging inventory/installer、启动参数和 fallback 均不包含或调用 `cloudflared.exe` / Cloudflare managed tunnel。上游历史兼容快照可作为不可执行审计证据保留，但不得被复制进最终发行 bundle；release Gate 必须 fail-closed 防止重新引入。
-43. 主控界面/Dashboard 禁止显示 `权限模式` 行，也禁止显示或提供 `编辑模式 / 完整模式 / 管理员模式` 三档选择控件；Dashboard 不得修改 `PermissionMode`、不得通过权限模式触发 UAC。首次配置的权限选择只存在于 onboarding 第 3 屏；完成 onboarding 后唯一权限模式编辑入口是设置页“权限”。Dashboard 仅可保留**只读**的 `管理员权限` 实际运行状态，并且必须直接来自 backend `PrivilegeState`。
+43. 主控界面/Dashboard 禁止显示 `权限模式` 行，也禁止显示或提供 `编辑模式 / 完整模式 / 管理员模式` 三档选择控件；Dashboard 不得修改 `PermissionMode`、不得通过权限模式触发 UAC。权限编辑允许存在于设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏；后者不是冲突或第二套非法入口。Dashboard 仅可保留**只读**的 `管理员权限` 实际运行状态，并且必须直接来自 backend `PrivilegeState`。
+44. `无法准备管理员权限`、保存/选择失败等一次性用户操作提示属于临时反馈：默认显示 3 秒后自动清除，新提示可替换旧提示；不得永久占据页面。持续存在的 runtime/reconnect Fault 必须继续由 typed 状态/故障窗口表达，不得因本规则被自动隐藏。
+45. 用户可见项目路径必须使用普通 Windows 可读形式，例如 `D:\project`；禁止向 Dashboard/设置/诊断/onboarding 显示 `\\?\D:\project` 等 Win32 verbatim/extended-length 前缀。内部 WorkspaceValidator/authorization/runtime 可继续使用 handle-resolved `\\?\` 路径与 filesystem identity；显示规范化不得参与或削弱授权判断。
+46. 同一页面/分组中的同级按钮必须使用统一动作列和水平左基线；重复动作的按钮左边缘在固定 900×620 下应对齐（自动几何 Gate 容差 ≤1 CSS px）。设置页 `Tunnel ID` 与 `Runtime API Key` 两个“更换”按钮是强制验收样例。禁止通过随文案长度漂移、任意 margin/offset 或第二套按钮布局语言实现。
+47. Dashboard 主界面必须提供 `重启服务` 与 `关闭服务` 两个真实服务控制按钮：`重启服务` 使用黄色/琥珀逻辑色，`关闭服务` 使用红色危险操作色；两者复用全产品按钮几何/字体/边界/对齐体系并与同级操作左基线对齐。动作只发送 typed intent，backend 异步执行真实受管 lifecycle；重启必须取消/收敛已有 Starting/Ready/Recovering/Fault runtime 后只启动一套当前持久化配置，不得 duplicate owner/restart storm，也不得因重启自身自动弹 UAC；关闭必须记录显式 manual-stop 语义并有序关闭 privileged gate/Broker/Tunnel/PEP/MCP，应用窗口本身保持可用并投影停止状态。

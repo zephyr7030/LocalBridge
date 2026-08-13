@@ -127,10 +127,14 @@ bounded recovery、two-phase workspace switch、rollback。
 ## LB-015 — UI Shell
 
 - Dashboard “选择其他文件夹”统一使用原生 Windows 文件夹选择器，禁止手填绝对路径主流程。
-- Dashboard 删除 `权限模式` 行以及编辑/完整/管理员三种模式按钮，只保留只读的管理员权限实际运行状态；Dashboard 不得修改 PermissionMode 或触发模式 UAC。完成 onboarding 后，三种权限模式按钮只存在于设置页“权限”：可见点击/重新点击管理员模式若未 Active 立即发起 UAC；禁止单独“启用管理员权限”按钮；离开管理员模式关闭 Broker。
-- 左下 CurrentTask 单行无任务固定显示 `等待命令`，禁止“空闲”/隐藏；实际 MCP/Broker 生产调用必须端到端驱动 backend `CurrentTaskStatus` → UI，frontend 不伪造。
+- Dashboard 删除 `权限模式` 行以及编辑/完整/管理员三种模式按钮，只保留只读的管理员权限实际运行状态；Dashboard 不得修改 PermissionMode 或触发模式 UAC。三种权限模式按钮允许出现在设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏；后者不是缺陷。可见点击/重新点击管理员模式若未 Active 立即发起 UAC；禁止单独“启用管理员权限”按钮；离开管理员模式关闭 Broker。
+- 左下 CurrentTask 单行由 backend 真实执行生命周期驱动：短于 UI polling interval 的文件新建/删除/修改/普通命令也不得遗漏；活动任务显示持续时间；无活动任务显示 `等待命令`，若有上一条真实命令则追加 `nS前/n分钟前/大于1小时/大于n天`。只保留当前+上一条 timing metadata，无历史/feed/list，frontend 不伪造。
 - 设置页严格为常规/连接/权限：常规=`开机启动`、`关闭窗口后继续运行`；连接=`Tunnel ID`、`Runtime API Key` 各自“更换”；权限=三模式；底部=`打开欢迎页`、`完成`。
-- `Runtime API Key` 为精确英文用户字段名，不翻译；完整 secret 永不回显/预填。Tunnel ID 与 Runtime API Key 独立更新，保存即校验→安全写入→按需受控重连；禁止“测试连接”。
+- `Runtime API Key` 为精确英文用户字段名，不翻译；完整 secret 永不回显/预填。Tunnel ID 与 Runtime API Key 独立更新，保存即校验→安全写入→按需受控重连；Starting/connecting 阶段即使 snapshot.active=false 也不得继续使用旧 captured config；禁止“测试连接”。
+- `无法准备管理员权限` 等 one-shot 操作提示默认 3 秒自动清除，持续 runtime Fault 仍保持 typed 状态。
+- UI 对 `\\?\D:\project` 等内部 resolved path 只做 presentation 转换并显示 `D:\project`；不得改动/弱化内部 filesystem identity 授权。
+- 同级按钮使用统一动作列/左基线；900×620 几何差 ≤1 CSS px，设置两个“更换”为强制样例。
+- Dashboard 增加黄色/琥珀 `重启服务` 与红色 `关闭服务`，沿用 shared button design/alignment；真实服务 lifecycle 由 backend 执行。
 - React/WebView 只消费 typed backend projection + user intent；故意延迟 backend 操作时 UI 必须保持响应。
 
 ### LB-015 额外 UI 语言硬要求
@@ -264,7 +268,7 @@ Rust Core 维护唯一 `CurrentTaskStatus`，负责 terminal → Idle 清理，�
 
 ## LB-015
 
-主控界面增加固定“当前任务”状态区，只显示类型 / 任务 / 状态。
+主控界面增加固定单行执行状态；活动时显示类型/安全摘要/真实持续时间，待机时显示 `等待命令` 与可选的上一条命令相对时间。backend 必须保留足够 current/last timing metadata，使短任务不会因 UI polling interval 被漏掉。
 
 禁止最近活动、消息流、时间线或历史列表。
 

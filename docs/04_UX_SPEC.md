@@ -141,7 +141,9 @@ OpenAI Tunnel
 - 普通 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；管理员模式使用黄色/琥珀逻辑色；
 - 白色/近白背景上的次要按钮必须有清晰边界或足够对比，不得“白底白按钮”；
 - 不为自解释操作堆叠重复说明；
-- 成功/复制状态预留空间，不推动周围内容。
+- 成功/复制状态预留空间，不推动周围内容；
+- 同一页面/分组的同级动作按钮必须共享动作列和水平左基线；固定 900×620 自动几何 Gate 容差 `<= 1 CSS px`。设置连接区两个“更换”按钮是强制样例，不得随 Tunnel ID/“已保存”文本宽度漂移；
+- `无法准备管理员权限`、一次性保存/选择失败等 one-shot 提示默认 3 秒自动清除；持续 runtime/reconnect fault 仍通过 typed 状态/故障窗口保持，不得错误套用临时提示规则。
 
 ## UI / Backend 执行边界
 
@@ -160,17 +162,21 @@ OpenAI 安全隧道状态
 管理员权限实际运行状态
 ```
 
-主控界面禁止显示 `权限模式` 行，也禁止出现 `编辑模式 / 完整模式 / 管理员模式` 三档选择控件。首次配置由 onboarding 第 3 屏选择；完成 onboarding 后，设置页“权限”是唯一 PermissionMode 编辑入口。主控界面的 `管理员权限实际运行状态` 仅为只读 `PrivilegeState` 投影；Dashboard 不得改变 PermissionMode，也不得通过权限模式触发 UAC。
+主控界面禁止显示 `权限模式` 行，也禁止出现 `编辑模式 / 完整模式 / 管理员模式` 三档选择控件。PermissionMode 编辑允许设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏；后者不构成冲突。主控界面的 `管理员权限实际运行状态` 仅为只读 `PrivilegeState` 投影；Dashboard 不得改变 PermissionMode，也不得通过权限模式触发 UAC。
 
 必要操作按当前状态显示：
 
 - `打开 ChatGPT`
 - `切换项目`
+- `重启服务`
+- `关闭服务`
 - `重新连接`（仅连接异常时）
 - `设置`
 - `诊断`
 
 最近项目只有存在历史时才显示。
+
+`重启服务` 固定使用黄色/琥珀逻辑色；`关闭服务` 固定使用红色逻辑色。两者复用既有 shared button tokens 与动作列，不得新建第二套形状、高度、字体或对齐规则；真实 lifecycle 由 backend 执行。
 
 ## 管理员权限状态
 
@@ -198,7 +204,7 @@ Dashboard 只读状态示例：
 管理员权限：已启用
 ```
 
-若用户要激活管理员模式或切换回编辑/完整模式，必须进入设置页“权限”；Dashboard 不提供这些操作。
+若用户要激活管理员模式或切换回编辑/完整模式，可进入设置页“权限”或显式重新打开欢迎/onboarding 后的第 3 屏；Dashboard 不提供这些操作。
 
 故障：
 
@@ -216,7 +222,7 @@ Dashboard 只读状态示例：
 执行中：
 
 ```text
-●  运行测试  cargo test
+●  运行测试  cargo test · 12S
 ```
 
 要求：
@@ -226,16 +232,18 @@ Dashboard 只读状态示例：
 - 不显示“当前任务”“类型”“任务”“状态”等标题；
 - 不显示“执行中”字样；
 - 不做卡片式消息；
-- 不产生最近活动或历史列表。
+- 不产生最近活动或历史列表；
+- 持续时间来自 backend 真实任务起始时间，前端不得伪造开始/结束；
+- 文件新建、删除、修改及普通命令即使短于 UI 刷新周期，也必须由 backend current/last timing projection 捕获，禁止把 frontend polling 当作唯一事件捕获机制。
 
 其他执行示例：
 
 ```text
-●  读取文件  src-tauri/src/runtime/mod.rs
-●  搜索代码  RuntimeState
-●  修改文件  src/lib/presentation/status.ts
-●  构建  cargo build
-●  管理员操作  安装设备驱动 · 等待授权
+●  读取文件  src-tauri/src/runtime/mod.rs · 2S
+●  搜索代码  RuntimeState · 5S
+●  修改文件  src/lib/presentation/status.ts · 3S
+●  构建  cargo build · 18S
+●  管理员操作  安装设备驱动 · 等待授权 · 7S
 ```
 
 无活动任务：
@@ -244,11 +252,13 @@ Dashboard 只读状态示例：
 ○  等待命令
 ```
 
+已有上一条真实命令时显示 `○ 等待命令 · <相对时间>`；相对时间至少覆盖 `nS前`、`n分钟前`、`大于1小时`、`大于n天`。从未执行命令时只显示 `等待命令`。只允许保留上一条 timing metadata，不形成用户可浏览 history/feed/list。
+
 `等待命令` 为必须可见的中性静态状态，无动画；禁止显示“空闲”或隐藏整行。该状态及活动状态均来自 backend `CurrentTaskStatus`，前端不得自行维护任务 truth。
 
 活动圆点必须尊重 `prefers-reduced-motion`：系统减少动态时改为静态绿色点。
 
-终态只允许短暂显示，随后回到 `等待命令`，不形成消息流。
+终态只允许短暂显示，随后回到 `等待命令` 并保留上一条完成时间元数据，不形成消息流。
 
 
 ## 项目新增、选择与移除
@@ -302,6 +312,8 @@ D:\project\LocalBridge   [切换]
 不得自动切换到另一个已保存项目。
 
 “没有当前项目”不是故障状态。
+
+用户可见项目路径不得显示 Win32 verbatim 前缀。例如内部 resolved path 可为 `\\?\D:\project`，Dashboard/项目选择/诊断必须呈现 `D:\project`。显示转换不参与 validated identity、reparse 防护或授权边界。
 
 # 托盘
 
@@ -359,6 +371,8 @@ Tunnel ID          tunnel_6a7ae9...     更换
 Runtime API Key    已保存               更换
 ```
 
+两个“更换”占用同一固定动作列，在 900×620 下左边缘差 `<= 1 CSS px`，不受左侧摘要宽度影响。
+
 完整 `Runtime API Key` 永不显示。点击对应“更换”才进入连接编辑态：
 
 ```text
@@ -373,7 +387,7 @@ Runtime API Key 仅保存在 Windows 安全凭据中。
 取消                                  保存
 ```
 
-Tunnel ID 与 Runtime API Key 独立更新：只改 Tunnel ID 不要求重输/改动密钥；只改密钥不改 Tunnel ID。保存执行“基础格式校验 → 安全写入 → 若 runtime 正在运行/连接且有效连接配置变化则受控重连”。禁止“测试连接”按钮。
+Tunnel ID 与 Runtime API Key 独立更新：只改 Tunnel ID 不要求重输/改动密钥；只改密钥不改 Tunnel ID。保存执行“基础格式校验 → 安全写入 → 若 runtime 正在运行/连接且有效连接配置变化则受控重连”。“正在连接”包括 `StartingMcp / WaitingMcpReady / StartingPolicyEnforcement / WaitingPolicyReady / StartingTunnel / WaitingTunnelReady` 等异步启动阶段；这些阶段配置变化不得因 `active=false` 直接返回并继续使用旧 captured config，最终运行实例必须使用最新持久化配置。禁止“测试连接”按钮。
 
 ## 权限
 

@@ -1,4 +1,4 @@
-# 07 — Acceptance Matrix v12
+# 07 — Acceptance Matrix v13
 
 | ID | 场景 | 预期 |
 |---|---|---|
@@ -94,10 +94,10 @@
 | A88 | installed >250 MiB | 必须生成体积归因 |
 
 | A89 | Dashboard 任意 PermissionMode | 不显示“权限模式”行，不显示编辑/完整/管理员三档选择控件；只读管理员权限状态仍可见 |
-| A90 | Dashboard 权限交互 | 不能修改 PermissionMode，不能通过权限模式控件触发 UAC；完成 onboarding 后只能去设置页“权限”修改 |
+| A90 | Dashboard 权限交互 | 不能修改 PermissionMode，不能通过权限模式控件触发 UAC；权限编辑允许设置页“权限”或用户显式重新打开的 onboarding 第3屏 |
 | A91 | Dashboard + PrivilegeState::Requested | 只读显示“管理员权限：等待授权”，无模式选择器、无独立启用按钮 |
 | A92 | Dashboard + PrivilegeState::AwaitingUac | 只读显示“管理员权限：等待系统授权” |
-| A93 | Dashboard + PrivilegeState::Active | 只读显示“管理员权限：已启用”；切换权限模式必须进入设置页 |
+| A93 | Dashboard + PrivilegeState::Active | 只读显示“管理员权限：已启用”；切换权限模式可进入设置页或显式重新打开的 onboarding 第3屏 |
 | A94 | Broker Active→Faulted | Dashboard 立即显示“故障” |
 | A95 | Dashboard privilege status | 由 PrivilegeState 驱动，不由 PermissionMode 猜测 |
 | A96 | Dashboard | 不显示 PID/nonce/SID/IPC 等内部字段 |
@@ -126,25 +126,25 @@
 | A117 | runtime adapter | domain 不直接依赖上游私有结构 |
 | A118 | release rollback | migration/install failure 不破坏旧配置 |
 
-| A119 | 主控界面无活动任务 | 当前任务固定显示“等待命令”，无活动历史 |
+| A119 | 主控界面无活动任务 | 固定显示“等待命令”；若已有上一条真实命令则追加 backend 相对时间，无活动历史列表 |
 | A120 | read_file tools/call | 类型显示“读取文件”，任务显示安全路径摘要 |
 | A121 | search tools/call | 类型显示“搜索代码”，显示安全搜索摘要 |
 | A122 | command tools/call | 类型显示“执行命令/运行测试/构建”等稳定分类 |
 | A123 | policy deny | 当前任务显示“已阻止”，不得先显示“执行中” |
 | A124 | 管理员调用等待 UAC | 当前任务显示“管理员操作 / 等待授权” |
-| A125 | task terminal | 最终回到“等待命令”，不追加历史消息 |
+| A125 | task terminal | 最终回到“等待命令”并保留上一条完成时间元数据用于相对时间，不追加历史消息 |
 | A126 | 主控界面 | 无最近活动、消息流、时间线 |
 | A127 | raw tool id | 不直接显示 MCP tool identifier |
 | A128 | secret-bearing args | 任务摘要不泄漏密钥/token/nonce |
 | A129 | model prose only | 未发生 MCP/Broker 调用时不得伪造当前任务 |
 
-| A130 | 运行测试中 | 单行显示“● 运行测试 cargo test” |
+| A130 | 运行测试中 | 单行显示“● 运行测试 cargo test · <持续时间>” |
 | A131 | 当前执行状态 | 无“当前任务/类型/任务/状态”标题 |
 | A132 | Running | 不额外显示“执行中”文字 |
 | A133 | Running | 绿色活动点使用轻量脉冲动效 |
 | A134 | reduced-motion | 活动点静态，不执行脉冲 |
 | A135 | 动效 | 不推动布局、不造成文字位移 |
-| A136 | Idle | 必须显示低存在感“○ 等待命令”，不得显示“空闲”或隐藏整行 |
+| A136 | Idle | 必须显示低存在感“○ 等待命令”；执行过命令后追加 nS前/n分钟前/大于1小时/大于n天；不得显示“空闲”或隐藏整行 |
 
 | A137 | 保存 Runtime API Key | settings/JSON/TOML 中不存在明文 |
 | A138 | 保存 Runtime API Key | Windows secure credential backend 可恢复 |
@@ -182,13 +182,13 @@
 | A207 | 前台启动 | onboarding 已完成且配置有效时，打开 UI 自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作 |
 | A208 | 前台慢启动 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新 |
 | A209 | CurrentTask idle | 左下状态固定显示“等待命令”，不得显示“空闲”或隐藏 |
-| A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus 并反映到 UI；terminal 回到“等待命令”；前端不伪造 |
+| A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus/timing 并反映到 UI；短于 UI 刷新周期的 create/delete/modify/command 也不得遗漏；活动显示持续时间；terminal 回到“等待命令+上次时间”；前端不伪造 |
 | A211 | Dashboard 新项目 | “选择其他文件夹”打开原生 Windows 文件夹选择器，手填路径不是主流程 |
 | A212 | 设置结构 | 仅常规/连接/权限三组；常规仅“开机启动/关闭窗口后继续运行”；底部“打开欢迎页/完成” |
 | A213 | 设置连接固定态 | 字段严格为 `Tunnel ID` / `Runtime API Key`；密钥只显示“已保存/未保存”，两项各有“更换”，完整密钥永不回显 |
 | A214 | 设置连接编辑 | 点“更换”才编辑；未改字段不要求重输、不被覆盖；保存密钥输入不得预填真实 secret |
 | A215 | 设置部分更新 | 只改 Tunnel ID 不改/不要求 Runtime API Key；只改 Runtime API Key 不改 Tunnel ID |
-| A216 | 设置保存 | 基础格式校验→安全写入→运行/连接中且有效连接配置变化时受控重连；不存在“测试连接”按钮 |
+| A216 | 设置保存 | 基础格式校验→安全写入→运行/连接中且有效连接配置变化时受控重连；Starting/connecting 且 active=false 也不得沿用旧 captured config；不存在“测试连接”按钮 |
 | A217 | 关闭窗口继续运行=开 | X 仅隐藏窗口，runtime/tray 继续 |
 | A218 | 关闭窗口继续运行=关 | X 有序关闭 privileged gate/Broker/Tunnel/PEP/MCP 后退出；偏好版本化持久化 |
 | A219 | 3/5 权限按钮结构 | `min-height >= 80px` 或等效结构证明，能容纳标题+两行说明+上下留白；900×620 人工视觉 Gate 仍必须 PASS |
@@ -197,4 +197,14 @@
 | A222 | 诊断日志/动作 | 最近限量脱敏日志；页面动作仅“打开日志/导出诊断/完成”，无刷新/重试连接/打开欢迎页/工程 generation 字段 |
 | A223 | UI/backend 分离 | WebView 只 render typed projection + send typed intent；耗时 process/filesystem/credential/UAC/recovery 工作不占用 UI 事件线程 |
 | A224 | LB-018 Cloudflare retirement | 最终 bundle/runtime manifest/installer/launcher/fallback 不含 `cloudflared.exe`、Cloudflare managed tunnel 或 cloudflared manifest；历史 compatibility 证据不进入可执行发行物 |
-| A225 | Dashboard 权限入口唯一性 | 主页无“权限模式”及三档选项、不能修改 PermissionMode/UAC；只读管理员权限状态来自 PrivilegeState；完成 onboarding 后设置页是唯一权限模式编辑入口 |
+| A225 | Dashboard 权限边界 | 主页无“权限模式”及三档选项、不能修改 PermissionMode/UAC；只读管理员权限状态来自 PrivilegeState；设置页与显式重新打开的 onboarding 第3屏均可编辑权限 |
+| A226 | 临时操作提示 | `无法准备管理员权限`、一次性保存/选择失败等 one-shot 提示默认 3 秒自动清除；持续 runtime/reconnect Fault 不被临时规则隐藏 |
+| A227 | 短任务状态捕获 | 文件新建、删除、修改及普通命令即使在一次前端轮询周期内完成，也必须留下 backend current/last timing projection；不得只显示偶然被 polling 撞到的任务 |
+| A228 | 执行持续时间 | 活动任务单行显示 backend-grounded elapsed duration；不得由前端伪造任务开始/结束状态 |
+| A229 | 上次命令时间 | Idle 显示 `等待命令` + 上一条命令年龄，至少覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天`；从未执行则只显示 `等待命令` |
+| A230 | 用户可见 workspace path | 内部 `\\?\D:\project` 与 `D:\project` 指向同一 workspace 时，UI 只显示 `D:\project`；内部 resolved identity/path 保留且显示转换不得参与授权 |
+| A231 | 设置“更换”按钮对齐 | Tunnel ID 与 Runtime API Key 两个“更换”在 900×620 下左边缘差 ≤1 CSS px，不随摘要宽度漂移 |
+| A232 | 同级按钮对齐 | 同一页面/分组 peer actions 复用统一动作列/左基线和 shared button geometry，不允许任意 offset/第二套对齐语言 |
+| A233 | Dashboard 重启服务 | 显示黄色/琥珀 `重启服务`；真实服务生命周期由 backend 执行，且满足机器合同的 single-owner 与最新持久化配置语义 |
+| A234 | Dashboard 关闭服务 | 显示红色 `关闭服务`；真实服务生命周期由 backend 执行并记录显式 manual-stop，Dashboard 窗口保持可用并显示停止状态 |
+| A235 | 服务按钮视觉 | `重启服务`/`关闭服务` 与现有按钮共享尺寸、字体、边界、圆角和水平对齐体系，仅逻辑色不同 |

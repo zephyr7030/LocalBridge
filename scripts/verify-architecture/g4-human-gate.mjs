@@ -275,9 +275,85 @@ const G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13 = Object.freeze({
   },
 });
 
+const G3_MANUAL_SUPPLEMENT_2026_08_14 = Object.freeze({
+  schemaVersion: 21,
+  baselineCommit: "e66a3b9a0d5a844fa35ed6f63b70acaeae4e4110",
+  baselineSchemaVersion: 20,
+  replacedRules: {
+    dashboard_current_task_status: ["single_current_or_last_timing_projection", "single_ephemeral_projection"],
+  },
+  removedBaselineRules: {
+    permission_mode_post_onboarding_edit_surface: "settings_only",
+  },
+  addedRules: {
+    dashboard_restart_auto_uac_forbidden: true,
+    dashboard_restart_backend_owned_controlled_single_owner: true,
+    dashboard_restart_service_accent: "amber",
+    dashboard_service_controls: ["重启服务", "关闭服务"],
+    dashboard_service_controls_shared_button_language_required: true,
+    dashboard_stop_orderly_managed_shutdown_required: true,
+    dashboard_stop_records_manual_stop: true,
+    dashboard_stop_service_accent: "red",
+    peer_action_button_alignment_tolerance_css_px: 1,
+    peer_action_button_left_edge_alignment_required: true,
+    permission_mode_post_onboarding_edit_surfaces: ["settings", "explicitly_reopened_onboarding_screen_3"],
+    persistent_runtime_fault_not_treated_as_transient_notice: true,
+    reopened_onboarding_screen_3_permission_edit_allowed: true,
+    settings_replace_buttons_same_action_column_required: true,
+    task_active_elapsed_required: true,
+    task_execution_timing_backend_owned: true,
+    task_idle_last_command_age_format: { seconds_under_60: "nS前", minutes_under_60: "n分钟前", hours_from_1: "大于1小时", days: "大于n天" },
+    task_idle_last_command_age_required: true,
+    task_last_metadata_only_allowed: true,
+    task_short_execution_must_not_be_missed: true,
+    ui_transient_operation_notice_examples: ["无法准备管理员权限", "权限模式未更新", "一次性保存/选择失败"],
+    ui_transient_operation_notice_seconds: 3,
+    workspace_display_normalization_must_not_authorize: true,
+    workspace_internal_resolved_verbatim_path_allowed: true,
+    workspace_user_facing_verbatim_prefix_forbidden: true,
+  },
+  lb015: {
+    addedWritablePaths: [
+      "src-tauri/src/state/**", "src-tauri/src/mcp/**", "src-tauri/src/app/**", "src-tauri/src/lib.rs",
+      "tests/integration/policy/**", "tests/integration/background/**",
+    ],
+    artifactReplacements: [
+      ["post-onboarding Edit/Full/Elevated UI in Settings and explicitly reopened onboarding Screen3, with Dashboard remaining read-only", "Settings-only post-onboarding Edit/Full/Elevated minimal permission UI"],
+      ["backend-only CurrentTask truth with elapsed timing and retained last-command time metadata so short real executions cannot be missed", "backend-only CurrentTask truth with 等待命令 idle projection"],
+    ],
+    addedArtifacts: [
+      "user-facing standard Windows workspace path projection separated from internal verbatim resolved authority path",
+      "transient three-second one-shot operation feedback",
+      "shared left-edge action-column alignment for peer buttons",
+      "Dashboard amber 重启服务 and red 关闭服务 controls backed by real managed lifecycle",
+    ],
+    testReplacements: [
+      ["Dashboard never edits PermissionMode; Settings and an explicitly reopened onboarding screen 3 are both permitted permission-mode editing surfaces", "Settings is the only post-onboarding permission-mode editing surface while onboarding screen 3 remains the first-run permission selection surface"],
+      ["Dashboard no-task state is always visible as 等待命令 and never 空闲; after at least one real task it also shows backend-grounded last-command relative age", "Dashboard no-task state is always visible as 等待命令 and never 空闲"],
+      ["real production MCP and Broker execution transitions backend CurrentTaskStatus to the Dashboard, including executions completing faster than the frontend refresh interval, and active projection includes elapsed duration", "real production MCP and Broker execution transitions backend CurrentTaskStatus to the Dashboard and terminal state returns to 等待命令"],
+      ["Settings save validates changed fields then securely writes and performs controlled reconnect when effective connection configuration changed while active or in any Starting/connecting state; asynchronous startup captured with old configuration cannot continue", "Settings save validates changed fields then securely writes and performs controlled reconnect only when effective connection configuration changed while active/connecting"],
+    ],
+    addedTests: [
+      "create modify delete and ordinary command tool calls each update backend current/last task timing truth rather than depending on frontend polling luck",
+      "task age formats cover nS前, n分钟前, 大于1小时 and 大于n天 while retaining no task history/feed/list",
+      "one-shot operation messages such as 无法准备管理员权限 auto-dismiss after 3 seconds and do not become permanent page content; persistent runtime faults remain typed state",
+      "Settings Tunnel ID and Runtime API Key 更换 buttons share the same action-column left edge within 1 CSS px at 900x620 regardless of summary text width",
+      "peer action buttons across Dashboard Settings Diagnostics and onboarding follow the same horizontal alignment system instead of arbitrary per-row offsets",
+      "Dashboard displays 重启服务 with amber semantics and 关闭服务 with red semantics using the existing shared button geometry and aligned action layout",
+      "重启服务 is a backend-owned controlled restart that cancels or joins Starting Ready Recovering or Fault lifecycle state before starting exactly one current persisted configuration and never auto-prompts UAC",
+      "关闭服务 records explicit manual-stop semantics and orderly closes privileged gate Broker Tunnel PEP MCP without closing the Dashboard window",
+      "Dashboard Diagnostics and project UI render D:\\project rather than \\\\?\\D:\\project when they denote the same workspace while internal filesystem identity/resolved path remains unchanged for authorization",
+    ],
+  },
+});
+
 const containsAll = (values, required) => Array.isArray(values) && (required ?? []).every((item) => values.includes(item));
 const containsNone = (values, forbidden) => Array.isArray(values) && (forbidden ?? []).every((item) => !values.includes(item));
 const removeItems = (values, removed) => (values ?? []).filter((item) => !(removed ?? []).includes(item));
+const canonicalJson = (value) => JSON.stringify(value, (_key, candidate) => {
+  if (!candidate || Array.isArray(candidate) || typeof candidate !== "object") return candidate;
+  return Object.fromEntries(Object.keys(candidate).sort().map((key) => [key, candidate[key]]));
+});
 
 function insertAfter(values, anchor, item) {
   const result = [...values];
@@ -366,6 +442,50 @@ function normalizeG3HumanReviewGeneration2Rules(rules) {
   const normalized = structuredClone(rules ?? null);
   if (!normalized) return normalized;
   for (const key of Object.keys(G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.addedRules)) delete normalized[key];
+  return normalized;
+}
+
+export function hasExactG3ManualSupplement20260814(contractsDoc) {
+  if (contractsDoc?.schema_version !== G3_MANUAL_SUPPLEMENT_2026_08_14.schemaVersion) return false;
+  const rules = contractsDoc?.rules;
+  for (const [key, [current]] of Object.entries(G3_MANUAL_SUPPLEMENT_2026_08_14.replacedRules)) {
+    if (JSON.stringify(rules?.[key]) !== JSON.stringify(current)) return false;
+  }
+  for (const key of Object.keys(G3_MANUAL_SUPPLEMENT_2026_08_14.removedBaselineRules)) {
+    if (Object.hasOwn(rules ?? {}, key)) return false;
+  }
+  for (const [key, expected] of Object.entries(G3_MANUAL_SUPPLEMENT_2026_08_14.addedRules)) {
+    if (JSON.stringify(rules?.[key]) !== JSON.stringify(expected)) return false;
+  }
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  if (!lb015) return false;
+  if (!containsAll(lb015.writable_paths, G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.addedWritablePaths)) return false;
+  if (!containsAll(lb015.required_artifacts, G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.addedArtifacts)) return false;
+  if (!containsAll(lb015.required_tests, G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.addedTests)) return false;
+  for (const [current, old] of G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.artifactReplacements) {
+    if (!lb015.required_artifacts?.includes(current) || lb015.required_artifacts?.includes(old)) return false;
+  }
+  for (const [current, old] of G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.testReplacements) {
+    if (!lb015.required_tests?.includes(current) || lb015.required_tests?.includes(old)) return false;
+  }
+  return true;
+}
+
+export function normalizeG3ManualSupplement20260814(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = G3_MANUAL_SUPPLEMENT_2026_08_14.baselineSchemaVersion;
+  for (const [key, [, old]] of Object.entries(G3_MANUAL_SUPPLEMENT_2026_08_14.replacedRules)) normalized.rules[key] = old;
+  for (const [key, old] of Object.entries(G3_MANUAL_SUPPLEMENT_2026_08_14.removedBaselineRules)) normalized.rules[key] = old;
+  for (const key of Object.keys(G3_MANUAL_SUPPLEMENT_2026_08_14.addedRules)) delete normalized.rules[key];
+  const lb015 = normalized.prs?.["LB-015"];
+  if (lb015) {
+    lb015.writable_paths = removeItems(lb015.writable_paths, G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.addedWritablePaths);
+    lb015.required_artifacts = removeItems(lb015.required_artifacts, G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.addedArtifacts)
+      .map((item) => G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.artifactReplacements.find(([current]) => current === item)?.[1] ?? item);
+    lb015.required_tests = removeItems(lb015.required_tests, G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.addedTests)
+      .map((item) => G3_MANUAL_SUPPLEMENT_2026_08_14.lb015.testReplacements.find(([current]) => current === item)?.[1] ?? item);
+  }
   return normalized;
 }
 
@@ -474,8 +594,30 @@ export function validatePreG4GateAuthorization(
   laterRatification = G3_SIX_SCREEN_CONTRACT_RATIFICATION,
 ) {
   const findings = [];
-  if ((contractsDoc?.schema_version ?? 0) >= G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.schemaVersion) {
-    if (!hasExactG3HumanReviewGeneration2Amendment(contractsDoc)) {
+  let authorizationContracts = contractsDoc;
+  if ((contractsDoc?.schema_version ?? 0) >= G3_MANUAL_SUPPLEMENT_2026_08_14.schemaVersion) {
+    if (!hasExactG3ManualSupplement20260814(contractsDoc)) {
+      findings.push(`${expected.id}:manual-supplement-20260814-contract-amendment-drift`);
+    }
+    const supplementBaselineCommit = G3_MANUAL_SUPPLEMENT_2026_08_14.baselineCommit;
+    const supplementBaseline = git.commitExists(supplementBaselineCommit) && git.isAncestor(supplementBaselineCommit)
+      ? git.jsonAt(supplementBaselineCommit, "PR_CONTRACTS.json")
+      : null;
+    const normalizedSupplement = normalizeG3ManualSupplement20260814(contractsDoc);
+    if (supplementBaseline?.schema_version !== G3_MANUAL_SUPPLEMENT_2026_08_14.baselineSchemaVersion) {
+      findings.push(`${expected.id}:manual-supplement-20260814-baseline`);
+    } else {
+      if (JSON.stringify(normalizedSupplement?.prs) !== JSON.stringify(supplementBaseline.prs)) {
+        findings.push(`${expected.id}:manual-supplement-20260814-pr-drift`);
+      }
+      if (canonicalJson(normalizedSupplement?.rules) !== canonicalJson(supplementBaseline.rules)) {
+        findings.push(`${expected.id}:manual-supplement-20260814-rule-drift`);
+      }
+    }
+    authorizationContracts = normalizedSupplement;
+  }
+  if ((authorizationContracts?.schema_version ?? 0) >= G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.schemaVersion) {
+    if (!hasExactG3HumanReviewGeneration2Amendment(authorizationContracts)) {
       findings.push(`${expected.id}:human-review-generation2-contract-amendment-drift`);
     }
     const baselineCommit = G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.baselineCommit;
@@ -485,22 +627,22 @@ export function validatePreG4GateAuthorization(
     if (baseline?.schema_version !== G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.baselineSchemaVersion) {
       findings.push(`${expected.id}:human-review-generation2-baseline`);
     } else {
-      if (JSON.stringify(normalizeG3HumanReviewGeneration2Amendment(contractsDoc?.prs)) !== JSON.stringify(baseline.prs)) {
+      if (JSON.stringify(normalizeG3HumanReviewGeneration2Amendment(authorizationContracts?.prs)) !== JSON.stringify(baseline.prs)) {
         findings.push(`${expected.id}:human-review-generation2-pr-drift`);
       }
-      if (JSON.stringify(normalizeG3HumanReviewGeneration2Rules(contractsDoc?.rules)) !== JSON.stringify(baseline.rules)) {
+      if (JSON.stringify(normalizeG3HumanReviewGeneration2Rules(authorizationContracts?.rules)) !== JSON.stringify(baseline.rules)) {
         findings.push(`${expected.id}:human-review-generation2-rule-drift`);
       }
     }
   }
-  const schema19View = (contractsDoc?.schema_version ?? 0) >= G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.schemaVersion
-    ? normalizeG3HumanReviewGeneration2Amendment(contractsDoc?.prs)
-    : contractsDoc?.prs;
-  if ((contractsDoc?.schema_version ?? 0) >= G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.schemaVersion
+  const schema19View = (authorizationContracts?.schema_version ?? 0) >= G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.schemaVersion
+    ? normalizeG3HumanReviewGeneration2Amendment(authorizationContracts?.prs)
+    : authorizationContracts?.prs;
+  if ((authorizationContracts?.schema_version ?? 0) >= G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.schemaVersion
     && !hasExactG3HumanReviewAmendment(schema19View)) {
     findings.push(`${expected.id}:human-review-contract-amendment-drift`);
   }
-  const entries = contractsDoc?.rules?.governance_authorizations;
+  const entries = authorizationContracts?.rules?.governance_authorizations;
   const entry = Array.isArray(entries) ? entries.find((candidate) => candidate?.id === expected.id) : null;
   if (!entry
     || entry.scheme !== expected.scheme
@@ -547,7 +689,7 @@ export function validatePreG4GateAuthorization(
     }
   }
   if (JSON.stringify(normalizeAuthorizedSemanticCorrections(contractBaseline?.prs))
-    !== JSON.stringify(normalizeAuthorizedSemanticCorrections(contractsDoc?.prs))) {
+    !== JSON.stringify(normalizeAuthorizedSemanticCorrections(authorizationContracts?.prs))) {
     findings.push(`${expected.id}:ordinary-pr-contract-drift`);
   }
   return [...new Set(findings)];
