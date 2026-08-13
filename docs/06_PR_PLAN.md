@@ -140,6 +140,13 @@ Tunnel
 
 单 Dashboard、settings、diagnostics入口、recent workspace、三档权限。
 
+同时冻结全产品共享的按钮与提示基础层：
+
+- 主/次/ghost 按钮使用一致的几何、状态和层级语言；
+- 白色或近白背景上的次级按钮必须保持清晰可辨，禁止白底白按钮；
+- 自解释操作不重复堆叠说明，只保留最小必要提示；
+- 状态反馈不得造成布局位移。
+
 Dashboard 必须直接显示：
 
 - ChatGPT / Tunnel 状态；
@@ -176,18 +183,26 @@ Dashboard 必须直接显示：
 
 ## LB-016 — First-run Wizard
 
-6 屏 Wizard。
+严格 6 屏：
 
-Screen 2：
-`打开 ChatGPT MCP 应用页`
+```text
+欢迎
+→ OpenAI
+→ 项目与权限
+→ ChatGPT 自定义连接器设置
+→ ChatGPT 使用确认
+→ 启动检查
+```
 
-权限屏包含：
-
-- Edit
-- Full
-- Elevated
-
-Elevated 的 UAC 可在向导中显式由用户触发，但不得后台偷偷触发。
+- Screen 2 字段：`Tunnel ID` / `Runtime API Key`；
+- Screen 3 项目与权限合并，新项目以原生 Windows 文件夹选择器为主交互；
+- Screen 4 只允许系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；
+- Screen 4 不使用 WebView，前端不得传入任意 URL；
+- Screen 5 只做最小必要的连接器完成/使用引导，不伪造 ChatGPT 状态；
+- 若展示/复制 connector endpoint，只能使用 Rust typed projection 的已验证 Tunnel/control-plane metadata，禁止根据 Tunnel ID 推导；
+- 复制成功反馈不得造成布局位移；
+- Screen 6 只检查本地运行环境、编码服务、OpenAI Tunnel，三项全绿前 `确定` disabled，不自动跳转；
+- 权限包含编辑/完整/管理员三档；向导不自动触发 UAC。
 
 ## LB-017 — Diagnostics
 

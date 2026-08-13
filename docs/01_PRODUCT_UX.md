@@ -137,18 +137,18 @@ icon package
 
 ## 首次引导
 
-首次启动固定为 **5 屏**，不得自行增加步骤、说明卡片或额外按钮。
+首次启动固定为 **6 屏**，不得自行增加第 7 屏、说明卡片或冗余按钮。
 
 顺序：
 
 ```text
-欢迎 → OpenAI → 项目与权限 → ChatGPT → 启动检查 → 主界面
+欢迎 → OpenAI → 项目与权限 → ChatGPT 自定义连接器设置 → ChatGPT 使用确认 → 启动检查 → 主界面
 ```
 
 ### 第 1 屏
 
 ```text
-1 / 5
+1 / 6
 
 
 简单设置 即可开始
@@ -163,10 +163,10 @@ LocalBridge是链接ChatGPT与本地代码的工具
 
 ### 第 2 屏
 
-Tunnel 必须使用英文。
+字段标签固定为 `Tunnel ID` 与 `Runtime API Key`。
 
 ```text
-2 / 5
+2 / 6
 
 
 连接 OpenAI
@@ -175,13 +175,10 @@ Tunnel 必须使用英文。
 Tunnel ID
 [________________________________]
 
-运行密钥
+Runtime API Key
 [••••••••••••••••••••••••••••]
 
 运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志或命令行。
-
-
-打开 Tunnel 页面       打开运行密钥页面
 
 
                                       继续
@@ -192,13 +189,14 @@ Tunnel ID
 ### 第 3 屏
 
 ```text
-3 / 5
+3 / 6
 
 
 项目与权限
 
 
-D:\project\LocalBridge                    选择文件夹
+当前项目：D:\project\LocalBridge
+                                      选择文件夹
 
 
 ● 编辑模式
@@ -214,36 +212,54 @@ D:\project\LocalBridge                    选择文件夹
                                       继续
 ```
 
-项目与权限必须位于同一屏。管理员模式只保存偏好，不自动弹 UAC。
+项目与权限必须位于同一屏。新项目选择以原生 Windows 文件夹选择器为主交互，不以手填绝对路径作为主流程。管理员模式只保存偏好，不自动弹 UAC。
 
 ### 第 4 屏
 
 ```text
-4 / 5
+4 / 6
 
 
-连接 ChatGPT
+添加 ChatGPT 自定义连接器
 
 
-在 ChatGPT 中选择当前 Tunnel。
+1. 点击“打开连接器设置”
+2. 在 ChatGPT 中创建自定义连接器
+3. 按页面要求填写 LocalBridge 连接信息
 
-tunnel_0123456789abcdef...              复制
-
-
-                         打开 ChatGPT MCP 应用页
+                              打开连接器设置
 
 
                                       继续
 ```
 
-使用系统默认浏览器；URL 由 Rust allowlisted 常量控制；不使用 WebView。
+只允许系统默认浏览器打开固定 URL：
+
+`https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
+
+URL 由 Rust allowlisted 常量控制；前端不能提供任意 URL；不使用 WebView。引导只保留完成配置所需的最少步骤。
 
 ### 第 5 屏
+
+```text
+5 / 6
+
+
+在 ChatGPT 中使用 LocalBridge
+
+完成连接器创建后，返回这里继续。
+
+                                      继续
+```
+
+LocalBridge 不伪造或猜测 ChatGPT 是否已创建连接器，不读取 ChatGPT 会话。若本屏需要展示或复制连接器 endpoint，必须来自 Rust 的 typed projection，并以已验证 Tunnel/control-plane metadata 为依据；禁止前端从 Tunnel ID 推导或自行拼接 URL。复制成功反馈预留固定空间，不得推动布局。
+
+### 第 6 屏
 
 检查中：
 
 ```text
-5 / 5
+6 / 6
 
 
 正在准备
@@ -276,7 +292,7 @@ Tunnel start → ready
 三项全部通过后：
 
 ```text
-5 / 5
+6 / 6
 
 
 正在准备
@@ -287,7 +303,7 @@ Tunnel start → ready
 ● OpenAI Tunnel
 
 
-设置完成，尝试在插件中选择刚刚添加的工具吧！
+设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！
 
 
                                   确定
@@ -302,12 +318,12 @@ Tunnel start → ready
 禁止：
 
 - 自动跳转；
-- 第 6 屏；
+- 第 7 屏；
 - “ChatGPT 连接”第四个检查项；
 - 第二个完成按钮；
 - 测试通过前显示完成提示。
 
-失败时只显示一句最关键错误和一个必要动作。
+失败时只显示一句最关键错误和一个必要动作。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。所有提示遵循最小必要原则。
 ## 权限
 
 ```text

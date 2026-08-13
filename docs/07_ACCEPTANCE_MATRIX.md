@@ -3,9 +3,9 @@
 | ID | 场景 | 预期 |
 |---|---|---|
 | A01 | 首次启动 | 进入 Wizard，不进入 Dashboard |
-| A02 | Screen 2 | 存在“打开 ChatGPT MCP 应用页” |
-| A03 | Screen 2 按钮 | 系统默认浏览器，不创建 WebView |
-| A04 | ChatGPT URL | 只能打开 allowlisted `https://chatgpt.com/...` |
+| A02 | Screen 2 | 字段标签严格为 `Tunnel ID` / `Runtime API Key` |
+| A03 | Screen 4 连接器按钮 | 系统默认浏览器，不创建 WebView |
+| A04 | ChatGPT URL | 只能打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins` |
 | A05 | 选择 workspace | 不自动授权父目录/磁盘根 |
 | A06 | Edit tools/list | 不出现 process-exec capability |
 | A07 | Edit tools/call 绕过 list | 仍被拒绝 |
@@ -162,3 +162,12 @@
 | A150 | NoActiveWorkspace | 可以选择新项目，runtime 之前保持停止 |
 | A151 | MCP tool call | 不能新增/选择/移除项目 |
 | A152 | 当前项目启动时不存在 | 不静默切换其他项目 |
+
+| A171 | 首次启动 | 严格 6 屏，无第 7 屏 |
+| A172 | 3/6 项目选择 | 新项目使用原生 Windows 文件夹选择器 |
+| A173 | 4/6 连接器设置 | 系统浏览器打开固定自定义连接器 deep link；无 WebView/任意 URL |
+| A174 | 5/6 | 不伪造 ChatGPT 状态；endpoint 只来自 Rust verified metadata projection |
+| A175 | 5/6 copy feedback | 不造成布局位移 |
+| A176 | 6/6 | 三项全绿前确定 disabled；全绿后才显示完成提示，不自动跳转 |
+| A177 | G3 按钮 | 一致且可辨识；禁止白底白按钮 |
+| A178 | G3 提示 | 最小必要，不重复堆叠自解释说明 |

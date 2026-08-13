@@ -48,16 +48,19 @@ current_pr    = LB-000
 
 G0 审查 PASS 前 G1 不得开始。
 
-Additional UI freeze:
+Additional UI freeze (superseded by explicit user contract amendment on 2026-08-13):
 
-- onboarding = exactly 5 screens;
-- 1/5 = `简单设置 即可开始`;
-- OpenAI = screen 2, `Tunnel` remains English;
-- workspace + permission = screen 3;
-- no screen 6;
-- screen 5 confirm disabled until all checks green;
+- onboarding = exactly 6 screens;
+- 1/6 = `简单设置 即可开始`;
+- OpenAI = screen 2 with `Tunnel ID` and `Runtime API Key` labels;
+- workspace + permission = screen 3 and uses the native Windows folder picker as the primary new-project interaction;
+- screen 4 = ChatGPT custom connector setup, system browser only, fixed URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`;
+- screen 5 = minimum connector confirmation/use guidance, with no fabricated ChatGPT-state detection;
+- no screen 7;
+- screen 6 confirm disabled until all three checks are green;
 - completion hint appears only after readiness;
-- user clicks confirm to enter main UI.
+- user clicks confirm to enter main UI;
+- buttons use one coherent visible affordance system; white-on-white ambiguous controls and layout-shifting copy feedback are forbidden.
 
 
 Frozen brand icon:

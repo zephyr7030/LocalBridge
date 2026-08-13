@@ -3,9 +3,9 @@
 | ID | 场景 | 预期 |
 |---|---|---|
 | A01 | 首次启动 | 进入 Wizard，不进入 Dashboard |
-| A02 | Screen 2 | 存在“打开 ChatGPT MCP 应用页” |
-| A03 | Screen 2 按钮 | 系统默认浏览器，不创建 WebView |
-| A04 | ChatGPT URL | 只能打开 allowlisted `https://chatgpt.com/...` |
+| A02 | Screen 2 | 字段标签严格为 `Tunnel ID` / `Runtime API Key` |
+| A03 | Screen 4 连接器按钮 | 系统默认浏览器，不创建 WebView |
+| A04 | ChatGPT URL | 只能打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins` |
 | A05 | 选择 workspace | 不自动授权父目录/磁盘根 |
 | A06 | Edit tools/list | 不出现 process-exec capability |
 | A07 | Edit tools/call 绕过 list | 仍被拒绝 |
@@ -182,25 +182,31 @@
 | A169 | review governance write | 只能改 PR_INDEX/PROJECT_STATE 状态字段 |
 | A170 | execution | 组内仍严格按 LB 编号顺序 |
 
-| A171 | 首次启动 | 总屏数严格为 5 |
-| A172 | 1/5 | 标题为“简单设置 即可开始” |
-| A173 | 1/5 | 说明为“LocalBridge是链接ChatGPT与本地代码的工具” |
-| A174 | 1/5 | 只有一个“开始”主按钮 |
-| A175 | 2/5 | Tunnel 术语保持英文 |
-| A176 | 2/5 | 密钥下方仅一行安全保存说明 |
-| A177 | 3/5 | 项目与权限位于同一屏 |
-| A178 | 5/5 未全部 Ready | “确定”灰色且 disabled |
-| A179 | 5/5 未全部 Ready | 不显示完成提示 |
-| A180 | 5/5 全部 Ready | 三项全部绿色 |
-| A181 | 5/5 全部 Ready | 显示“设置完成，尝试在插件中选择刚刚添加的工具吧！” |
-| A182 | 5/5 全部 Ready | “确定”启用但不自动跳转 |
-| A183 | 点击确定 | 标记 onboarding_complete 并进入主界面 |
-| A184 | 首次启动 | 不存在第 6 屏 |
+| A171 | 首次启动 | 总屏数严格为 6，不存在第 7 屏 |
+| A172 | 1/6 | 标题为“简单设置 即可开始” |
+| A173 | 1/6 | 说明为“LocalBridge是链接ChatGPT与本地代码的工具” |
+| A174 | 1/6 | 只有一个“开始”主按钮 |
+| A175 | 2/6 | 字段为 `Tunnel ID` / `Runtime API Key` |
+| A176 | 2/6 | 密钥下方仅一行安全保存说明 |
+| A177 | 3/6 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器 |
+| A178 | 4/6 | “打开连接器设置”只打开固定 ChatGPT 自定义连接器 deep link |
+| A179 | 4/6 | 使用系统默认浏览器，禁止 WebView/任意前端 URL |
+| A180 | 4/6 | 引导简短、傻瓜式，不堆叠非必要提示 |
+| A181 | 5/6 | 不伪造或猜测 ChatGPT 连接器创建状态 |
+| A182 | 5/6 connector endpoint | 如展示/复制，只来自 Rust typed projection 的已验证 Tunnel/control-plane metadata |
+| A183 | 5/6 connector endpoint | 前端不得从 Tunnel ID 推导、拼接或伪造 endpoint |
+| A184 | 5/6 copy feedback | 复制成功提示不造成布局位移 |
+| A185 | 6/6 未全部 Ready | “确定”灰色且 disabled，不显示完成提示 |
+| A186 | 6/6 全部 Ready | 仅本地运行环境/编码服务/OpenAI Tunnel 三项全部绿色 |
+| A187 | 6/6 全部 Ready | 显示“设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！” |
+| A188 | 6/6 全部 Ready | “确定”启用但不自动跳转；点击后标记 onboarding_complete 并进入主界面 |
+| A189 | G3 UI 按钮 | 主/次/ghost 使用一致且可辨识的按钮系统，白色表面上不存在难识别白色按钮 |
+| A190 | G3 UI 提示 | 自解释操作不重复堆叠说明，遵循最小必要提示原则 |
 
-| A185 | 品牌资源 | PNG 为 1024×1024 RGBA |
-| A186 | Windows 图标 | ICO 包含 16/24/32/48/64/128/256 px |
-| A187 | 应用/安装包 | 使用冻结的 LocalBridge 图标 |
-| A188 | 系统托盘 | 使用冻结的 LocalBridge 图标，不使用占位图/emoji |
-| A189 | UI 实现 | 不因品牌图标引入第三方 icon library |
-| A190 | 资产完整性 | PNG SHA256 = `710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a` |
-| A191 | 资产完整性 | ICO SHA256 = `c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78` |
+| A191 | 品牌资源 | PNG 为 1024×1024 RGBA |
+| A192 | Windows 图标 | ICO 包含 16/24/32/48/64/128/256 px |
+| A193 | 应用/安装包 | 使用冻结的 LocalBridge 图标 |
+| A194 | 系统托盘 | 使用冻结的 LocalBridge 图标，不使用占位图/emoji |
+| A195 | UI 实现 | 不因品牌图标引入第三方 icon library |
+| A196 | 资产完整性 | PNG SHA256 = `710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a` |
+| A197 | 资产完整性 | ICO SHA256 = `c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78` |

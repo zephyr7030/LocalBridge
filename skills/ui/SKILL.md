@@ -6,16 +6,25 @@
 - 自动恢复 5 次内不新增 UI，全部失败才一个错误窗口。
 - 动效低干扰并尊重 `prefers-reduced-motion`。
 
-## 首次启动 5 屏
+## 首次启动 6 屏
 
 固定：
 
 ```text
-欢迎 → OpenAI → 项目与权限 → ChatGPT → 启动检查
+欢迎 → OpenAI → 项目与权限 → ChatGPT 自定义连接器设置 → ChatGPT 使用确认 → 启动检查
 ```
 
-第 5 屏未 Ready：`确定` 灰色 disabled，完成提示隐藏。
+第 3 屏新项目使用原生 Windows 文件夹选择器。
 
-全 Ready：三项绿色，显示 `设置完成，尝试在插件中选择刚刚添加的工具吧！`，启用 `确定`。
+第 4 屏只允许系统浏览器打开固定自定义连接器 URL：
+`https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`。
+
+第 5 屏不伪造 ChatGPT 状态；如展示/复制 endpoint，只能使用 Rust typed projection 的已验证 Tunnel/control-plane metadata，禁止根据 Tunnel ID 推导；复制反馈不得造成布局位移。
+
+第 6 屏未 Ready：`确定` 灰色 disabled，完成提示隐藏。
+
+全 Ready：三项绿色，显示 `设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！`，启用 `确定`。
 
 必须由用户点击“确定”进入主界面，不自动跳转。
+
+按钮必须统一且可辨识，禁止白底白按钮；提示只保留当前动作所需的最少信息。

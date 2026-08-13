@@ -1,13 +1,17 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
   "ux_hard_requirements": [
     "No embedded ChatGPT",
-    "Wizard screen 2 includes Open ChatGPT MCP App Page",
+    "Wizard screen 4 opens the fixed ChatGPT custom connector setup page in the system default browser",
+    "Wizard uses exactly six screens and no seventh screen",
+    "Workspace selection uses the native Windows folder picker as the primary new-project interaction",
+    "Buttons use a coherent visible affordance system and never disappear into white surfaces",
+    "Copy-success feedback does not shift layout",
     "System default browser only",
     "Single dashboard",
     "Tray-first background runtime",
@@ -132,7 +136,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Resolve LB-016 machine-contract semantic conflict (6-screen vs exact five-screen) and re-run LB-016/LB-017 before G3 adversarial review generation 2"
+    "next_action": "Rework LB-015 first for the coherent visible button system and minimum-prompt UI baseline; then rework LB-016 to the newly ratified six-screen onboarding contract with native Windows folder picker and fixed ChatGPT custom connector deep link; re-run LB-017 and then G3 adversarial review generation 2"
   },
   "current_task_ui": {
     "enabled": true,
@@ -200,7 +204,11 @@
     "animation_library": false,
     "icon_package": false,
     "css_framework": false,
-    "bundled_font": false
+    "bundled_font": false,
+    "button_system": "coherent_visible_affordance",
+    "white_on_white_ambiguous_buttons": false,
+    "minimum_necessary_prompts": true,
+    "copy_feedback_layout_shift": false
   },
   "pr_group_policy": {
     "groups": [
@@ -219,12 +227,13 @@
     "executor_pre_authorization_requires_concrete_record_and_user_audit": true
   },
   "onboarding_ui": {
-    "screens": 5,
+    "screens": 6,
     "screen_order": [
       "welcome",
       "openai",
       "workspace_and_permission",
-      "chatgpt",
+      "chatgpt_connector_setup",
+      "chatgpt_connector_use",
       "runtime_check"
     ],
     "screen_1": {
@@ -234,9 +243,32 @@
     },
     "screen_2": {
       "tunnel_term": "Tunnel",
+      "field_labels": [
+        "Tunnel ID",
+        "Runtime API Key"
+      ],
       "runtime_key_security_hint": "运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志或命令行。"
     },
+    "screen_3": {
+      "workspace_and_permission_combined": true,
+      "native_windows_folder_picker": true,
+      "raw_path_entry_primary": false
+    },
+    "screen_4": {
+      "purpose": "chatgpt_custom_connector_setup",
+      "system_browser_only": true,
+      "url": "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins",
+      "embedded_webview": false,
+      "guidance": "minimum_foolproof_steps"
+    },
     "screen_5": {
+      "purpose": "chatgpt_connector_use_confirmation",
+      "automatic_chatgpt_state_detection": false,
+      "connector_endpoint_source": "typed_rust_projection_from_verified_tunnel_or_control_plane_metadata_only",
+      "frontend_endpoint_derivation": false,
+      "copy_success_layout_shift": false
+    },
+    "screen_6": {
       "title": "正在准备",
       "checks": [
         "本地运行环境",
@@ -244,7 +276,7 @@
         "OpenAI Tunnel"
       ],
       "confirm_disabled_until_all_green": true,
-      "success_message": "设置完成，尝试在插件中选择刚刚添加的工具吧！",
+      "success_message": "设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！",
       "success_message_visible_before_ready": false,
       "auto_advance": false,
       "extra_chatgpt_check": false
