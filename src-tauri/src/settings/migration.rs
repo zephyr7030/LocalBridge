@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 
-use super::model::{AppData, CURRENT_SETTINGS_SCHEMA_VERSION, StoredSettings};
+use super::model::{
+    AppData, CURRENT_SETTINGS_SCHEMA_VERSION, StoredPermissionMode, StoredSettings,
+};
 use crate::workspace::{
     PendingWorkspaceConfirmation, PendingWorkspaceReason, WorkspaceEntry, WorkspaceId,
     WorkspacePersistence,
@@ -53,9 +55,25 @@ struct V1 {
 #[serde(deny_unknown_fields)]
 struct V2 {
     schema_version: u32,
-    settings: StoredSettings,
+    settings: HistoricalStoredSettings,
     #[serde(default)]
     workspace: Option<LegacyWorkspaceRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoricalStoredSettings {
+    permission_mode: StoredPermissionMode,
+    auto_start_services: bool,
+    onboarding_complete: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V3 {
+    schema_version: u32,
+    settings: HistoricalStoredSettings,
+    workspace: WorkspacePersistence,
 }
 
 pub fn migrate_bytes(bytes: &[u8]) -> Result<MigrationOutcome, MigrationError> {
@@ -74,6 +92,7 @@ pub fn migrate_bytes(bytes: &[u8]) -> Result<MigrationOutcome, MigrationError> {
         value = match version {
             1 => migrate_v1_to_v2(value)?,
             2 => migrate_v2_to_v3(value)?,
+            3 => migrate_v3_to_v4(value)?,
             other => {
                 return Err(MigrationError::HistoricalSchemaInvalid {
                     version: other,
@@ -125,7 +144,7 @@ fn migrate_v1_to_v2(value: Value) -> Result<Value, MigrationError> {
     }
     serde_json::to_value(V2 {
         schema_version: 2,
-        settings: StoredSettings {
+        settings: HistoricalStoredSettings {
             permission_mode: old.permission_mode,
             auto_start_services: old.auto_start_services,
             onboarding_complete: old.onboarding_complete,
@@ -205,15 +224,41 @@ fn migrate_v2_to_v3(value: Value) -> Result<Value, MigrationError> {
         }
     }
 
-    let current = AppData {
-        schema_version: CURRENT_SETTINGS_SCHEMA_VERSION,
+    let current = V3 {
+        schema_version: 3,
         settings: old.settings,
         workspace,
+    };
+    serde_json::to_value(current)
+        .map_err(|error| MigrationError::MigrationSerialization(error.to_string()))
+}
+
+fn migrate_v3_to_v4(value: Value) -> Result<Value, MigrationError> {
+    let old: V3 =
+        serde_json::from_value(value).map_err(|error| MigrationError::HistoricalSchemaInvalid {
+            version: 3,
+            detail: error.to_string(),
+        })?;
+    if old.schema_version != 3 {
+        return Err(MigrationError::HistoricalSchemaInvalid {
+            version: 3,
+            detail: "version tag mismatch".to_owned(),
+        });
+    }
+    let current = AppData {
+        schema_version: CURRENT_SETTINGS_SCHEMA_VERSION,
+        settings: StoredSettings {
+            permission_mode: old.settings.permission_mode,
+            auto_start_services: old.settings.auto_start_services,
+            close_window_continue_running: true,
+            onboarding_complete: old.settings.onboarding_complete,
+        },
+        workspace: old.workspace,
     };
     current
         .validate()
         .map_err(|error| MigrationError::HistoricalSchemaInvalid {
-            version: 2,
+            version: 3,
             detail: format!("migrated current data invalid: {error:?}"),
         })?;
     serde_json::to_value(current)

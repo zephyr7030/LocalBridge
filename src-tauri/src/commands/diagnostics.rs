@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager};
 
 use crate::app::DesktopLifecycle;
 use crate::credentials::{CredentialStore, WindowsCredentialStore};
@@ -8,19 +8,25 @@ use crate::diagnostics::{
 };
 
 #[tauri::command]
-pub fn get_diagnostics(
-    _app: AppHandle,
-    lifecycle: State<'_, DesktopLifecycle>,
-) -> Result<DiagnosticsSnapshot, String> {
+pub async fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<DesktopLifecycle>();
+        get_diagnostics_blocking(&lifecycle)
+    })
+    .await
+    .map_err(|_| "诊断状态后台任务异常".to_string())?
+}
+
+fn get_diagnostics_blocking(lifecycle: &DesktopLifecycle) -> Result<DiagnosticsSnapshot, String> {
     let metadata = WindowsCredentialStore::default()
         .runtime_api_key_metadata()
-        .map_err(|_| "无法读取运行密钥状态".to_string())?;
+        .map_err(|_| "无法读取Runtime API Key状态".to_string())?;
     let install_root = production_install_root()?;
     let runtime = lifecycle.runtime_snapshot();
     let diagnostics_runtime = DiagnosticsRuntimeInput {
         active: runtime.active,
         state: runtime.state,
-        active_workspace: runtime.configured_workspace.is_some(),
+        active_workspace: runtime.configured_workspace,
         outage: runtime.outage.map(|outage| DiagnosticsOutageInput {
             generation: outage.generation,
             component: outage.component,
@@ -37,26 +43,39 @@ pub fn get_diagnostics(
 }
 
 #[tauri::command]
-pub fn diagnostics_retry_connection(lifecycle: State<'_, DesktopLifecycle>) -> Result<(), String> {
-    lifecycle
-        .manual_retry_after_attention()
-        .map_err(|_| "当前连接无法重试".to_string())?;
-    Ok(())
+pub async fn open_logs(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = app
+            .path()
+            .app_data_dir()
+            .map_err(|_| "无法定位日志目录".to_string())?
+            .join("logs");
+        std::fs::create_dir_all(&root).map_err(|_| "无法创建日志目录".to_string())?;
+        std::process::Command::new("explorer.exe")
+            .arg(&root)
+            .spawn()
+            .map_err(|_| "无法打开日志目录".to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|_| "打开日志后台任务异常".to_string())?
 }
 
 #[tauri::command]
-pub fn export_diagnostics(
-    app: AppHandle,
-    lifecycle: State<'_, DesktopLifecycle>,
-) -> Result<String, String> {
-    let snapshot = get_diagnostics(app.clone(), lifecycle)?;
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "无法定位应用数据目录".to_string())?;
-    export_snapshot(&root, &snapshot)
-        .map(|path| path.to_string_lossy().into_owned())
-        .map_err(|_| "无法导出诊断信息".to_string())
+pub async fn export_diagnostics(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<DesktopLifecycle>();
+        let snapshot = get_diagnostics_blocking(&lifecycle)?;
+        let root = app
+            .path()
+            .app_data_dir()
+            .map_err(|_| "无法定位应用数据目录".to_string())?;
+        export_snapshot(&root, &snapshot)
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|_| "无法导出诊断信息".to_string())
+    })
+    .await
+    .map_err(|_| "诊断导出后台任务异常".to_string())?
 }
 
 fn production_install_root() -> Result<std::path::PathBuf, String> {

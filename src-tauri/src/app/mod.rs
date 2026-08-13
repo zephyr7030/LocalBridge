@@ -17,9 +17,9 @@ pub use autostart::{
     AutostartError, AutostartManager, CURRENT_USER_RUN_KEY, LOCALBRIDGE_RUN_VALUE,
 };
 pub use background::{
-    BackgroundRecoveryAction, DesktopExitError, DesktopLifecycle, DesktopRuntimeStartError,
-    ExitRuntime, PrivilegeExit, ShutdownReport, StartupMode, attention_action, recovery_action,
-    shutdown_in_security_order,
+    BackgroundRecoveryAction, DesktopBackendHandle, DesktopExitError, DesktopLifecycle,
+    DesktopRuntimeStartError, ExitRuntime, PrivilegeExit, ShutdownReport, StartupMode,
+    attention_action, recovery_action, shutdown_in_security_order,
 };
 #[cfg(windows)]
 pub use single_instance::{SingleInstanceAcquire, SingleInstanceError, SingleInstanceGuard};

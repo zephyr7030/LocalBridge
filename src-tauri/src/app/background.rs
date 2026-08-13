@@ -1,4 +1,5 @@
 use std::ffi::OsStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, TryLockError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -398,6 +399,7 @@ pub struct DesktopLifecycle {
     runtime: Arc<Mutex<ProductionRuntimeOwner>>,
     recovery_cancellation: RecoveryCancellation,
     runtime_snapshot_cache: Arc<RwLock<DesktopRuntimeSnapshot>>,
+    close_window_continue_running: Arc<AtomicBool>,
     watchdog_shutdown: Mutex<Option<mpsc::Sender<()>>>,
     watchdog_thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -419,6 +421,7 @@ impl DesktopLifecycle {
         let runtime = Arc::new(Mutex::new(ProductionRuntimeOwner::default()));
         let recovery_cancellation = RecoveryCancellation::default();
         let runtime_snapshot_cache = Arc::new(RwLock::new(DesktopRuntimeSnapshot::inactive()));
+        let close_window_continue_running = Arc::new(AtomicBool::new(true));
         let monitor_operation = Arc::clone(&runtime_operation);
         let monitor_runtime = Arc::clone(&runtime);
         let monitor_snapshot = Arc::clone(&runtime_snapshot_cache);
@@ -456,6 +459,7 @@ impl DesktopLifecycle {
             runtime,
             recovery_cancellation,
             runtime_snapshot_cache,
+            close_window_continue_running,
             watchdog_shutdown: Mutex::new(Some(shutdown_tx)),
             watchdog_thread: Mutex::new(Some(watchdog_thread)),
         }
@@ -465,45 +469,31 @@ impl DesktopLifecycle {
         &self.privilege
     }
 
+    pub fn set_close_window_continue_running(&self, enabled: bool) {
+        self.close_window_continue_running
+            .store(enabled, Ordering::Release);
+    }
+
+    pub fn close_window_continue_running(&self) -> bool {
+        self.close_window_continue_running.load(Ordering::Acquire)
+    }
+
+    pub fn backend_handle(&self) -> DesktopBackendHandle {
+        DesktopBackendHandle {
+            privilege: self.privilege.clone(),
+            runtime_operation: Arc::clone(&self.runtime_operation),
+            runtime: Arc::clone(&self.runtime),
+            recovery_cancellation: self.recovery_cancellation.clone(),
+            runtime_snapshot_cache: Arc::clone(&self.runtime_snapshot_cache),
+        }
+    }
+
     #[cfg(windows)]
     pub fn start_production_runtime(
         &self,
         config: ProductionRuntimeConfig,
     ) -> Result<(), DesktopRuntimeStartError> {
-        self.recovery_cancellation.cancel();
-        let _operation = self
-            .runtime_operation
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if self
-            .runtime
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .is_active()
-        {
-            return Err(DesktopRuntimeStartError::AlreadyRegistered);
-        }
-
-        let driver = ProductionRuntimeDriver::new_owned(
-            config,
-            WindowsCredentialStore::default(),
-            generate_internal_bearer,
-        )
-        .with_privileged_execution(Arc::new(self.privilege.gateway()));
-        let mut runtime = RuntimeOrchestrator::new(driver);
-        runtime.start().map_err(DesktopRuntimeStartError::Runtime)?;
-        let runtime = AutoRecoveryRuntime::new_with_cancellation(
-            runtime,
-            SystemRecoveryClock::default(),
-            self.recovery_cancellation.clone(),
-        );
-        let mut owner = self
-            .runtime
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        owner.activate(runtime)?;
-        self.write_snapshot_cache(owner.snapshot());
-        Ok(())
+        self.backend_handle().start_production_runtime(config)
     }
 
     pub fn shutdown(&self) -> ShutdownReport {
@@ -683,6 +673,146 @@ impl DesktopLifecycle {
             .runtime_snapshot_cache
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
+    }
+}
+
+#[derive(Clone)]
+pub struct DesktopBackendHandle {
+    privilege: PrivilegeController,
+    runtime_operation: Arc<Mutex<()>>,
+    runtime: Arc<Mutex<ProductionRuntimeOwner>>,
+    recovery_cancellation: RecoveryCancellation,
+    runtime_snapshot_cache: Arc<RwLock<DesktopRuntimeSnapshot>>,
+}
+
+impl DesktopBackendHandle {
+    #[cfg(windows)]
+    pub fn start_production_runtime(
+        &self,
+        config: ProductionRuntimeConfig,
+    ) -> Result<(), DesktopRuntimeStartError> {
+        self.recovery_cancellation.cancel();
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_active()
+        {
+            return Err(DesktopRuntimeStartError::AlreadyRegistered);
+        }
+        let driver = ProductionRuntimeDriver::new_owned(
+            config,
+            WindowsCredentialStore::default(),
+            generate_internal_bearer,
+        )
+        .with_privileged_execution(Arc::new(self.privilege.gateway()));
+        let mut runtime = RuntimeOrchestrator::new(driver);
+        runtime.start().map_err(DesktopRuntimeStartError::Runtime)?;
+        let runtime = AutoRecoveryRuntime::new_with_cancellation(
+            runtime,
+            SystemRecoveryClock::default(),
+            self.recovery_cancellation.clone(),
+        );
+        let mut owner = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        owner.activate(runtime)?;
+        *self
+            .runtime_snapshot_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = owner.snapshot();
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    pub fn spawn_start_production_runtime(
+        &self,
+        config: ProductionRuntimeConfig,
+    ) -> std::io::Result<JoinHandle<()>> {
+        let backend = self.clone();
+        let configured_workspace = config.workspace.clone();
+        *self
+            .runtime_snapshot_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = DesktopRuntimeSnapshot {
+            active: false,
+            state: RuntimeState::StartingMcp,
+            current_task: CurrentTaskStatus::Idle,
+            configured_workspace: Some(configured_workspace.clone()),
+            outage: None,
+        };
+        let spawn = thread::Builder::new()
+            .name("localbridge-desktop-start".into())
+            .spawn(move || {
+                match backend.start_production_runtime(config) {
+                    Ok(()) => {}
+                    Err(DesktopRuntimeStartError::Runtime(error)) => {
+                        *backend
+                            .runtime_snapshot_cache
+                            .write()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                            DesktopRuntimeSnapshot {
+                                active: false,
+                                state: RuntimeState::Faulted(error.fault),
+                                current_task: CurrentTaskStatus::Idle,
+                                configured_workspace: Some(configured_workspace),
+                                outage: None,
+                            };
+                    }
+                    Err(DesktopRuntimeStartError::AlreadyRegistered) => {
+                        let snapshot = backend
+                            .runtime
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .snapshot();
+                        *backend
+                            .runtime_snapshot_cache
+                            .write()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
+                    }
+                }
+            });
+        if spawn.is_err() {
+            *self
+                .runtime_snapshot_cache
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                DesktopRuntimeSnapshot::inactive();
+        }
+        spawn
+    }
+
+    pub fn shutdown(&self) -> ShutdownReport {
+        self.recovery_cancellation.cancel();
+        let _operation = self
+            .runtime_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut runtime = self
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let report = shutdown_in_security_order(Some(&mut *runtime), &self.privilege);
+        *self
+            .runtime_snapshot_cache
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = DesktopRuntimeSnapshot::inactive();
+        report
+    }
+
+    pub fn spawn_shutdown_then(
+        &self,
+        after_shutdown: impl FnOnce(ShutdownReport) + Send + 'static,
+    ) -> std::io::Result<JoinHandle<()>> {
+        let backend = self.clone();
+        thread::Builder::new()
+            .name("localbridge-desktop-shutdown".into())
+            .spawn(move || after_shutdown(backend.shutdown()))
     }
 }
 

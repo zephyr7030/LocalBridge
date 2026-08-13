@@ -72,6 +72,7 @@ pub fn configure_desktop_startup(
     let data = SettingsStore::new(app_data_dir.join("settings.json"))
         .load()
         .map_err(DesktopStartupError::Settings)?;
+    lifecycle.set_close_window_continue_running(data.settings.close_window_continue_running);
     let profile_store = StartupProfileStore::new(app_data_dir.join(STARTUP_PROFILE_FILE_NAME));
     let profile = profile_store.load().map_err(DesktopStartupError::Profile)?;
 
@@ -81,7 +82,7 @@ pub fn configure_desktop_startup(
         .map_err(DesktopStartupError::Autostart)?;
 
     let permission_mode: PermissionMode = data.settings.permission_mode.into();
-    apply_background_privilege_preference(startup_mode, permission_mode, lifecycle)?;
+    restore_privilege_preference(permission_mode, lifecycle)?;
 
     let config = match build_background_resume_config(
         app_data_dir,
@@ -94,17 +95,17 @@ pub fn configure_desktop_startup(
         Err(suppression) => return Ok(DesktopStartupOutcome::ServicesSuppressed(suppression)),
     };
     lifecycle
-        .start_production_runtime(config)
-        .map_err(DesktopStartupError::Runtime)?;
+        .backend_handle()
+        .spawn_start_production_runtime(config)
+        .map_err(DesktopStartupError::AppDataIo)?;
     Ok(DesktopStartupOutcome::ServicesStarted)
 }
 
-fn apply_background_privilege_preference(
-    startup_mode: StartupMode,
+fn restore_privilege_preference(
     permission_mode: PermissionMode,
     lifecycle: &DesktopLifecycle,
 ) -> Result<(), DesktopStartupError> {
-    if startup_mode == StartupMode::Background && permission_mode == PermissionMode::Elevated {
+    if permission_mode == PermissionMode::Elevated {
         lifecycle
             .privilege()
             .request_without_uac()
@@ -131,16 +132,13 @@ fn build_background_resume_config(
     profile: &StartupProfile,
     install_root: PathBuf,
 ) -> Result<Result<ProductionRuntimeConfig, StartupSuppression>, DesktopStartupError> {
-    if startup_mode != StartupMode::Background {
-        return Ok(Err(StartupSuppression::Foreground));
-    }
     if !data.settings.onboarding_complete {
         return Ok(Err(StartupSuppression::OnboardingIncomplete));
     }
-    if !data.settings.auto_start_services {
+    if startup_mode == StartupMode::Background && !data.settings.auto_start_services {
         return Ok(Err(StartupSuppression::AutoStartDisabled));
     }
-    if profile.manual_stop_latched() {
+    if startup_mode == StartupMode::Background && profile.manual_stop_latched() {
         return Ok(Err(StartupSuppression::ManualStopLatched));
     }
     let Some(tunnel_id) = profile

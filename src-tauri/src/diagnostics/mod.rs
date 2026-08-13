@@ -1,8 +1,10 @@
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::runtime::{RecoveryDisposition, RuntimeOutage};
@@ -10,6 +12,8 @@ use crate::state::{PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState}
 
 pub const DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+const RECENT_EVENT_LIMIT: usize = 8;
+static RECENT_USER_EVENTS: OnceLock<Mutex<VecDeque<DiagnosticEvent>>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticsOutageInput {
@@ -23,7 +27,7 @@ pub struct DiagnosticsOutageInput {
 pub struct DiagnosticsRuntimeInput {
     pub active: bool,
     pub state: RuntimeState,
-    pub active_workspace: bool,
+    pub active_workspace: Option<PathBuf>,
     pub outage: Option<DiagnosticsOutageInput>,
 }
 
@@ -92,7 +96,16 @@ pub struct DiagnosticsSnapshot {
     pub broker: BrokerDiagnostics,
     pub reconnect: Option<ReconnectDiagnostics>,
     pub runtime_key_present: bool,
-    pub active_workspace: bool,
+    pub active_workspace_path: Option<String>,
+    pub recent_events: Vec<DiagnosticEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticEvent {
+    pub level: DiagnosticLevel,
+    pub message: String,
+    pub timestamp_ms: u64,
 }
 
 pub fn build_snapshot(
@@ -125,7 +138,7 @@ pub fn build_snapshot(
         },
         DiagnosticCheck {
             code: "runtime_key",
-            label: "运行密钥",
+            label: "Runtime API Key",
             level: if runtime_key_present {
                 DiagnosticLevel::Ok
             } else {
@@ -175,13 +188,155 @@ pub fn build_snapshot(
         },
     ];
 
+    let privilege_check = broker_diagnostics(privilege);
+    record_runtime_user_events(
+        &runtime.state,
+        runtime
+            .outage
+            .as_ref()
+            .map(|outage| (outage.component, &outage.fault)),
+        privilege,
+    );
+    let recent_events = recent_user_events();
+
     DiagnosticsSnapshot {
         schema_version: DIAGNOSTICS_SCHEMA_VERSION,
         checks,
-        broker: broker_diagnostics(privilege),
+        broker: privilege_check,
         reconnect: reconnect_diagnostics(runtime),
         runtime_key_present,
-        active_workspace: runtime.active_workspace,
+        active_workspace_path: runtime
+            .active_workspace
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned()),
+        recent_events,
+    }
+}
+
+fn recent_event_log() -> &'static Mutex<VecDeque<DiagnosticEvent>> {
+    RECENT_USER_EVENTS.get_or_init(|| Mutex::new(VecDeque::with_capacity(RECENT_EVENT_LIMIT)))
+}
+
+fn timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn record_recent_event(level: DiagnosticLevel, message: String) {
+    let mut events = recent_event_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if events
+        .front()
+        .is_some_and(|event| event.level == level && event.message == message)
+    {
+        return;
+    }
+    events.push_front(DiagnosticEvent {
+        level,
+        message,
+        timestamp_ms: timestamp_ms(),
+    });
+    events.truncate(RECENT_EVENT_LIMIT);
+}
+
+pub fn record_runtime_user_events(
+    state: &RuntimeState,
+    outage: Option<(RuntimeComponent, &RuntimeFault)>,
+    privilege: &PrivilegeState,
+) {
+    if let Some((component, fault)) = outage {
+        record_recent_event(
+            DiagnosticLevel::Error,
+            format!(
+                "{}：{}",
+                component_label(component),
+                runtime_fault_label(fault)
+            ),
+        );
+    } else {
+        match state {
+            RuntimeState::Ready => {
+                record_recent_event(DiagnosticLevel::Ok, "本地运行服务：已就绪".to_string())
+            }
+            RuntimeState::Recovering { component, .. } => record_recent_event(
+                DiagnosticLevel::Warning,
+                format!("{}：正在自动恢复", component_label(*component)),
+            ),
+            RuntimeState::SwitchingWorkspace { .. } => record_recent_event(
+                DiagnosticLevel::Warning,
+                "本地运行服务：正在切换项目".to_string(),
+            ),
+            RuntimeState::Faulted(fault) => record_recent_event(
+                DiagnosticLevel::Error,
+                format!("本地运行服务：{}", runtime_fault_label(fault)),
+            ),
+            RuntimeState::StartingMcp
+            | RuntimeState::WaitingMcpReady
+            | RuntimeState::StartingPolicyEnforcement
+            | RuntimeState::WaitingPolicyReady
+            | RuntimeState::StartingTunnel
+            | RuntimeState::WaitingTunnelReady => record_recent_event(
+                DiagnosticLevel::Warning,
+                "本地运行服务：正在启动".to_string(),
+            ),
+            RuntimeState::Stopped => {}
+        }
+    }
+
+    let broker = broker_diagnostics(privilege);
+    match broker.state {
+        BrokerDiagnosticState::Active => {
+            record_recent_event(DiagnosticLevel::Ok, "管理员权限：已启用".to_string())
+        }
+        BrokerDiagnosticState::Requested | BrokerDiagnosticState::Awaiting => record_recent_event(
+            DiagnosticLevel::Warning,
+            format!("管理员权限：{}", broker_state_label(broker.state)),
+        ),
+        BrokerDiagnosticState::Fault => {
+            record_recent_event(DiagnosticLevel::Error, "管理员权限：故障".to_string())
+        }
+        BrokerDiagnosticState::Off => {}
+    }
+}
+
+fn recent_user_events() -> Vec<DiagnosticEvent> {
+    recent_event_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .cloned()
+        .collect()
+}
+
+fn broker_state_label(state: BrokerDiagnosticState) -> &'static str {
+    match state {
+        BrokerDiagnosticState::Off => "未启用",
+        BrokerDiagnosticState::Requested => "等待授权",
+        BrokerDiagnosticState::Awaiting => "等待系统授权",
+        BrokerDiagnosticState::Active => "已启用",
+        BrokerDiagnosticState::Fault => "故障",
+    }
+}
+
+fn runtime_fault_label(fault: &RuntimeFault) -> &'static str {
+    match fault {
+        RuntimeFault::WorkspaceMissing | RuntimeFault::WorkspaceInvalid => "项目目录不可用",
+        RuntimeFault::RuntimeMissing | RuntimeFault::RuntimeChecksumMismatch => {
+            "本地运行环境不可用"
+        }
+        RuntimeFault::McpSpawnFailed | RuntimeFault::McpHealthTimeout | RuntimeFault::McpExited => {
+            "编码服务不可用"
+        }
+        RuntimeFault::TunnelAuthFailed
+        | RuntimeFault::TunnelSpawnFailed
+        | RuntimeFault::TunnelHealthTimeout
+        | RuntimeFault::TunnelExited => "OpenAI Tunnel 不可用",
+        RuntimeFault::UserStopped => "服务已停止",
+        _ => "服务发生故障",
     }
 }
 
@@ -272,7 +427,20 @@ pub fn export_snapshot(
         .as_secs();
     let sequence = EXPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path = directory.join(format!("localbridge-diagnostics-{seconds}-{sequence}.json"));
-    let bytes = serde_json::to_vec_pretty(snapshot).map_err(std::io::Error::other)?;
+    let mut export = serde_json::to_value(snapshot).map_err(std::io::Error::other)?;
+    if let Some(object) = export.as_object_mut() {
+        object.remove("activeWorkspacePath");
+        object.remove("runtimeKeyPresent");
+        if let Some(checks) = object
+            .get_mut("checks")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            checks.retain(|check| {
+                check.get("code").and_then(serde_json::Value::as_str) != Some("runtime_key")
+            });
+        }
+    }
+    let bytes = serde_json::to_vec_pretty(&export).map_err(std::io::Error::other)?;
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

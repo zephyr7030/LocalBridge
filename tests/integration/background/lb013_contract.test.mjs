@@ -4,6 +4,10 @@ import { readFileSync } from "node:fs";
 const main = readFileSync("src-tauri/src/main.rs", "utf8");
 const tray = readFileSync("src-tauri/src/tray/mod.rs", "utf8");
 const background = readFileSync("src-tauri/src/app/background.rs", "utf8");
+const startup = readFileSync("src-tauri/src/app/startup.rs", "utf8");
+const settingsModel = readFileSync("src-tauri/src/settings/model.rs", "utf8");
+const migration = readFileSync("src-tauri/src/settings/migration.rs", "utf8");
+const migrationTest = readFileSync("tests/migrations/migration_matrix.rs", "utf8");
 const privilege = readFileSync("src-tauri/src/privilege/control.rs", "utf8");
 const orchestrator = readFileSync("src-tauri/src/runtime/orchestrator.rs", "utf8");
 const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
@@ -12,8 +16,15 @@ const normalized = (value) => value.replace(/\s+/g, " ");
 
 if ((config.app?.windows ?? []).length !== 0) throw new Error("LB-013 background startup still has a static Tauri main window");
 if (!main.includes('windows_subsystem = "windows"')) throw new Error("LB-013 LocalBridge app binary can still expose a console window");
-for (const required of ["StartupMode::from_args", "creates_main_window_at_startup", "ensure_main_window", "install_tray", "CloseRequested", "prevent_close", ".hide()"])
+for (const required of ["StartupMode::from_args", "creates_main_window_at_startup", "ensure_main_window", "install_tray", "CloseRequested", "prevent_close", "close_window_continue_running", "backend_handle", "spawn_shutdown_then", ".hide()"])
   if (!main.includes(required)) throw new Error(`LB-013 entry lifecycle missing: ${required}`);
+const closeHandlerStart = main.indexOf("fn handle_main_window_event");
+const closeHandlerEnd = main.indexOf("#[cfg(debug_assertions)]", closeHandlerStart);
+const closeHandler = main.slice(closeHandlerStart, closeHandlerEnd);
+if (!closeHandler.includes("if lifecycle.close_window_continue_running()") || !closeHandler.includes("spawn_shutdown_then(move |_| app.exit(0))"))
+  throw new Error("LB-013 CloseRequested does not implement cached hide-vs-orderly-exit policy");
+if (closeHandler.includes("SettingsStore::new") || closeHandler.includes("lifecycle.shutdown()"))
+  throw new Error("LB-013 CloseRequested performs blocking settings/lifecycle work on the UI event path");
 const modeGuard = main.indexOf("creates_main_window_at_startup");
 const createCall = main.indexOf("ensure_main_window", modeGuard);
 if (!(modeGuard >= 0 && createCall > modeGuard)) throw new Error("LB-013 foreground window creation is not startup-mode gated");
@@ -56,6 +67,8 @@ for (const required of ["TrayIconBuilder", "FROZEN_TRAY_ICON_ICO", "include_byte
 for (const forbidden of ["TRAY_ICON_CROP_PERCENT", "tray_icon_from_frozen(&icon)", "default_window_icon()"])
   if (tray.includes(forbidden)) throw new Error(`LB-013 stale tray resampling path remains: ${forbidden}`);
 if (/emoji|placeholder|lucide|heroicon|react-icons/i.test(tray)) throw new Error("LB-013 tray uses placeholder/third-party icon surface");
+if (!tray.includes("spawn_shutdown_then(move |_| exit_app.exit(0))") || tray.includes("let _ = lifecycle.shutdown();"))
+  throw new Error("LB-013 Tray Exit still performs blocking lifecycle shutdown inside the tray callback");
 if (!config.bundle?.icon?.includes("../assets/icons/localbridge.ico")) throw new Error("LB-013 bundle icon is not frozen localbridge.ico");
 const ico = readFileSync("assets/icons/localbridge.ico");
 const hash = createHash("sha256").update(ico).digest("hex");
@@ -71,9 +84,23 @@ if (!orchestrator.includes("pub fn stop_tunnel_for_exit") || !orchestrator.inclu
 const backgroundTest = readFileSync("tests/integration/background/background.rs", "utf8");
 if (!backgroundTest.includes("production_tray_exit_owns_actual_adapter_and_stops_tunnel_gate_pep_mcp"))
   throw new Error("LB-013 has no actual production-adapter Tray Exit regression");
+for (const required of [
+  "close_window_policy_defaults_to_continue_running_and_is_memory_cached",
+  "backend_shutdown_dispatch_returns_before_deliberately_slow_cleanup_finishes",
+]) if (!backgroundTest.includes(required)) throw new Error(`LB-013 blocking-boundary regression missing: ${required}`);
+for (const required of ["CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 4", "close_window_continue_running"])
+  if (!settingsModel.includes(required)) throw new Error(`LB-013 persisted close policy missing: ${required}`);
+for (const required of ["3 => migrate_v3_to_v4(value)?", "close_window_continue_running: true"])
+  if (!migration.includes(required)) throw new Error(`LB-013 close policy migration missing: ${required}`);
+if (!migrationTest.includes("v3_migrates_close_window_policy_to_safe_continue_running_default"))
+  throw new Error("LB-013 has no v3->v4 close-policy migration regression");
+if (!startup.includes("set_close_window_continue_running(data.settings.close_window_continue_running)"))
+  throw new Error("LB-013 startup does not load persisted close policy into backend memory");
+for (const required of ["DesktopBackendHandle", "spawn_shutdown_then", 'name("localbridge-desktop-shutdown"', "backend.shutdown()"])
+  if (!background.includes(required)) throw new Error(`LB-013 nonblocking lifecycle boundary missing: ${required}`);
 for (const id of ["EXEC-PREAUTH-LB013-001", "EXEC-PREAUTH-LB013-002", "EXEC-PREAUTH-LB013-003", "EXEC-PREAUTH-LB013-004", "EXEC-PREAUTH-LB013-005"]) {
   const record = auth.records.find((candidate) => candidate.authorization_id === id);
   if (!record || record.user_audit_status !== "PENDING" || record.does_not_expand_future_pr_writable_paths !== true)
     throw new Error(`LB-013 preauthorization record invalid: ${id}`);
 }
-console.log("LB013_CONTRACT=PASS background_no_window=true logical_fixed_window=900x620 native_dpi_scaling=true inverse_webview_zoom=false physical_pixel_lock=false resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true dpi_change_webview_sync=true close_to_hide=true tray_frozen_ico=true tray_native_dpi_frame=true tray_resample_hack=false exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=5");
+console.log("LB013_CONTRACT=PASS background_no_window=true logical_fixed_window=900x620 native_dpi_scaling=true inverse_webview_zoom=false physical_pixel_lock=false resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true dpi_change_webview_sync=true close_policy=persisted_v4 hide_or_async_exit=true lifecycle_ui_thread_blocking=false tray_exit_async=true tray_frozen_ico=true tray_native_dpi_frame=true tray_resample_hack=false exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=5");

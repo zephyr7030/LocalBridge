@@ -143,6 +143,51 @@ fn shutdown_continues_after_each_stage_failure() {
     );
 }
 
+#[test]
+fn close_window_policy_defaults_to_continue_running_and_is_memory_cached() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    assert!(lifecycle.close_window_continue_running());
+    lifecycle.set_close_window_continue_running(false);
+    assert!(!lifecycle.close_window_continue_running());
+    lifecycle.set_close_window_continue_running(true);
+    assert!(lifecycle.close_window_continue_running());
+}
+
+#[test]
+fn backend_shutdown_dispatch_returns_before_deliberately_slow_cleanup_finishes() {
+    struct SlowRuntime;
+    impl ExitRuntime for SlowRuntime {
+        fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError> {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            Ok(())
+        }
+
+        fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError> {
+            Ok(())
+        }
+    }
+
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    lifecycle.install_runtime_for_test(SlowRuntime).unwrap();
+    let backend = lifecycle.backend_handle();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let started = std::time::Instant::now();
+    let handle = backend
+        .spawn_shutdown_then(move |report| {
+            let _ = done_tx.send(report);
+        })
+        .unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(100),
+        "dispatch must not wait for blocking lifecycle cleanup"
+    );
+    let report = done_rx
+        .recv_timeout(std::time::Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(report, ShutdownReport::default());
+    handle.join().unwrap();
+}
+
 #[cfg(windows)]
 struct BlockingMonitorRuntime {
     entered: Option<Sender<()>>,

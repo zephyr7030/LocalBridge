@@ -34,11 +34,12 @@ export interface DiagnosticsSnapshot {
   broker: BrokerDiagnostics;
   reconnect: ReconnectDiagnostics | null;
   runtimeKeyPresent: boolean;
-  activeWorkspace: boolean;
+  activeWorkspacePath: string | null;
+  recentEvents: Array<{ level: DiagnosticLevel; message: string; timestampMs: number }>;
 }
 
 export const diagnosticsApi = {
   read: () => invoke<DiagnosticsSnapshot>("get_diagnostics"),
-  retry: () => invoke<void>("diagnostics_retry_connection"),
+  openLogs: () => invoke<void>("open_logs"),
   exportReport: () => invoke<string>("export_diagnostics"),
 };

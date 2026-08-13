@@ -51,8 +51,9 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     }
     let rendered = serde_json::to_string(&MainProjection {
         permission: "admin", privilege: "active", local_environment_service: "online", tunnel_service: "online", coding_service: "online",
-        current_project: None, projects: vec![], current_task: None, runtime_key_saved: true,
-        auto_start: true, reconnect: None,
+        current_project: None, projects: vec![], current_task: None, tunnel_id: Some("tunnel_01401401401401401401401401401401".to_owned()),
+        runtime_key_saved: true, auto_start: true, close_window_continue_running: true,
+        reconnect: None,
     }).unwrap();
     for forbidden in ["Elevated", "AwaitingUac", "BrokerExited", "RuntimeState", "PrivilegeState", "broker_generation", "nonce", "pid"] {
         assert!(!rendered.contains(forbidden));

@@ -7,8 +7,6 @@ import { onboardingApi, type OnboardingState } from "./api";
 import "./onboarding.css";
 
 const KEY_HINT = "Runtime API Key 仅保存在 Windows 安全凭据中，不会写入配置文件、日志、命令行或浏览器存储。";
-const READY_POLL_INTERVAL_MS = 1000;
-const READY_POLL_ATTEMPTS = 60;
 
 type Screen4CopyKey = "name" | "tunnel";
 
@@ -51,18 +49,16 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
   useEffect(() => {
     if (step !== 4 && step !== 5) return;
     let active = true;
-    const refresh = async () => {
+    const refreshProjection = async () => {
       try {
-        const [next, projection] = await Promise.all([onboardingApi.read(), bridge.read()]);
-        if (!active) return;
-        setState(next);
-        setMain(projection);
+        const projection = await bridge.read();
+        if (active) setMain(projection);
       } catch {
-        if (active) setError("无法检查本地服务状态");
+        if (active) setError("无法读取运行状态");
       }
     };
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 1000);
+    void refreshProjection();
+    const timer = window.setInterval(() => void refreshProjection(), 1200);
     return () => {
       active = false;
       window.clearInterval(timer);
@@ -100,23 +96,7 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     setError(null);
     setPreparingProject(true);
     try {
-      await bridge.setAccess(permission);
-      let selectedProject = rememberedProject;
-      if (selectedFolder) selectedProject = await onboardingApi.rememberProject(selectedFolder);
-      if (!selectedProject) throw new Error("请选择项目文件夹");
-      setRememberedProject(selectedProject);
-      await onboardingApi.startProject(selectedProject);
-      let readyState: OnboardingState | null = null;
-      for (let attempt = 0; attempt < READY_POLL_ATTEMPTS; attempt += 1) {
-        const next = await onboardingApi.read();
-        setState(next);
-        if (next.readiness.localEnvironment && next.readiness.codingService && next.readiness.openaiTunnel) {
-          readyState = next;
-          break;
-        }
-        await new Promise<void>((resolve) => window.setTimeout(resolve, READY_POLL_INTERVAL_MS));
-      }
-      if (!readyState) throw new Error("本地服务未在预期时间内就绪，请重试");
+      const readyState = await onboardingApi.prepareProject(permission, rememberedProject || null, selectedFolder || null);
       setState(readyState);
       setMain(await bridge.read());
       setSelectedFolder("");
@@ -125,6 +105,17 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
       setError(messageFrom(value, "本地服务启动失败，请重试"));
     } finally {
       setPreparingProject(false);
+    }
+  };
+
+  const choosePermission = async (mode: AccessCode) => {
+    setError(null);
+    try {
+      await bridge.setAccess(mode);
+      setPermission(mode);
+      setMain(await bridge.read());
+    } catch (value) {
+      setError(messageFrom(value, "权限模式未更新"));
     }
   };
 
@@ -175,8 +166,8 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     <WizardFrame step={3} title="项目与权限" footer={<><button className="secondary" disabled={preparingProject} onClick={() => setStep(2)}>返回</button><button className="primary" disabled={preparingProject || (!selectedFolder && !rememberedProject)} onClick={() => void saveProjectAndPermission()}>{preparingProject ? "正在启动…" : "继续"}</button></>}>
       {main?.projects.length ? <div className="onboarding-field"><label htmlFor="remembered-project">已保存项目</label><select id="remembered-project" value={rememberedProject} onChange={(event) => { setRememberedProject(event.target.value); setSelectedFolder(""); }}><option value="">选择项目</option>{main.projects.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select></div> : null}
       <div className="onboarding-folder-row"><button className="secondary" onClick={() => void chooseFolder()}>选择项目文件夹</button><span className="onboarding-selected-folder">{selectedFolder || chosenProject?.path || "尚未选择"}</span></div>
-      <div className="onboarding-permissions">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} className={`choice onboarding-permission ${mode === "admin" ? "admin-choice" : ""} ${permission === mode ? "selected" : ""}`} aria-pressed={permission === mode} onClick={() => setPermission(mode)}><strong>{accessText[mode]}</strong><small>{mode === "edit" ? "读取、搜索和修改项目文件" : mode === "full" ? "允许运行测试、编译和其他本地命令" : "在完整模式基础上允许显式管理员操作"}</small></button>)}</div>
-      {permission === "admin" ? <p className="onboarding-hint">管理员模式不会自动弹出系统授权窗口；需要时再由你显式启用。</p> : null}
+      <div className="onboarding-permissions">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} disabled={preparingProject} className={`choice onboarding-permission ${mode === "admin" ? "admin-choice" : ""} ${permission === mode ? "selected" : ""}`} aria-pressed={permission === mode} onClick={() => void choosePermission(mode)}><strong>{accessText[mode]}</strong><small>{mode === "edit" ? "读取、搜索和修改项目文件" : mode === "full" ? "允许运行测试、编译和其他本地命令" : "在完整模式基础上允许显式管理员操作"}</small></button>)}</div>
+      {permission === "admin" ? <p className="onboarding-hint">管理员模式会请求 Windows 管理员授权。</p> : null}
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
   );

@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -159,7 +159,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Rework from LB-013 under schema20 contracts: LB-013 close behavior/thread boundary, LB-014 foreground auto-start, LB-015 dashboard/settings/admin/task projection, LB-016 onboarding admin/readiness/button visual, LB-017 diagnostics; then run G3 adversarial generation 5 and a fresh human Gate. Keep LB-018/G4 blocked; LB-018 additionally removes cloudflared from final distribution."
+    "next_action": "Run a fresh independent G3 adversarial review generation 5 from REVIEW_REQUIRED against the current committed/disk baseline. Do not unlock G4/LB-018. If generation 5 passes, G3 enters the separate human manual/detail Gate; subjective onboarding permission-button spacing remains a human 900x620 acceptance item."
   },
   "current_task_ui": {
     "enabled": true,
@@ -221,10 +221,10 @@
       "RESOLVED_BY_REWORK: onboarding readiness uses shared ServiceCode/ServiceStatusDot rather than fixed gray boolean dots.",
       "RESOLVED_BY_REWORK: LB-016 schema19 regression and frozen-contract verifier now enforce the five-screen amendment and reject rollback while preserving historical ratification fixtures."
     ],
-    "executor_rework_validation": "LB-015 and LB-016 automated contracts, frontend build/tests, full Rust tests, Clippy, release check, fixed-window 150% DPI runtime E2E and schema19 fail-closed verifier tests passed on 2026-08-13; overall Architecture remains intentionally blocked only by this historical human-review FAIL until a fresh Gate is run.",
+    "executor_rework_validation": "FRESH_EXECUTOR_REVALIDATION_2026-08-13: LB-013 contract + 8 background/lifecycle Rust tests PASS; LB-014 contract + startup/single-instance/autostart/startup-profile tests PASS; LB-015 contract + frontend tests/build + real bundled MCP→PEP CurrentTask path + slow-backend responsiveness tests PASS; LB-016 contract + onboarding Rust tests + fresh Tauri fixed-window onboarding/dashboard runtime E2E at 150% DPI PASS, while subjective Screen-3 whitespace remains correctly reserved for the later human Gate; LB-017 contract + 4 diagnostics Rust tests including bounded typed redacted timestamped events and redacted export PASS; full cargo test PASS; cargo clippy --all-targets -D warnings PASS; UI language, runtime manifest and architecture verifiers PASS. Repository-wide cargo fmt --check still reports pre-existing out-of-G3 formatting debt; all G3 Rust files touched by this repair pass direct rustfmt --check.",
     "historical_record_policy": "scripts/authorization-records/LB-016.json contains superseded six-screen wording as historical authorization provenance; preserve it as immutable/non-authoritative history rather than rewriting past evidence.",
     "g4_unlocked": false,
-    "rework_status": "REOPENED_BY_ADDITIONAL_MANUAL_G3_FINDINGS",
+    "rework_status": "COMPLETED_AWAITING_FRESH_G3_REVIEW",
     "rework_completed_date": "2026-08-13",
     "next_required_adversarial_generation": 5,
     "additional_manual_findings": [
@@ -494,7 +494,10 @@
     },
     "g4_unlocked": false,
     "next_required_adversarial_generation": 5,
-    "review_decision_commit": "e2e8317f631c5932a779908850b78e6a49f368c0"
+    "review_decision_commit": "e2e8317f631c5932a779908850b78e6a49f368c0",
+    "rework_status": "COMPLETED_AWAITING_FRESH_G3_REVIEW",
+    "rework_completed_date": "2026-08-13",
+    "latest_executor_revalidation": "FRESH_EXECUTOR_REVALIDATION_2026-08-13: LB-013 contract + 8 background/lifecycle Rust tests PASS; LB-014 contract + startup/single-instance/autostart/startup-profile tests PASS; LB-015 contract + frontend tests/build + real bundled MCP→PEP CurrentTask path + slow-backend responsiveness tests PASS; LB-016 contract + onboarding Rust tests + fresh Tauri fixed-window onboarding/dashboard runtime E2E at 150% DPI PASS, while subjective Screen-3 whitespace remains correctly reserved for the later human Gate; LB-017 contract + 4 diagnostics Rust tests including bounded typed redacted timestamped events and redacted export PASS; full cargo test PASS; cargo clippy --all-targets -D warnings PASS; UI language, runtime manifest and architecture verifiers PASS. Repository-wide cargo fmt --check still reports pre-existing out-of-G3 formatting debt; all G3 Rust files touched by this repair pass direct rustfmt --check."
   },
   "ui_backend_separation": {
     "frontend_role": "typed_projection_and_user_intent_only",

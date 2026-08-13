@@ -63,7 +63,22 @@ fn handle_main_window_event(window: &tauri::Window<tauri::Wry>, event: &WindowEv
     match event {
         WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
-            let _ = window.hide();
+            let Some(lifecycle) = window.app_handle().try_state::<DesktopLifecycle>() else {
+                let _ = window.hide();
+                return;
+            };
+            if lifecycle.close_window_continue_running() {
+                let _ = window.hide();
+                return;
+            }
+            let backend = lifecycle.backend_handle();
+            let app = window.app_handle().clone();
+            if backend
+                .spawn_shutdown_then(move |_| app.exit(0))
+                .is_err()
+            {
+                window.app_handle().exit(1);
+            }
         }
         WindowEvent::ScaleFactorChanged { .. } => {
             if let Ok(client_size) = window.inner_size() {

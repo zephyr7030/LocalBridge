@@ -38,6 +38,16 @@ fn v2_migrates_to_current_without_skipping_version_contract() {
 }
 
 #[test]
+fn v3_migrates_close_window_policy_to_safe_continue_running_default() {
+    let (dir, path) = temp_file("settings.json", include_str!("v3-close-policy.json"));
+    let data = SettingsStore::new(&path).load().unwrap();
+    assert_eq!(data.schema_version, CURRENT_SETTINGS_SCHEMA_VERSION);
+    assert!(data.settings.close_window_continue_running);
+    assert!(SettingsStore::new(&path).backup_path().exists());
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn unvalidated_historical_workspace_is_preserved_as_pending_but_not_authorized() {
     let (dir, path) = temp_file("settings.json", include_str!("v2-unvalidated-workspace.json"));
     let data = SettingsStore::new(&path).load().unwrap();

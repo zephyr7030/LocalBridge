@@ -6,5 +6,5 @@ export const serviceText: Record<ServiceCode, string> = { off: "未启动", star
 export type ServiceVisualState = "ready" | "starting" | "fault" | "unknown";
 export const serviceVisualState: Record<ServiceCode, ServiceVisualState> = { off: "unknown", starting: "starting", online: "ready", recovering: "starting", fault: "fault" };
 const taskKindText = { read: "读取文件", search: "搜索代码", modify: "修改文件", command: "运行命令", git: "版本操作", build: "构建项目", test: "运行测试", admin: "管理员操作", other: "处理任务" } as const;
-const taskStateText = { idle: "空闲", running: "", waiting: "等待授权", blocked: "已阻止", failed: "失败", cancelled: "已取消" } as const;
-export function taskText(task: TaskProjection | null): string { if (!task) return "空闲"; const parts: string[] = [taskKindText[task.kind]]; if (task.summary) parts.push(task.summary); const state = taskStateText[task.state]; if (state) parts.push(state); return parts.join("  "); }
+const taskStateText = { idle: "等待命令", running: "", waiting: "等待授权", blocked: "已阻止", failed: "失败", cancelled: "已取消" } as const;
+export function taskText(task: TaskProjection | null): string { if (!task) return "等待命令"; if (task.state === "idle") return "等待命令"; const parts: string[] = [taskKindText[task.kind]]; if (task.summary) parts.push(task.summary); const state = taskStateText[task.state]; if (state) parts.push(state); return parts.join("  "); }

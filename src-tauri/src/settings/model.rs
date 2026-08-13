@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::state::{PermissionMode, Settings};
 use crate::workspace::{WorkspacePersistence, WorkspaceRegistryError};
 
-pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SETTINGS_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StoredPermissionMode {
@@ -37,6 +37,7 @@ impl From<StoredPermissionMode> for PermissionMode {
 pub struct StoredSettings {
     pub permission_mode: StoredPermissionMode,
     pub auto_start_services: bool,
+    pub close_window_continue_running: bool,
     pub onboarding_complete: bool,
 }
 
@@ -51,6 +52,7 @@ impl StoredSettings {
         Self {
             permission_mode: settings.permission_mode.into(),
             auto_start_services: settings.auto_start_services,
+            close_window_continue_running: true,
             onboarding_complete: settings.onboarding_complete,
         }
     }

@@ -9,13 +9,23 @@ static SEQ: AtomicU64 = AtomicU64::new(1);
 struct TempDir(PathBuf);
 impl TempDir {
     fn new(label: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("localbridge-lb017-{label}-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+        let path = std::env::temp_dir().join(format!(
+            "localbridge-lb017-{label}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
-    fn path(&self) -> &Path { &self.0 }
+    fn path(&self) -> &Path {
+        &self.0
+    }
 }
-impl Drop for TempDir { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 fn complete_runtime(root: &Path) {
     for relative in [
@@ -33,7 +43,7 @@ fn runtime(state: RuntimeState, outage: Option<DiagnosticsOutageInput>) -> Diagn
     DiagnosticsRuntimeInput {
         active: !matches!(state, RuntimeState::Stopped),
         state,
-        active_workspace: true,
+        active_workspace: Some(PathBuf::from(r"C:\project\redacted")),
         outage,
     }
 }
@@ -45,21 +55,39 @@ fn typed_checks_and_broker_generation_expose_no_broker_internals() {
     let snapshot = build_snapshot(
         root.path(),
         &runtime(RuntimeState::Ready, None),
-        &PrivilegeState::Active { broker_generation: GenerationId::new(7) },
+        &PrivilegeState::Active {
+            broker_generation: GenerationId::new(7),
+        },
         true,
     );
     assert_eq!(snapshot.schema_version, 1);
-    assert!(snapshot.checks.iter().all(|check| check.level == DiagnosticLevel::Ok));
+    assert!(
+        snapshot
+            .checks
+            .iter()
+            .all(|check| check.level == DiagnosticLevel::Ok)
+    );
     assert_eq!(snapshot.broker.state, BrokerDiagnosticState::Active);
     assert_eq!(snapshot.broker.generation, Some(7));
-    let json = serde_json::to_string(&snapshot).unwrap().to_ascii_lowercase();
-    for forbidden in ["nonce", "pipe", "sid", "pid", "secret", "credential_id", "broker_generation"] {
+    let json = serde_json::to_string(&snapshot)
+        .unwrap()
+        .to_ascii_lowercase();
+    for forbidden in [
+        "nonce",
+        "pipe",
+        "sid",
+        "pid",
+        "secret",
+        "credential_id",
+        "broker_generation",
+    ] {
         assert!(!json.contains(forbidden), "diagnostics leaked {forbidden}");
     }
 }
 
 #[test]
-fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverable_does_not_fake_history() {
+fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverable_does_not_fake_history()
+ {
     let root = TempDir::new("reconnect");
     complete_runtime(root.path());
     let exhausted = build_snapshot(
@@ -79,8 +107,20 @@ fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverab
     let reconnect = exhausted.reconnect.unwrap();
     assert_eq!(reconnect.generation, 11);
     assert_eq!(reconnect.attempts.len(), 5);
-    assert_eq!(reconnect.attempts.iter().map(|item| item.attempt).collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
-    assert!(reconnect.attempts.iter().all(|item| item.state == ReconnectAttemptState::Failed));
+    assert_eq!(
+        reconnect
+            .attempts
+            .iter()
+            .map(|item| item.attempt)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5]
+    );
+    assert!(
+        reconnect
+            .attempts
+            .iter()
+            .all(|item| item.state == ReconnectAttemptState::Failed)
+    );
 
     let nonrecoverable = build_snapshot(
         root.path(),
@@ -100,15 +140,64 @@ fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverab
 }
 
 #[test]
+fn recent_user_events_are_backend_typed_bounded_timestamped_and_redacted() {
+    recent_event_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
+    for index in 0..12 {
+        let state = if index % 3 == 0 {
+            RuntimeState::Ready
+        } else if index % 3 == 1 {
+            RuntimeState::Recovering {
+                component: RuntimeComponent::Tunnel,
+                attempt: 1,
+            }
+        } else {
+            RuntimeState::Faulted(RuntimeFault::TunnelExited)
+        };
+        record_runtime_user_events(&state, None, &PrivilegeState::Disabled);
+    }
+    let events = recent_user_events();
+    assert_eq!(events.len(), RECENT_EVENT_LIMIT);
+    assert!(events.iter().all(|event| event.timestamp_ms > 0));
+    let text = serde_json::to_string(&events).unwrap();
+    for forbidden in [
+        "Runtime API Key",
+        "Authorization",
+        "synthetic-secret",
+        "nonce",
+        r"C:\project\redacted",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "recent user events leaked {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn user_triggered_export_contains_allowlisted_projection_only() {
     let root = TempDir::new("export");
     complete_runtime(root.path());
-    let snapshot = build_snapshot(root.path(), &runtime(RuntimeState::Ready, None), &PrivilegeState::Disabled, true);
+    let snapshot = build_snapshot(
+        root.path(),
+        &runtime(RuntimeState::Ready, None),
+        &PrivilegeState::Disabled,
+        true,
+    );
     let path = export_snapshot(root.path(), &snapshot).unwrap();
     let text = fs::read_to_string(path).unwrap();
     assert!(text.contains("schemaVersion"));
     assert!(!text.contains(r"C:\project\redacted"));
-    for forbidden in ["Runtime API Key", "Authorization", "CODING_TOOLS_MCP_AUTH_TOKEN", "nonce", "pipeName", "processId"] {
+    for forbidden in [
+        "Runtime API Key",
+        "Authorization",
+        "CODING_TOOLS_MCP_AUTH_TOKEN",
+        "nonce",
+        "pipeName",
+        "processId",
+    ] {
         assert!(!text.contains(forbidden));
     }
 }

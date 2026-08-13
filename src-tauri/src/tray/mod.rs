@@ -104,9 +104,16 @@ pub fn install_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), TraySetupError
             }
             MENU_EXIT_ID => {
                 if let Some(lifecycle) = app.try_state::<DesktopLifecycle>() {
-                    let _ = lifecycle.shutdown();
+                    let backend = lifecycle.backend_handle();
+                    let exit_app = app.clone();
+                    if backend
+                        .spawn_shutdown_then(move |_| exit_app.exit(0))
+                        .is_ok()
+                    {
+                        return;
+                    }
                 }
-                app.exit(0);
+                app.exit(1);
             }
             _ => {}
         })

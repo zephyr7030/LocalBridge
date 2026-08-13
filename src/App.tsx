@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { APP_NAME } from "./appModel";
-import { bridge, type AccessCode, type MainProjection, type ProjectProjection } from "./bridge";
+import { bridge, type AccessCode, type MainProjection, type ProjectProjection, type ServiceCode } from "./bridge";
 import { accessText, privilegeText, serviceText, taskText, uiText } from "./presentation";
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { onboardingApi, type OnboardingState } from "./features/onboarding/api";
@@ -35,10 +35,11 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const [view, setView] = useState<View>("main");
   const [error, setError] = useState<string | null>(null);
   const [keyValue, setKeyValue] = useState("");
-  const [keySaved, setKeySaved] = useState(false);
-  const [pathEditor, setPathEditor] = useState(false);
-  const [newPath, setNewPath] = useState("");
+  const [tunnelValue, setTunnelValue] = useState("");
+  const [editingTunnel, setEditingTunnel] = useState(false);
+  const [editingKey, setEditingKey] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ProjectProjection | null>(null);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [handledGeneration, setHandledGeneration] = useState<number | null>(null);
   const refresh = useCallback(async () => { try { setProjection(await bridge.read()); } catch (value) { setError(errorText(value)); } }, []);
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 1200); return () => window.clearInterval(timer); }, [refresh]);
@@ -48,30 +49,32 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const activeProject = projection?.projects.find((item) => item.active) ?? null;
   const reconnectVisible = Boolean(projection?.reconnect && projection.reconnect.generation !== handledGeneration);
   const privilegeLabel = projection ? privilegeText[projection.privilege] : "未启用";
-  const statusClass = projection?.privilege === "fault" ? "status-bad" : projection?.privilege === "active" ? "status-good" : "";
-  const adminAction = useMemo(() => {
-    if (!projection || projection.permission !== "admin") return null;
-    if (projection.privilege === "active") return <button className="secondary" onClick={() => void run(bridge.disableAdmin)}>关闭管理员权限</button>;
-    if (projection.privilege === "awaiting") return null;
-    return <button className="secondary" onClick={() => void run(bridge.enableAdmin)}>启用管理员权限</button>;
-  }, [projection, run]);
+  const privilegeService: ServiceCode = projection?.privilege === "active" ? "online" : projection?.privilege === "fault" ? "fault" : projection?.privilege === "requested" || projection?.privilege === "awaiting" ? "starting" : "off";
   const chooseAccess = (mode: AccessCode) => void run(() => bridge.setAccess(mode));
-  const confirmRemove = async (item: ProjectProjection) => { if (item.active) { setRemoveTarget(item); return; } await run(() => bridge.removeProject(item.id)); };
+  const chooseOtherFolder = () => void run(async () => { const path = await bridge.chooseProjectFolder(); if (path) { await bridge.addProject(path); setProjectPickerOpen(false); } });
 
   return <main className="shell">
     <header className="topbar"><div className="brand">{APP_NAME}</div><div className="top-actions"><button className="ghost" onClick={() => setView("settings")}>{uiText.settings}</button><button className="ghost" onClick={() => setView("diagnostics")}>{uiText.diagnostics}</button></div></header>
     <section className="card">
-      <div className="row"><span className="label">当前项目</span><div className="project-actions">{projection?.projects.length ? <select value={activeProject?.id ?? ""} onChange={(event) => event.target.value && void run(() => bridge.selectProject(event.target.value))} aria-label="选择项目">{!activeProject && <option value="">选择项目</option>}{projection.projects.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select> : <span className="value">未选择项目</span>}<button className="secondary" onClick={() => setPathEditor(true)}>选择其他文件夹</button></div></div>
+      <div className="row"><span className="label">当前项目</span><div className="project-actions"><span className="value">{activeProject?.path ?? "未选择项目"}</span><button className="secondary" onClick={() => setProjectPickerOpen(true)}>{activeProject ? "切换" : "选择项目"}</button></div></div>
+      <div className="row"><span className="label">本地运行环境</span><span className="value service-value"><ServiceStatusDot service={projection?.localEnvironmentService ?? null}/><span>{projection ? serviceText[projection.localEnvironmentService] : "正在读取"}</span></span></div>
       <div className="row"><span className="label">OpenAI 安全隧道</span><span className="value service-value"><ServiceStatusDot service={projection?.tunnelService ?? null}/><span>{projection ? serviceText[projection.tunnelService] : "正在读取"}</span></span></div>
       <div className="row"><span className="label">编码服务</span><span className="value service-value"><ServiceStatusDot service={projection?.codingService ?? null}/><span>{projection ? serviceText[projection.codingService] : "正在读取"}</span></span></div>
-      <div className="row"><span className="label">管理员权限</span><span className={`value ${statusClass}`}>{privilegeLabel}</span></div>
+      <div className="row"><span className="label">管理员权限</span><span className="value service-value"><ServiceStatusDot service={privilegeService}/><span>{privilegeLabel}</span></span></div>
     </section>
-    <section className="card"><span className="label">权限模式</span><div className="access-grid">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} className={`choice ${mode === "admin" ? "admin-choice" : ""} ${projection?.permission === mode ? "selected" : ""}`} onClick={() => chooseAccess(mode)}>{accessText[mode]}</button>)}</div>{adminAction && <div className="inline-actions" style={{ marginTop: 12 }}>{adminAction}</div>}</section>
     <div className="task-row" aria-live="polite"><span className={`activity-dot ${taskActive ? "active" : ""}`} aria-hidden="true"/><span>{taskText(task)}</span></div>
     {error && <div className="error" role="alert">{error}</div>}
-    {view === "settings" && <div className="sheet-backdrop" onMouseDown={() => setView("main")}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>{uiText.settings}</h2><div className="row"><span>开机启动</span><input type="checkbox" checked={projection?.autoStart ?? false} onChange={(event) => void run(() => bridge.setAutoStart(event.target.checked))}/></div><div className="field"><label htmlFor="runtime-key">运行密钥</label><input id="runtime-key" type="password" autoComplete="off" value={keyValue} onChange={(event) => { setKeyValue(event.target.value); setKeySaved(false); }} placeholder={projection?.runtimeKeySaved ? "已保存" : "输入运行密钥"}/><div className="inline-actions"><button className="primary" disabled={!keyValue} onClick={() => void run(async () => { await bridge.saveKey(keyValue); setKeyValue(""); setKeySaved(true); })}>保存</button>{projection?.runtimeKeySaved && <button className="secondary" onClick={() => void run(bridge.deleteKey)}>删除</button>}{keySaved && <span className="saved">已保存</span>}</div></div><div className="field"><span>已保存项目</span><div className="project-list">{projection?.projects.map((item) => <div className="project-item" key={item.id}><span className="project-path">{item.path}</span><button className="secondary" onClick={() => void confirmRemove(item)}>移除</button></div>)}</div></div><div className="dialog-actions"><button className="primary" onClick={() => setView("main")}>完成</button></div></section></div>}
-    {view === "diagnostics" && <Diagnostics onClose={() => setView("main")} onOpenWelcome={onOpenWelcome} />}
-    {pathEditor && <div className="dialog-backdrop"><section className="dialog"><h2>选择其他文件夹</h2><div className="field"><label htmlFor="project-path">文件夹路径</label><input id="project-path" type="text" value={newPath} onChange={(event) => setNewPath(event.target.value)}/></div><div className="dialog-actions"><button className="secondary" onClick={() => { setPathEditor(false); setNewPath(""); }}>取消</button><button className="primary" disabled={!newPath.trim()} onClick={() => void run(async () => { await bridge.addProject(newPath.trim()); setPathEditor(false); setNewPath(""); })}>使用此文件夹</button></div></section></div>}
+    {view === "settings" && <div className="sheet-backdrop" onMouseDown={() => setView("main")}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>{uiText.settings}</h2>
+      <section className="settings-section"><h3>常规</h3><div className="row"><span>开机启动</span><input type="checkbox" checked={projection?.autoStart ?? false} onChange={(event) => void run(() => bridge.setAutoStart(event.target.checked))}/></div><div className="row"><span>关闭窗口后继续运行</span><input type="checkbox" checked={projection?.closeWindowContinueRunning ?? true} onChange={(event) => void run(() => bridge.setCloseWindowContinueRunning(event.target.checked))}/></div></section>
+      <section className="settings-section"><h3>连接</h3>
+        <div className="field"><label htmlFor="tunnel-id">Tunnel ID</label>{editingTunnel ? <><input id="tunnel-id" autoComplete="off" value={tunnelValue} onChange={(event) => setTunnelValue(event.target.value)} placeholder={projection?.tunnelId ?? "输入 Tunnel ID"}/><div className="inline-actions"><button className="primary" disabled={!tunnelValue.trim()} onClick={() => void run(async () => { await bridge.saveTunnelId(tunnelValue.trim()); setTunnelValue(""); setEditingTunnel(false); })}>保存</button><button className="secondary" onClick={() => { setTunnelValue(""); setEditingTunnel(false); }}>取消</button></div></> : <div className="settings-summary"><span>{projection?.tunnelId ?? "未保存"}</span><button className="secondary" onClick={() => { setTunnelValue(""); setEditingTunnel(true); }}>更换</button></div>}</div>
+        <div className="field"><label htmlFor="runtime-key">Runtime API Key</label>{editingKey ? <><input id="runtime-key" type="password" autoComplete="off" value={keyValue} onChange={(event) => setKeyValue(event.target.value)} placeholder="输入新的 Runtime API Key"/><div className="inline-actions"><button className="primary" disabled={!keyValue.trim()} onClick={() => void run(async () => { await bridge.saveKey(keyValue); setKeyValue(""); setEditingKey(false); })}>保存</button><button className="secondary" onClick={() => { setKeyValue(""); setEditingKey(false); }}>取消</button></div></> : <div className="settings-summary"><span>{projection?.runtimeKeySaved ? "已保存" : "未保存"}</span><button className="secondary" onClick={() => { setKeyValue(""); setEditingKey(true); }}>更换</button></div>}</div>
+      </section>
+      <section className="settings-section"><h3>权限</h3><div className="access-grid">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} className={`choice ${mode === "admin" ? "admin-choice" : ""} ${projection?.permission === mode ? "selected" : ""}`} onClick={() => chooseAccess(mode)}>{accessText[mode]}</button>)}</div></section>
+      <div className="dialog-actions"><button className="secondary" onClick={onOpenWelcome}>打开欢迎页</button><button className="primary" onClick={() => setView("main")}>完成</button></div>
+    </section></div>}
+    {view === "diagnostics" && <Diagnostics onClose={() => setView("main")} />}
+    {projectPickerOpen && <div className="sheet-backdrop" onMouseDown={() => setProjectPickerOpen(false)}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>切换项目</h2><div className="project-list">{projection?.projects.map((item) => <div className="project-item" key={item.id}><button className="ghost project-select" disabled={item.active} onClick={() => void run(async () => { await bridge.selectProject(item.id); setProjectPickerOpen(false); })}><span className="project-path">{item.path}</span>{item.active ? <span className="project-current">当前</span> : null}</button><button className="secondary" onClick={() => { if (item.active) { setProjectPickerOpen(false); setRemoveTarget(item); } else { void run(() => bridge.removeProject(item.id)); } }}>移除</button></div>)}</div><div className="dialog-actions"><button className="secondary" onClick={chooseOtherFolder}>选择其他文件夹</button><button className="primary" onClick={() => setProjectPickerOpen(false)}>完成</button></div></section></div>}
     {removeTarget && <div className="dialog-backdrop"><section className="dialog"><h2>移除当前项目</h2><p>从 LocalBridge 移除此项目？<br/>不会删除项目文件。</p><div className="dialog-actions"><button className="secondary" onClick={() => setRemoveTarget(null)}>取消</button><button className="primary" onClick={() => void run(async () => { await bridge.removeProject(removeTarget.id); setRemoveTarget(null); })}>移除</button></div></section></div>}
     {reconnectVisible && projection?.reconnect && <div className="dialog-backdrop"><section className="dialog" role="dialog" aria-modal="true"><h2>连接失败</h2><p>已自动重试 5 次。</p><div className="dialog-actions"><button className="secondary" onClick={() => void run(async () => { await bridge.retry(); setHandledGeneration(projection.reconnect?.generation ?? null); })}>重试</button><button className="primary" onClick={() => { setHandledGeneration(projection.reconnect?.generation ?? null); setView("diagnostics"); }}>查看诊断</button></div></section></div>}
   </main>;
