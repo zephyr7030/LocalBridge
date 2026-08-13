@@ -1,11 +1,13 @@
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "review_date": "2026-08-10",
   "baseline": "v15-FINAL",
-  "status": "PASS",
+  "status": "REWORK_REQUIRED",
   "phase": "PRE_CODE",
-  "current_pr": "LB-000",
-  "blocking_findings": [],
+  "current_pr": "LB-013",
+  "blocking_findings": [
+    "G3 manual review generation 2 requires rework from LB-013 under PR_CONTRACTS schema 20"
+  ],
   "dynamic_gates_owned_by_lb000": [
     "coding-tools capability surface",
     "PEP implementation decision",
@@ -28,7 +30,10 @@
     "titles": false,
     "field_labels": false,
     "running_text": false,
-    "reduced_motion_supported": true
+    "reduced_motion_supported": true,
+    "idle_text": "等待命令",
+    "idle_visible": true,
+    "frontend_projection_only": true
   },
   "credentials": {
     "runtime_api_key_plaintext": false,
@@ -43,7 +48,7 @@
     "remove_deletes_files": false,
     "active_remove_result": "NoActiveWorkspace"
   },
-  "current_group": "G0",
+  "current_group": "G3",
   "reconnect": {
     "attempts": 5,
     "backoff_seconds": [
@@ -80,5 +85,41 @@
     "status": "FROZEN",
     "png_sha256": "710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a",
     "ico_sha256": "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78"
-  }
+  },
+  "admin_ui": {
+    "visible_admin_mode_selection_requests_uac": true,
+    "separate_enable_admin_button": false,
+    "background_auto_uac": false
+  },
+  "settings_ui": {
+    "sections": [
+      "常规",
+      "连接",
+      "权限"
+    ],
+    "connection_labels": [
+      "Tunnel ID",
+      "Runtime API Key"
+    ],
+    "test_connection_button": false,
+    "partial_update": true
+  },
+  "diagnostics_ui": {
+    "sections": [
+      "运行状态",
+      "项目",
+      "日志"
+    ],
+    "actions": [
+      "打开日志",
+      "导出诊断",
+      "完成"
+    ]
+  },
+  "ui_backend_separation": {
+    "frontend_projection_only": true,
+    "blocking_backend_work_off_webview_thread": true,
+    "slow_backend_responsiveness_gate": true
+  },
+  "cloudflare_final_distribution": "forbidden_from_LB-018_bundle_manifest_launcher_and_fallback"
 }

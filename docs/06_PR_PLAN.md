@@ -114,137 +114,56 @@ bounded recovery、two-phase workspace switch、rollback。
 
 ## LB-013 — Tray + Background
 
-Tray、close-to-hide、`--background`、退出清理。
-
-退出顺序需包含：
-
-```text
-Tunnel
-→ privileged call gate close
-→ Broker
-→ PEP
-→ MCP
-```
+- 增加版本化持久化 `关闭窗口后继续运行`（允许该字段所需的 settings/schema/migration 窄例外）；true：X=hide、runtime/tray 不变；false：关闭 privileged gate、清理 Broker/Tunnel/PEP/MCP 后退出。
+- 建立 UI/backend 非阻塞执行边界：可能耗时 lifecycle 工作不得在 WebView/UI 事件线程同步运行。
+- 保留真实 `--background` 无可见窗口与 tray exit cleanup。
 
 ## LB-014 — Autostart + Single Instance
 
-后台开机、single instance、manual stop。
-
-若权限偏好为 Elevated：
-
-- 不自动弹 UAC；
-- privilege runtime = Requested；
-- 普通 runtime 仍可后台 Ready。
+- `开机启动` 仅控制 Windows 登录启动。
+- onboarding 已完成且 active workspace/Tunnel ID/Runtime API Key metadata 有效时，普通前台 UI 启动自动异步启动 selected project/runtime/MCP/OpenAI Tunnel；UI 先可响应并反映 Starting/Ready/Fault。
+- 后台恢复管理员偏好只 Requested，不自动 UAC；single-instance/wake/manual-stop 语义继续保留。
 
 ## LB-015 — UI Shell
 
-单 Dashboard、settings、diagnostics入口、recent workspace、三档权限。
-
-同时冻结全产品共享的按钮与提示基础层：
-
-- 主/次/ghost 按钮使用一致的几何、状态和层级语言；
-- 普通 primary、普通 selected 与主要交互使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；
-- 管理员模式在 onboarding 与 Dashboard 使用黄色/琥珀逻辑色，禁止被普通蓝色 selected 覆盖；
-- 白色或近白背景上的次级按钮必须保持清晰可辨，禁止白底白按钮；
-- 自解释操作不重复堆叠说明，只保留最小必要提示；
-- 状态反馈不得造成布局位移。
-
-Dashboard 必须直接显示：
-
-- ChatGPT / Tunnel 状态；
-- Coding Runtime 状态；
-- 当前权限模式；
-- **管理员权限实际运行状态**。
-
-Dashboard 的主要服务状态必须显示状态圆点，并与 onboarding 启动检查消费同源 typed 状态：Ready=绿、Starting=黄色/琥珀、Fault=红、Unknown=灰；禁止两处各维护互相冲突的状态颜色。
-
-管理员状态至少支持：
-
-```text
-未启用
-等待授权
-等待 UAC
-已启用
-故障
-```
-
-管理员模式 UI 只保留必要操作：
-
-- `启用管理员权限`
-- `关闭管理员权限`
-- 故障时复用现有 `查看` / diagnostics 入口
-
-不加入时间选择器，不显示 Broker 内部技术字段。
-
+- Dashboard “选择其他文件夹”统一使用原生 Windows 文件夹选择器，禁止手填绝对路径主流程。
+- 权限控制只保留编辑/完整/管理员三种模式按钮：可见点击/重新点击管理员模式若未 Active 立即发起 UAC；禁止单独“启用管理员权限”按钮；离开管理员模式关闭 Broker。
+- 左下 CurrentTask 单行无任务固定显示 `等待命令`，禁止“空闲”/隐藏；实际 MCP/Broker 生产调用必须端到端驱动 backend `CurrentTaskStatus` → UI，frontend 不伪造。
+- 设置页严格为常规/连接/权限：常规=`开机启动`、`关闭窗口后继续运行`；连接=`Tunnel ID`、`Runtime API Key` 各自“更换”；权限=三模式；底部=`打开欢迎页`、`完成`。
+- `Runtime API Key` 为精确英文用户字段名，不翻译；完整 secret 永不回显/预填。Tunnel ID 与 Runtime API Key 独立更新，保存即校验→安全写入→按需受控重连；禁止“测试连接”。
+- React/WebView 只消费 typed backend projection + user intent；故意延迟 backend 操作时 UI 必须保持响应。
 
 ### LB-015 额外 UI 语言硬要求
 
-- 所有用户可见文案使用简体中文；
-- 专业缩写/专有名词除外；
-- domain enum 不直接渲染；
-- 建立统一 presentation/i18n mapper；
-- 主控界面不得出现 Dashboard / Settings / Diagnostics / Elevated / Broker / Runtime 等无必要英文。
+中文优先继续成立，但 `Tunnel ID` 与 `Runtime API Key` 是冻结专有字段名例外。Dashboard/Settings/Diagnostics/Edit/Full/Elevated 等普通英文仍禁止。
 
 ## LB-016 — First-run Wizard
 
-严格 5 屏，无第 6 屏：
-
-```text
-欢迎
-→ OpenAI
-→ 项目与权限
-→ 创建自定义插件（第 3 屏先启动项目/runtime/MCP/Tunnel并全就绪；第 4 屏仅名称/Tunnel ID与两个 Rust 固定浏览器入口）
-→ 启动检查
-```
-
-- Screen 2 字段：`Tunnel ID` / `Runtime API Key`；
-- Screen 3 项目与权限合并，新项目以原生 Windows 文件夹选择器为主交互；权限按钮不得固定高度压缩说明，换行自动增高，900×620 视觉留白必须由人工 Gate 验收；普通 selected 为蓝色 `#0071e3`，管理员模式为黄色/琥珀；
-- Screen 3 保存项目与权限后立即启动 selected project/runtime/MCP/OpenAI Tunnel，三项真实就绪后才允许进入 Screen 4；唯一 runtime 启动边沿不得延迟到 Screen 5；
-- Screen 4 标题固定 `创建自定义插件`，开发者模式提示固定；`打开 ChatGPT插件设置` 左侧放置，只允许 Rust 固定 allowlist + 系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Plugins`；
-- 其下固定显示 `打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件`；
-- Screen 4 信息严格只有 `名称 = Local Bridge` / `Tunnel ID = 当前持久化保存值`，禁止“本地服务”；两行各自复制，绿色 `已复制` 精确 3 秒，不得布局位移；
-- `打开插件管理页` 同样位于左侧，只允许 Rust 固定 allowlist + 系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；两个入口均禁止 WebView 和前端 URL 参数；
-- Screen 4 底部必须有 `返回` / `继续`；
-- Screen 5 只检查本地运行环境、编码服务、OpenAI Tunnel；状态点使用与 Dashboard 同源 typed 状态并映射 Ready绿 / Starting琥珀 / Fault红 / Unknown灰；三项全绿前 `确定` disabled，不自动跳转；
-- Screen 5 全绿后完成提示严格为 `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`；
-- 除 Screen 1 外，Screen 2/3/4/5 都必须有明确 `返回`；保存、启动、配置失败不得锁死用户；
-- 主窗口固定 900×620；minimum/maximum inner size 均为 900×620，`resizable=false`、`maximizable=false`，不允许用户改变窗口尺寸；
-- native decorations 关闭；全产品共享唯一自定义 chrome，外框 edge-to-edge 绑定完整 client area，禁止原生边框与风格化边框同时存在；自定义 chrome 负责拖拽、最小化、关闭且无最大化；
-- Dashboard 与 onboarding 必须在固定 900×620 client area 内完整可操作；不再要求 resize/maximize 响应式布局或真实 resize E2E；
-- onboarding 采用整页布局并直接使用 custom chrome 内容区；禁止将整个向导做成居中 floating card/modal/dialog，也禁止大面积空白背景包围一个带圆角/阴影/边框的二级“窗口”；
-- 权限包含编辑/完整/管理员三档；向导不自动触发 UAC；普通产品 accent 为蓝色 `#0071e3`，管理员模式为黄色/琥珀逻辑色。
+- 保持严格 5 屏、Screen3 runtime ready-before-Screen4、Screen4 固定插件创建合同、Screen5 Gate 与全部返回路径。
+- Screen3 新项目仍用原生 Windows folder picker。
+- 三个权限按钮结构高度必须 `min-height >= 80px` 或等效证明，能够容纳标题+两行说明+上下留白；900×620 人工视觉 Gate 仍必须 PASS。
+- 可见选择/重新选择管理员模式即显式 UAC 动作；禁止单独 enable-admin 按钮，后台 preference restore 仍无 UAC。
+- runtime start + readiness wait 移到 backend 状态机；React 只观察 typed projection，不持有 60 秒 polling/start orchestration。慢 backend 时 onboarding UI 必须响应。
 
 ## LB-017 — Diagnostics
 
-最小诊断 + redacted export。
+固定最小诊断：
 
-增加：
+```text
+运行状态: 本地运行环境 / 编码服务 / OpenAI Tunnel / 管理员权限
+项目: 当前实际项目路径
+日志: 最近、限量、脱敏用户事件
+动作: 打开日志 / 导出诊断 / 完成
+```
 
-- Broker selected/active/faulted；
-- Broker generation；
-- IPC health；
-- 不显示 nonce/secret。
+普通诊断 UI 禁止 Broker/reconnect generation、attempt counter、PID/SID/nonce/IPC，也删除刷新、重试连接、打开欢迎页。导出仍严格 redacted。
 
 ## LB-018 — Runtime Packaging
 
-打包：
-
-- Python Embedded；
-- coding-tools-mcp；
-- tunnel-client；
-- privileged-broker；
-- SHA256/provenance；
-- installer；
-- install/uninstall cleanup。
-
-必须：
-
-- Windows 11 x64 only；
-- 不打包 WebView2；
-- 不实现 runtime self-update；
-- 不实现 app auto-updater；
-- 生成安装包/安装后体积报告；
-- installer >100 MiB 或 installed >250 MiB 时必须归因分析。
+- 最终 LocalBridge bundle/runtime manifest/packaging inventory/installer/launcher/fallback 必须移除 `cloudflared.exe`、`cloudflared-manifest.json` 与 Cloudflare managed tunnel activation。
+- `compatibility/**` 中历史 upstream 快照允许保留 cloudflared 事实作为不可执行审计证据，但不得复制到最终发行 runtime。
+- 增加 fail-closed packaging Gate，防止 Cloudflare/cloudflared 被重新引入。
+- 其余 bundled Python/coding-tools/tunnel-client、SBOM/notices/provenance/icon/zero-telemetry 合同保持。
 
 ## LB-019 — Release / Clean-machine / Reboot E2E
 

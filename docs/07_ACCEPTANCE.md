@@ -95,9 +95,9 @@
 
 | A89 | Dashboard + Edit | 显示管理员权限“未启用”，无冗余启用按钮 |
 | A90 | Dashboard + Full | 显示管理员权限“未启用”，无冗余启用按钮 |
-| A91 | Dashboard + Elevated + Requested | 显示“等待授权”与“启用管理员权限” |
+| A91 | Dashboard + Elevated + Requested | 显示“等待授权”；点击/重新点击“管理员模式”立即发起 UAC，不显示单独“启用管理员权限”按钮 |
 | A92 | Dashboard + Elevated + AwaitingUac | 显示“等待 UAC” |
-| A93 | Dashboard + Elevated + Active | 显示“已启用”与“关闭管理员权限” |
+| A93 | Dashboard + Elevated + Active | 显示“已启用”；切换到编辑/完整模式即关闭管理员权限，不增加冗余权限按钮 |
 | A94 | Broker Active→Faulted | Dashboard 立即显示“故障” |
 | A95 | Dashboard privilege status | 由 PrivilegeState 驱动，不由 PermissionMode 猜测 |
 | A96 | Dashboard | 不显示 PID/nonce/SID/IPC 等内部字段 |
@@ -126,13 +126,13 @@
 | A117 | runtime adapter | domain 不直接依赖上游私有结构 |
 | A118 | release rollback | migration/install failure 不破坏旧配置 |
 
-| A119 | 主控界面空闲 | 当前任务显示“空闲”，无活动历史 |
+| A119 | 主控界面无活动任务 | 当前任务固定显示“等待命令”，无活动历史 |
 | A120 | read_file tools/call | 类型显示“读取文件”，任务显示安全路径摘要 |
 | A121 | search tools/call | 类型显示“搜索代码”，显示安全搜索摘要 |
 | A122 | command tools/call | 类型显示“执行命令/运行测试/构建”等稳定分类 |
 | A123 | policy deny | 当前任务显示“已阻止”，不得先显示“执行中” |
 | A124 | 管理员调用等待 UAC | 当前任务显示“管理员操作 / 等待授权” |
-| A125 | task terminal | 最终回到“空闲”，不追加历史消息 |
+| A125 | task terminal | 最终回到“等待命令”，不追加历史消息 |
 | A126 | 主控界面 | 无最近活动、消息流、时间线 |
 | A127 | raw tool id | 不直接显示 MCP tool identifier |
 | A128 | secret-bearing args | 任务摘要不泄漏密钥/token/nonce |
@@ -144,7 +144,7 @@
 | A133 | Running | 绿色活动点使用轻量脉冲动效 |
 | A134 | reduced-motion | 活动点静态，不执行脉冲 |
 | A135 | 动效 | 不推动布局、不造成文字位移 |
-| A136 | Idle | 显示低存在感“○ 空闲”或隐藏整行 |
+| A136 | Idle | 必须显示低存在感“○ 等待命令”，不得显示“空闲”或隐藏整行 |
 
 | A137 | 保存 Runtime API Key | settings/JSON/TOML 中不存在明文 |
 | A138 | 保存 Runtime API Key | Windows secure credential backend 可恢复 |
@@ -189,7 +189,7 @@
 | A175 | 2/5 | 字段为 `Tunnel ID` / `Runtime API Key`，并有明确“返回” |
 | A176 | 2/5 | 密钥下方仅一行安全保存说明；保存失败时仍可返回，不得锁死 |
 | A177 | 3/5 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器，并有明确“返回” |
-| A178 | 3/5 权限模式 | 三个权限按钮说明换行时安全自动增高，900×620 实机文字与边框留白均衡；该项必须人工视觉验收，不能凭 CSS padding 自动 PASS；普通 selected 使用蓝色 `#0071e3`，管理员模式使用黄色/琥珀逻辑色 |
+| A178 | 3/5 权限模式 | 三个权限按钮结构 `min-height >= 80px` 或等效证明，说明换行安全增高，900×620 实机文字与边框留白均衡；该项仍必须人工视觉验收，不能凭 CSS 自动 PASS；普通 selected 蓝色 `#0071e3`、管理员黄色/琥珀 |
 | A179 | 4/5 ChatGPT 插件设置 | 标题为“创建自定义插件”，提示为“在插件设置页面最底端，打开‘开发者模式’”；`打开 ChatGPT插件设置` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Plugins` |
 | A180 | 4/5 信息与复制 | 插件设置按钮下显示“打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件”；信息严格只有“名称 / Tunnel ID”两行，禁止“本地服务”；Tunnel ID 来自当前持久化值；两行独立复制成功绿色 `已复制` 精确 3 秒且不位移 |
 | A181 | 4/5 插件管理 | `打开插件管理页` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView/任意前端 URL；底部有“返回 / 继续” |
@@ -216,4 +216,24 @@
 | A201 | 窗口外框 | native `decorations=false`；仅存在一层 edge-to-edge 自定义 chrome，不出现原生标题栏/边框 + 自定义边框的双框 |
 | A202 | 自定义标题栏 | 可拖拽窗口；提供最小化与关闭；不提供最大化；chrome 从 client `(0,0)` 覆盖 100% 宽高 |
 | A203 | 首次引导整页布局 | onboarding 直接占用 custom chrome 内容区，不存在“大面积空白画布 + 居中 floating card/modal/dialog”整体向导外壳；页面级 padding 与局部分组允许 |
-| A204 | 3/5 权限模式按钮视觉 | 固定 900×620 实际运行窗口中标题/说明与边框留白均衡、换行不拥挤且按钮自动增高；此项为人工视觉验收，CSS 标记存在本身不得构成 PASS |
+| A204 | 3/5 权限模式按钮视觉 | 固定 900×620 下 `min-height >= 80px` 或等效结构，标题+两行说明+上下留白不拥挤；仍为人工视觉验收，CSS 标记本身不得构成 PASS |
+| A205 | 管理员模式选择 | 可见用户点击/重新点击“管理员模式”时，若 Broker 未 Active，立即发起 Windows UAC；不存在单独“启用管理员权限”按钮；后台偏好恢复不自动 UAC |
+| A206 | 离开管理员模式 | 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker |
+| A207 | 前台启动 | onboarding 已完成且配置有效时，打开 UI 自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作 |
+| A208 | 前台慢启动 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新 |
+| A209 | CurrentTask idle | 左下状态固定显示“等待命令”，不得显示“空闲”或隐藏 |
+| A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus 并反映到 UI；terminal 回到“等待命令”；前端不伪造 |
+| A211 | Dashboard 新项目 | “选择其他文件夹”打开原生 Windows 文件夹选择器，手填路径不是主流程 |
+| A212 | 设置结构 | 仅常规/连接/权限三组；常规仅“开机启动/关闭窗口后继续运行”；底部“打开欢迎页/完成” |
+| A213 | 设置连接固定态 | 字段严格为 `Tunnel ID` / `Runtime API Key`；密钥只显示“已保存/未保存”，两项各有“更换”，完整密钥永不回显 |
+| A214 | 设置连接编辑 | 点“更换”才编辑；未改字段不要求重输、不被覆盖；保存密钥输入不得预填真实 secret |
+| A215 | 设置部分更新 | 只改 Tunnel ID 不改/不要求 Runtime API Key；只改 Runtime API Key 不改 Tunnel ID |
+| A216 | 设置保存 | 基础格式校验→安全写入→运行/连接中且有效连接配置变化时受控重连；不存在“测试连接”按钮 |
+| A217 | 关闭窗口继续运行=开 | X 仅隐藏窗口，runtime/tray 继续 |
+| A218 | 关闭窗口继续运行=关 | X 有序关闭 privileged gate/Broker/Tunnel/PEP/MCP 后退出；偏好版本化持久化 |
+| A219 | 3/5 权限按钮结构 | `min-height >= 80px` 或等效结构证明，能容纳标题+两行说明+上下留白；900×620 人工视觉 Gate 仍必须 PASS |
+| A220 | Onboarding backend ownership | React 不拥有 runtime start/readiness polling 状态机；backend 持有并投影；慢 backend 时 UI 仍响应 |
+| A221 | 诊断结构 | 仅运行状态/项目/日志；运行状态四行=本地运行环境/编码服务/OpenAI Tunnel/管理员权限；项目显示实际路径 |
+| A222 | 诊断日志/动作 | 最近限量脱敏日志；页面动作仅“打开日志/导出诊断/完成”，无刷新/重试连接/打开欢迎页/工程 generation 字段 |
+| A223 | UI/backend 分离 | WebView 只 render typed projection + send typed intent；耗时 process/filesystem/credential/UAC/recovery 工作不占用 UI 事件线程 |
+| A224 | LB-018 Cloudflare retirement | 最终 bundle/runtime manifest/installer/launcher/fallback 不含 `cloudflared.exe`、Cloudflare managed tunnel 或 cloudflared manifest；历史 compatibility 证据不进入可执行发行物 |

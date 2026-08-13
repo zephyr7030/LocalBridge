@@ -124,12 +124,14 @@ Active
 Faulted
 ```
 
-用户可以：
+用户通过三种权限模式本身控制：
 
 ```text
-启用管理员模式
-关闭管理员模式
+点击/重新点击 管理员模式 → 显式 UAC / 激活 Broker
+切换 编辑模式/完整模式 → 关闭 privileged call gate / 停止 Broker
 ```
+
+禁止额外“启用管理员权限”按钮。
 
 `Active` 不因时间自动失效。
 
@@ -157,13 +159,7 @@ elevated_active = false
 
 但后台开机启动 **不得自动弹出 UAC**。
 
-用户打开控制中心后显式点击：
-
-```text
-启用管理员权限
-```
-
-才启动 Broker。
+用户打开控制中心后点击/重新点击 `管理员模式` 本身就是显式提权动作，立即发起安全校验与 Windows UAC；不再经过单独“启用管理员权限”按钮。后台恢复偏好仍只进入 Requested，不弹 UAC。
 
 这样同时满足：
 
@@ -339,10 +335,10 @@ User chooses Elevated
 → Active
 ```
 
-关闭 Elevated：
+离开 Elevated（用户选择 Edit/Full）：
 
 ```text
-disable elevation
+close privileged call gate
 → stop accepting privileged calls
 → Broker graceful shutdown
 → forced cleanup if needed

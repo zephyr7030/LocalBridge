@@ -78,3 +78,19 @@ Frozen brand icon:
 - `assets/icons/localbridge.ico` — 16/24/32/48/64/128/256 px;
 - Windows app, installer and tray use this asset;
 - no icon-library dependency or placeholder replacement is permitted.
+
+## G3 human-review amendment — generation 2 (2026-08-13)
+
+This section supersedes conflicting older G3 UI/lifecycle wording while preserving the already-correct five-screen and Screen3→4 readiness contract above.
+
+- effective rework entry is `LB-013`; G4/LB-018 remains blocked until LB-013→LB-017 are re-executed, G3 adversarial generation 5 passes, and a fresh human Gate passes;
+- `关闭窗口后继续运行` is a persisted setting: enabled = close hides and keeps runtime/tray, disabled = orderly runtime/Broker cleanup then exit;
+- configured normal foreground launch automatically starts selected project/runtime/MCP/OpenAI Tunnel asynchronously; `开机启动` controls Windows login launch only; background restore of administrator preference still must not auto-UAC;
+- frontend/WebView is presentation-only: typed projection + typed user intent. Runtime/readiness/retry/workspace/UAC/current-task state machines belong to backend workers/async tasks; intentionally slow backend operations must not make the UI unresponsive;
+- visible selection/reselection of `管理员模式` itself is the explicit UAC action when Broker is not Active; the separate `启用管理员权限` button is forbidden; selecting Edit/Full closes the privileged gate/Broker;
+- no-task Dashboard status is always `等待命令`, never `空闲` or hidden, and production MCP/Broker execution must end-to-end drive the backend `CurrentTaskStatus` projection;
+- Dashboard add-project uses the native Windows folder picker, not a raw path-entry primary flow;
+- screen-3 permission buttons require `min-height >= 80px` or equivalent structural proof for title + two-line description + balanced whitespace, while human 900×620 visual acceptance remains mandatory;
+- Settings is exactly `常规 / 连接 / 权限`: general = `开机启动 / 关闭窗口后继续运行`; connection = exact `Tunnel ID / Runtime API Key` labels with independent `更换`; permission = three modes; page-level footer = `打开欢迎页 / 完成`. Full Runtime API Key is never revealed/prefilled; changed fields save independently; save validates → securely writes → controlled reconnects if effective connection configuration changed while active/connecting; no `测试连接` button;
+- Diagnostics is exactly `运行状态 / 项目 / 日志`; runtime rows = 本地运行环境 / 编码服务 / OpenAI Tunnel / 管理员权限; project = actual path; logs = bounded recent redacted events; page actions only `打开日志 / 导出诊断 / 完成`; engineering generation/attempt/PID/SID/nonce/IPC details are not normal UI;
+- LB-018 must retire Cloudflare/cloudflared from the final LocalBridge distribution: no `cloudflared.exe`, cloudflared manifest, Cloudflare managed-tunnel activation, launcher argument or fallback in final bundle/runtime manifest/installer. Historical compatibility evidence may retain the upstream fact but must not become executable packaged runtime.

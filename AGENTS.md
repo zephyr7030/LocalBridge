@@ -6,7 +6,7 @@
 3. 组末必须停止；只有独立组级对抗审查 PASS 才能解锁下一组。唯一额外 Gate：G3 独立对抗审查 PASS 后仍不得解锁 G4，必须再通过人工实测细审核。
 4. 只写当前 PR writable paths 和合同明确的受限例外。
 5. 不写 patch-only 生产代码；上游 runtime 放在 stable adapter 后。
-6. Rust 管 lifecycle；React 不管理 sidecar/PID/权限/安全策略/raw MCP。
+6. Rust/backend 管 lifecycle、readiness、retry、权限与 CurrentTask truth；React/WebView 仅渲染 typed backend projection 并发送 typed user intent。前端不得管理 sidecar/PID/权限/安全策略/raw MCP，也不得拥有 runtime 启停/readiness/retry 的轮询状态机；任何可能阻塞的进程、文件、credential、UAC、recovery 或 lifecycle 工作不得占用 UI/WebView 事件线程。
 7. 编辑模式无 process exec；完整模式为当前用户权限；管理员能力只走独立 Broker；control-plane 永久 deny。
 8. `tools/call` mandatory enforcement；unknown deny；workflow 间接能力必须分类。
 9. remembered projects 不授予访问；同时最多一个 active root；remove 永不删文件；MCP 无权改 workspace control-plane。
@@ -15,7 +15,7 @@
 12. listener 只允许 127.0.0.1/::1。
 13. recoverable 故障自动重连 5 次，1/2/5/10/30s；成功静默；5 次失败才一次错误窗口；禁止 restart storm。
 14. UI 中文、极简、Apple-inspired；视觉只用 React/Tauri + 原生 CSS/SVG/system fonts；不得新增 UI/动画/图标/CSS/字体依赖。
-15. 当前执行只显示单行绿色脉冲状态；无 feed/history；摘要脱敏。
+15. 当前执行只显示单行状态；无 feed/history；摘要脱敏。无活动任务时该行必须可见并固定显示 `等待命令`，不得显示 `空闲` 或隐藏；活动/等待/阻止/失败状态只能来自真实 backend `CurrentTaskStatus` 投影，前端不得伪造。
 16. `--background` 从入口不显示窗口；管理员偏好不自动 UAC。
 17. 捆绑 Python/coding-tools/tunnel-client；无系统 Python fallback；无独立 runtime/app updater v0.1。
 18. 普通 PR 使用 deterministic fake sidecars；真实 external test 只属于明确 Gate；安全边界必须 negative/adversarial。
@@ -38,3 +38,12 @@ PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRE
 31. 除第 1 屏外，onboarding 第 2/3/4/5 屏都必须有明确“返回”路径；任何保存、启动或配置失败均不得锁死用户，最终启动检查页也必须能返回第 4 屏重新配置。
 32. 普通产品强调色固定恢复为原 onboarding 蓝色 `#0071e3`：primary、普通 selected 与主要交互统一使用蓝色体系，黑色 `#1d1d1f` 仅可作为文字/中性色，不得作为普通产品 accent。管理员模式是唯一逻辑色例外，使用黄色/琥珀色。
 33. Onboarding 启动检查与 Dashboard 主要服务状态必须消费同源 typed 状态投影并使用同一颜色语义：Ready/正常=绿色，Starting/等待=黄色或琥珀色，Fault/失败=红色，Unknown/未启动=灰色。禁止文字变化而圆点颜色固定，也禁止两处各维护一套互相冲突的状态。
+34. 管理员模式的**可见用户选择本身**就是显式提权动作：在 Dashboard、设置或 onboarding 中点击/重新点击“管理员模式”，若 Broker 尚未 Active，必须立即走现有安全校验后发起 Windows UAC / `runas` 并只提升 Privileged Broker。禁止单独的“启用管理员权限”按钮；离开管理员模式必须立即关闭 privileged call gate 并停止 Broker。后台 `--background` 恢复已保存管理员偏好仍不得自动弹 UAC，只进入 Requested。
+35. 正常前台 UI 启动在 onboarding 已完成、当前项目与连接凭据有效时必须**自动且异步**启动 selected project/runtime/MCP/OpenAI Tunnel；窗口先可交互显示 Starting/Ready/Fault typed 状态，不得要求用户再次点击启动服务。`开机启动` 只控制 Windows 登录启动注册，不得与“手动打开应用后是否启动服务”混为一项；常规设置中禁止新增“自动启动服务/开机后静默运行”冗余开关。
+36. 设置页字段专有名词固定使用 `Tunnel ID` 与 `Runtime API Key`，这是中文优先规则的明确例外；禁止把 `Runtime API Key` 改写成“运行密钥”。完整 Runtime API Key 永不回显。连接区默认只显示持久化摘要与各自“更换”；点“更换”才进入编辑态，Tunnel ID 与 Runtime API Key 可独立更新，未修改字段不得被要求重输或被覆盖；保存执行基础格式校验→安全写入→若当前运行/连接且有效连接配置变化则受控重连；禁止“测试连接”按钮。
+37. 设置页固定为三组：`常规`（开机启动、关闭窗口后继续运行）、`连接`（Tunnel ID、Runtime API Key，各自更换）、`权限`（编辑模式、完整模式、管理员模式）；底部只保留 `打开欢迎页` / `完成`。`关闭窗口后继续运行=true` 时 X=hide、runtime/tray 保持；false 时 X=有序关闭受管 runtime/Broker 后退出；该偏好必须版本化持久化。
+38. 诊断页固定为最小三段：`运行状态`（本地运行环境、编码服务、OpenAI Tunnel、管理员权限）、`项目`（当前实际路径）、`日志`（最近、限量、脱敏用户日志）；底部动作只保留 `打开日志`、`导出诊断`、`完成`。普通诊断页禁止 Broker generation、reconnect generation/attempt 列表、刷新、重试连接、打开欢迎页等工程/重复动作；导出仍必须严格 secret-redacted。
+39. 第 3 屏三个权限按钮除 `height:auto`/换行安全外，在固定 900×620 下必须具备足以容纳“标题 + 两行说明 + 上下留白”的结构高度基线，自动化结构 Gate 以 `min-height >= 80px`（或等效可证明布局）防止压扁；最终仍必须由人工 900×620 视觉 Gate 验证均衡留白，自动规则不能替代人工 PASS。
+40. UI/backend 必须是独立执行边界：WebView 主线程只做 render/input；所有可能耗时的 Rust/Tauri command 必须投递到 backend worker/async task/`spawn_blocking` 等非 UI 执行上下文。onboarding 的 runtime start + readiness wait、foreground startup、workspace switch、UAC、recovery 等状态机属于 backend；React 只观察 typed projection。必须有“故意延迟 backend 工作时 UI 仍可响应/刷新状态”的回归测试。
+41. Dashboard “选择其他文件夹”与 onboarding 一致，必须调用原生 Windows 文件夹选择器；手填绝对路径不得作为主流程。
+42. Cloudflare/cloudflared 从 LocalBridge 最终发行路径退休：LB-018 必须确保最终 runtime bundle、`runtime-manifest.toml`、packaging inventory/installer、启动参数和 fallback 均不包含或调用 `cloudflared.exe` / Cloudflare managed tunnel。上游历史兼容快照可作为不可执行审计证据保留，但不得被复制进最终发行 bundle；release Gate 必须 fail-closed 防止重新引入。

@@ -76,9 +76,9 @@ Rust Core
 
 允许：
 
-- 展示状态；
-- 发出用户意图；
-- 路由 Wizard；
+- 展示 Rust/backend typed projection；
+- 发出 typed 用户意图；
+- 路由 Wizard 的纯展示步骤；
 - 展示 typed errors。
 
 禁止：
@@ -86,8 +86,10 @@ Rust Core
 - spawn/kill 进程；
 - 直接读取 credential；
 - 保存 Runtime API Key；
-- 自己计算 runtime truth；
-- 通过 frontend timer 决定重启 sidecar。
+- 自己计算 runtime/readiness/privilege/current-task truth；
+- 拥有 runtime start/readiness/retry/recovery 的 polling/backoff 状态机；
+- 通过 frontend timer 决定重启 sidecar；
+- 在 WebView/UI 事件线程执行或等待可能阻塞的 lifecycle/process/filesystem/credential/UAC 操作。
 
 ## Rust 边界
 
@@ -105,6 +107,24 @@ Rust Core
 - app-data；
 - runtime manifest；
 - capability policy。
+
+## UI / Backend Execution Boundary
+
+Tauri/WebView 的 UI 线程必须与后端执行解耦：
+
+```text
+React/WebView render + input
+        ↓ typed intent / projection
+Rust control plane
+        ↓
+backend worker / async task / spawn_blocking
+        ↓
+process / filesystem / credential / UAC / recovery
+```
+
+任何可能超过即时内存投影读取的操作都不得依赖 UI 事件线程同步完成。正常前台启动必须先创建可响应窗口，再由 backend 异步恢复/启动 configured runtime；onboarding 的 start + readiness wait 也必须由 backend 状态机持有，React 只能观察状态。
+
+验收必须人为注入慢启动/慢 credential/慢 lifecycle 操作，并证明窗口输入、绘制和 typed projection refresh 仍有响应。
 
 ## Control Plane 与 Data Plane
 
@@ -162,12 +182,11 @@ LocalBridge.exe
 
 ## 关闭语义
 
-窗口关闭：
+窗口关闭由持久化设置 `关闭窗口后继续运行` 决定：
 
 ```text
-Window → hide
-Runtime → unchanged
-Tray → remains
+true  → Window hide → Runtime unchanged → Tray remains
+false → close privileged call gate → Broker/Tunnel/PEP/MCP orderly stop → exit app
 ```
 
 托盘“退出”：
@@ -202,6 +221,10 @@ validate candidate
 - active 不得被提前覆盖；
 - UI 显示 candidate fault；
 - 允许回滚上一个 active workspace。
+
+## 前台启动
+
+当 `onboarding_complete=true` 且 active workspace、Tunnel ID、Runtime API Key metadata 均有效时，普通前台启动必须自动异步启动 selected project/runtime/MCP/OpenAI Tunnel。`开机启动` 仅控制 Windows 登录时是否启动 LocalBridge，不得充当“手动打开应用后是否启动服务”的开关。前台启动过程中 UI 必须持续消费 backend Starting/Ready/Fault 投影。
 
 ## 开机后台
 

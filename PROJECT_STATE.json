@@ -1,7 +1,7 @@
 {
-  "schema_version": 16,
+  "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-013",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -79,12 +79,15 @@
     "internal_model": "Elevated = Full + Privileged Broker",
     "whole_app_elevation": false,
     "admin_ttl": null,
-    "user_controls_enable_disable": true,
+    "user_controls_enable_disable": false,
     "background_auto_uac": false,
     "generic_elevated_exec": true,
     "generic_elevated_exec_semantics": "reviewed_structured_gateway_only",
     "arbitrary_elevated_program_execution": false,
-    "elevated_exec_indirect_control_plane_mutation": "deny_always"
+    "elevated_exec_indirect_control_plane_mutation": "deny_always",
+    "visible_admin_mode_selection_requests_uac": true,
+    "separate_enable_admin_button": false,
+    "leaving_admin_mode_disables_broker": true
   },
   "distribution_architecture": {
     "target": "Windows 11 x64",
@@ -121,7 +124,12 @@
       "Windows",
       "LocalBridge"
     ],
-    "internal_enums_direct_render": false
+    "internal_enums_direct_render": false,
+    "exact_english_field_labels": [
+      "Tunnel ID",
+      "Runtime API Key"
+    ],
+    "runtime_api_key_translation_forbidden": true
   },
   "maintenance_architecture": {
     "machine_verifiable_architecture_rules": true,
@@ -142,7 +150,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Fix the G3 generation 4 LB-015 Dashboard workspace-picker violation, then re-execute LB-015 -> LB-016 -> LB-017 in strict order and run a fresh G3 independent adversarial review generation 5. Keep G4/LB-018 blocked."
+    "next_action": "Rework from LB-013 under schema20 contracts: LB-013 close behavior/thread boundary, LB-014 foreground auto-start, LB-015 dashboard/settings/admin/task projection, LB-016 onboarding admin/readiness/button visual, LB-017 diagnostics; then run G3 adversarial generation 5 and a fresh human Gate. Keep LB-018/G4 blocked; LB-018 additionally removes cloudflared from final distribution."
   },
   "current_task_ui": {
     "enabled": true,
@@ -158,7 +166,10 @@
     "show_running_text": false,
     "active_indicator": "green_pulsing_dot",
     "reduced_motion": "static_green_dot",
-    "idle": "neutral_static_dot_or_hidden"
+    "idle": "等待命令",
+    "idle_row_visible": true,
+    "frontend_synthesized_state": false,
+    "end_to_end_production_projection_required": true
   },
   "credential_policy": {
     "runtime_api_key_plaintext_persistence": false,
@@ -184,10 +195,10 @@
   "current_group": "G3",
   "g3_human_review": {
     "status": "FAIL",
-    "generation": 1,
+    "generation": 2,
     "date": "2026-08-13",
-    "reopen_from_pr": "LB-015",
-    "reason": "Manual G3 review found Dashboard/UI-shell accent and service-status defects plus LB-016 onboarding contract and flow defects; contracts amended before implementation rework.",
+    "reopen_from_pr": "LB-013",
+    "reason": "Additional manual G3 review found lifecycle, elevation, settings, current-task projection, onboarding visual, UI/backend separation and diagnostics defects; Cloudflare retirement was added to LB-018 packaging.",
     "verified_disk_findings": {
       "runtime_start_before_screen_4": "CURRENTLY_COMPLIANT: saveProjectAndPermission starts the selected project and bounded-polls localEnvironment/codingService/openaiTunnel before setStep(4); do not move this edge later.",
       "stale_claim_rejected": "The claim that current production defers its unique runtime start until the old Screen 5 is not supported by the current disk code.",
@@ -204,9 +215,20 @@
     "executor_rework_validation": "LB-015 and LB-016 automated contracts, frontend build/tests, full Rust tests, Clippy, release check, fixed-window 150% DPI runtime E2E and schema19 fail-closed verifier tests passed on 2026-08-13; overall Architecture remains intentionally blocked only by this historical human-review FAIL until a fresh Gate is run.",
     "historical_record_policy": "scripts/authorization-records/LB-016.json contains superseded six-screen wording as historical authorization provenance; preserve it as immutable/non-authoritative history rather than rewriting past evidence.",
     "g4_unlocked": false,
-    "rework_status": "REOPENED_BY_G3_GENERATION_4_FAIL",
+    "rework_status": "REOPENED_BY_ADDITIONAL_MANUAL_G3_FINDINGS",
     "rework_completed_date": "2026-08-13",
-    "next_required_adversarial_generation": 5
+    "next_required_adversarial_generation": 5,
+    "additional_manual_findings": [
+      "Selecting administrator mode currently does not launch UAC because set_permission_mode only requests without UAC and a separate enable-admin command owns explicit elevation; separate enable button is now forbidden.",
+      "Foreground UI startup currently suppresses runtime startup; configured foreground launch must auto-start services asynchronously.",
+      "Settings currently uses 运行密钥; exact user-facing field label must be Runtime API Key.",
+      "Dashboard current-task idle text is hard-coded 空闲; required text is 等待命令 and end-to-end production backend projection must be proven.",
+      "Onboarding permission buttons remain visually too short; structural min-height 80px or equivalent plus human 900x620 Gate is required.",
+      "Frontend currently owns onboarding start/readiness polling and synchronous command boundaries can block; frontend must become projection-only and backend work must run off the UI/WebView thread.",
+      "Settings must be rebuilt to the frozen 常规/连接/权限 layout with independent connection replacement and controlled reconnect.",
+      "Diagnostics must be rebuilt to the frozen 运行状态/项目/日志 minimal layout and exact action set.",
+      "Cloudflared is present in bundled tunnel-client compatibility/runtime evidence and must be absent from the final LB-018 bundle/runtime manifest/launcher paths."
+    ]
   },
   "recovery_policy": {
     "automatic_reconnect": true,
@@ -303,7 +325,10 @@
       "permission_button_css_only_auto_pass_forbidden": true,
       "ordinary_selected_accent": "#0071e3",
       "administrator_selected_accent": "amber",
-      "back_action": true
+      "back_action": true,
+      "permission_button_min_height_px": 80,
+      "visible_admin_selection_requests_uac": true,
+      "separate_enable_admin_button": false
     },
     "screen_4": {
       "purpose": "create_custom_plugin",
@@ -456,5 +481,131 @@
     "g4_unlocked": false,
     "next_required_adversarial_generation": 5,
     "review_decision_commit": "e2e8317f631c5932a779908850b78e6a49f368c0"
+  },
+  "ui_backend_separation": {
+    "frontend_role": "typed_projection_and_user_intent_only",
+    "backend_single_truth": [
+      "RuntimeState",
+      "PrivilegeState",
+      "CurrentTaskStatus",
+      "readiness",
+      "recovery"
+    ],
+    "frontend_runtime_orchestration_forbidden": true,
+    "blocking_work_on_webview_event_thread_forbidden": true,
+    "backend_worker_or_async_boundary_required": true,
+    "slow_backend_ui_responsiveness_test_required": true,
+    "onboarding_runtime_start_and_readiness_owned_by_backend": true
+  },
+  "startup_runtime_policy": {
+    "foreground_configured_launch_auto_starts_services": true,
+    "foreground_start_async_nonblocking_ui": true,
+    "required_valid_state": [
+      "onboarding_complete",
+      "active_workspace",
+      "Tunnel ID",
+      "Runtime API Key metadata"
+    ],
+    "os_login_autostart_setting": "开机启动",
+    "os_login_autostart_does_not_gate_manual_foreground_runtime_start": true,
+    "background_admin_preference_auto_uac": false
+  },
+  "close_window_policy": {
+    "setting_label": "关闭窗口后继续运行",
+    "default": true,
+    "persisted_versioned": true,
+    "when_true": "hide_window_keep_runtime_and_tray",
+    "when_false": "orderly_stop_runtime_and_privileged_broker_then_exit"
+  },
+  "settings_ui": {
+    "sections": [
+      "常规",
+      "连接",
+      "权限"
+    ],
+    "general": [
+      "开机启动",
+      "关闭窗口后继续运行"
+    ],
+    "connection_labels": [
+      "Tunnel ID",
+      "Runtime API Key"
+    ],
+    "fixed_view_actions": [
+      "更换"
+    ],
+    "runtime_api_key_full_reveal": false,
+    "runtime_api_key_display_states": [
+      "已保存",
+      "未保存"
+    ],
+    "edit_requires_replace_action": true,
+    "independent_partial_updates": true,
+    "runtime_api_key_hint": "Runtime API Key 仅保存在 Windows 安全凭据中。",
+    "save_sequence": [
+      "validate_changed_fields",
+      "secure_write",
+      "controlled_reconnect_if_effective_config_changed_and_runtime_active_or_connecting"
+    ],
+    "test_connection_button": false,
+    "permission_modes": [
+      "编辑模式",
+      "完整模式",
+      "管理员模式"
+    ],
+    "footer_actions": [
+      "打开欢迎页",
+      "完成"
+    ],
+    "redundant_general_controls_forbidden": [
+      "自动启动服务",
+      "开机后静默运行"
+    ]
+  },
+  "diagnostics_ui": {
+    "sections": [
+      "运行状态",
+      "项目",
+      "日志"
+    ],
+    "runtime_status_rows": [
+      "本地运行环境",
+      "编码服务",
+      "OpenAI Tunnel",
+      "管理员权限"
+    ],
+    "project_value": "actual_current_project_path",
+    "logs": "bounded_recent_redacted_user_events",
+    "actions": [
+      "打开日志",
+      "导出诊断",
+      "完成"
+    ],
+    "forbidden_normal_ui": [
+      "Broker generation",
+      "reconnect generation",
+      "attempt counters",
+      "刷新",
+      "重试连接",
+      "打开欢迎页",
+      "PID",
+      "SID",
+      "nonce",
+      "IPC"
+    ],
+    "export_redaction_required": true
+  },
+  "cloudflare_retirement": {
+    "owner_pr": "LB-018",
+    "current_evidence": [
+      "runtime/tunnel-client/cloudflared-manifest.json",
+      "compatibility/tunnel-client/0.0.11/release-asset.json includes cloudflared.exe",
+      "compatibility/tunnel-client/0.0.11/run-help.txt exposes cloudflared options"
+    ],
+    "final_bundle_cloudflared_forbidden": true,
+    "final_runtime_manifest_cloudflare_forbidden": true,
+    "launch_or_fallback_cloudflare_forbidden": true,
+    "historical_compatibility_evidence_may_remain": true,
+    "historical_evidence_must_not_be_packaged_as_executable_runtime": true
   }
 }

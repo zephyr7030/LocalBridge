@@ -84,6 +84,15 @@ UI 冻结补充：
 窗口验收       = `resizable=false`、`maximizable=false`；拖拽边框/最大化均不能改变 client size
 窗口边框       = `decorations=false`；唯一自定义 chrome 必须贴满 client area；禁止原生+自定义双边框；保留拖拽/最小化/关闭
 引导页布局     = 整页；直接使用 custom chrome 内容区；禁止空白页面中居中再套 card/modal/dialog 式向导外壳
+管理员选择     = 可见点击“管理员模式”即为显式 UAC 动作；无单独“启用管理员权限”按钮；后台恢复偏好仍不自动 UAC
+前台启动       = onboarding 完成且配置有效时自动、异步启动 runtime/MCP/Tunnel；UI 不等待后端阻塞工作
+任务待机文案   = 固定“等待命令”；必须来自 backend CurrentTaskStatus，不得显示“空闲”或由前端伪造
+设置           = 常规/连接/权限三组；连接字段固定英文 `Tunnel ID` / `Runtime API Key`；独立“更换”；保存即验证并按需受控重连；无“测试连接”
+诊断           = 运行状态/项目/最近脱敏日志；只保留“打开日志 / 导出诊断 / 完成”
+关闭窗口       = 设置项“关闭窗口后继续运行”；开=hide+后台继续，关=有序退出
+UI/backend     = frontend 纯投影；耗时 lifecycle/process/credential/UAC/recovery 工作必须离开 UI/WebView 线程
+权限按钮高度   = 900×620 下结构基线 min-height≥80px 或等效证明，且仍需人工视觉 Gate
+Cloudflare     = LB-018 从最终 bundle/manifest/installer/启动参数/fallback 移除 cloudflared；历史兼容证据可留但不可执行/打包
 ```
 
 ```text

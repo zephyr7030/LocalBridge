@@ -63,8 +63,16 @@ LocalBridge 面向用户的界面默认使用简体中文。内部代码、协�
 | Reconnect | 重新连接 |
 | Switch Workspace | 切换项目 |
 | Open ChatGPT | 打开 ChatGPT |
-| Runtime API Key | 运行密钥 |
-| Tunnel ID | 隧道 ID |
+| Runtime API Key | Runtime API Key（冻结英文专有字段名，不翻译） |
+| Tunnel ID | Tunnel ID（冻结英文专有字段名） |
+
+## 专有字段例外
+
+中文优先不代表强制翻译所有技术标识。用户配置中的 `Tunnel ID` 与 `Runtime API Key` 是本产品冻结专有字段名，必须原样显示；`Runtime API Key` 尤其不得改写为“运行密钥”。完整 secret 永不回显。
+
+管理员权限没有“启用管理员权限”独立按钮文案；可见用户点击/重新点击“管理员模式”本身就是 UAC 动作，离开管理员模式即关闭 Broker。
+
+无活动任务的唯一待机文案为 `等待命令`；禁止 `空闲`。
 
 ## 状态映射
 
@@ -105,7 +113,7 @@ TunnelAuthFailed
 
 ```text
 安全隧道认证失败
-请检查运行密钥。
+请检查 Runtime API Key。
 ```
 
 ## 按钮
@@ -116,8 +124,6 @@ TunnelAuthFailed
 打开 ChatGPT
 切换项目
 重新连接
-启用管理员权限
-关闭管理员权限
 查看诊断
 ```
 
@@ -175,7 +181,7 @@ src/lib/presentation/
 | Current Task | 当前任务 |
 | Task Kind | 类型 |
 | Task Summary | 任务 |
-| Idle | 空闲 |
+| Idle | 等待命令 |
 | Requested | 准备执行 |
 | Running | 执行中 |
 | Awaiting Permission | 等待授权 |

@@ -131,6 +131,213 @@ const G3_HUMAN_REVIEW_AMENDMENT_2026_08_13 = Object.freeze({
   lb016LegacyInsertBefore: "copy-success feedback reserves layout space and causes no layout shift",
 });
 
+const G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13 = Object.freeze({
+  schemaVersion: 20,
+  baselineCommit: "a19297a77688aebe1f3d807f28da6b3fad1dcbcb",
+  baselineSchemaVersion: 19,
+  addedRules: {
+    visible_admin_mode_selection_requests_uac: true,
+    separate_enable_admin_button_forbidden: true,
+    leaving_admin_mode_disables_broker: true,
+    background_admin_preference_auto_uac_forbidden: true,
+    foreground_configured_launch_auto_starts_runtime: true,
+    foreground_runtime_start_must_not_block_ui: true,
+    frontend_is_typed_projection_only: true,
+    frontend_runtime_readiness_polling_state_machine_forbidden: true,
+    blocking_backend_work_on_ui_thread_forbidden: true,
+    ui_responsiveness_under_slow_backend_required: true,
+    dashboard_idle_text: "等待命令",
+    dashboard_idle_row_must_remain_visible: true,
+    dashboard_frontend_synthesized_task_state_forbidden: true,
+    settings_connection_field_labels: ["Tunnel ID", "Runtime API Key"],
+    runtime_api_key_user_facing_label: "Runtime API Key",
+    runtime_api_key_label_translation_forbidden: true,
+    settings_test_connection_button_forbidden: true,
+    settings_connection_partial_update_required: true,
+    settings_save_controlled_reconnect_on_effective_connection_change: true,
+    settings_sections: ["常规", "连接", "权限"],
+    settings_general_controls: ["开机启动", "关闭窗口后继续运行"],
+    settings_footer_actions: ["打开欢迎页", "完成"],
+    close_window_continue_running_setting_required: true,
+    diagnostics_sections: ["运行状态", "项目", "日志"],
+    diagnostics_actions: ["打开日志", "导出诊断", "完成"],
+    diagnostics_engineering_generation_details_forbidden: true,
+    onboarding_screen_3_permission_min_height_px: 80,
+    dashboard_native_windows_folder_picker_required: true,
+    cloudflared_final_bundle_forbidden: true,
+    cloudflare_managed_tunnel_runtime_forbidden: true,
+    cloudflare_historical_compatibility_evidence_may_remain_non_executable: true,
+  },
+  prs: {
+    "LB-013": {
+      addedWritablePaths: ["src-tauri/src/settings/**", "schema/settings/**", "tests/migrations/**"],
+      addedArtifacts: ["persisted close-window behavior preference", "non-blocking backend execution boundary for desktop lifecycle work"],
+      addedTests: [
+        "关闭窗口后继续运行=true hides the window and leaves runtime/tray unchanged",
+        "关闭窗口后继续运行=false performs orderly managed runtime and privileged broker cleanup then exits",
+        "close-window behavior preference is versioned persisted and migration-safe",
+        "desktop lifecycle blocking work does not execute on the UI/WebView event thread",
+      ],
+    },
+    "LB-014": {
+      addedArtifacts: ["foreground configured launch automatic runtime start"],
+      addedTests: [
+        "configured foreground UI launch automatically starts selected project runtime MCP and OpenAI Tunnel without a second user start action",
+        "foreground window remains responsive and projects Starting Ready or Fault while backend startup runs",
+        "开机启动 controls Windows login launch registration only and does not gate runtime start after a manual foreground launch",
+      ],
+    },
+    "LB-015": {
+      addedArtifacts: [
+        "settings page with exact 常规 连接 权限 groups",
+        "independent Tunnel ID and Runtime API Key replace/edit flow",
+        "native Windows folder picker for Dashboard add-project flow",
+        "backend-only CurrentTask truth with 等待命令 idle projection",
+        "projection-only responsive frontend boundary",
+      ],
+      addedTests: [
+        "no separate 启用管理员权限 button exists; visible 管理员模式 selection or reselection requests UAC when privilege is not Active",
+        "leaving 管理员模式 closes the privileged call gate and disables the broker",
+        "Dashboard settings and onboarding keep privilege runtime status sourced from PrivilegeState rather than preference alone",
+        "Dashboard no-task state is always visible as 等待命令 and never 空闲",
+        "real production MCP and Broker execution transitions backend CurrentTaskStatus to the Dashboard and terminal state returns to 等待命令",
+        "frontend does not synthesize task state or own runtime readiness/retry state machines",
+        "Dashboard 选择其他文件夹 uses the native Windows folder picker and does not open a raw path-entry primary flow",
+        "Settings has exactly 常规 连接 权限 sections with 开机启动 and 关闭窗口后继续运行 in 常规",
+        "Settings connection labels are exact Tunnel ID and Runtime API Key; Runtime API Key is not translated to 运行密钥",
+        "Settings fixed connection view shows persisted Tunnel ID summary and Runtime API Key only as 已保存 or 未保存 with separate 更换 actions",
+        "clicking 更换 enters edit state without revealing or prefilling the saved Runtime API Key plaintext",
+        "changing only Tunnel ID does not require or mutate Runtime API Key",
+        "changing only Runtime API Key does not mutate Tunnel ID",
+        "Settings save validates changed fields then securely writes and performs controlled reconnect only when effective connection configuration changed while active/connecting",
+        "Settings has no 测试连接 button",
+        "Settings footer exposes only 打开欢迎页 and 完成 for page-level actions",
+        "intentionally slow backend lifecycle operation does not freeze frontend interaction or typed projection refresh",
+      ],
+      removedTests: ["only enable/disable admin controls", "dashboard idle state shows only current-task idle status"],
+    },
+    "LB-016": {
+      addedArtifacts: ["backend-owned onboarding start/readiness state machine", "administrator-mode selection UAC activation"],
+      addedTests: [
+        "screen 3 visible selection or reselection of 管理员模式 is the explicit user action that requests UAC when broker is not Active; no separate enable-admin button exists",
+        "background preference restore remains non-UAC even though visible administrator-mode selection requests UAC",
+        "screen 3 permission buttons have structural min-height at least 80px or an equivalent provable layout for title plus two-line description and balanced vertical whitespace; human 900x620 visual Gate remains required",
+        "React does not own runtime start readiness polling loop; backend owns start/readiness state and frontend only observes typed projection",
+        "backend start/readiness delay does not make the onboarding UI unresponsive",
+      ],
+      removedTests: ["UAC only from explicit user action"],
+    },
+    "LB-017": {
+      addedArtifacts: ["minimal diagnostics runtime status project and recent redacted log view", "open-log action"],
+      removedArtifacts: ["minimal diagnostics"],
+      addedTests: [
+        "diagnostics has exactly user-facing sections 运行状态 项目 日志",
+        "运行状态 shows 本地运行环境 编码服务 OpenAI Tunnel 管理员权限 from typed backend state",
+        "项目 shows the actual current project path rather than only selected/unselected",
+        "日志 shows a bounded recent redacted user-facing event list and never leaks Runtime API Key Authorization nonce or raw sensitive payload",
+        "diagnostics page actions are only 打开日志 导出诊断 完成",
+        "normal diagnostics UI does not expose Broker generation reconnect generation attempt counters IPC nonce PID SID or other engineering internals",
+        "diagnostic export remains redacted and may contain safe typed detail without changing the minimal on-screen view",
+        "no refresh retry-connection or open-welcome action appears on the diagnostics page",
+      ],
+      removedTests: [
+        "no secret export",
+        "safe repair boundaries",
+        "typed checks",
+        "broker status without nonce/secret exposure",
+        "diagnostics can report reconnect generation/attempt history without exposing it as dashboard feed",
+        "reconnect diagnostics contain no secrets",
+      ],
+    },
+    "LB-018": {
+      addedArtifacts: ["Cloudflare/cloudflared-free final LocalBridge runtime bundle"],
+      addedTests: [
+        "final runtime bundle and installer contain no cloudflared.exe or cloudflared-manifest.json",
+        "runtime-manifest and packaging inventory contain no Cloudflare/cloudflared runtime entry",
+        "LocalBridge launch arguments environment and fallback paths do not activate cloudflared or Cloudflare managed tunnel",
+        "historical upstream compatibility evidence may mention cloudflared but is not copied into executable final runtime bundle",
+        "packaging gate fails closed if cloudflared is reintroduced",
+      ],
+    },
+  },
+});
+
+const containsAll = (values, required) => Array.isArray(values) && (required ?? []).every((item) => values.includes(item));
+const containsNone = (values, forbidden) => Array.isArray(values) && (forbidden ?? []).every((item) => !values.includes(item));
+const removeItems = (values, removed) => (values ?? []).filter((item) => !(removed ?? []).includes(item));
+
+function insertAfter(values, anchor, item) {
+  const result = [...values];
+  if (result.includes(item)) return result;
+  const index = result.indexOf(anchor);
+  result.splice(index >= 0 ? index + 1 : result.length, 0, item);
+  return result;
+}
+
+function hasExactG3HumanReviewGeneration2PrAmendment(prs) {
+  for (const [id, delta] of Object.entries(G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.prs)) {
+    const pr = prs?.[id];
+    if (!pr) return false;
+    if (!containsAll(pr.writable_paths ?? [], delta.addedWritablePaths ?? [])) return false;
+    if (!containsAll(pr.required_artifacts ?? [], delta.addedArtifacts ?? [])) return false;
+    if (!containsNone(pr.required_artifacts ?? [], delta.removedArtifacts ?? [])) return false;
+    if (!containsAll(pr.required_tests ?? [], delta.addedTests ?? [])) return false;
+    if (!containsNone(pr.required_tests ?? [], delta.removedTests ?? [])) return false;
+  }
+  return true;
+}
+
+export function hasExactG3HumanReviewGeneration2Amendment(contractsDoc) {
+  if (contractsDoc?.schema_version !== G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.addedRules)) {
+    if (JSON.stringify(contractsDoc?.rules?.[key]) !== JSON.stringify(expected)) return false;
+  }
+  return hasExactG3HumanReviewGeneration2PrAmendment(contractsDoc?.prs);
+}
+
+export function normalizeG3HumanReviewGeneration2Amendment(prs) {
+  const normalized = structuredClone(prs ?? null);
+  if (!normalized || !hasExactG3HumanReviewGeneration2PrAmendment(normalized)) return normalized;
+  for (const [id, delta] of Object.entries(G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.prs)) {
+    const pr = normalized[id];
+    if (!pr) continue;
+    if (Array.isArray(pr.writable_paths)) pr.writable_paths = removeItems(pr.writable_paths, delta.addedWritablePaths);
+    if (Array.isArray(pr.required_artifacts)) pr.required_artifacts = removeItems(pr.required_artifacts, delta.addedArtifacts);
+    if (Array.isArray(pr.required_tests)) pr.required_tests = removeItems(pr.required_tests, delta.addedTests);
+  }
+  const lb015 = normalized["LB-015"];
+  if (Array.isArray(lb015?.required_tests)) {
+    lb015.required_tests = insertAfter(lb015.required_tests, "no admin time selector", "only enable/disable admin controls");
+    lb015.required_tests = insertAfter(lb015.required_tests, "dashboard shows task kind summary and status for active task", "dashboard idle state shows only current-task idle status");
+  }
+  const lb016 = normalized["LB-016"];
+  if (Array.isArray(lb016?.required_tests)) {
+    lb016.required_tests = insertAfter(lb016.required_tests, "Elevated option present without TTL UI", "UAC only from explicit user action");
+  }
+  const lb017 = normalized["LB-017"];
+  if (Array.isArray(lb017?.required_artifacts) && !lb017.required_artifacts.includes("minimal diagnostics")) {
+    lb017.required_artifacts.unshift("minimal diagnostics");
+  }
+  if (Array.isArray(lb017?.required_tests)) {
+    lb017.required_tests.unshift(
+      "no secret export",
+      "safe repair boundaries",
+      "typed checks",
+      "broker status without nonce/secret exposure",
+      "diagnostics can report reconnect generation/attempt history without exposing it as dashboard feed",
+      "reconnect diagnostics contain no secrets",
+    );
+  }
+  return normalized;
+}
+
+function normalizeG3HumanReviewGeneration2Rules(rules) {
+  const normalized = structuredClone(rules ?? null);
+  if (!normalized) return normalized;
+  for (const key of Object.keys(G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.addedRules)) delete normalized[key];
+  return normalized;
+}
+
 export function hasExactG3HumanReviewAmendment(prs) {
   const lb015 = prs?.["LB-015"];
   const lb016 = prs?.["LB-016"];
@@ -169,7 +376,7 @@ export function normalizeG3HumanReviewAmendment(prs) {
 }
 
 function normalizeAuthorizedSemanticCorrections(prs) {
-  const normalized = normalizeG3HumanReviewAmendment(prs);
+  const normalized = normalizeG3HumanReviewAmendment(normalizeG3HumanReviewGeneration2Amendment(prs));
   const lb016 = normalized?.["LB-016"];
   if (Array.isArray(lb016?.required_artifacts)) {
     lb016.required_artifacts = lb016.required_artifacts.filter((item) =>
@@ -236,6 +443,25 @@ export function validatePreG4GateAuthorization(
   laterRatification = G3_SIX_SCREEN_CONTRACT_RATIFICATION,
 ) {
   const findings = [];
+  if ((contractsDoc?.schema_version ?? 0) >= G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.schemaVersion) {
+    if (!hasExactG3HumanReviewGeneration2Amendment(contractsDoc)) {
+      findings.push(`${expected.id}:human-review-generation2-contract-amendment-drift`);
+    }
+    const baselineCommit = G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.baselineCommit;
+    const baseline = git.commitExists(baselineCommit) && git.isAncestor(baselineCommit)
+      ? git.jsonAt(baselineCommit, "PR_CONTRACTS.json")
+      : null;
+    if (baseline?.schema_version !== G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.baselineSchemaVersion) {
+      findings.push(`${expected.id}:human-review-generation2-baseline`);
+    } else {
+      if (JSON.stringify(normalizeG3HumanReviewGeneration2Amendment(contractsDoc?.prs)) !== JSON.stringify(baseline.prs)) {
+        findings.push(`${expected.id}:human-review-generation2-pr-drift`);
+      }
+      if (JSON.stringify(normalizeG3HumanReviewGeneration2Rules(contractsDoc?.rules)) !== JSON.stringify(baseline.rules)) {
+        findings.push(`${expected.id}:human-review-generation2-rule-drift`);
+      }
+    }
+  }
   if ((contractsDoc?.schema_version ?? 0) >= G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.schemaVersion
     && !hasExactG3HumanReviewAmendment(contractsDoc?.prs)) {
     findings.push(`${expected.id}:human-review-contract-amendment-drift`);

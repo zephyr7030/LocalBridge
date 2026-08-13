@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, normalizeG3HumanReviewAmendment, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { readFileSync } from "node:fs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -256,6 +257,22 @@ assert.equal(hasExactG3HumanReviewAmendment(changedRuntimeEdge), false);
 const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
+
+const generation2Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactG3HumanReviewGeneration2Amendment(generation2Contracts), true);
+const normalizedGeneration2 = normalizeG3HumanReviewGeneration2Amendment(generation2Contracts.prs);
+assert.equal(normalizedGeneration2["LB-013"].writable_paths.includes("src-tauri/src/settings/**"), false);
+assert.equal(normalizedGeneration2["LB-015"].required_tests.includes("only enable/disable admin controls"), true);
+assert.equal(normalizedGeneration2["LB-016"].required_tests.includes("UAC only from explicit user action"), true);
+assert.equal(normalizedGeneration2["LB-017"].required_artifacts.includes("minimal diagnostics"), true);
+const historicalBaselineUnaffected = normalizeG3HumanReviewGeneration2Amendment(beforePrContracts.prs);
+assert.deepEqual(historicalBaselineUnaffected, beforePrContracts.prs);
+const weakenedGeneration2 = structuredClone(generation2Contracts);
+weakenedGeneration2.rules.frontend_is_typed_projection_only = false;
+assert.equal(hasExactG3HumanReviewGeneration2Amendment(weakenedGeneration2), false);
+const reintroducedEnableButton = structuredClone(generation2Contracts);
+reintroducedEnableButton.prs["LB-015"].required_tests = reintroducedEnableButton.prs["LB-015"].required_tests.filter((item) => !item.startsWith("no separate 启用管理员权限 button exists"));
+assert.equal(hasExactG3HumanReviewGeneration2Amendment(reintroducedEnableButton), false);
 
 const base = {
   execution: { current_group: "G3", current_pr: null },

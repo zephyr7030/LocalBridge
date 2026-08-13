@@ -157,7 +157,7 @@ Mitigation：
 
 - preference 与 active runtime 分离；
 - background only enters Requested；
-- UAC only from explicit UI action。
+- UAC only from explicit visible `管理员模式` selection/reselection；禁止 separate enable-admin button。
 
 ## R-016 No-TTL Elevated persistence — HIGH
 
@@ -301,13 +301,13 @@ Mitigation：safe task summarizer + secret redaction + length limit；不安全 
 
 最近活动会逐渐形成日志/消息系统，增加 UI、隐私、存储和维护成本。
 
-Mitigation：v0.1 只允许单一 CurrentTaskStatus；无历史 UI；terminal 后回到 Idle。
+Mitigation：v0.1 只允许单一 backend CurrentTaskStatus；无历史 UI；terminal 后 domain 回到 Idle，UI 映射固定为 `等待命令`。
 
 ## R-029 False model-intent projection — MEDIUM
 
 根据模型文字猜测“正在执行什么”会造成状态失真。
 
-Mitigation：只使用真实 MCP/Broker execution events；没有工具调用时保持 Idle。
+Mitigation：只使用真实 MCP/Broker execution events；没有工具调用时 backend 保持 Idle，UI 必须映射为 `等待命令`，frontend 不得伪造。
 
 ## R-030 Credential plaintext persistence — CRITICAL
 
@@ -353,3 +353,15 @@ Mitigation：
 - active removal → NoActiveWorkspace；
 - no auto-selection；
 - user explicitly selects next project。
+
+## R-034 UI thread blocked by backend lifecycle — HIGH
+
+同步 Tauri command 若在 WebView/UI 事件线程等待 process、workspace switch、credential、UAC、readiness/recovery，可能导致前端无响应。
+
+Mitigation：frontend projection-only；backend worker/async execution boundary；onboarding/startup 状态机归 Rust；人为慢 backend responsiveness Gate。
+
+## R-035 Cloudflared distribution dependency drift — MEDIUM
+
+当前 tunnel-client 兼容/运行资产包含 cloudflared 能力；若继续打包会引入不再需要的第三方 runtime、体积和额外生命周期/供应链面。
+
+Mitigation：LB-018 最终 bundle/runtime manifest/installer/launcher/fallback 明确禁止 cloudflared/Cloudflare managed tunnel；历史 compatibility 证据只读保留；packaging fail-closed regression Gate。

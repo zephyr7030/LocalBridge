@@ -1,5 +1,5 @@
 {
-  "schema_version": 19,
+  "schema_version": 20,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -219,7 +219,59 @@
       4,
       5
     ],
-    "onboarding_failure_backtracking_required": true
+    "onboarding_failure_backtracking_required": true,
+    "visible_admin_mode_selection_requests_uac": true,
+    "separate_enable_admin_button_forbidden": true,
+    "leaving_admin_mode_disables_broker": true,
+    "background_admin_preference_auto_uac_forbidden": true,
+    "foreground_configured_launch_auto_starts_runtime": true,
+    "foreground_runtime_start_must_not_block_ui": true,
+    "frontend_is_typed_projection_only": true,
+    "frontend_runtime_readiness_polling_state_machine_forbidden": true,
+    "blocking_backend_work_on_ui_thread_forbidden": true,
+    "ui_responsiveness_under_slow_backend_required": true,
+    "dashboard_idle_text": "等待命令",
+    "dashboard_idle_row_must_remain_visible": true,
+    "dashboard_frontend_synthesized_task_state_forbidden": true,
+    "settings_connection_field_labels": [
+      "Tunnel ID",
+      "Runtime API Key"
+    ],
+    "runtime_api_key_user_facing_label": "Runtime API Key",
+    "runtime_api_key_label_translation_forbidden": true,
+    "settings_test_connection_button_forbidden": true,
+    "settings_connection_partial_update_required": true,
+    "settings_save_controlled_reconnect_on_effective_connection_change": true,
+    "settings_sections": [
+      "常规",
+      "连接",
+      "权限"
+    ],
+    "settings_general_controls": [
+      "开机启动",
+      "关闭窗口后继续运行"
+    ],
+    "settings_footer_actions": [
+      "打开欢迎页",
+      "完成"
+    ],
+    "close_window_continue_running_setting_required": true,
+    "diagnostics_sections": [
+      "运行状态",
+      "项目",
+      "日志"
+    ],
+    "diagnostics_actions": [
+      "打开日志",
+      "导出诊断",
+      "完成"
+    ],
+    "diagnostics_engineering_generation_details_forbidden": true,
+    "onboarding_screen_3_permission_min_height_px": 80,
+    "dashboard_native_windows_folder_picker_required": true,
+    "cloudflared_final_bundle_forbidden": true,
+    "cloudflare_managed_tunnel_runtime_forbidden": true,
+    "cloudflare_historical_compatibility_evidence_may_remain_non_executable": true
   },
   "prs": {
     "LB-000": {
@@ -622,7 +674,10 @@
         "src-tauri/src/app/**",
         "src-tauri/src/main.rs",
         "tests/integration/background/**",
-        "src-tauri/src/privilege/**"
+        "src-tauri/src/privilege/**",
+        "src-tauri/src/settings/**",
+        "schema/settings/**",
+        "tests/migrations/**"
       ],
       "forbidden_paths": [
         "src/features/onboarding/**"
@@ -630,7 +685,9 @@
       "required_artifacts": [
         "Tray",
         "background lifecycle",
-        "system tray uses frozen LocalBridge brand icon"
+        "system tray uses frozen LocalBridge brand icon",
+        "persisted close-window behavior preference",
+        "non-blocking backend execution boundary for desktop lifecycle work"
       ],
       "required_tests": [
         "close-to-hide",
@@ -640,7 +697,11 @@
         "background recovery emits no toast/banner/tray notification before retry exhaustion",
         "background mode may show final error window only after fifth failed reconnect",
         "tray icon derives from frozen localbridge.ico asset",
-        "tray does not use emoji or placeholder icon"
+        "tray does not use emoji or placeholder icon",
+        "关闭窗口后继续运行=true hides the window and leaves runtime/tray unchanged",
+        "关闭窗口后继续运行=false performs orderly managed runtime and privileged broker cleanup then exits",
+        "close-window behavior preference is versioned persisted and migration-safe",
+        "desktop lifecycle blocking work does not execute on the UI/WebView event thread"
       ],
       "non_goals": [
         "autostart",
@@ -660,13 +721,17 @@
       ],
       "required_artifacts": [
         "autostart",
-        "single-instance"
+        "single-instance",
+        "foreground configured launch automatic runtime start"
       ],
       "required_tests": [
         "existing background instance wake",
         "manual stop persistence",
         "startup args",
-        "Elevated preference does not auto-trigger UAC on background startup"
+        "Elevated preference does not auto-trigger UAC on background startup",
+        "configured foreground UI launch automatically starts selected project runtime MCP and OpenAI Tunnel without a second user start action",
+        "foreground window remains responsive and projects Starting Ready or Fault while backend startup runs",
+        "开机启动 controls Windows login launch registration only and does not gate runtime start after a manual foreground launch"
       ],
       "non_goals": [
         "UI redesign"
@@ -699,14 +764,18 @@
         "coherent visible button token system shared across product UI",
         "minimum-necessary prompt and helper-copy rules",
         "blue #0071e3 standard product accent with amber administrator-mode exception",
-        "shared typed service-status dot presentation for Dashboard and onboarding"
+        "shared typed service-status dot presentation for Dashboard and onboarding",
+        "settings page with exact 常规 连接 权限 groups",
+        "independent Tunnel ID and Runtime API Key replace/edit flow",
+        "native Windows folder picker for Dashboard add-project flow",
+        "backend-only CurrentTask truth with 等待命令 idle projection",
+        "projection-only responsive frontend boundary"
       ],
       "required_tests": [
         "minimal-ui assertions",
         "no redundant pages",
         "state rendering",
         "no admin time selector",
-        "only enable/disable admin controls",
         "Dashboard shows privilege status independently from permission preference",
         "Elevated+Requested shows waiting authorization",
         "Elevated+Active shows administrator enabled",
@@ -719,7 +788,6 @@
         "Dashboard/Settings/Diagnostics presented as 主控界面/设置/诊断",
         "professional abbreviations remain allowed only by terminology policy",
         "dashboard shows task kind summary and status for active task",
-        "dashboard idle state shows only current-task idle status",
         "dashboard has no recent activity list",
         "dashboard has no activity message feed or timeline",
         "dashboard never displays raw MCP tool identifiers",
@@ -754,7 +822,24 @@
         "primary and ordinary selected controls use the blue #0071e3 accent rather than black",
         "administrator mode uses amber logical selection styling and is not overridden by ordinary blue selected styling",
         "Dashboard tunnel and coding service states render status dots using Ready green Starting amber Fault red Unknown gray semantics from the same typed status source used by onboarding",
-        "Dashboard does not maintain an independent conflicting service-status color state"
+        "Dashboard does not maintain an independent conflicting service-status color state",
+        "no separate 启用管理员权限 button exists; visible 管理员模式 selection or reselection requests UAC when privilege is not Active",
+        "leaving 管理员模式 closes the privileged call gate and disables the broker",
+        "Dashboard settings and onboarding keep privilege runtime status sourced from PrivilegeState rather than preference alone",
+        "Dashboard no-task state is always visible as 等待命令 and never 空闲",
+        "real production MCP and Broker execution transitions backend CurrentTaskStatus to the Dashboard and terminal state returns to 等待命令",
+        "frontend does not synthesize task state or own runtime readiness/retry state machines",
+        "Dashboard 选择其他文件夹 uses the native Windows folder picker and does not open a raw path-entry primary flow",
+        "Settings has exactly 常规 连接 权限 sections with 开机启动 and 关闭窗口后继续运行 in 常规",
+        "Settings connection labels are exact Tunnel ID and Runtime API Key; Runtime API Key is not translated to 运行密钥",
+        "Settings fixed connection view shows persisted Tunnel ID summary and Runtime API Key only as 已保存 or 未保存 with separate 更换 actions",
+        "clicking 更换 enters edit state without revealing or prefilling the saved Runtime API Key plaintext",
+        "changing only Tunnel ID does not require or mutate Runtime API Key",
+        "changing only Runtime API Key does not mutate Tunnel ID",
+        "Settings save validates changed fields then securely writes and performs controlled reconnect only when effective connection configuration changed while active/connecting",
+        "Settings has no 测试连接 button",
+        "Settings footer exposes only 打开欢迎页 and 完成 for page-level actions",
+        "intentionally slow backend lifecycle operation does not freeze frontend interaction or typed projection refresh"
       ],
       "non_goals": [
         "wizard",
@@ -779,7 +864,9 @@
         "runtime-check gated confirm button",
         "fixed 900x620 non-resizable non-maximizable main window",
         "single edge-to-edge custom window chrome with native decorations disabled",
-        "full-page onboarding layout using the fixed custom-chrome content area"
+        "full-page onboarding layout using the fixed custom-chrome content area",
+        "backend-owned onboarding start/readiness state machine",
+        "administrator-mode selection UAC activation"
       ],
       "required_tests": [
         "screen 4 title is 创建自定义插件",
@@ -796,7 +883,6 @@
         "no WebView",
         "wizard completion",
         "Elevated option present without TTL UI",
-        "UAC only from explicit user action",
         "wizard user-facing copy contains no unnecessary English terms",
         "wizard error messages are concise Chinese and actionable",
         "onboarding has exactly five screens",
@@ -829,7 +915,12 @@
         "primary and ordinary selected wizard controls use the blue #0071e3 accent rather than black",
         "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
         "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
-        "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas"
+        "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
+        "screen 3 visible selection or reselection of 管理员模式 is the explicit user action that requests UAC when broker is not Active; no separate enable-admin button exists",
+        "background preference restore remains non-UAC even though visible administrator-mode selection requests UAC",
+        "screen 3 permission buttons have structural min-height at least 80px or an equivalent provable layout for title plus two-line description and balanced vertical whitespace; human 900x620 visual Gate remains required",
+        "React does not own runtime start readiness polling loop; backend owns start/readiness state and frontend only observes typed projection",
+        "backend start/readiness delay does not make the onboarding UI unresponsive"
       ],
       "non_goals": [
         "new dashboard pages",
@@ -847,16 +938,19 @@
         "runtime/**"
       ],
       "required_artifacts": [
-        "minimal diagnostics",
-        "redacted export"
+        "minimal diagnostics runtime status project and recent redacted log view",
+        "redacted export",
+        "open-log action"
       ],
       "required_tests": [
-        "no secret export",
-        "safe repair boundaries",
-        "typed checks",
-        "broker status without nonce/secret exposure",
-        "diagnostics can report reconnect generation/attempt history without exposing it as dashboard feed",
-        "reconnect diagnostics contain no secrets"
+        "diagnostics has exactly user-facing sections 运行状态 项目 日志",
+        "运行状态 shows 本地运行环境 编码服务 OpenAI Tunnel 管理员权限 from typed backend state",
+        "项目 shows the actual current project path rather than only selected/unselected",
+        "日志 shows a bounded recent redacted user-facing event list and never leaks Runtime API Key Authorization nonce or raw sensitive payload",
+        "diagnostics page actions are only 打开日志 导出诊断 完成",
+        "normal diagnostics UI does not expose Broker generation reconnect generation attempt counters IPC nonce PID SID or other engineering internals",
+        "diagnostic export remains redacted and may contain safe typed detail without changing the minimal on-screen view",
+        "no refresh retry-connection or open-welcome action appears on the diagnostics page"
       ],
       "non_goals": [
         "credential reset automation",
@@ -892,7 +986,8 @@
         "SBOM",
         "third-party notices",
         "release provenance manifest",
-        "installer and Windows executable packaging use frozen LocalBridge brand icon"
+        "installer and Windows executable packaging use frozen LocalBridge brand icon",
+        "Cloudflare/cloudflared-free final LocalBridge runtime bundle"
       ],
       "required_tests": [
         "all SHA256",
@@ -908,7 +1003,12 @@
         "third-party notice coverage",
         "dependency lockfile consistency",
         "release packaging uses frozen LocalBridge icon",
-        "brand icon asset hashes match frozen project state"
+        "brand icon asset hashes match frozen project state",
+        "final runtime bundle and installer contain no cloudflared.exe or cloudflared-manifest.json",
+        "runtime-manifest and packaging inventory contain no Cloudflare/cloudflared runtime entry",
+        "LocalBridge launch arguments environment and fallback paths do not activate cloudflared or Cloudflare managed tunnel",
+        "historical upstream compatibility evidence may mention cloudflared but is not copied into executable final runtime bundle",
+        "packaging gate fails closed if cloudflared is reintroduced"
       ],
       "non_goals": [
         "first-time runtime feasibility",

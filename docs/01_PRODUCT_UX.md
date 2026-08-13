@@ -77,7 +77,6 @@ icon package
 ```text
 打开 ChatGPT
 切换项目
-启用/关闭管理员权限
 设置
 诊断
 ```
@@ -97,13 +96,13 @@ icon package
 - 无消息流、最近活动、时间线、历史列表；
 - 摘要来自真实 MCP/Broker 执行并脱敏。
 
-空闲可显示：
+无活动任务时必须稳定显示：
 
 ```text
-○  空闲
+○  等待命令
 ```
 
-也允许隐藏。
+该行不得隐藏，也不得由前端本地状态伪造；真实 MCP/Broker 调用的 Running/Waiting/Blocked/Failed/Cancelled 必须由 backend `CurrentTaskStatus` typed projection 驱动，terminal 后回到 `等待命令`。
 
 ## 自动重连 UI
 
@@ -214,9 +213,9 @@ Runtime API Key
 返回                                  继续
 ```
 
-项目与权限必须位于同一屏。新项目选择以原生 Windows 文件夹选择器为主交互，不以手填绝对路径作为主流程。管理员模式只保存偏好，不自动弹 UAC。第 3 屏必须提供明确 `返回` 到第 2 屏。
+项目与权限必须位于同一屏。新项目选择以原生 Windows 文件夹选择器为主交互，不以手填绝对路径作为主流程。可见用户点击/重新点击 `管理员模式` 本身就是显式提权动作；若 Broker 尚未 Active，必须立即发起 Windows UAC，仅提升 Privileged Broker，禁止额外“启用管理员权限”按钮。后台 `--background` 恢复管理员偏好仍不得自动 UAC。第 3 屏必须提供明确 `返回` 到第 2 屏。
 
-三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白；禁止固定高度压缩说明，说明换行时按钮必须安全自动增高，固定 900×620 实机渲染不得出现文字贴边。此项是人工视觉 Gate，不能仅凭 CSS 存在 `padding` 自动判 PASS。普通选中项使用统一蓝色 `#0071e3`；管理员模式在 onboarding 与 Dashboard 均使用黄色/琥珀逻辑色，不得被普通蓝色 selected 规则覆盖。
+三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白；禁止固定高度压缩说明，说明换行时按钮必须安全自动增高，并提供 `min-height >= 80px` 或等效结构证明，确保“标题 + 两行说明 + 上下留白”不会被压扁。固定 900×620 实机渲染不得出现文字贴边。此项仍是人工视觉 Gate，不能仅凭 CSS 存在 `padding/min-height` 自动判 PASS。普通选中项使用统一蓝色 `#0071e3`；管理员模式在 onboarding 与 Dashboard 均使用黄色/琥珀逻辑色，不得被普通蓝色 selected 规则覆盖。
 
 ### 第 4 屏
 
@@ -328,6 +327,62 @@ Tunnel start → ready
 失败时只显示一句最关键错误和一个必要动作。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。普通产品 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；管理员模式是黄色/琥珀逻辑色例外。所有提示遵循最小必要原则。
 
 主窗口固定为 900×620。minimum inner size 与 maximum inner size 均固定为 900×620，`resizable=false`、`maximizable=false`。原生 Windows 窗口 decorations 必须关闭；LocalBridge 只允许一层自定义风格化窗口 chrome，并且外框必须从 client area 的 `(0,0)` 开始、以 100% 宽高贴合整个窗口，不能在原生边框内部再绘制一个内缩“假窗口”。自定义 chrome 必须提供窗口拖拽区、最小化和关闭；不提供最大化。Dashboard 与 onboarding 必须在该固定 client area 内完整可操作。
+## UI / Backend 分离
+
+WebView/React 只负责展示 backend typed projection 与发送 typed user intent。runtime 启停、readiness、retry/recovery、workspace switch、credential 写入、UAC 与 CurrentTask truth 均由 Rust/backend 状态机负责；可能耗时的操作必须运行在独立 worker/async 执行上下文，禁止占用 UI/WebView 事件线程。正常前台启动在 onboarding 已完成且持久化配置有效时自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，窗口必须先保持可交互并实时反映 Starting/Ready/Fault。
+
+必须有故意延迟 backend 工作时 UI 仍可响应并持续读取 typed projection 的回归 Gate。
+
+## 设置
+
+固定三组：
+
+```text
+常规
+────────────────────────────────────────
+开机启动                               ○
+关闭窗口后继续运行                      ●
+
+连接
+────────────────────────────────────────
+Tunnel ID          tunnel_6a7ae9...     更换
+Runtime API Key    已保存               更换
+
+权限
+────────────────────────────────────────
+编辑模式       完整模式       管理员模式
+                            打开欢迎页    完成
+```
+
+`Runtime API Key` 是冻结英文专有字段名，不翻译为“运行密钥”；完整值永不回显。默认连接区只显示持久化摘要和“更换”。点“更换”后才进入编辑态，Tunnel ID 与 Runtime API Key 独立修改；只改其中一个时另一个不得要求重输或被覆盖。Runtime API Key 输入不得用已保存 secret 预填，只显示密码输入控件与提示 `Runtime API Key 仅保存在 Windows 安全凭据中。`。
+
+保存顺序固定：基础格式校验 → 安全写入 → 若当前正在运行/连接且有效连接配置发生变化则执行受控重连。禁止额外“测试连接”按钮。`开机启动` 只控制 Windows 登录启动；手动打开已配置应用仍自动启动 runtime。`关闭窗口后继续运行=true` 时 X 仅 hide 并保持 runtime/tray；false 时 X 有序停止受管 runtime/Broker 后退出。
+
+## 诊断
+
+固定为：
+
+```text
+运行状态
+────────────────────────────────────────
+本地运行环境                         正常
+编码服务                             已就绪
+OpenAI Tunnel                        故障
+管理员权限                           未启用
+
+项目
+────────────────────────────────────────
+D:\project\LocalBridge
+
+日志
+────────────────────────────────────────
+<最近、限量、脱敏用户日志>
+
+                         打开日志  导出诊断  完成
+```
+
+普通诊断 UI 不显示 Broker/reconnect generation、attempt counter、PID/SID/nonce/IPC，也不提供刷新、重试连接、打开欢迎页等重复/工程动作。导出诊断继续执行严格 secret redaction。
+
 ## 权限
 
 ```text

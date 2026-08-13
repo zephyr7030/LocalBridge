@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": "LB-015",
+    "current_pr": "LB-013",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -202,7 +202,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-014",
@@ -211,7 +211,7 @@
         "LB-013"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-015",
@@ -223,7 +223,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "REWORK_REQUIRED"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-016",
@@ -358,7 +358,7 @@
         "commit": "e2e8317f631c5932a779908850b78e6a49f368c0",
         "invalidated_generations": []
       },
-      "reopen_from_pr": "LB-015"
+      "reopen_from_pr": "LB-013"
     },
     {
       "id": "G4",
@@ -372,5 +372,5 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-015"
+  "current_pr": "LB-013"
 }

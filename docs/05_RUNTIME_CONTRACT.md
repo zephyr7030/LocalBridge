@@ -97,6 +97,12 @@ MCP ↑
 - 保留 typed fault；
 - 不假装 Ready。
 
+### Foreground Configured Launch
+
+`onboarding_complete=true` 且 active workspace、Tunnel ID、Runtime API Key metadata 有效时，普通前台 UI 启动必须自动**异步**发起 runtime Start。窗口创建/交互不得等待 Start 完成；Starting/Ready/Fault 只经 backend typed projection 反映。`开机启动` 只控制 OS login launch，不得阻止手动前台启动后的 runtime 自动启动。
+
+所有可能阻塞的 runtime/process/credential/UAC/recovery 工作必须运行于 backend worker/async execution context；WebView/UI event thread 不得执行长生命周期工作。
+
 ## Stop
 
 ```text
@@ -231,10 +237,11 @@ enum PrivilegeState {
 ### 启用
 
 ```text
-user selects Elevated
+visible user selects/reselects Elevated
 → Requested
-→ explicit user activation
+→ immediately validate broker source/security boundary
 → AwaitingUac
+→ Windows UAC / runas
 → Broker handshake
 → Active
 ```
@@ -262,7 +269,7 @@ privilege runtime = Requested
 - 不自动弹 UAC；
 - 不假装 Active；
 - 普通 MCP/Tunnel 可继续后台 Ready；
-- 用户打开控制中心后主动完成 UAC。
+- 用户打开控制中心后点击/重新点击管理员模式即主动完成 UAC；禁止额外“启用管理员权限”按钮。
 
 ### Elevated Call
 
@@ -383,12 +390,13 @@ request
 → idle
 ```
 
-主控界面只消费 `CurrentTaskStatus | Idle`。
+主控界面只消费 backend `CurrentTaskStatus | Idle`；frontend 不维护平行任务状态。
 
+- Idle / 无活动任务 → `等待命令`（必须可见，不得显示“空闲”）
 - PEP deny → `已阻止`
 - 等待 UAC → `等待授权`
 - process 已启动 → `执行中`
-- terminal → 最终回到 `空闲`
+- terminal → 最终回到 `等待命令`
 
 任务摘要不得成为 secret 泄漏通道。
 

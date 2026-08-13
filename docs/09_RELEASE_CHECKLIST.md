@@ -39,7 +39,9 @@
 - [ ] Job Object / ADR-defined ownership verified
 - [ ] PID reuse safe
 - [ ] stale state reconciled
-- [ ] close window keeps Ready
+- [ ] 关闭窗口后继续运行=true: close hides and keeps Ready
+- [ ] 关闭窗口后继续运行=false: close performs orderly cleanup and exits
+- [ ] close behavior preference is versioned/migration-safe
 - [ ] Tray exit kills owned runtime
 - [ ] app crash behavior matches ADR
 - [ ] `--background` has no visible main window
@@ -66,6 +68,10 @@
 
 ## LB-018 Packaging
 
+- [ ] final bundle has no cloudflared.exe/cloudflared-manifest.json
+- [ ] runtime manifest/packaging inventory/launcher/fallback has no Cloudflare managed tunnel activation
+- [ ] historical compatibility evidence mentioning cloudflared is not packaged as executable runtime
+- [ ] packaging gate fails closed on cloudflared reintroduction
 - [ ] no Python preinstall required
 - [ ] dummy/real sidecar packaged correctly
 - [ ] runtime resources present
@@ -90,7 +96,7 @@
 
 - [ ] LocalBridge main process remains non-elevated
 - [ ] only Broker receives Administrator token
-- [ ] explicit UAC activation
+- [ ] visible 管理员模式 selection/reselection is the explicit UAC activation; no separate enable-admin button
 - [ ] no TTL/time selector
 - [ ] disable closes privileged gate immediately
 - [ ] no automatic UAC on background startup
@@ -137,15 +143,15 @@
 - [ ] Dashboard always exposes administrator privilege runtime status
 - [ ] status comes from PrivilegeState
 - [ ] Elevated preference alone does not display Active
-- [ ] Requested exposes enable action
-- [ ] Active exposes disable action
+- [ ] Requested shows waiting authorization; selecting/reselecting 管理员模式 triggers UAC without a separate enable action
+- [ ] leaving 管理员模式 for Edit/Full closes the privileged gate and Broker
 - [ ] Faulted is visible immediately
 - [ ] no Broker PID/nonce/SID/IPC internals exposed
 
 ## UI Language
 
 - [ ] all normal user-facing copy is zh-CN
-- [ ] no Dashboard/Settings/Diagnostics/Edit/Full/Elevated/Broker/Runtime labels
+- [ ] no ordinary Dashboard/Settings/Diagnostics/Edit/Full/Elevated/Broker/Runtime labels; exact `Tunnel ID` / `Runtime API Key` are required field-name exceptions
 - [ ] professional abbreviations only where justified
 - [ ] no direct enum/fault-code rendering
 - [ ] no bilingual label clutter
@@ -168,13 +174,13 @@
 ## Current Task Status
 
 - [ ] dashboard has one current-task status region
-- [ ] idle state is explicit
+- [ ] idle/no-task state is explicit `等待命令`, always visible, never `空闲`
 - [ ] tool category uses stable domain classification
 - [ ] task summary is secret-redacted
 - [ ] raw MCP tool IDs are not shown
 - [ ] denied call never appears as running
 - [ ] elevated waiting state matches privilege state
-- [ ] terminal task returns to idle
+- [ ] terminal task returns to `等待命令`
 - [ ] no recent activity list
 - [ ] no activity feed/timeline
 - [ ] no model thought/chat-response projection
@@ -188,7 +194,7 @@
 - [ ] active indicator is a small green pulse
 - [ ] animation does not shift layout
 - [ ] prefers-reduced-motion uses static indicator
-- [ ] idle is neutral and low-presence
+- [ ] `等待命令` is neutral, low-presence and always visible
 
 ## Credentials & Projects
 
@@ -206,3 +212,12 @@
 - [ ] removing active project enters NoActiveWorkspace
 - [ ] no automatic authorization of another remembered project
 - [ ] MCP cannot mutate project registry/current project
+## G3 UI/Backend Responsiveness
+
+- [ ] configured foreground launch auto-starts runtime asynchronously
+- [ ] UI remains responsive during intentionally slow backend startup/lifecycle work
+- [ ] React/WebView owns no runtime readiness/retry/UAC state machine
+- [ ] production MCP/Broker CurrentTaskStatus reaches Dashboard end-to-end
+- [ ] Dashboard folder add uses native Windows folder picker
+- [ ] Settings matches frozen 常规/连接/权限 layout and has no 测试连接
+- [ ] Diagnostics matches frozen 运行状态/项目/日志 layout and exact action set
