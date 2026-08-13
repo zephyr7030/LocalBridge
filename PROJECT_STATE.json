@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -138,7 +138,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Revalidate LB-017 diagnostics and redacted export against the corrected G3 physical-window and six-screen baseline, then return G3 to independent review"
+    "next_action": "Run G3 independent adversarial review generation 3; keep G4 blocked until that review passes and the subsequent human/manual review gate also passes"
   },
   "current_task_ui": {
     "enabled": true,
