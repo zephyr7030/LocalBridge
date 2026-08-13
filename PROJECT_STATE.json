@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -89,7 +89,9 @@
     "runtime_upgrade_model": "whole LocalBridge release",
     "installer_scope": "perMachine",
     "privileged_broker_install_root": "protected_machine_program_files",
-    "privileged_broker_uac_target": "canonical_current_install_sibling"
+    "privileged_broker_uac_target": "canonical_current_install_sibling",
+    "privileged_broker_mutation_guard": "trusted_owner_and_dacl_no_untrusted_mutation_plus_current_unelevated_token_denied_each_dangerous_right_across_broker_install_ancestor_chain",
+    "privileged_broker_signature_or_hash_binding": false
   },
   "ui_language_policy": {
     "default_locale": "zh-CN",
@@ -130,7 +132,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Rework LB-010 after G2 independent adversarial review generation 7 FAIL: failed workspace switch plus failed rollback must retire/cancel stale pending automatic recovery and remain fail-closed in the typed Faulted state; then revalidate LB-011 Broker UAC executable trust so a same-user writable/attacker-substitutable Broker under a permissive Program Files child cannot pass the elevation trust boundary; reaccept LB-012 only after both earlier PRs pass and then run a fresh G2 review"
+    "next_action": "Run G2 independent adversarial review generation 8 against the repaired current disk state before LB-013; generation 7 remains the last completed review and its FAIL/provenance remain historical evidence until generation 8 records a new decision"
   },
   "current_task_ui": {
     "enabled": true,
@@ -185,8 +187,10 @@
     "single_error_per_generation": true,
     "manual_retry_new_generation": true,
     "successful_workspace_switch_new_generation": true,
-    "failed_workspace_switch_preserves_previous_generation": true,
-    "workspace_rollback_cleanup_faults_typed": true
+    "failed_workspace_switch_with_clean_ready_rollback_preserves_previous_generation": true,
+    "failed_workspace_switch_without_clean_ready_rollback_retires_stale_recovery": true,
+    "workspace_rollback_cleanup_faults_typed": true,
+    "failed_workspace_rollback_requires_new_explicit_control_action": true
   },
   "ui_visual_policy": {
     "style": "Apple-inspired minimal",
