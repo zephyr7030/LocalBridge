@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -139,7 +139,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Revalidate LB-015 single custom chrome, shared UI shell, visible button system, and fixed-content layout against the full-page onboarding contract; keep G3 in rework until sequential revalidation reaches LB-017"
+    "next_action": "Implement and revalidate LB-016 so first-run onboarding directly fills the custom-chrome content area with no centered card/modal/dialog or window-within-window surface; preserve exact six-screen behavior and existing security/runtime semantics"
   },
   "current_task_ui": {
     "enabled": true,
