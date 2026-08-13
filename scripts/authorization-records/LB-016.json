@@ -188,6 +188,23 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-010",
+      "scope": [
+        "src-tauri/src/main.rs",
+        "src-tauri/src/lib.rs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Remove the obsolete debug resize/maximize E2E IPC and replace it with a debug-only fixed-window metrics channel that is absent from release builds",
+        "Add a debug-only fixed-window test entry to the ordinary LocalBridge main binary so Tauri CLI dev uses the production window creation path while verifying fixed native properties, single edge-to-edge custom chrome, minimize, and close-to-hide without invoking resize or maximize"
+      ],
+      "reason": "G3 generation 2 failed because the newly frozen contract replaces the earlier resizable-window semantics with a fixed 900x620 borderless window and one custom chrome. A real runtime E2E is still required to prevent static self-certification, but the old resize harness now contradicts the product contract.",
+      "evidence_ref": "Explicit user G3 generation-2 FAIL repair instruction on 2026-08-13 requiring fixed 900x620, min=max 900x620, resizable=false, maximizable=false, decorations=false, exactly one edge-to-edge custom chrome with drag/minimize/close and no maximize; frozen contract baseline 2eb11fc.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

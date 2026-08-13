@@ -44,10 +44,10 @@ macro_rules! localbridge_invoke_handler {
 }
 
 #[cfg(debug_assertions)]
-pub struct ResizeE2eMetricsSink(std::sync::Mutex<std::sync::mpsc::Sender<String>>);
+pub struct FixedWindowE2eMetricsSink(std::sync::Mutex<std::sync::mpsc::Sender<String>>);
 
 #[cfg(debug_assertions)]
-impl ResizeE2eMetricsSink {
+impl FixedWindowE2eMetricsSink {
     pub fn new(sender: std::sync::mpsc::Sender<String>) -> Self {
         Self(std::sync::Mutex::new(sender))
     }
@@ -55,20 +55,20 @@ impl ResizeE2eMetricsSink {
 
 #[cfg(debug_assertions)]
 #[tauri::command]
-fn resize_e2e_report(
+fn fixed_window_e2e_report(
     metrics: String,
-    sink: tauri::State<'_, ResizeE2eMetricsSink>,
+    sink: tauri::State<'_, FixedWindowE2eMetricsSink>,
 ) -> Result<(), String> {
     sink.0
         .lock()
-        .map_err(|_| "resize E2E metrics sink poisoned".to_string())?
+        .map_err(|_| "fixed-window E2E metrics sink poisoned".to_string())?
         .send(metrics)
-        .map_err(|_| "resize E2E metrics receiver closed".to_string())
+        .map_err(|_| "fixed-window E2E metrics receiver closed".to_string())
 }
 
 #[cfg(debug_assertions)]
 pub fn build_app() -> tauri::Builder<tauri::Wry> {
-    tauri::Builder::default().invoke_handler(localbridge_invoke_handler![resize_e2e_report])
+    tauri::Builder::default().invoke_handler(localbridge_invoke_handler![fixed_window_e2e_report])
 }
 
 #[cfg(not(debug_assertions))]

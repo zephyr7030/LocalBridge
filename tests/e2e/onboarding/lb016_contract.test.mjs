@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
 const app = read("src/App.tsx");
+const chrome = read("src/components/WindowChrome.tsx");
 const onboarding = read("src/features/onboarding/Onboarding.tsx");
 const api = read("src/features/onboarding/api.ts");
 const onboardingCss = read("src/features/onboarding/onboarding.css");
@@ -17,6 +18,8 @@ const background = read("src-tauri/src/app/background.rs");
 const tray = read("src-tauri/src/tray/mod.rs");
 const main = read("src-tauri/src/main.rs");
 const lib = read("src-tauri/src/lib.rs");
+const windowCapability = JSON.parse(read("src-tauri/capabilities/window-chrome.json"));
+const fixedWindowE2e = read("tests/e2e/onboarding/fixed_window_runtime_e2e.mjs");
 const auth = JSON.parse(read("scripts/authorization-records/LB-016.json"));
 const contracts = JSON.parse(read("PR_CONTRACTS.json"));
 
@@ -123,6 +126,29 @@ if (onboarding.includes("设置完成，尝试在 ChatGPT 中选择刚刚添加�
 
 for (const marker of [".inner_size(900.0, 620.0)", ".min_inner_size(900.0, 620.0)", ".max_inner_size(900.0, 620.0)", ".resizable(false)", ".maximizable(false)", ".decorations(false)"]) if (!tray.includes(marker)) throw new Error(`LB-016 fixed/custom window contract missing: ${marker}`);
 if (tray.includes(".resizable(true)") || tray.includes(".maximizable(true)")) throw new Error("LB-016 main window remains user-resizable/maximizable");
+if (main.includes("WindowEvent::Resized") || /\.maximize\(|\.unmaximize\(|\.set_size\(/.test(main)) throw new Error("LB-016 production/debug main contains forbidden resize/maximize behavior");
+if (!app.includes('import { WindowChrome } from "./components/WindowChrome"')
+  || (app.match(/<WindowChrome>/g) ?? []).length !== 1
+  || (app.match(/<\/WindowChrome>/g) ?? []).length !== 1) throw new Error("LB-016 does not production-compose exactly one shared custom window chrome");
+if (!app.includes("!onboarding.complete ? <Onboarding") || !app.includes(": <Dashboard />")) throw new Error("LB-016 first-run flow is not composed inside the shared custom chrome ahead of dashboard");
+for (const marker of ["getCurrentWindow", "startDragging()", "minimize()", "close()", 'aria-label="最小化"', 'aria-label="关闭"']) if (!chrome.includes(marker)) throw new Error(`LB-016 custom titlebar behavior missing: ${marker}`);
+if (/maximize|toggleMaximize/i.test(chrome)) throw new Error("LB-016 custom titlebar exposes forbidden maximize behavior");
+const compactSharedCss = sharedCss.replace(/\s+/g, "");
+const chromeRule = compactSharedCss.match(/\.window-chrome\{([^}]*)\}/)?.[1] ?? "";
+for (const marker of ["position:fixed", "inset:0", "width:100%", "height:100%", "overflow:hidden"]) if (!chromeRule.includes(marker)) throw new Error(`LB-016 custom chrome is not edge-to-edge: ${marker}`);
+const exactWindowPermissions = ["core:window:allow-start-dragging", "core:window:allow-minimize", "core:window:allow-close"];
+if (windowCapability.identifier !== "window-chrome"
+  || JSON.stringify(windowCapability.windows) !== JSON.stringify(["main"])
+  || JSON.stringify(windowCapability.permissions) !== JSON.stringify(exactWindowPermissions)) throw new Error("LB-016 custom chrome capability is not exact least privilege");
+if (windowCapability.permissions.some((permission) => /maximize|resize|decorations|set-size/i.test(permission))) throw new Error("LB-016 custom chrome capability grants forbidden maximize/window mutation permission");
+if (!/\.onboarding-shell\{[^}]*width:100%[^}]*height:100%[^}]*min-height:0/is.test(onboardingCss.replace(/\s+/g, ""))
+  || /\.onboarding-shell\{[^}]*(?:100dvh|100vh)/is.test(onboardingCss.replace(/\s+/g, ""))) throw new Error("LB-016 onboarding is not constrained to the fixed custom-chrome content area");
+if (existsSync("tests/e2e/onboarding/resize_runtime_e2e.mjs")) throw new Error("LB-016 obsolete resizable/maximize runtime E2E still exists");
+for (const marker of ["tauri.cmd dev --no-watch", "LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW", "CARGO_TARGET_DIR", "LB016_FIXED_WINDOW_E2E=PASS", "fixed=900x620", "maximizable=false", "single_custom_chrome=true"]) if (!fixedWindowE2e.includes(marker)) throw new Error(`LB-016 real fixed-window E2E runner missing: ${marker}`);
+if (/\.maximize\(|\.unmaximize\(|\.set_size\(|LOCALBRIDGE_RESIZE_E2E_VIEW|LB016_REAL_RESIZE_E2E/.test(fixedWindowE2e)) throw new Error("LB-016 fixed-window E2E runner contains obsolete resize/maximize semantics");
+for (const marker of ["FixedWindowE2eMetricsSink", "fixed_window_e2e_report", "cfg(debug_assertions)", "cfg(not(debug_assertions))", "localbridge_invoke_handler![]"]) if (!lib.includes(marker)) throw new Error(`LB-016 debug-only fixed-window IPC contract missing: ${marker}`);
+if (/ResizeE2eMetricsSink|resize_e2e_report/.test(lib)) throw new Error("LB-016 obsolete resize E2E IPC remains registered");
+for (const marker of ["LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW", "window.inner_size()", "window.scale_factor()", "window.is_resizable()", "window.is_maximizable()", "window.is_decorated()", "window-chrome", "chrome_count", "window.is_minimized()", "window.unminimize()", "window.is_visible()", "LB016_FIXED_WINDOW_E2E=PASS"]) if (!main.includes(marker)) throw new Error(`LB-016 live fixed-window Tauri/WebView assertion missing: ${marker}`);
 const completionCalls = [...onboarding.matchAll(/onboardingApi\.complete\(\)/g)];
 const finishStart = onboarding.indexOf("const finish = async () =>");
 const screenStart = onboarding.indexOf("if (step === 1)", finishStart);
@@ -130,7 +156,6 @@ if (completionCalls.length !== 1 || finishStart < 0 || screenStart <= finishStar
   || completionCalls[0].index <= finishStart || completionCalls[0].index >= screenStart) throw new Error("LB-016 completion is not restricted to the explicit finish handler");
 if (!backend.includes("if !current.readiness.all_ready()") || !backend.includes("data.settings.onboarding_complete = true")) throw new Error("LB-016 backend completion does not re-check readiness before persistence");
 
-if (!app.includes("if (!onboarding.complete) return <Onboarding")) throw new Error("LB-016 first-run flow is not production-composed ahead of dashboard");
 for (const command of [
   "get_onboarding_state",
   "save_onboarding_connection",
@@ -183,30 +208,17 @@ if (!semanticAuth || JSON.stringify(semanticAuth.scope) !== JSON.stringify(expec
   || !semanticAuth.evidence_ref.includes("2026-08-13")
   || !semanticAuth.evidence_ref.includes(exactSuccessCopy)) throw new Error("LB-016 Local Bridge/responsive preauthorization invalid");
 
-const resizeAuth = auth.records.find((candidate) => candidate.authorization_id === "EXEC-PREAUTH-LB016-009");
-const expectedResizeScope = [
+const fixedWindowAuth = auth.records.find((candidate) => candidate.authorization_id === "EXEC-PREAUTH-LB016-010");
+const expectedFixedWindowScope = [
   "src-tauri/src/main.rs",
   "src-tauri/src/lib.rs",
-  "src-tauri/src/tray/mod.rs",
-  "PR_CONTRACTS.json",
-  "AGENTS.md",
-  "docs/01_PRODUCT_UX.md",
-  "docs/04_UX_SPEC.md",
-  "docs/06_PR_PLAN.md",
-  "docs/07_ACCEPTANCE.md",
-  "docs/07_ACCEPTANCE_MATRIX.md",
-  "docs/08_FINAL_REVIEW.md",
-  "scripts/verify-architecture/g4-human-gate.mjs",
-  "scripts/verify-architecture/g4-human-gate.test.mjs",
   "scripts/authorization-records/LB-016.json",
-  "START_HERE.md",
-  "PROJECT_STATE.json",
-  "skills/ui/SKILL.md",
 ];
-if (!resizeAuth || JSON.stringify(resizeAuth.scope) !== JSON.stringify(expectedResizeScope)
-  || resizeAuth.user_audit_status !== "PENDING"
-  || resizeAuth.does_not_expand_future_pr_writable_paths !== true
-  || !resizeAuth.evidence_ref.includes("2026-08-13")
-  || !resizeAuth.evidence_ref.includes("true resize E2E")) throw new Error("LB-016 native/WebView resize preauthorization invalid");
+if (!fixedWindowAuth || JSON.stringify(fixedWindowAuth.scope) !== JSON.stringify(expectedFixedWindowScope)
+  || fixedWindowAuth.user_audit_status !== "PENDING"
+  || fixedWindowAuth.does_not_expand_future_pr_writable_paths !== true
+  || !fixedWindowAuth.evidence_ref.includes("2026-08-13")
+  || !fixedWindowAuth.evidence_ref.includes("2eb11fc")
+  || !fixedWindowAuth.evidence_ref.includes("fixed 900x620")) throw new Error("LB-016 fixed-window runtime preauthorization invalid");
 
-console.log("LB016_CONTRACT=PASS six_screens=true no_screen7=true key_secure=true native_folder_picker=true fixed_connector_deeplink=true typed_verified_endpoint=true frontend_endpoint_derivation=false fake_chatgpt_state=false copy_feedback_reserved=true shared_buttons=true checks=3 confirm_gated=true exact_success=true local_bridge_term=true responsive_window=true native_webview_sync=true real_resize_e2e_required=true static_markers_insufficient=true rework_preauth=EXEC-PREAUTH-LB016-006 semantic_preauth=EXEC-PREAUTH-LB016-007 resize_preauth=EXEC-PREAUTH-LB016-009");
+console.log("LB016_CONTRACT=PASS six_screens=true no_screen7=true key_secure=true native_folder_picker=true fixed_connector_deeplink=true typed_verified_endpoint=true frontend_endpoint_derivation=false fake_chatgpt_state=false copy_feedback_reserved=true shared_buttons=true checks=3 confirm_gated=true exact_success=true local_bridge_term=true fixed_window=900x620 resizable=false maximizable=false native_decorations=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false real_fixed_window_e2e_required=true resize_e2e_forbidden=true fixed_window_preauth=EXEC-PREAUTH-LB016-010");
