@@ -10,13 +10,22 @@ const compactCss = css.replace(/\s+/g, "");
 const compactOnboarding = onboardingCss.replace(/\s+/g, "");
 
 for (const marker of [
-  ".inner_size(900.0, 620.0)",
-  ".min_inner_size(900.0, 620.0)",
-  ".max_inner_size(900.0, 620.0)",
+  "MAIN_WINDOW_PHYSICAL_WIDTH: u32 = 900",
+  "MAIN_WINDOW_PHYSICAL_HEIGHT: u32 = 620",
+  "PhysicalSize::new(MAIN_WINDOW_PHYSICAL_WIDTH, MAIN_WINDOW_PHYSICAL_HEIGHT)",
+  "window.set_min_size(Some(physical))?",
+  "window.set_max_size(Some(physical))?",
+  "window.set_size(physical)?",
+  "window.set_zoom(1.0 / scale)?",
   ".resizable(false)",
   ".maximizable(false)",
   ".decorations(false)",
 ]) if (!tray.includes(marker)) throw new Error(`LB-015 native fixed-window baseline missing: ${marker}`);
+for (const marker of [
+  ".inner_size(900.0, 620.0)",
+  ".min_inner_size(900.0, 620.0)",
+  ".max_inner_size(900.0, 620.0)",
+]) if (tray.includes(marker)) throw new Error(`LB-015 stale logical-DIP fixed-window baseline remains: ${marker}`);
 
 if ((app.match(/<WindowChrome>/g) ?? []).length !== 1 || (app.match(/<\/WindowChrome>/g) ?? []).length !== 1) {
   throw new Error("LB-015 App must compose exactly one shared WindowChrome around all views");
