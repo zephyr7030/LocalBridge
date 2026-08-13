@@ -1,7 +1,7 @@
 {
   "schema_version": 16,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -142,7 +142,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Create an auditable committed baseline for the completed G3 human-review rework, then run a fresh G3 independent adversarial review generation 4 from REVIEW_REQUIRED. If that review passes, run a new human manual/detail Gate; keep G4/LB-018 blocked until both fresh gates pass and executor preauthorizations are user-audited as required."
+    "next_action": "Fix the G3 generation 4 LB-015 Dashboard workspace-picker violation, then re-execute LB-015 -> LB-016 -> LB-017 in strict order and run a fresh G3 independent adversarial review generation 5. Keep G4/LB-018 blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -204,9 +204,9 @@
     "executor_rework_validation": "LB-015 and LB-016 automated contracts, frontend build/tests, full Rust tests, Clippy, release check, fixed-window 150% DPI runtime E2E and schema19 fail-closed verifier tests passed on 2026-08-13; overall Architecture remains intentionally blocked only by this historical human-review FAIL until a fresh Gate is run.",
     "historical_record_policy": "scripts/authorization-records/LB-016.json contains superseded six-screen wording as historical authorization provenance; preserve it as immutable/non-authoritative history rather than rewriting past evidence.",
     "g4_unlocked": false,
-    "rework_status": "COMPLETED_AWAITING_FRESH_G3_REVIEW",
+    "rework_status": "REOPENED_BY_G3_GENERATION_4_FAIL",
     "rework_completed_date": "2026-08-13",
-    "next_required_adversarial_generation": 4
+    "next_required_adversarial_generation": 5
   },
   "recovery_policy": {
     "automatic_reconnect": true,
@@ -422,5 +422,38 @@
     "tray": "assets/icons/localbridge.ico",
     "installer": "assets/icons/localbridge.ico",
     "replacement_without_contract": false
+  },
+  "g3_adversarial_review": {
+    "status": "FAIL",
+    "generation": 4,
+    "date": "2026-08-13",
+    "baseline_commit": "f83ea6907df38c8c493135e1b85f8e648636e315",
+    "severity": "MAJOR",
+    "reopen_from_pr": "LB-015",
+    "finding": "Dashboard 的“选择其他文件夹”仍打开前端手填绝对路径对话框，而不是原生 Windows 文件夹选择器，违反全局新项目主交互硬合同。",
+    "evidence": [
+      "PROJECT_STATE.json:12 freezes native Windows folder picker as the primary new-project interaction.",
+      "START_HERE.md:78 freezes project selection to the native Windows folder picker as the primary interaction.",
+      "src/App.tsx:64 opens pathEditor from the Dashboard “选择其他文件夹” action.",
+      "src/App.tsx:74 renders a text input for 文件夹路径 and calls bridge.addProject(newPath.trim()) instead of invoking the native picker.",
+      "src-tauri/src/commands/onboarding.rs:130-134 already exposes choose_onboarding_workspace_folder backed by the native Windows picker path."
+    ],
+    "reproduction": [
+      "Open the Dashboard main UI.",
+      "Click “选择其他文件夹”.",
+      "Observe a LocalBridge text-entry dialog requesting 文件夹路径 instead of the Windows native folder picker.",
+      "Expected: invoke the native Windows folder picker and use its selected directory as the new-project path."
+    ],
+    "independent_verification": {
+      "npm_test": "PASS",
+      "frontend_build": "PASS",
+      "architecture_verify": "PASS before recording this FAIL decision",
+      "lb015_status_accent_contract": "PASS",
+      "lb016_contract": "PASS",
+      "g4_human_gate_verifier_test": "PASS",
+      "cargo_test_locked": "PASS"
+    },
+    "g4_unlocked": false,
+    "next_required_adversarial_generation": 5
   }
 }
