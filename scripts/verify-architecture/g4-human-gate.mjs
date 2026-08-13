@@ -347,6 +347,48 @@ const G3_MANUAL_SUPPLEMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14 = Object.freeze({
+  schemaVersion: 22,
+  baselineCommit: "d06ff536425c459c6f18a6e29f56bdf9b68d852f",
+  baselineSchemaVersion: 21,
+  removedBaselineRules: {
+    workspace_internal_resolved_verbatim_path_allowed: true,
+  },
+  addedRules: {
+    workspace_verbatim_path_allowed_only_for_internal_identity_validation: true,
+    workspace_tool_invocation_verbatim_prefix_forbidden: true,
+    workspace_command_cwd_verbatim_prefix_forbidden: true,
+    workspace_sidecar_current_dir_verbatim_prefix_forbidden: true,
+    workspace_execution_path_must_use_ordinary_win32_form: true,
+    workspace_execution_path_derived_from_validated_identity_required: true,
+    workspace_execution_path_normalization_must_not_authorize: true,
+  },
+  lb015: {
+    addedWritablePaths: [
+      "src-tauri/src/workspace/**",
+      "src-tauri/src/runtime/**",
+      "tests/unit/workspace/**",
+      "tests/integration/workspace_switch/**",
+      "tests/integration/autostart/**",
+      "tests/integration/mcp/**",
+      "tests/integration/process/**",
+    ],
+    artifactReplacements: [[
+      "workspace filesystem-identity validation path separated from ordinary Win32 presentation and execution paths used by UI MCP Broker sidecars process launch and command tools",
+      "user-facing standard Windows workspace path projection separated from internal verbatim resolved authority path",
+    ]],
+    testReplacements: [[
+      "verbatim resolved paths such as \\\\?\\D:\\project are confined to internal filesystem identity validation and comparison; Dashboard Diagnostics WorkspaceRef runtime MCP Broker sidecar process launch and tool invocation cwd workdir current_dir or path arguments use ordinary D:\\project form tied to the same validated identity without changing authorization scope",
+      "Dashboard Diagnostics and project UI render D:\\project rather than \\\\?\\D:\\project when they denote the same workspace while internal filesystem identity/resolved path remains unchanged for authorization",
+    ]],
+    addedTests: [
+      "when GetFinalPathNameByHandleW resolves the selected workspace to \\\\?\\D:\\project the coding-tools command execution boundary receives ordinary D:\\project as cwd or workdir and a representative common command succeeds",
+      "no MCP Broker sidecar ManagedProcessSpec process launch or command tool invocation receives a workspace cwd workdir current_dir or path argument beginning with the Win32 verbatim prefix",
+      "ordinary execution path is revalidated or identity-bound to the same freshly validated filesystem object and a mismatch fails closed rather than authorizing a path alias",
+    ],
+  },
+});
+
 const containsAll = (values, required) => Array.isArray(values) && (required ?? []).every((item) => values.includes(item));
 const containsNone = (values, forbidden) => Array.isArray(values) && (forbidden ?? []).every((item) => !values.includes(item));
 const removeItems = (values, removed) => (values ?? []).filter((item) => !(removed ?? []).includes(item));
@@ -489,6 +531,45 @@ export function normalizeG3ManualSupplement20260814(contractsDoc) {
   return normalized;
 }
 
+export function hasExactG3ManualPathExecutionCorrection20260814(contractsDoc) {
+  if (contractsDoc?.schema_version !== G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.schemaVersion) return false;
+  const rules = contractsDoc?.rules;
+  for (const key of Object.keys(G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.removedBaselineRules)) {
+    if (Object.hasOwn(rules ?? {}, key)) return false;
+  }
+  for (const [key, expected] of Object.entries(G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.addedRules)) {
+    if (JSON.stringify(rules?.[key]) !== JSON.stringify(expected)) return false;
+  }
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  if (!lb015) return false;
+  if (!containsAll(lb015.writable_paths, G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.lb015.addedWritablePaths)) return false;
+  if (!containsAll(lb015.required_tests, G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.lb015.addedTests)) return false;
+  for (const [current, old] of G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.lb015.artifactReplacements) {
+    if (!lb015.required_artifacts?.includes(current) || lb015.required_artifacts?.includes(old)) return false;
+  }
+  for (const [current, old] of G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.lb015.testReplacements) {
+    if (!lb015.required_tests?.includes(current) || lb015.required_tests?.includes(old)) return false;
+  }
+  return true;
+}
+
+export function normalizeG3ManualPathExecutionCorrection20260814(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.baselineSchemaVersion;
+  for (const [key, old] of Object.entries(G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.removedBaselineRules)) normalized.rules[key] = old;
+  for (const key of Object.keys(G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.addedRules)) delete normalized.rules[key];
+  const lb015 = normalized.prs?.["LB-015"];
+  if (lb015) {
+    lb015.writable_paths = removeItems(lb015.writable_paths, G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.lb015.addedWritablePaths);
+    lb015.required_artifacts = lb015.required_artifacts
+      .map((item) => G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.lb015.artifactReplacements.find(([current]) => current === item)?.[1] ?? item);
+    lb015.required_tests = removeItems(lb015.required_tests, G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.lb015.addedTests)
+      .map((item) => G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.lb015.testReplacements.find(([current]) => current === item)?.[1] ?? item);
+  }
+  return normalized;
+}
+
 export function hasExactG3HumanReviewAmendment(prs) {
   const lb015 = prs?.["LB-015"];
   const lb016 = prs?.["LB-016"];
@@ -595,15 +676,36 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
-  if ((contractsDoc?.schema_version ?? 0) >= G3_MANUAL_SUPPLEMENT_2026_08_14.schemaVersion) {
-    if (!hasExactG3ManualSupplement20260814(contractsDoc)) {
+  if ((authorizationContracts?.schema_version ?? 0) >= G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.schemaVersion) {
+    if (!hasExactG3ManualPathExecutionCorrection20260814(authorizationContracts)) {
+      findings.push(`${expected.id}:manual-path-execution-correction-20260814-contract-amendment-drift`);
+    }
+    const correctionBaselineCommit = G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.baselineCommit;
+    const correctionBaseline = git.commitExists(correctionBaselineCommit) && git.isAncestor(correctionBaselineCommit)
+      ? git.jsonAt(correctionBaselineCommit, "PR_CONTRACTS.json")
+      : null;
+    const normalizedCorrection = normalizeG3ManualPathExecutionCorrection20260814(authorizationContracts);
+    if (correctionBaseline?.schema_version !== G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.baselineSchemaVersion) {
+      findings.push(`${expected.id}:manual-path-execution-correction-20260814-baseline`);
+    } else {
+      if (JSON.stringify(normalizedCorrection?.prs) !== JSON.stringify(correctionBaseline.prs)) {
+        findings.push(`${expected.id}:manual-path-execution-correction-20260814-pr-drift`);
+      }
+      if (canonicalJson(normalizedCorrection?.rules) !== canonicalJson(correctionBaseline.rules)) {
+        findings.push(`${expected.id}:manual-path-execution-correction-20260814-rule-drift`);
+      }
+    }
+    authorizationContracts = normalizedCorrection;
+  }
+  if ((authorizationContracts?.schema_version ?? 0) >= G3_MANUAL_SUPPLEMENT_2026_08_14.schemaVersion) {
+    if (!hasExactG3ManualSupplement20260814(authorizationContracts)) {
       findings.push(`${expected.id}:manual-supplement-20260814-contract-amendment-drift`);
     }
     const supplementBaselineCommit = G3_MANUAL_SUPPLEMENT_2026_08_14.baselineCommit;
     const supplementBaseline = git.commitExists(supplementBaselineCommit) && git.isAncestor(supplementBaselineCommit)
       ? git.jsonAt(supplementBaselineCommit, "PR_CONTRACTS.json")
       : null;
-    const normalizedSupplement = normalizeG3ManualSupplement20260814(contractsDoc);
+    const normalizedSupplement = normalizeG3ManualSupplement20260814(authorizationContracts);
     if (supplementBaseline?.schema_version !== G3_MANUAL_SUPPLEMENT_2026_08_14.baselineSchemaVersion) {
       findings.push(`${expected.id}:manual-supplement-20260814-baseline`);
     } else {

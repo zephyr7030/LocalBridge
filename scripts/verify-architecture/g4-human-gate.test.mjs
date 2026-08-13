@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualSupplement20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualSupplement20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualSupplement20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualSupplement20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,29 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema21Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema22Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactG3ManualPathExecutionCorrection20260814(schema22Contracts), true);
+const schema21Contracts = normalizeG3ManualPathExecutionCorrection20260814(schema22Contracts);
+assert.equal(schema21Contracts.schema_version, 21);
+assert.equal(schema21Contracts.rules.workspace_internal_resolved_verbatim_path_allowed, true);
+assert.equal(Object.hasOwn(schema21Contracts.rules, "workspace_command_cwd_verbatim_prefix_forbidden"), false);
+assert.equal(schema21Contracts.prs["LB-015"].writable_paths.includes("src-tauri/src/runtime/**"), false);
+const schema22BroadVerbatimRegression = structuredClone(schema22Contracts);
+schema22BroadVerbatimRegression.rules.workspace_internal_resolved_verbatim_path_allowed = true;
+assert.equal(hasExactG3ManualPathExecutionCorrection20260814(schema22BroadVerbatimRegression), false);
+for (const rule of [
+  "workspace_command_cwd_verbatim_prefix_forbidden",
+  "workspace_tool_invocation_verbatim_prefix_forbidden",
+  "workspace_sidecar_current_dir_verbatim_prefix_forbidden",
+  "workspace_execution_path_derived_from_validated_identity_required",
+]) {
+  const weakened = structuredClone(schema22Contracts);
+  delete weakened.rules[rule];
+  assert.equal(hasExactG3ManualPathExecutionCorrection20260814(weakened), false);
+}
+const schema22MissingRuntimeScope = structuredClone(schema22Contracts);
+schema22MissingRuntimeScope.prs["LB-015"].writable_paths = schema22MissingRuntimeScope.prs["LB-015"].writable_paths.filter((item) => item !== "src-tauri/src/runtime/**");
+assert.equal(hasExactG3ManualPathExecutionCorrection20260814(schema22MissingRuntimeScope), false);
 assert.equal(hasExactG3ManualSupplement20260814(schema21Contracts), true);
 const generation2Contracts = normalizeG3ManualSupplement20260814(schema21Contracts);
 assert.equal(hasExactG3HumanReviewGeneration2Amendment(generation2Contracts), true);

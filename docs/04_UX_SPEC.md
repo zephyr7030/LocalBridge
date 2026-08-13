@@ -313,7 +313,7 @@ D:\project\LocalBridge   [切换]
 
 “没有当前项目”不是故障状态。
 
-用户可见项目路径不得显示 Win32 verbatim 前缀。例如内部 resolved path 可为 `\\?\D:\project`，Dashboard/项目选择/诊断必须呈现 `D:\project`。显示转换不参与 validated identity、reparse 防护或授权边界。
+Win32 verbatim 路径只允许停留在内部 filesystem identity 校验。例如 `GetFinalPathNameByHandleW` 可得到 `\\?\D:\project`，但 Dashboard/项目选择/诊断必须呈现 `D:\project`，并且 MCP/Broker/sidecar/process/command/tool invocation 的路径参数和 `cwd/workdir/current_dir` 也必须使用与该 validated identity 对应的普通 `D:\project`。禁止把 `\\?\` 工作目录传给命令工具；现有数据流若把 resolved identity path 直接投影到 runtime/tool cwd 即为缺陷。execution/display 转换不参与授权，转换后的路径必须仍绑定同一 freshly validated identity，不匹配时 fail-closed。
 
 # 托盘
 

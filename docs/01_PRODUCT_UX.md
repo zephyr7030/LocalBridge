@@ -435,7 +435,7 @@ D:\project\LocalBridge
 
 不增加独立“项目管理中心”。
 
-Windows 内部路径校验允许使用 `GetFinalPathNameByHandleW` 返回的 `\\?\D:\project` verbatim/resolved 路径作为 runtime/authorization 身份依据；用户界面必须显示普通可读形式 `D:\project`。两者指向同一目录时，`\\?\` 不是另一个项目；UI 显示规范化只能用于 presentation，绝不能替代 filesystem identity 或扩大授权。
+Windows `GetFinalPathNameByHandleW` 返回的 `\\?\D:\project` verbatim/resolved 路径只用于 WorkspaceValidator 的 filesystem identity、去重、reparse 防护和授权身份比较；它不是 runtime/tool 的执行路径。进入 MCP、Broker、sidecar/process launch、command/tool invocation 前，必须得到与同一 freshly validated filesystem identity 绑定的普通 Win32 execution path，例如 `D:\project`。所有实际工具路径参数及 `cwd/workdir/current_dir` 禁止带 `\\?\`；尤其不得把 verbatim 工作目录传给命令执行工具，因为该形式可导致实际命令失败。Dashboard/设置/诊断/onboarding 也只显示普通路径。execution/display 转换都只是投影，不得替代 identity 校验、扩大根目录或授予权限；identity 不一致时 fail-closed。
 
 
 ## 品牌图标

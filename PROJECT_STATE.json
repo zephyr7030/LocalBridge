@@ -63,7 +63,7 @@
     "G4 remains blocked after G3 adversarial PASS until a separate human manual/detail review is accepted as PASS",
     "Human review treats user/executor factual claims as untrusted evidence and requires user-audited concrete executor pre-authorizations"
   ],
-  "execution_plan_version": 16,
+  "execution_plan_version": 17,
   "total_prs": 20,
   "architecture_decisions_pending_lb000": [
     "Policy Enforcement implementation: upstream / adapter / Rust Guard",
@@ -671,7 +671,7 @@
       "2. RETAINED DEFECT: changing Tunnel ID or Runtime API Key while asynchronous runtime startup is Starting/connecting can bypass controlled reconnect and continue with captured old configuration.",
       "3. CONTRACT: one-shot notices such as 无法准备管理员权限 must be temporary, default 3 seconds, rather than permanent page content; persistent runtime faults remain typed persistent state.",
       "4. CONTRACT: task display must bind every real MCP/Broker execution including short create/delete/modify/ordinary commands; active task shows elapsed duration; idle shows 等待命令 plus backend-grounded last-command age using nS前/n分钟前/大于1小时/大于n天; no history/feed/list.",
-      "5. VERIFIED ROOT CAUSE/CONTRACT: Windows GetFinalPathNameByHandleW may return a verbatim resolved path such as \\\\?\\D:\\project. This is not a different workspace by itself; internal resolved identity may retain it, while user-facing projection must show D:\\project and display normalization must never change access scope.",
+      "5. VERIFIED DEFECT/CONTRACT: Windows GetFinalPathNameByHandleW may return a verbatim resolved identity path such as \\\\?\\D:\\project. Current code can propagate that value through WorkspaceRef/runtime config into MCP/process current_dir and tool cwd/workdir, which can make command execution fail. Verbatim form is identity-validation-only; UI and every MCP/Broker/sidecar/process/command/tool execution path must use ordinary D:\\project tied to the same validated filesystem identity, and conversion must never widen authorization.",
       "6. CONTRACT: peer buttons share a horizontal action column/left edge; Settings Tunnel ID and Runtime API Key 更换 buttons must align within 1 CSS px at 900x620 regardless of value width.",
       "7. CONTRACT: Dashboard adds real 重启服务 amber and 关闭服务 red buttons, aligned with the shared button system; backend owns controlled single-owner restart and orderly manual-stop lifecycle, with no second design language and no restart-triggered UAC."
     ],
@@ -679,11 +679,26 @@
     "g4_unlocked": false,
     "next_required_adversarial_generation": 6
   },
+  "g3_manual_supplement_item5_correction_2026_08_14": {
+    "status": "VERIFIED_DEFECT_AND_CONTRACT_CORRECTION",
+    "baseline_commit": "d06ff536425c459c6f18a6e29f56bdf9b68d852f",
+    "supersedes": "schema21 item5 presentation-only boundary",
+    "finding": "verbatim workspace path propagation reaches runtime/tool working-directory execution boundaries and can break command execution",
+    "reopen_from_pr": "LB-015",
+    "g4_unlocked": false,
+    "next_required_adversarial_generation": 6
+  },
   "workspace_path_presentation": {
-    "internal_resolved_verbatim_path_allowed": true,
+    "internal_verbatim_identity_validation_allowed": true,
     "user_facing_verbatim_prefix_allowed": false,
-    "example_internal": "\\\\?\\D:\\project",
+    "tool_invocation_verbatim_prefix_allowed": false,
+    "command_working_directory_verbatim_prefix_allowed": false,
+    "sidecar_process_current_dir_verbatim_prefix_allowed": false,
+    "example_internal_identity": "\\\\?\\D:\\project",
+    "example_execution": "D:\\project",
     "example_display": "D:\\project",
+    "execution_path_bound_to_validated_identity": true,
+    "execution_normalization_is_authority": false,
     "display_normalization_is_authority": false
   }
 }

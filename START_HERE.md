@@ -89,7 +89,7 @@ UI 冻结补充：
 前台启动       = onboarding 完成且配置有效时自动、异步启动 runtime/MCP/Tunnel；UI 不等待后端阻塞工作
 任务状态       = backend 真实执行绑定；短任务不得被 UI 轮询漏掉；执行中显示持续时间；待机显示“等待命令”，有上一条命令时追加 nS前/n分钟前/大于1小时/大于n天；无历史列表
 临时提示       = “无法准备管理员权限”等一次性操作提示默认 3 秒自动消失；持续 runtime fault 仍由 typed 状态表达
-项目路径显示   = UI 显示 D:\project 等普通 Windows 路径；内部可保留 \\?\D:\project resolved path，显示规范化不得参与授权
+项目路径边界   = \\?\D:\project 仅限内部 filesystem identity 校验；UI 与 MCP/Broker/sidecar/process/command/tool 的 cwd/workdir/current_dir/路径参数必须使用同一 validated identity 对应的普通 D:\project；verbatim 工作目录不得传给命令工具，execution/display 转换不得参与授权
 按钮对齐       = 同级动作使用同一左基线/动作列；900×620 几何差≤1 CSS px；设置两项“更换”为强制样例
 服务控制       = Dashboard 提供黄色/琥珀“重启服务”与红色“关闭服务”；backend 真实 lifecycle，统一按钮设计与对齐；重启不自动 UAC
 设置           = 常规/连接/权限三组；连接字段固定英文 `Tunnel ID` / `Runtime API Key`；独立“更换”；保存即验证并按需受控重连；无“测试连接”

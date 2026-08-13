@@ -1,5 +1,5 @@
 {
-  "schema_version": 21,
+  "schema_version": 22,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -298,8 +298,14 @@
     "reopened_onboarding_screen_3_permission_edit_allowed": true,
     "dashboard_admin_privilege_status_read_only": true,
     "workspace_user_facing_verbatim_prefix_forbidden": true,
-    "workspace_internal_resolved_verbatim_path_allowed": true,
+    "workspace_verbatim_path_allowed_only_for_internal_identity_validation": true,
+    "workspace_tool_invocation_verbatim_prefix_forbidden": true,
+    "workspace_command_cwd_verbatim_prefix_forbidden": true,
+    "workspace_sidecar_current_dir_verbatim_prefix_forbidden": true,
+    "workspace_execution_path_must_use_ordinary_win32_form": true,
+    "workspace_execution_path_derived_from_validated_identity_required": true,
     "workspace_display_normalization_must_not_authorize": true,
+    "workspace_execution_path_normalization_must_not_authorize": true,
     "dashboard_service_controls": ["重启服务", "关闭服务"],
     "dashboard_restart_service_accent": "amber",
     "dashboard_stop_service_accent": "red",
@@ -783,11 +789,18 @@
         "src-tauri/src/state/**",
         "src-tauri/src/mcp/**",
         "src-tauri/src/app/**",
+        "src-tauri/src/workspace/**",
+        "src-tauri/src/runtime/**",
         "src-tauri/src/lib.rs",
         "tests/unit/ui/**",
+        "tests/unit/workspace/**",
         "tests/e2e/dashboard/**",
         "tests/integration/policy/**",
-        "tests/integration/background/**"
+        "tests/integration/background/**",
+        "tests/integration/workspace_switch/**",
+        "tests/integration/autostart/**",
+        "tests/integration/mcp/**",
+        "tests/integration/process/**"
       ],
       "forbidden_paths": [
         "runtime/**"
@@ -814,7 +827,7 @@
         "independent Tunnel ID and Runtime API Key replace/edit flow",
         "native Windows folder picker for Dashboard add-project flow",
         "backend-only CurrentTask truth with elapsed timing and retained last-command time metadata so short real executions cannot be missed",
-        "user-facing standard Windows workspace path projection separated from internal verbatim resolved authority path",
+        "workspace filesystem-identity validation path separated from ordinary Win32 presentation and execution paths used by UI MCP Broker sidecars process launch and command tools",
         "transient three-second one-shot operation feedback",
         "shared left-edge action-column alignment for peer buttons",
         "Dashboard amber 重启服务 and red 关闭服务 controls backed by real managed lifecycle",
@@ -900,7 +913,10 @@
         "Dashboard displays 重启服务 with amber semantics and 关闭服务 with red semantics using the existing shared button geometry and aligned action layout",
         "重启服务 is a backend-owned controlled restart that cancels or joins Starting Ready Recovering or Fault lifecycle state before starting exactly one current persisted configuration and never auto-prompts UAC",
         "关闭服务 records explicit manual-stop semantics and orderly closes privileged gate Broker Tunnel PEP MCP without closing the Dashboard window",
-        "Dashboard Diagnostics and project UI render D:\\project rather than \\\\?\\D:\\project when they denote the same workspace while internal filesystem identity/resolved path remains unchanged for authorization",
+        "verbatim resolved paths such as \\\\?\\D:\\project are confined to internal filesystem identity validation and comparison; Dashboard Diagnostics WorkspaceRef runtime MCP Broker sidecar process launch and tool invocation cwd workdir current_dir or path arguments use ordinary D:\\project form tied to the same validated identity without changing authorization scope",
+        "when GetFinalPathNameByHandleW resolves the selected workspace to \\\\?\\D:\\project the coding-tools command execution boundary receives ordinary D:\\project as cwd or workdir and a representative common command succeeds",
+        "no MCP Broker sidecar ManagedProcessSpec process launch or command tool invocation receives a workspace cwd workdir current_dir or path argument beginning with the Win32 verbatim prefix",
+        "ordinary execution path is revalidated or identity-bound to the same freshly validated filesystem object and a mismatch fails closed rather than authorizing a path alias",
         "intentionally slow backend lifecycle operation does not freeze frontend interaction or typed projection refresh"
       ],
       "non_goals": [

@@ -132,7 +132,7 @@ bounded recovery、two-phase workspace switch、rollback。
 - 设置页严格为常规/连接/权限：常规=`开机启动`、`关闭窗口后继续运行`；连接=`Tunnel ID`、`Runtime API Key` 各自“更换”；权限=三模式；底部=`打开欢迎页`、`完成`。
 - `Runtime API Key` 为精确英文用户字段名，不翻译；完整 secret 永不回显/预填。Tunnel ID 与 Runtime API Key 独立更新，保存即校验→安全写入→按需受控重连；Starting/connecting 阶段即使 snapshot.active=false 也不得继续使用旧 captured config；禁止“测试连接”。
 - `无法准备管理员权限` 等 one-shot 操作提示默认 3 秒自动清除，持续 runtime Fault 仍保持 typed 状态。
-- UI 对 `\\?\D:\project` 等内部 resolved path 只做 presentation 转换并显示 `D:\project`；不得改动/弱化内部 filesystem identity 授权。
+- 拆分 workspace identity path 与 execution/presentation path：`\\?\D:\project` 仅用于 WorkspaceValidator/filesystem identity、去重、reparse/授权比较；UI、WorkspaceRef/runtime、MCP/Broker/sidecar/process/command/tool 的实际路径参数和 `cwd/workdir/current_dir` 必须使用与同一 validated identity 绑定的普通 `D:\project`。禁止把 verbatim 工作目录传给命令工具；identity 不匹配时 fail-closed，execution/display 转换不得扩大授权。
 - 同级按钮使用统一动作列/左基线；900×620 几何差 ≤1 CSS px，设置两个“更换”为强制样例。
 - Dashboard 增加黄色/琥珀 `重启服务` 与红色 `关闭服务`，沿用 shared button design/alignment；真实服务 lifecycle 由 backend 执行。
 - React/WebView 只消费 typed backend projection + user intent；故意延迟 backend 操作时 UI 必须保持响应。

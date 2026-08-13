@@ -1,4 +1,4 @@
-# 07 — Acceptance Matrix v13
+# 07 — Acceptance Matrix v14
 
 | ID | 场景 | 预期 |
 |---|---|---|
@@ -202,9 +202,10 @@
 | A227 | 短任务状态捕获 | 文件新建、删除、修改及普通命令即使在一次前端轮询周期内完成，也必须留下 backend current/last timing projection；不得只显示偶然被 polling 撞到的任务 |
 | A228 | 执行持续时间 | 活动任务单行显示 backend-grounded elapsed duration；不得由前端伪造任务开始/结束状态 |
 | A229 | 上次命令时间 | Idle 显示 `等待命令` + 上一条命令年龄，至少覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天`；从未执行则只显示 `等待命令` |
-| A230 | 用户可见 workspace path | 内部 `\\?\D:\project` 与 `D:\project` 指向同一 workspace 时，UI 只显示 `D:\project`；内部 resolved identity/path 保留且显示转换不得参与授权 |
+| A230 | workspace identity / execution / display path 边界 | `\\?\D:\project` 仅允许用于内部 filesystem identity 校验/去重/reparse/授权比较；UI 以及 MCP/Broker/sidecar/process/command/tool 的路径参数和 `cwd/workdir/current_dir` 必须使用与同一 freshly validated identity 绑定的普通 `D:\project`；execution/display 转换不得授权，identity 不一致 fail-closed |
 | A231 | 设置“更换”按钮对齐 | Tunnel ID 与 Runtime API Key 两个“更换”在 900×620 下左边缘差 ≤1 CSS px，不随摘要宽度漂移 |
 | A232 | 同级按钮对齐 | 同一页面/分组 peer actions 复用统一动作列/左基线和 shared button geometry，不允许任意 offset/第二套对齐语言 |
 | A233 | Dashboard 重启服务 | 显示黄色/琥珀 `重启服务`；真实服务生命周期由 backend 执行，且满足机器合同的 single-owner 与最新持久化配置语义 |
 | A234 | Dashboard 关闭服务 | 显示红色 `关闭服务`；真实服务生命周期由 backend 执行并记录显式 manual-stop，Dashboard 窗口保持可用并显示停止状态 |
 | A235 | 服务按钮视觉 | `重启服务`/`关闭服务` 与现有按钮共享尺寸、字体、边界、圆角和水平对齐体系，仅逻辑色不同 |
+| A236 | verbatim workspace 命令回归 | 当内部 `GetFinalPathNameByHandleW` 得到 `\\?\D:\project` 时，coding-tools/`exec_command` 或等价普通命令实际收到 `D:\project` cwd/workdir 并成功执行；MCP/Broker/sidecar/ManagedProcessSpec/process/tool invocation 不得收到 `\\?\` cwd/workdir/current_dir/路径参数 |
