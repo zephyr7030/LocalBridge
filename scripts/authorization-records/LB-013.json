@@ -68,6 +68,30 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB013-005",
+      "scope": [
+        "src-tauri/src/tray/mod.rs",
+        "src-tauri/src/main.rs",
+        "tests/integration/background/lb013_contract.test.mjs",
+        "tests/e2e/dashboard/lb015_window_chrome_contract.test.mjs",
+        "tests/e2e/onboarding/lb016_contract.test.mjs",
+        "tests/e2e/onboarding/fixed_window_runtime_e2e.mjs",
+        "PR_INDEX.json",
+        "PROJECT_STATE.json",
+        "scripts/authorization-records/LB-013.json"
+      ],
+      "actions": [
+        "Roll back the physical-pixel 900x620 window lock and inverse WebView zoom introduced by the earlier DPI correction, restoring fixed 900x620 logical/DIP inner-size semantics so Windows and WebView2 perform normal DPI scaling",
+        "Update only the directly dependent LB-013/LB-015/LB-016 regression and live fixed-window E2E assertions so physical size divided by native scale resolves to 900x620 logical while fixed borderless custom-chrome behavior remains unchanged",
+        "Preserve the frozen localbridge.ico tray implementation that selects a native DPI-matched ICO frame without resampling; do not restore the old crop/default-window-icon path"
+      ],
+      "reason": "The user explicitly requested rollback of the prior Windows DPI sizing semantic correction after it had been described as forcing a physical 900x620 native client at 150% scaling. The physical lock plus inverse WebView zoom is separable from the later native-DPI tray icon fix and can be removed without changing the frozen product fixed-window contract.",
+      "evidence_ref": "Explicit user instruction on 2026-08-13: '回调：修正 Windows DPI 尺寸语义。实机 150% 缩放下原生 client 已验证为物理 900×620'",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

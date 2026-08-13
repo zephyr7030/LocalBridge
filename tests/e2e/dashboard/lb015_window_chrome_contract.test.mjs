@@ -10,22 +10,20 @@ const compactCss = css.replace(/\s+/g, "");
 const compactOnboarding = onboardingCss.replace(/\s+/g, "");
 
 for (const marker of [
-  "MAIN_WINDOW_PHYSICAL_WIDTH: u32 = 900",
-  "MAIN_WINDOW_PHYSICAL_HEIGHT: u32 = 620",
-  "PhysicalSize::new(MAIN_WINDOW_PHYSICAL_WIDTH, MAIN_WINDOW_PHYSICAL_HEIGHT)",
-  "window.set_min_size(Some(physical))?",
-  "window.set_max_size(Some(physical))?",
-  "window.set_size(physical)?",
-  "window.set_zoom(1.0 / scale)?",
+  ".inner_size(900.0, 620.0)",
+  ".min_inner_size(900.0, 620.0)",
+  ".max_inner_size(900.0, 620.0)",
   ".resizable(false)",
   ".maximizable(false)",
   ".decorations(false)",
 ]) if (!tray.includes(marker)) throw new Error(`LB-015 native fixed-window baseline missing: ${marker}`);
 for (const marker of [
-  ".inner_size(900.0, 620.0)",
-  ".min_inner_size(900.0, 620.0)",
-  ".max_inner_size(900.0, 620.0)",
-]) if (tray.includes(marker)) throw new Error(`LB-015 stale logical-DIP fixed-window baseline remains: ${marker}`);
+  "MAIN_WINDOW_PHYSICAL_WIDTH",
+  "MAIN_WINDOW_PHYSICAL_HEIGHT",
+  "PhysicalSize::new(MAIN_WINDOW_PHYSICAL_WIDTH, MAIN_WINDOW_PHYSICAL_HEIGHT)",
+  "window.set_size(physical)?",
+  "window.set_zoom(1.0 / scale)?",
+]) if (tray.includes(marker)) throw new Error(`LB-015 stale physical-pixel DPI compensation remains: ${marker}`);
 
 if ((app.match(/<WindowChrome>/g) ?? []).length !== 1 || (app.match(/<\/WindowChrome>/g) ?? []).length !== 1) {
   throw new Error("LB-015 App must compose exactly one shared WindowChrome around all views");
@@ -62,4 +60,4 @@ const onboardingRule = compactOnboarding.match(/\.onboarding-shell\{([^}]*)\}/)?
 for (const token of ["width:100%", "height:100%", "min-height:0"]) if (!onboardingRule.includes(token)) throw new Error(`LB-015 onboarding fixed-content sizing missing: ${token}`);
 if (/100dvh|100vh/.test(onboardingRule)) throw new Error("LB-015 onboarding still escapes chrome content area");
 
-console.log("LB015_WINDOW_CHROME=PASS fixed=900x620 native_decorations=false single_custom_chrome=true edge_to_edge=true drag=true minimize=true close=true maximize=false least_privilege_capability=true dashboard_fit=true onboarding_fit=true");
+console.log("LB015_WINDOW_CHROME=PASS logical_fixed=900x620 native_dpi_scaling=true native_decorations=false single_custom_chrome=true edge_to_edge=true drag=true minimize=true close=true maximize=false least_privilege_capability=true dashboard_fit=true onboarding_fit=true");

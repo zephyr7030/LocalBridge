@@ -6,8 +6,7 @@ use localbridge_lib::app::{
 };
 use localbridge_lib::privilege::PrivilegeController;
 use localbridge_lib::tray::{
-    MAIN_WINDOW_LABEL, MAIN_WINDOW_PHYSICAL_HEIGHT, MAIN_WINDOW_PHYSICAL_WIDTH,
-    enforce_main_window_metrics, ensure_main_window, install_tray,
+    MAIN_WINDOW_LABEL, ensure_main_window, install_tray, sync_main_webview_to_client,
 };
 #[cfg(debug_assertions)]
 use localbridge_lib::{FixedWindowE2eMetricsSink, settings::SettingsStore};
@@ -67,7 +66,9 @@ fn handle_main_window_event(window: &tauri::Window<tauri::Wry>, event: &WindowEv
             let _ = window.hide();
         }
         WindowEvent::ScaleFactorChanged { .. } => {
-            let _ = enforce_main_window_metrics(window.app_handle());
+            if let Ok(client_size) = window.inner_size() {
+                let _ = sync_main_webview_to_client(window.app_handle(), client_size);
+            }
         }
         _ => {}
     }
@@ -214,15 +215,16 @@ fn execute_fixed_window_e2e(
     let scale = window
         .scale_factor()
         .map_err(|error| format!("scale_factor: {error}"))?;
-    if physical.width != MAIN_WINDOW_PHYSICAL_WIDTH
-        || physical.height != MAIN_WINDOW_PHYSICAL_HEIGHT
-    {
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(format!("invalid native scale factor: {scale}"));
+    }
+    let logical_width = f64::from(physical.width) / scale;
+    let logical_height = f64::from(physical.height) / scale;
+    if (logical_width - 900.0).abs() > 2.0 || (logical_height - 620.0).abs() > 2.0 {
         return Err(format!(
-            "native physical client is {}x{}, expected {}x{}",
+            "native client is {logical_width:.1}x{logical_height:.1} logical ({}x{} physical at {scale}x), expected 900x620 logical",
             physical.width,
-            physical.height,
-            MAIN_WINDOW_PHYSICAL_WIDTH,
-            MAIN_WINDOW_PHYSICAL_HEIGHT
+            physical.height
         ));
     }
     if window
@@ -267,7 +269,9 @@ fn execute_fixed_window_e2e(
     .ok_or("custom close control did not reach CloseRequested close-to-hide behavior")?;
 
     Ok(format!(
-        "physical={}x{} webview={}x{} native_scale={} dpr={} decorations=false resizable=false maximizable=false chrome=edge-to-edge controls=drag,minimize,close minimize_click=true close_hide=true",
+        "logical={}x{} physical={}x{} webview={}x{} native_scale={} dpr={} decorations=false resizable=false maximizable=false chrome=edge-to-edge controls=drag,minimize,close minimize_click=true close_hide=true",
+        logical_width.round(),
+        logical_height.round(),
         physical.width,
         physical.height,
         metrics.inner_width.round(),

@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -138,7 +138,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run G3 independent adversarial review generation 3; keep G4 blocked until that review passes and the subsequent human/manual review gate also passes"
+    "next_action": "Revalidate LB-014 autostart and single-instance behavior against the restored logical/DIP 900x620 fixed-window baseline; keep G4 blocked and continue G3 sequential revalidation afterward"
   },
   "current_task_ui": {
     "enabled": true,

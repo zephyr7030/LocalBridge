@@ -11,8 +11,6 @@ use tauri::{
 use crate::app::DesktopLifecycle;
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
-pub const MAIN_WINDOW_PHYSICAL_WIDTH: u32 = 900;
-pub const MAIN_WINDOW_PHYSICAL_HEIGHT: u32 = 620;
 const TRAY_ID: &str = "localbridge-tray";
 const MENU_OPEN_ID: &str = "open";
 const MENU_EXIT_ID: &str = "exit";
@@ -49,7 +47,7 @@ pub fn ensure_main_window<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<WebviewWindow<R>, tauri::Error> {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        enforce_main_window_metrics(app)?;
+        sync_main_webview_to_client(app, window.inner_size()?)?;
         window.show()?;
         window.set_focus()?;
         return Ok(window);
@@ -59,30 +57,17 @@ pub fn ensure_main_window<R: Runtime>(
         WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
             .title("LocalBridge")
             .visible(false)
+            .inner_size(900.0, 620.0)
+            .min_inner_size(900.0, 620.0)
+            .max_inner_size(900.0, 620.0)
             .resizable(false)
             .maximizable(false)
             .decorations(false)
             .build()?;
-    enforce_main_window_metrics(app)?;
+    sync_main_webview_to_client(app, window.inner_size()?)?;
     window.show()?;
     window.set_focus()?;
     Ok(window)
-}
-
-pub fn enforce_main_window_metrics<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Error> {
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        let physical = PhysicalSize::new(MAIN_WINDOW_PHYSICAL_WIDTH, MAIN_WINDOW_PHYSICAL_HEIGHT);
-        window.set_min_size(Some(physical))?;
-        window.set_max_size(Some(physical))?;
-        window.set_size(physical)?;
-
-        let scale = window.scale_factor()?;
-        if scale.is_finite() && scale > 0.0 {
-            window.set_zoom(1.0 / scale)?;
-        }
-        sync_main_webview_to_client(app, window.inner_size()?)?;
-    }
-    Ok(())
 }
 
 pub fn sync_main_webview_to_client<R: Runtime>(

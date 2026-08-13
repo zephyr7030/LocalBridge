@@ -125,22 +125,20 @@ if (!onboarding.includes(success)) throw new Error("LB-016 exact Screen 6 succes
 if (onboarding.includes("设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！")) throw new Error("LB-016 stale Screen 6 success copy remains in production");
 
 for (const marker of [
-  "MAIN_WINDOW_PHYSICAL_WIDTH: u32 = 900",
-  "MAIN_WINDOW_PHYSICAL_HEIGHT: u32 = 620",
-  "PhysicalSize::new(MAIN_WINDOW_PHYSICAL_WIDTH, MAIN_WINDOW_PHYSICAL_HEIGHT)",
-  "window.set_min_size(Some(physical))?",
-  "window.set_max_size(Some(physical))?",
-  "window.set_size(physical)?",
-  "window.set_zoom(1.0 / scale)?",
+  ".inner_size(900.0, 620.0)",
+  ".min_inner_size(900.0, 620.0)",
+  ".max_inner_size(900.0, 620.0)",
   ".resizable(false)",
   ".maximizable(false)",
   ".decorations(false)",
 ]) if (!tray.includes(marker)) throw new Error(`LB-016 fixed/custom window contract missing: ${marker}`);
-for (const marker of [".inner_size(900.0, 620.0)", ".min_inner_size(900.0, 620.0)", ".max_inner_size(900.0, 620.0)"])
-  if (tray.includes(marker)) throw new Error(`LB-016 stale logical-DIP fixed-window contract remains: ${marker}`);
+for (const marker of ["MAIN_WINDOW_PHYSICAL_WIDTH", "MAIN_WINDOW_PHYSICAL_HEIGHT", "window.set_size(physical)?", "window.set_zoom(1.0 / scale)?", "enforce_main_window_metrics"])
+  if (tray.includes(marker)) throw new Error(`LB-016 stale physical-pixel DPI compensation remains: ${marker}`);
 if (tray.includes(".resizable(true)") || tray.includes(".maximizable(true)")) throw new Error("LB-016 main window remains user-resizable/maximizable");
-for (const marker of ["WindowEvent::ScaleFactorChanged", "enforce_main_window_metrics(window.app_handle())", "physical.width != MAIN_WINDOW_PHYSICAL_WIDTH", "physical.height != MAIN_WINDOW_PHYSICAL_HEIGHT"])
-  if (!main.includes(marker)) throw new Error(`LB-016 DPI-independent physical window assertion missing: ${marker}`);
+for (const marker of ["WindowEvent::ScaleFactorChanged", "sync_main_webview_to_client(window.app_handle(), client_size)", "let logical_width = f64::from(physical.width) / scale", "let logical_height = f64::from(physical.height) / scale"])
+  if (!main.includes(marker)) throw new Error(`LB-016 logical-DIP fixed-window assertion missing: ${marker}`);
+for (const marker of ["enforce_main_window_metrics(window.app_handle())", "native physical client is", "set_zoom(1.0 / scale)"])
+  if (main.includes(marker)) throw new Error(`LB-016 stale physical-pixel DPI compensation remains in runtime E2E: ${marker}`);
 if (main.includes("WindowEvent::Resized") || /\.maximize\(|\.unmaximize\(|\.set_size\(/.test(main)) throw new Error("LB-016 production/debug main contains forbidden resize/maximize behavior");
 if (!app.includes('import { WindowChrome } from "./components/WindowChrome"')
   || (app.match(/<WindowChrome>/g) ?? []).length !== 1
@@ -159,7 +157,7 @@ if (windowCapability.permissions.some((permission) => /maximize|resize|decoratio
 if (!/\.onboarding-shell\{[^}]*width:100%[^}]*height:100%[^}]*min-height:0/is.test(onboardingCss.replace(/\s+/g, ""))
   || /\.onboarding-shell\{[^}]*(?:100dvh|100vh)/is.test(onboardingCss.replace(/\s+/g, ""))) throw new Error("LB-016 onboarding is not constrained to the fixed custom-chrome content area");
 if (existsSync("tests/e2e/onboarding/resize_runtime_e2e.mjs")) throw new Error("LB-016 obsolete resizable/maximize runtime E2E still exists");
-for (const marker of ["tauri.cmd dev --no-watch", "LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW", "CARGO_TARGET_DIR", "LB016_FIXED_WINDOW_E2E=PASS", "fixed=900x620", "maximizable=false", "single_custom_chrome=true"]) if (!fixedWindowE2e.includes(marker)) throw new Error(`LB-016 real fixed-window E2E runner missing: ${marker}`);
+for (const marker of ["tauri.cmd dev --no-watch", "LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW", "CARGO_TARGET_DIR", "LB016_FIXED_WINDOW_E2E=PASS", "logical_fixed=900x620", "native_dpi_scaling=true", "maximizable=false", "single_custom_chrome=true"]) if (!fixedWindowE2e.includes(marker)) throw new Error(`LB-016 real fixed-window E2E runner missing: ${marker}`);
 if (/\.maximize\(|\.unmaximize\(|\.set_size\(|LOCALBRIDGE_RESIZE_E2E_VIEW|LB016_REAL_RESIZE_E2E/.test(fixedWindowE2e)) throw new Error("LB-016 fixed-window E2E runner contains obsolete resize/maximize semantics");
 for (const marker of ["FixedWindowE2eMetricsSink", "fixed_window_e2e_report", "cfg(debug_assertions)", "cfg(not(debug_assertions))", "localbridge_invoke_handler![]"]) if (!lib.includes(marker)) throw new Error(`LB-016 debug-only fixed-window IPC contract missing: ${marker}`);
 if (/ResizeE2eMetricsSink|resize_e2e_report/.test(lib)) throw new Error("LB-016 obsolete resize E2E IPC remains registered");
