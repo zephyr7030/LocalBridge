@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -138,7 +138,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Create an auditable implementation baseline commit for the tested G2/G3 repair working tree, then run G3 independent adversarial review generation 2; if PASS, proceed to required human manual/detail review before G4"
+    "next_action": "Revalidate LB-014 against the fixed 900x620 borderless-window LB-013 baseline, then continue strict G3 sequence"
   },
   "current_task_ui": {
     "enabled": true,

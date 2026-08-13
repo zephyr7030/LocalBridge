@@ -54,8 +54,11 @@ pub fn ensure_main_window<R: Runtime>(
         WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
             .title("LocalBridge")
             .inner_size(900.0, 620.0)
-            .min_inner_size(720.0, 500.0)
-            .resizable(true)
+            .min_inner_size(900.0, 620.0)
+            .max_inner_size(900.0, 620.0)
+            .resizable(false)
+            .maximizable(false)
+            .decorations(false)
             .build()?;
     sync_main_webview_to_client(app, window.inner_size()?)?;
     window.show()?;

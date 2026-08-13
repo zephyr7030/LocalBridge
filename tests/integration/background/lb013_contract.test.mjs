@@ -17,6 +17,22 @@ for (const required of ["StartupMode::from_args", "creates_main_window_at_startu
 const modeGuard = main.indexOf("creates_main_window_at_startup");
 const createCall = main.indexOf("ensure_main_window", modeGuard);
 if (!(modeGuard >= 0 && createCall > modeGuard)) throw new Error("LB-013 foreground window creation is not startup-mode gated");
+for (const required of [
+  ".inner_size(900.0, 620.0)",
+  ".min_inner_size(900.0, 620.0)",
+  ".max_inner_size(900.0, 620.0)",
+  ".resizable(false)",
+  ".maximizable(false)",
+  ".decorations(false)",
+  "sync_main_webview_to_client(app, window.inner_size()?)?",
+]) if (!tray.includes(required)) throw new Error(`LB-013 fixed borderless main-window contract missing: ${required}`);
+for (const forbidden of [
+  ".min_inner_size(720.0, 500.0)",
+  ".resizable(true)",
+  ".maximizable(true)",
+]) if (tray.includes(forbidden)) throw new Error(`LB-013 stale native window behavior remains: ${forbidden}`);
+if (main.includes("WindowEvent::Resized") || main.includes("window.maximize()") || main.includes("window.unmaximize()"))
+  throw new Error("LB-013 fixed window still carries resize/maximize runtime behavior");
 if (/notification|toast|banner/i.test(`${main}\n${tray}\n${background}`)) throw new Error("LB-013 added pre-exhaustion notification surface");
 for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required", "ShowFinalErrorWindow", "ProductionRuntimeOwner", "runtime: Arc<Mutex<ProductionRuntimeOwner>>", "ProductionRuntimeOwner::default()", "start_production_runtime", "ProductionRuntimeDriver::new_owned", "WindowsCredentialStore::default", "with_privileged_execution", "self.privilege.gateway()", ".activate(runtime)", "shutdown_in_security_order(Some(&mut *runtime), privilege)"])
   if (!normalized(background).includes(normalized(required))) throw new Error(`LB-013 recovery attention gate missing: ${required}`);
@@ -46,4 +62,4 @@ for (const id of ["EXEC-PREAUTH-LB013-001", "EXEC-PREAUTH-LB013-002", "EXEC-PREA
   if (!record || record.user_audit_status !== "PENDING" || record.does_not_expand_future_pr_writable_paths !== true)
     throw new Error(`LB-013 preauthorization record invalid: ${id}`);
 }
-console.log("LB013_CONTRACT=PASS background_no_window=true close_to_hide=true tray_frozen_icon=true tray_visual_zoom=true exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=4");
+console.log("LB013_CONTRACT=PASS background_no_window=true fixed_window=900x620 resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true close_to_hide=true tray_frozen_icon=true tray_visual_zoom=true exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=4");
