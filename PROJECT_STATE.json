@@ -24,7 +24,9 @@
     "Task summary is grounded in actual MCP/Broker execution and secret-redacted",
     "Onboarding screen 4 uses Local Bridge as the user-facing connector term",
     "Ordinary primary and selected UI uses blue #0071e3; black is not the standard product accent",
-    "Administrator mode uses amber logical styling in onboarding and Dashboard and is not overridden by ordinary blue selected styling",
+    "Administrator mode uses amber logical styling in onboarding and Settings and is not overridden by ordinary blue selected styling",
+    "Dashboard does not show PermissionMode or Edit Full Elevated selection controls; Settings is the only post-onboarding permission-mode editing surface",
+    "Dashboard administrator privilege runtime status is read-only and sourced from PrivilegeState",
     "Onboarding and Dashboard service-status dots use the same typed status source and Ready green Starting amber Fault red Unknown gray semantics",
     "Main window is fixed at 900x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
@@ -87,7 +89,14 @@
     "elevated_exec_indirect_control_plane_mutation": "deny_always",
     "visible_admin_mode_selection_requests_uac": true,
     "separate_enable_admin_button": false,
-    "leaving_admin_mode_disables_broker": true
+    "leaving_admin_mode_disables_broker": true,
+    "visible_selection_surfaces": [
+      "onboarding_screen_3",
+      "settings"
+    ],
+    "post_onboarding_edit_surface": "settings_only",
+    "dashboard_permission_mode_controls": false,
+    "dashboard_admin_privilege_status_read_only": true
   },
   "distribution_architecture": {
     "target": "Windows 11 x64",
@@ -227,7 +236,8 @@
       "Frontend currently owns onboarding start/readiness polling and synchronous command boundaries can block; frontend must become projection-only and backend work must run off the UI/WebView thread.",
       "Settings must be rebuilt to the frozen 常规/连接/权限 layout with independent connection replacement and controlled reconnect.",
       "Diagnostics must be rebuilt to the frozen 运行状态/项目/日志 minimal layout and exact action set.",
-      "Cloudflared is present in bundled tunnel-client compatibility/runtime evidence and must be absent from the final LB-018 bundle/runtime manifest/launcher paths."
+      "Cloudflared is present in bundled tunnel-client compatibility/runtime evidence and must be absent from the final LB-018 bundle/runtime manifest/launcher paths.",
+      "Dashboard currently duplicates permission-mode presentation/control that must be removed; Settings is the sole post-onboarding permission-mode editing surface, while Dashboard retains only read-only administrator privilege runtime status from PrivilegeState."
     ]
   },
   "recovery_policy": {
@@ -267,6 +277,10 @@
     "black_as_standard_accent": false,
     "administrator_mode_logic_accent": "amber",
     "administrator_mode_blue_override": false,
+    "administrator_mode_selection_surfaces": [
+      "onboarding_screen_3",
+      "settings"
+    ],
     "service_status_dot_semantics": {
       "Ready": "green",
       "Starting": "amber",
@@ -561,6 +575,14 @@
       "自动启动服务",
       "开机后静默运行"
     ]
+  },
+  "dashboard_ui": {
+    "permission_mode_row": false,
+    "permission_mode_controls": false,
+    "permission_mode_change": false,
+    "permission_mode_uac_trigger": false,
+    "administrator_privilege_status": "read_only_PrivilegeState_projection",
+    "post_onboarding_permission_edit_surface": "settings"
   },
   "diagnostics_ui": {
     "sections": [

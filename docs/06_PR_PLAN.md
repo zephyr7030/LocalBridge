@@ -127,7 +127,7 @@ bounded recovery、two-phase workspace switch、rollback。
 ## LB-015 — UI Shell
 
 - Dashboard “选择其他文件夹”统一使用原生 Windows 文件夹选择器，禁止手填绝对路径主流程。
-- 权限控制只保留编辑/完整/管理员三种模式按钮：可见点击/重新点击管理员模式若未 Active 立即发起 UAC；禁止单独“启用管理员权限”按钮；离开管理员模式关闭 Broker。
+- Dashboard 删除 `权限模式` 行以及编辑/完整/管理员三种模式按钮，只保留只读的管理员权限实际运行状态；Dashboard 不得修改 PermissionMode 或触发模式 UAC。完成 onboarding 后，三种权限模式按钮只存在于设置页“权限”：可见点击/重新点击管理员模式若未 Active 立即发起 UAC；禁止单独“启用管理员权限”按钮；离开管理员模式关闭 Broker。
 - 左下 CurrentTask 单行无任务固定显示 `等待命令`，禁止“空闲”/隐藏；实际 MCP/Broker 生产调用必须端到端驱动 backend `CurrentTaskStatus` → UI，frontend 不伪造。
 - 设置页严格为常规/连接/权限：常规=`开机启动`、`关闭窗口后继续运行`；连接=`Tunnel ID`、`Runtime API Key` 各自“更换”；权限=三模式；底部=`打开欢迎页`、`完成`。
 - `Runtime API Key` 为精确英文用户字段名，不翻译；完整 secret 永不回显/预填。Tunnel ID 与 Runtime API Key 独立更新，保存即校验→安全写入→按需受控重连；禁止“测试连接”。

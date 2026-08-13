@@ -89,8 +89,9 @@ PermissionMode::Elevated
 ```text
 编码服务：已就绪
 管理员权限：已启用
-权限模式：管理员模式
 ```
+
+主页/Dashboard 禁止显示 `权限模式` 标签以及 `编辑模式 / 完整模式 / 管理员模式` 三档选项。上述三种模式名称只在设置页“权限”和 onboarding 第 3 屏作为选择项出现；Dashboard 的管理员权限文案仅表达只读 `PrivilegeState`。
 
 禁止把 enum / fault code / process name 原样显示。
 

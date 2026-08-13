@@ -78,13 +78,14 @@ UI 冻结补充：
 项目选择       = 原生 Windows 文件夹选择器为主交互
 按钮           = 统一且可辨识；禁止白底白按钮
 普通强调色     = 蓝色 #0071e3；黑色不得作为普通 primary/selected accent
-管理员逻辑色   = onboarding 与 Dashboard 均为黄色/琥珀色，不得被蓝色 selected 覆盖
+管理员逻辑色   = onboarding 与设置页均为黄色/琥珀色，不得被蓝色 selected 覆盖
 服务状态点     = Ready绿 / Starting琥珀 / Fault红 / Unknown灰；onboarding 与 Dashboard 使用同源状态
 窗口           = 固定 900×620；minimum=maximum=900×620；禁止缩放与最大化
 窗口验收       = `resizable=false`、`maximizable=false`；拖拽边框/最大化均不能改变 client size
 窗口边框       = `decorations=false`；唯一自定义 chrome 必须贴满 client area；禁止原生+自定义双边框；保留拖拽/最小化/关闭
 引导页布局     = 整页；直接使用 custom chrome 内容区；禁止空白页面中居中再套 card/modal/dialog 式向导外壳
-管理员选择     = 可见点击“管理员模式”即为显式 UAC 动作；无单独“启用管理员权限”按钮；后台恢复偏好仍不自动 UAC
+管理员选择     = 仅设置页或 onboarding 第3屏可见选择；点击“管理员模式”即为显式 UAC 动作；无单独“启用管理员权限”按钮；后台恢复偏好仍不自动 UAC
+主页权限       = 不显示“权限模式”及编辑/完整/管理员三档选项；不得从主页修改 PermissionMode 或触发模式 UAC；只读显示管理员权限实际状态；完成 onboarding 后权限模式只在设置页修改
 前台启动       = onboarding 完成且配置有效时自动、异步启动 runtime/MCP/Tunnel；UI 不等待后端阻塞工作
 任务待机文案   = 固定“等待命令”；必须来自 backend CurrentTaskStatus，不得显示“空闲”或由前端伪造
 设置           = 常规/连接/权限三组；连接字段固定英文 `Tunnel ID` / `Runtime API Key`；独立“更换”；保存即验证并按需受控重连；无“测试连接”

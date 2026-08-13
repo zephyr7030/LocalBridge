@@ -164,6 +164,13 @@ const G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13 = Object.freeze({
     diagnostics_engineering_generation_details_forbidden: true,
     onboarding_screen_3_permission_min_height_px: 80,
     dashboard_native_windows_folder_picker_required: true,
+    dashboard_permission_mode_row_forbidden: true,
+    dashboard_permission_mode_controls_forbidden: true,
+    dashboard_permission_mode_change_forbidden: true,
+    dashboard_permission_mode_uac_trigger_forbidden: true,
+    permission_mode_edit_surfaces: ["settings", "onboarding_screen_3"],
+    permission_mode_post_onboarding_edit_surface: "settings_only",
+    dashboard_admin_privilege_status_read_only: true,
     cloudflared_final_bundle_forbidden: true,
     cloudflare_managed_tunnel_runtime_forbidden: true,
     cloudflare_historical_compatibility_evidence_may_remain_non_executable: true,
@@ -188,6 +195,7 @@ const G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13 = Object.freeze({
       ],
     },
     "LB-015": {
+      artifactReplacements: [["Settings-only post-onboarding Edit/Full/Elevated minimal permission UI", "Edit/Full/Elevated minimal permission UI"]],
       addedArtifacts: [
         "settings page with exact 常规 连接 权限 groups",
         "independent Tunnel ID and Runtime API Key replace/edit flow",
@@ -196,9 +204,13 @@ const G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13 = Object.freeze({
         "projection-only responsive frontend boundary",
       ],
       addedTests: [
-        "no separate 启用管理员权限 button exists; visible 管理员模式 selection or reselection requests UAC when privilege is not Active",
+        "Settings has no separate 启用管理员权限 button; visible 管理员模式 selection or reselection in Settings requests UAC when privilege is not Active",
         "leaving 管理员模式 closes the privileged call gate and disables the broker",
-        "Dashboard settings and onboarding keep privilege runtime status sourced from PrivilegeState rather than preference alone",
+        "Dashboard read-only administrator privilege status plus Settings and onboarding privilege runtime state are sourced from PrivilegeState rather than permission preference alone",
+        "Dashboard renders no 权限模式 row and no 编辑模式 完整模式 管理员模式 selection controls",
+        "Dashboard cannot change PermissionMode or request UAC through a permission-mode control",
+        "Settings is the only post-onboarding permission-mode editing surface while onboarding screen 3 remains the first-run permission selection surface",
+        "Dashboard administrator privilege status is read-only and sourced from PrivilegeState",
         "Dashboard no-task state is always visible as 等待命令 and never 空闲",
         "real production MCP and Broker execution transitions backend CurrentTaskStatus to the Dashboard and terminal state returns to 等待命令",
         "frontend does not synthesize task state or own runtime readiness/retry state machines",
@@ -217,6 +229,7 @@ const G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13 = Object.freeze({
       removedTests: ["only enable/disable admin controls", "dashboard idle state shows only current-task idle status"],
     },
     "LB-016": {
+      testReplacements: [["ordinary selected permission modes use the standard blue accent while administrator mode uses amber logical styling in onboarding and Settings", "ordinary selected permission modes use the standard blue accent while administrator mode uses amber logical styling in onboarding and Dashboard"]],
       addedArtifacts: ["backend-owned onboarding start/readiness state machine", "administrator-mode selection UAC activation"],
       addedTests: [
         "screen 3 visible selection or reselection of 管理员模式 is the explicit user action that requests UAC when broker is not Active; no separate enable-admin button exists",
@@ -281,8 +294,14 @@ function hasExactG3HumanReviewGeneration2PrAmendment(prs) {
     if (!containsAll(pr.writable_paths ?? [], delta.addedWritablePaths ?? [])) return false;
     if (!containsAll(pr.required_artifacts ?? [], delta.addedArtifacts ?? [])) return false;
     if (!containsNone(pr.required_artifacts ?? [], delta.removedArtifacts ?? [])) return false;
+    for (const [current, old] of delta.artifactReplacements ?? []) {
+      if (!pr.required_artifacts?.includes(current) || pr.required_artifacts?.includes(old)) return false;
+    }
     if (!containsAll(pr.required_tests ?? [], delta.addedTests ?? [])) return false;
     if (!containsNone(pr.required_tests ?? [], delta.removedTests ?? [])) return false;
+    for (const [current, old] of delta.testReplacements ?? []) {
+      if (!pr.required_tests?.includes(current) || pr.required_tests?.includes(old)) return false;
+    }
   }
   return true;
 }
@@ -304,6 +323,18 @@ export function normalizeG3HumanReviewGeneration2Amendment(prs) {
     if (Array.isArray(pr.writable_paths)) pr.writable_paths = removeItems(pr.writable_paths, delta.addedWritablePaths);
     if (Array.isArray(pr.required_artifacts)) pr.required_artifacts = removeItems(pr.required_artifacts, delta.addedArtifacts);
     if (Array.isArray(pr.required_tests)) pr.required_tests = removeItems(pr.required_tests, delta.addedTests);
+    if (Array.isArray(pr.required_artifacts)) {
+      pr.required_artifacts = pr.required_artifacts.map((item) => {
+        const replacement = (delta.artifactReplacements ?? []).find(([current]) => current === item);
+        return replacement ? replacement[1] : item;
+      });
+    }
+    if (Array.isArray(pr.required_tests)) {
+      pr.required_tests = pr.required_tests.map((item) => {
+        const replacement = (delta.testReplacements ?? []).find(([current]) => current === item);
+        return replacement ? replacement[1] : item;
+      });
+    }
   }
   const lb015 = normalized["LB-015"];
   if (Array.isArray(lb015?.required_tests)) {
@@ -462,8 +493,11 @@ export function validatePreG4GateAuthorization(
       }
     }
   }
+  const schema19View = (contractsDoc?.schema_version ?? 0) >= G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13.schemaVersion
+    ? normalizeG3HumanReviewGeneration2Amendment(contractsDoc?.prs)
+    : contractsDoc?.prs;
   if ((contractsDoc?.schema_version ?? 0) >= G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.schemaVersion
-    && !hasExactG3HumanReviewAmendment(contractsDoc?.prs)) {
+    && !hasExactG3HumanReviewAmendment(schema19View)) {
     findings.push(`${expected.id}:human-review-contract-amendment-drift`);
   }
   const entries = contractsDoc?.rules?.governance_authorizations;

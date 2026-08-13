@@ -6,7 +6,8 @@
   "phase": "PRE_CODE",
   "current_pr": "LB-013",
   "blocking_findings": [
-    "G3 manual review generation 2 requires rework from LB-013 under PR_CONTRACTS schema 20"
+    "G3 manual review generation 2 requires rework from LB-013 under PR_CONTRACTS schema 20",
+    "Dashboard permission-mode row and Edit/Full/Admin controls must be removed; Settings is the only post-onboarding permission editor"
   ],
   "dynamic_gates_owned_by_lb000": [
     "coding-tools capability surface",
@@ -89,7 +90,13 @@
   "admin_ui": {
     "visible_admin_mode_selection_requests_uac": true,
     "separate_enable_admin_button": false,
-    "background_auto_uac": false
+    "background_auto_uac": false,
+    "selection_surfaces": [
+      "onboarding_screen_3",
+      "settings"
+    ],
+    "dashboard_permission_controls": false,
+    "dashboard_admin_privilege_status_read_only": true
   },
   "settings_ui": {
     "sections": [

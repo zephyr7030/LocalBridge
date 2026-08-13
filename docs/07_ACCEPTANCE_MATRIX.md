@@ -93,17 +93,17 @@
 | A87 | installer >100 MiB | 必须生成体积归因 |
 | A88 | installed >250 MiB | 必须生成体积归因 |
 
-| A89 | Dashboard + Edit | 显示管理员权限“未启用”，无冗余启用按钮 |
-| A90 | Dashboard + Full | 显示管理员权限“未启用”，无冗余启用按钮 |
-| A91 | Dashboard + Elevated + Requested | 显示“等待授权”；点击/重新点击“管理员模式”立即发起 UAC，不显示单独“启用管理员权限”按钮 |
-| A92 | Dashboard + Elevated + AwaitingUac | 显示“等待 UAC” |
-| A93 | Dashboard + Elevated + Active | 显示“已启用”；切换到编辑/完整模式即关闭管理员权限，不增加冗余权限按钮 |
+| A89 | Dashboard 任意 PermissionMode | 不显示“权限模式”行，不显示编辑/完整/管理员三档选择控件；只读管理员权限状态仍可见 |
+| A90 | Dashboard 权限交互 | 不能修改 PermissionMode，不能通过权限模式控件触发 UAC；完成 onboarding 后只能去设置页“权限”修改 |
+| A91 | Dashboard + PrivilegeState::Requested | 只读显示“管理员权限：等待授权”，无模式选择器、无独立启用按钮 |
+| A92 | Dashboard + PrivilegeState::AwaitingUac | 只读显示“管理员权限：等待系统授权” |
+| A93 | Dashboard + PrivilegeState::Active | 只读显示“管理员权限：已启用”；切换权限模式必须进入设置页 |
 | A94 | Broker Active→Faulted | Dashboard 立即显示“故障” |
 | A95 | Dashboard privilege status | 由 PrivilegeState 驱动，不由 PermissionMode 猜测 |
 | A96 | Dashboard | 不显示 PID/nonce/SID/IPC 等内部字段 |
 
 | A97 | 主控界面 | 不出现 Dashboard/Settings/Diagnostics 等普通英文 |
-| A98 | 权限模式 | 显示“编辑模式 / 完整模式 / 管理员模式” |
+| A98 | 设置/首次引导权限模式 | 仅设置页与 onboarding 第3屏显示“编辑模式 / 完整模式 / 管理员模式”；主控界面不得显示 |
 | A99 | 状态 | 不直接显示 Ready/Active/Faulted/Requested 等内部英文 |
 | A100 | 专业缩写 | MCP/API/UAC/OpenAI/ChatGPT 可按术语策略保留 |
 | A101 | 错误提示 | 中文、简短、可行动，不暴露内部 fault enum |
@@ -177,8 +177,8 @@
 | A182 | 单层窗口 chrome | native `decorations=false`；自定义 chrome edge-to-edge 覆盖 client area，不存在双边框 |
 | A183 | 自定义窗口控制 | 有拖拽区、最小化、关闭，无最大化 |
 | A184 | onboarding 整页布局 | 5 屏直接使用 custom chrome 内容区；不得用居中 floating card/modal/dialog 或大圆角+整体阴影/边框制造“窗口里的窗口” |
-| A205 | 管理员模式选择 | 可见用户点击/重新点击“管理员模式”时，若 Broker 未 Active，立即发起 Windows UAC；不存在单独“启用管理员权限”按钮；后台偏好恢复不自动 UAC |
-| A206 | 离开管理员模式 | 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker |
+| A205 | 管理员模式选择 | 仅设置页或 onboarding 第3屏可见；点击/重新点击“管理员模式”时若 Broker 未 Active，立即发起 Windows UAC；不存在单独“启用管理员权限”按钮；后台偏好恢复不自动 UAC |
+| A206 | 离开管理员模式 | 在设置页或 onboarding 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker；Dashboard 无模式切换入口 |
 | A207 | 前台启动 | onboarding 已完成且配置有效时，打开 UI 自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作 |
 | A208 | 前台慢启动 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新 |
 | A209 | CurrentTask idle | 左下状态固定显示“等待命令”，不得显示“空闲”或隐藏 |
@@ -197,3 +197,4 @@
 | A222 | 诊断日志/动作 | 最近限量脱敏日志；页面动作仅“打开日志/导出诊断/完成”，无刷新/重试连接/打开欢迎页/工程 generation 字段 |
 | A223 | UI/backend 分离 | WebView 只 render typed projection + send typed intent；耗时 process/filesystem/credential/UAC/recovery 工作不占用 UI 事件线程 |
 | A224 | LB-018 Cloudflare retirement | 最终 bundle/runtime manifest/installer/launcher/fallback 不含 `cloudflared.exe`、Cloudflare managed tunnel 或 cloudflared manifest；历史 compatibility 证据不进入可执行发行物 |
+| A225 | Dashboard 权限入口唯一性 | 主页无“权限模式”及三档选项、不能修改 PermissionMode/UAC；只读管理员权限状态来自 PrivilegeState；完成 onboarding 后设置页是唯一权限模式编辑入口 |

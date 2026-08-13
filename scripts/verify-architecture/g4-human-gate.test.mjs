@@ -271,8 +271,25 @@ const weakenedGeneration2 = structuredClone(generation2Contracts);
 weakenedGeneration2.rules.frontend_is_typed_projection_only = false;
 assert.equal(hasExactG3HumanReviewGeneration2Amendment(weakenedGeneration2), false);
 const reintroducedEnableButton = structuredClone(generation2Contracts);
-reintroducedEnableButton.prs["LB-015"].required_tests = reintroducedEnableButton.prs["LB-015"].required_tests.filter((item) => !item.startsWith("no separate 启用管理员权限 button exists"));
+reintroducedEnableButton.prs["LB-015"].required_tests = reintroducedEnableButton.prs["LB-015"].required_tests.filter((item) => !item.startsWith("Settings has no separate 启用管理员权限 button"));
 assert.equal(hasExactG3HumanReviewGeneration2Amendment(reintroducedEnableButton), false);
+const reintroducedDashboardPermissionMode = structuredClone(generation2Contracts);
+reintroducedDashboardPermissionMode.rules.dashboard_permission_mode_controls_forbidden = false;
+assert.equal(hasExactG3HumanReviewGeneration2Amendment(reintroducedDashboardPermissionMode), false);
+const removedDashboardNoModeTest = structuredClone(generation2Contracts);
+removedDashboardNoModeTest.prs["LB-015"].required_tests = removedDashboardNoModeTest.prs["LB-015"].required_tests.filter((item) => !item.startsWith("Dashboard renders no 权限模式 row"));
+assert.equal(hasExactG3HumanReviewGeneration2Amendment(removedDashboardNoModeTest), false);
+const rolledBackDashboardAmber = structuredClone(generation2Contracts);
+rolledBackDashboardAmber.prs["LB-016"].required_tests = rolledBackDashboardAmber.prs["LB-016"].required_tests.map((item) => item.includes("amber logical styling in onboarding and Settings") ? item.replace("onboarding and Settings", "onboarding and Dashboard") : item);
+assert.equal(hasExactG3HumanReviewGeneration2Amendment(rolledBackDashboardAmber), false);
+assert.doesNotMatch(validatePreG4GateAuthorization(generation2Contracts, {
+  ...ratifiedGit,
+  commitExists: (commit) => commit === "a19297a77688aebe1f3d807f28da6b3fad1dcbcb" || ratifiedGit.commitExists(commit),
+  isAncestor: (commit) => commit === "a19297a77688aebe1f3d807f28da6b3fad1dcbcb" || ratifiedGit.isAncestor(commit),
+  jsonAt: (revision, path) => revision === "a19297a77688aebe1f3d807f28da6b3fad1dcbcb" && path === "PR_CONTRACTS.json"
+    ? { schema_version: 19, rules: Object.fromEntries(Object.entries(generation2Contracts.rules).filter(([key]) => !["dashboard_permission_mode_row_forbidden", "dashboard_permission_mode_controls_forbidden", "dashboard_permission_mode_change_forbidden", "dashboard_permission_mode_uac_trigger_forbidden", "permission_mode_edit_surfaces", "permission_mode_post_onboarding_edit_surface", "dashboard_admin_privilege_status_read_only", "visible_admin_mode_selection_requests_uac", "separate_enable_admin_button_forbidden", "leaving_admin_mode_disables_broker", "background_admin_preference_auto_uac_forbidden", "foreground_configured_launch_auto_starts_runtime", "foreground_runtime_start_must_not_block_ui", "frontend_is_typed_projection_only", "frontend_runtime_readiness_polling_state_machine_forbidden", "blocking_backend_work_on_ui_thread_forbidden", "ui_responsiveness_under_slow_backend_required", "dashboard_idle_text", "dashboard_idle_row_must_remain_visible", "dashboard_frontend_synthesized_task_state_forbidden", "settings_connection_field_labels", "runtime_api_key_user_facing_label", "runtime_api_key_label_translation_forbidden", "settings_test_connection_button_forbidden", "settings_connection_partial_update_required", "settings_save_controlled_reconnect_on_effective_connection_change", "settings_sections", "settings_general_controls", "settings_footer_actions", "close_window_continue_running_setting_required", "diagnostics_sections", "diagnostics_actions", "diagnostics_engineering_generation_details_forbidden", "onboarding_screen_3_permission_min_height_px", "dashboard_native_windows_folder_picker_required", "cloudflared_final_bundle_forbidden", "cloudflare_managed_tunnel_runtime_forbidden", "cloudflare_historical_compatibility_evidence_may_remain_non_executable"].includes(key))), prs: normalizedGeneration2 }
+    : ratifiedGit.jsonAt(revision, path),
+}, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
 const base = {
   execution: { current_group: "G3", current_pr: null },

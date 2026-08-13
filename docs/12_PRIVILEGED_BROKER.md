@@ -124,7 +124,7 @@ Active
 Faulted
 ```
 
-用户通过三种权限模式本身控制：
+用户只通过设置页“权限”或首次 onboarding 第 3 屏中的三种权限模式本身控制；Dashboard 不提供权限模式控件：
 
 ```text
 点击/重新点击 管理员模式 → 显式 UAC / 激活 Broker

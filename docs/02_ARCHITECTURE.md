@@ -318,8 +318,10 @@ domain state
 ```text
 RuntimeState::Ready      → 编码服务：已就绪
 PrivilegeState::Active   → 管理员权限：已启用
-PermissionMode::Elevated → 权限模式：管理员模式
+PermissionMode::Elevated → 设置/首次引导中的“管理员模式”选中态
 ```
+
+`PermissionMode` presentation mapper 只允许供设置页与 onboarding 第 3 屏使用。Dashboard 不消费该映射、不显示 `权限模式`，也不渲染三档模式控件；Dashboard 只消费 `PrivilegeState` 的只读管理员权限运行状态。
 
 组件不得直接把 Rust/domain enum 转成字符串显示。
 

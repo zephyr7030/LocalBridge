@@ -96,7 +96,7 @@
 
 - [ ] LocalBridge main process remains non-elevated
 - [ ] only Broker receives Administrator token
-- [ ] visible 管理员模式 selection/reselection is the explicit UAC activation; no separate enable-admin button
+- [ ] visible 管理员模式 selection/reselection in Settings/onboarding is the explicit UAC activation; no separate enable-admin button
 - [ ] no TTL/time selector
 - [ ] disable closes privileged gate immediately
 - [ ] no automatic UAC on background startup
@@ -143,8 +143,10 @@
 - [ ] Dashboard always exposes administrator privilege runtime status
 - [ ] status comes from PrivilegeState
 - [ ] Elevated preference alone does not display Active
-- [ ] Requested shows waiting authorization; selecting/reselecting 管理员模式 triggers UAC without a separate enable action
-- [ ] leaving 管理员模式 for Edit/Full closes the privileged gate and Broker
+- [ ] Dashboard has no 权限模式 row and no 编辑/完整/管理员 mode selection controls
+- [ ] Dashboard cannot change PermissionMode or trigger UAC through a permission-mode control
+- [ ] Requested shows read-only waiting authorization; mode activation is performed in Settings/onboarding, not Dashboard
+- [ ] Settings is the only post-onboarding permission-mode editing surface
 - [ ] Faulted is visible immediately
 - [ ] no Broker PID/nonce/SID/IPC internals exposed
 
