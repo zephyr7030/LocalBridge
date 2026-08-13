@@ -124,8 +124,23 @@ const success = `allGreen ? <p className="onboarding-success">${exactSuccessCopy
 if (!onboarding.includes(success)) throw new Error("LB-016 exact Screen 6 success message is not conditional on all green");
 if (onboarding.includes("设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！")) throw new Error("LB-016 stale Screen 6 success copy remains in production");
 
-for (const marker of [".inner_size(900.0, 620.0)", ".min_inner_size(900.0, 620.0)", ".max_inner_size(900.0, 620.0)", ".resizable(false)", ".maximizable(false)", ".decorations(false)"]) if (!tray.includes(marker)) throw new Error(`LB-016 fixed/custom window contract missing: ${marker}`);
+for (const marker of [
+  "MAIN_WINDOW_PHYSICAL_WIDTH: u32 = 900",
+  "MAIN_WINDOW_PHYSICAL_HEIGHT: u32 = 620",
+  "PhysicalSize::new(MAIN_WINDOW_PHYSICAL_WIDTH, MAIN_WINDOW_PHYSICAL_HEIGHT)",
+  "window.set_min_size(Some(physical))?",
+  "window.set_max_size(Some(physical))?",
+  "window.set_size(physical)?",
+  "window.set_zoom(1.0 / scale)?",
+  ".resizable(false)",
+  ".maximizable(false)",
+  ".decorations(false)",
+]) if (!tray.includes(marker)) throw new Error(`LB-016 fixed/custom window contract missing: ${marker}`);
+for (const marker of [".inner_size(900.0, 620.0)", ".min_inner_size(900.0, 620.0)", ".max_inner_size(900.0, 620.0)"])
+  if (tray.includes(marker)) throw new Error(`LB-016 stale logical-DIP fixed-window contract remains: ${marker}`);
 if (tray.includes(".resizable(true)") || tray.includes(".maximizable(true)")) throw new Error("LB-016 main window remains user-resizable/maximizable");
+for (const marker of ["WindowEvent::ScaleFactorChanged", "enforce_main_window_metrics(window.app_handle())", "physical.width != MAIN_WINDOW_PHYSICAL_WIDTH", "physical.height != MAIN_WINDOW_PHYSICAL_HEIGHT"])
+  if (!main.includes(marker)) throw new Error(`LB-016 DPI-independent physical window assertion missing: ${marker}`);
 if (main.includes("WindowEvent::Resized") || /\.maximize\(|\.unmaximize\(|\.set_size\(/.test(main)) throw new Error("LB-016 production/debug main contains forbidden resize/maximize behavior");
 if (!app.includes('import { WindowChrome } from "./components/WindowChrome"')
   || (app.match(/<WindowChrome>/g) ?? []).length !== 1
@@ -148,7 +163,7 @@ for (const marker of ["tauri.cmd dev --no-watch", "LOCALBRIDGE_FIXED_WINDOW_E2E_
 if (/\.maximize\(|\.unmaximize\(|\.set_size\(|LOCALBRIDGE_RESIZE_E2E_VIEW|LB016_REAL_RESIZE_E2E/.test(fixedWindowE2e)) throw new Error("LB-016 fixed-window E2E runner contains obsolete resize/maximize semantics");
 for (const marker of ["FixedWindowE2eMetricsSink", "fixed_window_e2e_report", "cfg(debug_assertions)", "cfg(not(debug_assertions))", "localbridge_invoke_handler![]"]) if (!lib.includes(marker)) throw new Error(`LB-016 debug-only fixed-window IPC contract missing: ${marker}`);
 if (/ResizeE2eMetricsSink|resize_e2e_report/.test(lib)) throw new Error("LB-016 obsolete resize E2E IPC remains registered");
-for (const marker of ["LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW", "window.inner_size()", "window.scale_factor()", "window.is_resizable()", "window.is_maximizable()", "window.is_decorated()", "window-chrome", "chrome_count", "window.is_minimized()", "window.unminimize()", "window.is_visible()", "LB016_FIXED_WINDOW_E2E=PASS"]) if (!main.includes(marker)) throw new Error(`LB-016 live fixed-window Tauri/WebView assertion missing: ${marker}`);
+for (const marker of ["LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW", "inner_size()", "scale_factor()", "is_resizable()", "is_maximizable()", "is_decorated()", "window-chrome", "chrome_count", "is_minimized()", "unminimize()", "is_visible()", "LB016_FIXED_WINDOW_E2E=PASS"]) if (!main.includes(marker)) throw new Error(`LB-016 live fixed-window Tauri/WebView assertion missing: ${marker}`);
 const completionCalls = [...onboarding.matchAll(/onboardingApi\.complete\(\)/g)];
 const finishStart = onboarding.indexOf("const finish = async () =>");
 const screenStart = onboarding.indexOf("if (step === 1)", finishStart);
