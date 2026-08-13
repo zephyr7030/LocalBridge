@@ -14,6 +14,7 @@ function errorText(value: unknown): string { return typeof value === "string" &&
 export function App() {
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
   const [onboardingError, setOnboardingError] = useState(false);
+  const [onboardingPreview, setOnboardingPreview] = useState(false);
   useEffect(() => {
     void onboardingApi.read().then(setOnboarding).catch(() => setOnboardingError(true));
   }, []);
@@ -22,12 +23,13 @@ export function App() {
       {onboardingError ? <main className="onboarding-loading">无法读取首次设置状态</main>
         : !onboarding ? <main className="onboarding-loading">正在准备 LocalBridge…</main>
           : !onboarding.complete ? <Onboarding initial={onboarding} onComplete={() => setOnboarding({ ...onboarding, complete: true })} />
-            : <Dashboard />}
+            : onboardingPreview ? <Onboarding initial={onboarding} previewMode onComplete={() => setOnboardingPreview(false)} />
+              : <Dashboard onOpenWelcome={() => setOnboardingPreview(true)} />}
     </WindowChrome>
   );
 }
 
-function Dashboard() {
+function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const [projection, setProjection] = useState<MainProjection | null>(null);
   const [view, setView] = useState<View>("main");
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +69,7 @@ function Dashboard() {
     <div className="task-row" aria-live="polite"><span className={`activity-dot ${taskActive ? "active" : ""}`} aria-hidden="true"/><span>{taskText(task)}</span></div>
     {error && <div className="error" role="alert">{error}</div>}
     {view === "settings" && <div className="sheet-backdrop" onMouseDown={() => setView("main")}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>{uiText.settings}</h2><div className="row"><span>开机启动</span><input type="checkbox" checked={projection?.autoStart ?? false} onChange={(event) => void run(() => bridge.setAutoStart(event.target.checked))}/></div><div className="field"><label htmlFor="runtime-key">运行密钥</label><input id="runtime-key" type="password" autoComplete="off" value={keyValue} onChange={(event) => { setKeyValue(event.target.value); setKeySaved(false); }} placeholder={projection?.runtimeKeySaved ? "已保存" : "输入运行密钥"}/><div className="inline-actions"><button className="primary" disabled={!keyValue} onClick={() => void run(async () => { await bridge.saveKey(keyValue); setKeyValue(""); setKeySaved(true); })}>保存</button>{projection?.runtimeKeySaved && <button className="secondary" onClick={() => void run(bridge.deleteKey)}>删除</button>}{keySaved && <span className="saved">已保存</span>}</div></div><div className="field"><span>已保存项目</span><div className="project-list">{projection?.projects.map((item) => <div className="project-item" key={item.id}><span className="project-path">{item.path}</span><button className="secondary" onClick={() => void confirmRemove(item)}>移除</button></div>)}</div></div><div className="dialog-actions"><button className="primary" onClick={() => setView("main")}>完成</button></div></section></div>}
-    {view === "diagnostics" && <Diagnostics onClose={() => setView("main")} />}
+    {view === "diagnostics" && <Diagnostics onClose={() => setView("main")} onOpenWelcome={onOpenWelcome} />}
     {pathEditor && <div className="dialog-backdrop"><section className="dialog"><h2>选择其他文件夹</h2><div className="field"><label htmlFor="project-path">文件夹路径</label><input id="project-path" type="text" value={newPath} onChange={(event) => setNewPath(event.target.value)}/></div><div className="dialog-actions"><button className="secondary" onClick={() => { setPathEditor(false); setNewPath(""); }}>取消</button><button className="primary" disabled={!newPath.trim()} onClick={() => void run(async () => { await bridge.addProject(newPath.trim()); setPathEditor(false); setNewPath(""); })}>使用此文件夹</button></div></section></div>}
     {removeTarget && <div className="dialog-backdrop"><section className="dialog"><h2>移除当前项目</h2><p>从 LocalBridge 移除此项目？<br/>不会删除项目文件。</p><div className="dialog-actions"><button className="secondary" onClick={() => setRemoveTarget(null)}>取消</button><button className="primary" onClick={() => void run(async () => { await bridge.removeProject(removeTarget.id); setRemoveTarget(null); })}>移除</button></div></section></div>}
     {reconnectVisible && projection?.reconnect && <div className="dialog-backdrop"><section className="dialog" role="dialog" aria-modal="true"><h2>连接失败</h2><p>已自动重试 5 次。</p><div className="dialog-actions"><button className="secondary" onClick={() => void run(async () => { await bridge.retry(); setHandledGeneration(projection.reconnect?.generation ?? null); })}>重试</button><button className="primary" onClick={() => { setHandledGeneration(projection.reconnect?.generation ?? null); setView("diagnostics"); }}>查看诊断</button></div></section></div>}

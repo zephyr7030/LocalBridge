@@ -5,6 +5,7 @@ const commands = readFileSync("src-tauri/src/commands/diagnostics.rs", "utf8");
 const ui = readFileSync("src/features/diagnostics/Diagnostics.tsx", "utf8");
 const api = readFileSync("src/features/diagnostics/api.ts", "utf8");
 const app = readFileSync("src/App.tsx", "utf8");
+const onboarding = readFileSync("src/features/onboarding/Onboarding.tsx", "utf8");
 const lib = readFileSync("src-tauri/src/lib.rs", "utf8");
 const auth = JSON.parse(readFileSync("scripts/authorization-records/LB-017.json", "utf8"));
 
@@ -30,7 +31,10 @@ if (!ui.includes("导出诊断") || !api.includes('invoke<string>("export_diagno
 const initialEffect = ui.slice(ui.indexOf("useEffect("), ui.indexOf("const retry"));
 if (initialEffect.includes("exportReport") || initialEffect.includes("diagnosticsApi.exportReport")) throw new Error("LB-017 diagnostics export is automatic rather than user-triggered");
 for (const command of ["get_diagnostics", "diagnostics_retry_connection", "export_diagnostics"]) if (!lib.includes(`commands::diagnostics::${command}`)) throw new Error(`LB-017 command not registered: ${command}`);
-if (!app.includes('<Diagnostics onClose={() => setView("main")} />')) throw new Error("LB-017 feature is not composed into existing diagnostics entry");
+if (!ui.includes("打开欢迎页") || !ui.includes("onOpenWelcome")) throw new Error("LB-017 manual welcome-page test entry missing");
+if (!app.includes('<Diagnostics onClose={() => setView("main")} onOpenWelcome={onOpenWelcome} />')) throw new Error("LB-017 welcome-page test entry is not composed through the existing diagnostics surface");
+if (!app.includes("onboardingPreview") || !app.includes("<Onboarding initial={onboarding} previewMode onComplete={() => setOnboardingPreview(false)} />")) throw new Error("welcome-page test entry is not session-only onboarding preview navigation");
+if (!onboarding.includes("previewMode = false") || !onboarding.includes("if (!previewMode) await onboardingApi.complete();")) throw new Error("welcome-page preview can mutate persisted onboarding completion state");
 
 const record = auth.records.find((candidate) => candidate.authorization_id === "EXEC-PREAUTH-LB017-001");
 const expectedScope = ["src/App.tsx", "src-tauri/src/lib.rs", "scripts/authorization-records/LB-017.json"];

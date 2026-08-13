@@ -7,7 +7,7 @@
   "target_platform": "windows-x86_64",
   "ux_hard_requirements": [
     "No embedded ChatGPT",
-    "Wizard screen 4 opens the fixed ChatGPT custom connector setup page in the system default browser",
+    "Wizard screen 4 exposes only fixed Rust-allowlisted ChatGPT plugin settings and custom-plugin management destinations in the system default browser",
     "Wizard uses exactly six screens and no seventh screen",
     "Workspace selection uses the native Windows folder picker as the primary new-project interaction",
     "Buttons use a coherent visible affordance system and never disappear into white surfaces",
@@ -139,7 +139,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run G3 human manual/detail review generation 1 against the adversarially accepted G3 baseline; keep G4/LB-018 blocked until human review PASS and user-audited executor pre-authorizations are satisfied"
+    "next_action": "Run the next G3 independent adversarial review generation against the current committed LB-013 through LB-017 repair baseline; keep Screen-3 900x620 visual spacing and all executor preauthorization audits pending for the later human gate, and keep G4 blocked"
   },
   "current_task_ui": {
     "enabled": true,
@@ -235,7 +235,7 @@
       "welcome",
       "openai",
       "workspace_and_permission",
-      "chatgpt_connector_setup",
+      "create_custom_plugin",
       "chatgpt_connector_use",
       "runtime_check"
     ],
@@ -255,15 +255,37 @@
     "screen_3": {
       "workspace_and_permission_combined": true,
       "native_windows_folder_picker": true,
-      "raw_path_entry_primary": false
+      "raw_path_entry_primary": false,
+      "permission_button_content_spacing": "clear_balanced_and_wrap_safe_at_900x620",
+      "permission_button_visual_acceptance": "PENDING_HUMAN_900x620",
+      "permission_button_css_only_auto_pass_forbidden": true
     },
     "screen_4": {
-      "purpose": "chatgpt_custom_connector_setup",
+      "purpose": "create_custom_plugin",
       "system_browser_only": true,
-      "url": "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins",
+      "plugin_settings_url": "https://chatgpt.com/plugins#settings/Plugins",
+      "plugin_management_url": "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins",
       "embedded_webview": false,
       "guidance": "minimum_foolproof_steps",
-      "title": "Local Bridge 设置"
+      "title": "创建自定义插件",
+      "developer_mode_guidance": true,
+      "plugin_settings_action_label": "打开 ChatGPT插件设置",
+      "plugin_settings_action_source": "independent_fixed_rust_allowlisted_chatgpt_plugin_settings_destination",
+      "information_rows": [
+        "名称",
+        "Tunnel ID"
+      ],
+      "name_value": "Local Bridge",
+      "local_service_row": "forbidden",
+      "tunnel_id_source": "current_persisted_saved_value",
+      "copy_action_per_row": true,
+      "copy_success_text": "已复制",
+      "copy_success_color": "green",
+      "copy_success_duration_seconds": 3,
+      "copy_feedback_layout_shift": false,
+      "plugin_management_action_label": "打开插件管理页",
+      "runtime_readiness_before_screen_4": "local_environment_and_coding_service_and_openai_tunnel_all_ready",
+      "runtime_start_deferred_until_screen_5_or_6": false
     },
     "screen_5": {
       "purpose": "chatgpt_connector_use_confirmation",
@@ -274,7 +296,7 @@
       "title": "Local Bridge 使用确认"
     },
     "screen_6": {
-      "title": "正在准备",
+      "title": "启动检查",
       "checks": [
         "本地运行环境",
         "编码服务",

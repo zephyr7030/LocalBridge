@@ -189,7 +189,7 @@ Dashboard 必须直接显示：
 欢迎
 → OpenAI
 → 项目与权限
-→ Local Bridge 设置
+→ 创建自定义插件（第 3 屏先启动项目/runtime/MCP/Tunnel并全就绪；第 4 屏仅名称/Tunnel ID与两个 Rust 固定浏览器入口）
 → Local Bridge 使用确认
 → 启动检查
 ```

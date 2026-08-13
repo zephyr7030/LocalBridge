@@ -64,6 +64,26 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB015-005",
+      "scope": [
+        "AGENTS.md",
+        "PR_CONTRACTS.json",
+        "PROJECT_STATE.json",
+        "docs/04_UX_SPEC.md",
+        "docs/07_ACCEPTANCE.md",
+        "scripts/authorization-records/LB-015.json"
+      ],
+      "actions": [
+        "Freeze Screen-3 permission-button wrap-safe balanced spacing without fixed-height text squeezing",
+        "Record the 900x620 permission-button appearance as a human visual acceptance item that automation cannot self-certify from CSS markers"
+      ],
+      "reason": "The post-G3 manual review found visible crowding between permission titles/descriptions and button borders despite the existing automated CSS contract.",
+      "evidence_ref": "Explicit user execution plan on 2026-08-13 requiring balanced Screen-3 permission-button whitespace, automatic height growth on wrapping, and human visual acceptance rather than CSS-only PASS.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

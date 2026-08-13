@@ -10,6 +10,7 @@ export interface OnboardingState {
   complete: boolean;
   connectionConfigured: boolean;
   runtimeKeySaved: boolean;
+  tunnelId: string | null;
   readiness: OnboardingReadiness;
 }
 
@@ -25,6 +26,7 @@ export const onboardingApi = {
   chooseWorkspaceFolder: () => invoke<string | null>("choose_onboarding_workspace_folder"),
   openTunnelSettings: () => invoke<void>("open_openai_tunnel_settings"),
   openApiKeys: () => invoke<void>("open_openai_api_keys"),
+  openPluginsSettings: () => invoke<void>("open_chatgpt_plugins_settings"),
   openConnectorSettings: () => invoke<void>("open_chatgpt_custom_connector_settings"),
   readConnectorEndpoint: () => invoke<ConnectorEndpointProjection>("get_connector_endpoint"),
   complete: () => invoke<void>("complete_onboarding"),

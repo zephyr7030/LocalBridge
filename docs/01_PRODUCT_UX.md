@@ -144,7 +144,7 @@ icon package
 顺序：
 
 ```text
-欢迎 → OpenAI → 项目与权限 → Local Bridge 设置 → Local Bridge 使用确认 → 启动检查 → 主界面
+欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → Local Bridge 使用确认 → 启动检查 → 主界面
 ```
 
 ### 第 1 屏
@@ -222,24 +222,31 @@ Runtime API Key
 4 / 6
 
 
-Local Bridge 设置
+创建自定义插件
 
+在插件设置页面最底端，打开“开发者模式”
+                              打开 ChatGPT插件设置
 
-1. 点击“打开 Local Bridge 设置”
-2. 新建 Local Bridge
-3. 保存后返回 LocalBridge
+名称       Local Bridge                         复制
+Tunnel ID  <当前已保存 Tunnel ID>               复制
 
-                              打开 Local Bridge 设置
+                                      打开插件管理页
 
 
                                       继续
 ```
 
-只允许系统默认浏览器打开固定 URL：
+`打开 ChatGPT插件设置` 只允许 Rust 固定 allowlist 通过系统默认浏览器打开：
+
+`https://chatgpt.com/plugins#settings/Plugins`
+
+`打开插件管理页` 只允许 Rust 固定 allowlist 通过系统默认浏览器打开：
 
 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
 
-URL 由 Rust allowlisted 常量控制；前端不能提供任意 URL；不使用 WebView。引导只保留完成配置所需的最少步骤。
+前端不能传入、拼接或修改上述 URL；不使用 WebView。中部严格只有 `名称` 与 `Tunnel ID` 两行，不显示“本地服务”。名称固定为 `Local Bridge`；Tunnel ID 必须来自当前已持久化的 StartupProfile，而非尚未保存的输入框值。两行复制按钮状态独立，成功后绿色显示 `已复制` 精确 3 秒并保持按钮几何尺寸不变。
+
+第 3 屏保存项目与权限后，必须先启动 selected project、本地 runtime / MCP / OpenAI Tunnel，并等待三项 readiness 全部真实就绪，之后才能进入第 4 屏。不得把唯一 runtime 启动边沿留到第 5/6 屏。
 
 ### 第 5 屏
 

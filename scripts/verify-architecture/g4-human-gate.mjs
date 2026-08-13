@@ -60,15 +60,30 @@ const LB016_AUTHORIZED_G3_REWORK_2026_08_13 = Object.freeze({
   oldSuccessTest: "screen 6 success message is 设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！",
   newSuccessTest: "screen 6 success message is 配置完成，在插件中选择刚刚添加的Local Bridge试试吧",
   addedArtifacts: [
+    "screen 4 create-custom-plugin persisted-information panel",
     "fixed 900x620 non-resizable non-maximizable main window",
     "single edge-to-edge custom window chrome with native decorations disabled",
     "full-page onboarding layout using the fixed custom-chrome content area",
   ],
   addedTests: [
+    "screen 4 title is 创建自定义插件",
+    "screen 4 ChatGPT plugin-settings action opens only https://chatgpt.com/plugins#settings/Plugins in the system default browser through a fixed Rust allowlist",
+    "screen 4 shows exactly two concise information rows 名称 Tunnel ID and does not show 本地服务",
+    "screen 4 名称 value is Local Bridge",
+    "screen 4 Tunnel ID value reflects the current persisted saved value rather than an unsaved frontend-only value",
+    "each of the two screen 4 information rows has its own copy action and successful copy shows green 已复制 for exactly 3 seconds before restoring without layout shift",
+    "screen 3 permission mode buttons preserve clearly visible balanced content-to-border spacing in the real 900x620 render and grow safely for wrapped descriptive text; final visual PASS requires human inspection and cannot be inferred from CSS padding markers alone",
+    "the selected project runtime MCP and OpenAI Tunnel are all ready before screen 4 becomes reachable so plugin creation is executable rather than premature guidance",
+    "onboarding never defers its only runtime startup edge until screen 5 or screen 6",
     "screens 4 and 5 use Local Bridge as the user-facing connector term",
     "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
     "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
     "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
+  ],
+  replacedTests: [
+    ["screen 4 developer-mode guidance is 在插件设置页面最底端，打开“开发者模式”", "screen 4 custom connector guidance is concise and foolproof"],
+    ["screen 4 lower plugin action label is 打开插件管理页", "screen 4 custom connector setup button"],
+    ["screen 4 plugin management action opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser through a fixed Rust allowlist", "screen 4 opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser"],
   ],
 });
 
@@ -83,9 +98,11 @@ function normalizeAuthorizedSemanticCorrections(prs) {
   if (Array.isArray(lb016?.required_tests)) {
     lb016.required_tests = lb016.required_tests
       .filter((item) => !LB016_AUTHORIZED_G3_REWORK_2026_08_13.addedTests.includes(item))
-      .map((item) => item === LB016_AUTHORIZED_G3_REWORK_2026_08_13.newSuccessTest
-        ? LB016_AUTHORIZED_G3_REWORK_2026_08_13.oldSuccessTest
-        : item);
+      .map((item) => {
+        if (item === LB016_AUTHORIZED_G3_REWORK_2026_08_13.newSuccessTest) return LB016_AUTHORIZED_G3_REWORK_2026_08_13.oldSuccessTest;
+        const replacement = LB016_AUTHORIZED_G3_REWORK_2026_08_13.replacedTests.find(([current]) => current === item);
+        return replacement ? replacement[1] : item;
+      });
   }
   return normalized;
 }

@@ -146,6 +146,8 @@
     "onboarding_screen_6_confirm_requires_all_green": true,
     "chatgpt_custom_connector_url": "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins",
     "chatgpt_custom_connector_system_browser_only": true,
+    "chatgpt_plugins_settings_url": "https://chatgpt.com/plugins#settings/Plugins",
+    "chatgpt_plugins_settings_system_browser_only": true,
     "chatgpt_embedded_webview_forbidden": true,
     "onboarding_native_windows_folder_picker_required": true,
     "connector_endpoint_source": "typed_rust_projection_from_verified_tunnel_or_control_plane_metadata_only",
@@ -189,7 +191,17 @@
     "onboarding_full_page_layout_required": true,
     "onboarding_centered_floating_shell_forbidden": true,
     "onboarding_modal_or_dialog_shell_forbidden": true,
-    "onboarding_large_empty_surrounding_canvas_forbidden": true
+    "onboarding_large_empty_surrounding_canvas_forbidden": true,
+    "onboarding_screen_3_permission_visual_human_acceptance_required": true,
+    "onboarding_screen_3_permission_visual_css_only_auto_pass_forbidden": true,
+    "onboarding_screen_4_information_rows": [
+      "名称",
+      "Tunnel ID"
+    ],
+    "onboarding_screen_4_local_service_row_forbidden": true,
+    "onboarding_screen_4_persisted_tunnel_id_required": true,
+    "onboarding_screen_4_copy_success_seconds": 3,
+    "onboarding_runtime_ready_before_screen_4_required": true
   },
   "prs": {
     "LB-000": {
@@ -739,13 +751,20 @@
         "six-screen onboarding flow",
         "native Windows workspace folder picker",
         "ChatGPT custom connector system-browser setup flow",
+        "screen 4 create-custom-plugin persisted-information panel",
         "runtime-check gated confirm button",
         "fixed 900x620 non-resizable non-maximizable main window",
         "single edge-to-edge custom window chrome with native decorations disabled",
         "full-page onboarding layout using the fixed custom-chrome content area"
       ],
       "required_tests": [
-        "screen 4 custom connector setup button",
+        "screen 4 title is 创建自定义插件",
+        "screen 4 ChatGPT plugin-settings action opens only https://chatgpt.com/plugins#settings/Plugins in the system default browser through a fixed Rust allowlist",
+        "screen 4 shows exactly two concise information rows 名称 Tunnel ID and does not show 本地服务",
+        "screen 4 名称 value is Local Bridge",
+        "screen 4 Tunnel ID value reflects the current persisted saved value rather than an unsaved frontend-only value",
+        "each of the two screen 4 information rows has its own copy action and successful copy shows green 已复制 for exactly 3 seconds before restoring without layout shift",
+        "screen 4 lower plugin action label is 打开插件管理页",
         "system browser allowlist is the exact fixed ChatGPT custom connector URL",
         "no WebView",
         "wizard completion",
@@ -760,8 +779,11 @@
         "screen 2 shows one-line secure Runtime API Key storage hint",
         "workspace and permission are combined in screen 3",
         "screen 3 uses a native Windows folder picker as the primary new-project selection interaction",
-        "screen 4 opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser",
-        "screen 4 custom connector guidance is concise and foolproof",
+        "screen 4 plugin management action opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser through a fixed Rust allowlist",
+        "screen 4 developer-mode guidance is 在插件设置页面最底端，打开“开发者模式”",
+        "screen 3 permission mode buttons preserve clearly visible balanced content-to-border spacing in the real 900x620 render and grow safely for wrapped descriptive text; final visual PASS requires human inspection and cannot be inferred from CSS padding markers alone",
+        "the selected project runtime MCP and OpenAI Tunnel are all ready before screen 4 becomes reachable so plugin creation is executable rather than premature guidance",
+        "onboarding never defers its only runtime startup edge until screen 5 or screen 6",
         "screen 5 provides only the minimum connector confirmation/use guidance and does not pretend to detect ChatGPT state",
         "if a connector endpoint is displayed or copied it comes from a typed Rust projection backed by verified tunnel or control-plane metadata",
         "frontend never derives a connector endpoint from Tunnel ID or fabricates one",

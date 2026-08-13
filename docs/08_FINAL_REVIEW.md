@@ -54,7 +54,7 @@ Additional UI freeze (superseded by explicit user contract amendment on 2026-08-
 - 1/6 = `简单设置 即可开始`;
 - OpenAI = screen 2 with `Tunnel ID` and `Runtime API Key` labels;
 - workspace + permission = screen 3 and uses the native Windows folder picker as the primary new-project interaction;
-- screen 4 = `Local Bridge 设置`, system browser only, fixed ChatGPT custom-connector URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`;
+- screen 4 = `创建自定义插件`; exact developer-mode hint; only two information rows `名称 / Tunnel ID` with persisted Tunnel ID and independent 3-second stable copy feedback; no `本地服务`; `打开 ChatGPT插件设置` and `打开插件管理页` are argument-free frontend actions backed by Rust fixed allowlists and the system browser for `https://chatgpt.com/plugins#settings/Plugins` and `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`; Screen 3 starts selected project/runtime/MCP/Tunnel and reaches all-ready before Screen 4;
 - screen 5 = `Local Bridge 使用确认`, with minimum guidance and no fabricated ChatGPT-state detection;
 - no screen 7;
 - screen 6 confirm disabled until all three checks are green;

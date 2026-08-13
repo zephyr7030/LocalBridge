@@ -49,6 +49,15 @@ if (contracts.rules?.onboarding_user_facing_connector_term !== "Local Bridge"
   || contracts.rules?.onboarding_centered_floating_shell_forbidden !== true
   || contracts.rules?.onboarding_modal_or_dialog_shell_forbidden !== true
   || contracts.rules?.onboarding_large_empty_surrounding_canvas_forbidden !== true
+  || contracts.rules?.onboarding_screen_3_permission_visual_human_acceptance_required !== true
+  || contracts.rules?.onboarding_screen_3_permission_visual_css_only_auto_pass_forbidden !== true
+  || JSON.stringify(contracts.rules?.onboarding_screen_4_information_rows) !== JSON.stringify(["名称", "Tunnel ID"])
+  || contracts.rules?.onboarding_screen_4_local_service_row_forbidden !== true
+  || contracts.rules?.onboarding_screen_4_persisted_tunnel_id_required !== true
+  || contracts.rules?.onboarding_screen_4_copy_success_seconds !== 3
+  || contracts.rules?.onboarding_runtime_ready_before_screen_4_required !== true
+  || contracts.rules?.chatgpt_plugins_settings_url !== "https://chatgpt.com/plugins#settings/Plugins"
+  || contracts.rules?.chatgpt_plugins_settings_system_browser_only !== true
   || JSON.stringify(contracts.rules?.main_window_custom_controls) !== JSON.stringify(["minimize", "close"])) {
   throw new Error("LB-016 machine contract does not freeze Local Bridge success/fixed-window semantics");
 }
@@ -58,6 +67,18 @@ if (!lb016.required_artifacts.includes("full-page onboarding layout using the fi
 for (const required of [
   `screen 6 success message is ${exactSuccessCopy}`,
   "screens 4 and 5 use Local Bridge as the user-facing connector term",
+  "screen 4 title is 创建自定义插件",
+  "screen 4 developer-mode guidance is 在插件设置页面最底端，打开“开发者模式”",
+  "screen 4 ChatGPT plugin-settings action opens only https://chatgpt.com/plugins#settings/Plugins in the system default browser through a fixed Rust allowlist",
+  "screen 4 shows exactly two concise information rows 名称 Tunnel ID and does not show 本地服务",
+  "screen 4 名称 value is Local Bridge",
+  "screen 4 Tunnel ID value reflects the current persisted saved value rather than an unsaved frontend-only value",
+  "each of the two screen 4 information rows has its own copy action and successful copy shows green 已复制 for exactly 3 seconds before restoring without layout shift",
+  "screen 4 lower plugin action label is 打开插件管理页",
+  "screen 4 plugin management action opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser through a fixed Rust allowlist",
+  "screen 3 permission mode buttons preserve clearly visible balanced content-to-border spacing in the real 900x620 render and grow safely for wrapped descriptive text; final visual PASS requires human inspection and cannot be inferred from CSS padding markers alone",
+  "the selected project runtime MCP and OpenAI Tunnel are all ready before screen 4 becomes reachable so plugin creation is executable rather than premature guidance",
+  "onboarding never defers its only runtime startup edge until screen 5 or screen 6",
   "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false",
   "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
   "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
@@ -68,7 +89,7 @@ for (const required of [
   "LocalBridge是链接ChatGPT与本地代码的工具",
   'step={2} title="OpenAI 设置"',
   'step={3} title="项目与权限"',
-  'step={4} title="Local Bridge 设置"',
+  'step={4} title="创建自定义插件"',
   'step={5} title="Local Bridge 使用确认"',
   'step={6} title="启动检查"',
 ]) if (!onboarding.includes(required)) throw new Error(`LB-016 screen contract missing: ${required}`);
@@ -88,6 +109,10 @@ if (/enableAdmin|enable_admin/.test(onboarding) || /ttl|expires|到期|时长/i.
 if (!onboarding.includes("onboardingApi.chooseWorkspaceFolder()") || !api.includes('invoke<string | null>("choose_onboarding_workspace_folder")')) throw new Error("LB-016 native folder picker frontend path missing");
 for (const marker of ["SHBrowseForFolderW", "SHGetPathFromIDListW", "BIF_RETURNONLYFSDIRS", "choose_onboarding_workspace_folder"]) if (!backend.includes(marker)) throw new Error(`LB-016 native Windows folder picker backend missing: ${marker}`);
 if (/project-path-onboarding|输入代码文件夹路径|手动输入.*路径/.test(onboarding)) throw new Error("LB-016 Screen 3 still exposes manual absolute-path entry as primary interaction");
+const compactOnboardingCss = onboardingCss.replace(/\s+/g, "");
+const permissionRule = compactOnboardingCss.match(/\.onboarding-permission\{([^}]*)\}/)?.[1] ?? "";
+for (const marker of ["height:auto", "padding:15px16px", "gap:7px", "white-space:normal"]) if (!permissionRule.includes(marker)) throw new Error(`LB-016 Screen 3 wrap-safe permission structure missing: ${marker}`);
+if (/min-height:/.test(permissionRule)) throw new Error("LB-016 Screen 3 permission buttons still impose a text-squeezing minimum height");
 if (!api.includes('rememberProject: (path: string) => invoke<string>("add_project", { path, deferActivation: true })')) throw new Error("LB-016 deferred project persistence API missing");
 const addProjectStart = uiBackend.indexOf("pub fn add_project");
 const selectProjectStart = uiBackend.indexOf("pub fn select_project", addProjectStart);
@@ -96,12 +121,35 @@ const compactAddProjectFlow = addProjectFlow.replace(/\s+/g, "");
 for (const marker of ["defer_activation:Option<bool>", "ifdefer_activation.unwrap_or(false)", "store.save(&data)", "returnOk(id_value)"]) if (!compactAddProjectFlow.includes(marker)) throw new Error(`LB-016 deferred project persistence missing: ${marker}`);
 
 const connectorUrl = "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins";
+const pluginsUrl = "https://chatgpt.com/plugins#settings/Plugins";
+if (!backend.includes(`CHATGPT_PLUGINS_SETTINGS_URL: &str = "${pluginsUrl}"`)) throw new Error("LB-016 fixed ChatGPT plugins settings URL missing");
 if (!backend.includes(`CHATGPT_CUSTOM_CONNECTOR_URL: &str = "${connectorUrl}"`)) throw new Error("LB-016 fixed ChatGPT custom connector URL missing");
-for (const marker of ["ShellExecuteW", "open_allowlisted_url(CHATGPT_CUSTOM_CONNECTOR_URL)", "open_chatgpt_custom_connector_settings"]) if (!backend.includes(marker)) throw new Error(`LB-016 system-browser connector adapter missing: ${marker}`);
-if (!onboarding.includes("点击“打开 Local Bridge 设置”") || !onboarding.includes("新建 Local Bridge") || !onboarding.includes("保存后返回 LocalBridge")) throw new Error("LB-016 Screen 4 foolproof Local Bridge guidance incomplete");
+for (const marker of ["ShellExecuteW", "open_allowlisted_url(CHATGPT_PLUGINS_SETTINGS_URL)", "open_chatgpt_plugins_settings", "open_allowlisted_url(CHATGPT_CUSTOM_CONNECTOR_URL)", "open_chatgpt_custom_connector_settings"]) if (!backend.includes(marker)) throw new Error(`LB-016 fixed system-browser adapter missing: ${marker}`);
+if (!onboarding.includes('title="创建自定义插件"') || !onboarding.includes("在插件设置页面最底端，打开“开发者模式”") || !onboarding.includes("打开 ChatGPT插件设置") || !onboarding.includes("打开插件管理页")) throw new Error("LB-016 Screen 4 exact plugin guidance/actions incomplete");
 if (onboarding.includes("连接器")) throw new Error("LB-016 user-visible onboarding terminology regressed from Local Bridge to 连接器");
+if (!api.includes('openPluginsSettings: () => invoke<void>("open_chatgpt_plugins_settings")')) throw new Error("LB-016 frontend plugins-settings action is not argument-free");
 if (!api.includes('openConnectorSettings: () => invoke<void>("open_chatgpt_custom_connector_settings")')) throw new Error("LB-016 frontend connector action is not argument-free");
+if (`${onboarding}\n${api}`.includes(pluginsUrl) || `${onboarding}\n${api}`.includes(connectorUrl)) throw new Error("LB-016 frontend embeds a forbidden ChatGPT URL literal");
 if (/WebviewWindowBuilder|WebviewUrl|window\.open/.test(`${backend}\n${onboarding}\n${api}`)) throw new Error("LB-016 uses forbidden embedded/arbitrary browser surface");
+
+const screen4Start = onboarding.indexOf("if (step === 4)");
+const screen5Start = onboarding.indexOf("if (step === 5)", screen4Start);
+const screen4 = screen4Start >= 0 && screen5Start > screen4Start ? onboarding.slice(screen4Start, screen5Start) : "";
+if ((screen4.match(/onboarding-info-row/g) ?? []).length !== 2) throw new Error("LB-016 Screen 4 does not contain exactly two information rows");
+for (const marker of [">名称</span>", ">Local Bridge</span>", ">Tunnel ID</span>", "state.tunnelId", 'copyScreen4Value("name", "Local Bridge")', 'copyScreen4Value("tunnel", state.tunnelId)']) if (!screen4.includes(marker)) throw new Error(`LB-016 Screen 4 two-row persisted/copy contract missing: ${marker}`);
+if (screen4.includes("本地服务")) throw new Error("LB-016 Screen 4 contains forbidden 本地服务 row");
+for (const marker of ["tunnelId: string | null", "tunnel_id: Option<String>", "validated_tunnel_id()", "tunnel_id.map(|value| value.expose().to_owned())"]) if (!`${api}\n${backend}`.includes(marker)) throw new Error(`LB-016 persisted Tunnel ID projection missing: ${marker}`);
+for (const marker of ['type Screen4CopyKey = "name" | "tunnel"', "copyTimers", "setCopiedRows", "window.setTimeout(() =>", "3000"]) if (!onboarding.includes(marker)) throw new Error(`LB-016 independent three-second copy state missing: ${marker}`);
+if (!/\.onboarding-copy-action\{[^}]*width:82px[^}]*min-width:82px/i.test(compactOnboardingCss) || !/\.onboarding-copy-action\.copied\{[^}]*color:#237a49/i.test(compactOnboardingCss)) throw new Error("LB-016 copy feedback is not green/fixed-width and layout-stable");
+
+const saveStart = onboarding.indexOf("const saveProjectAndPermission = async () =>");
+const nextHandler = onboarding.indexOf("const startSelectedProject = async () =>", saveStart);
+const saveFlow = saveStart >= 0 && nextHandler > saveStart ? onboarding.slice(saveStart, nextHandler) : "";
+const startIndex = saveFlow.indexOf("onboardingApi.startProject(selectedProject)");
+const readyIndex = saveFlow.indexOf("next.readiness.localEnvironment && next.readiness.codingService && next.readiness.openaiTunnel");
+const step4Index = saveFlow.indexOf("setStep(4)");
+if (startIndex < 0 || readyIndex <= startIndex || step4Index <= readyIndex || !saveFlow.includes("READY_POLL_ATTEMPTS") || !saveFlow.includes("if (!readyState) throw new Error")) throw new Error("LB-016 Screen 3 does not start and bound-wait for real readiness before Screen 4");
+if (/if\s*\(step\s*===\s*5\)[\s\S]{0,100}startSelectedProject/.test(onboarding)) throw new Error("LB-016 still defers its unique runtime startup edge to Screen 5");
 
 const compactBackend = backend.replace(/\s+/g, "");
 for (const marker of ["pubstructConnectorEndpointProjection", "pubfnget_connector_endpoint", "lifecycle.connector_endpoint()"] ) if (!compactBackend.includes(marker)) throw new Error(`LB-016 typed endpoint UI projection missing: ${marker}`);
@@ -149,7 +197,7 @@ if (main.includes("WindowEvent::Resized") || /\.maximize\(|\.unmaximize\(|\.set_
 if (!app.includes('import { WindowChrome } from "./components/WindowChrome"')
   || (app.match(/<WindowChrome>/g) ?? []).length !== 1
   || (app.match(/<\/WindowChrome>/g) ?? []).length !== 1) throw new Error("LB-016 does not production-compose exactly one shared custom window chrome");
-if (!app.includes("!onboarding.complete ? <Onboarding") || !app.includes(": <Dashboard />")) throw new Error("LB-016 first-run flow is not composed inside the shared custom chrome ahead of dashboard");
+if (!app.includes("!onboarding.complete ? <Onboarding") || !app.includes("<Dashboard onOpenWelcome=")) throw new Error("LB-016 first-run flow is not composed inside the shared custom chrome ahead of dashboard");
 for (const marker of ["getCurrentWindow", "startDragging()", "minimize()", "close()", 'aria-label="最小化"', 'aria-label="关闭"']) if (!chrome.includes(marker)) throw new Error(`LB-016 custom titlebar behavior missing: ${marker}`);
 if (/maximize|toggleMaximize/i.test(chrome)) throw new Error("LB-016 custom titlebar exposes forbidden maximize behavior");
 const compactSharedCss = sharedCss.replace(/\s+/g, "");
@@ -185,6 +233,7 @@ for (const command of [
   "save_onboarding_connection",
   "open_openai_tunnel_settings",
   "open_openai_api_keys",
+  "open_chatgpt_plugins_settings",
   "open_chatgpt_custom_connector_settings",
   "get_connector_endpoint",
   "choose_onboarding_workspace_folder",
@@ -245,4 +294,12 @@ if (!fixedWindowAuth || JSON.stringify(fixedWindowAuth.scope) !== JSON.stringify
   || !fixedWindowAuth.evidence_ref.includes("2eb11fc")
   || !fixedWindowAuth.evidence_ref.includes("fixed 900x620")) throw new Error("LB-016 fixed-window runtime preauthorization invalid");
 
-console.log("LB016_CONTRACT=PASS six_screens=true no_screen7=true key_secure=true native_folder_picker=true fixed_connector_deeplink=true typed_verified_endpoint=true frontend_endpoint_derivation=false fake_chatgpt_state=false copy_feedback_reserved=true shared_buttons=true checks=3 confirm_gated=true exact_success=true local_bridge_term=true fixed_window=900x620 resizable=false maximizable=false native_decorations=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false real_fixed_window_e2e_required=true resize_e2e_forbidden=true fixed_window_preauth=EXEC-PREAUTH-LB016-010");
+const pluginReworkAuth = auth.records.find((candidate) => candidate.authorization_id === "EXEC-PREAUTH-LB016-013");
+if (!pluginReworkAuth
+  || pluginReworkAuth.user_audit_status !== "PENDING"
+  || pluginReworkAuth.does_not_expand_future_pr_writable_paths !== true
+  || !pluginReworkAuth.evidence_ref.includes("2026-08-13")
+  || !pluginReworkAuth.actions.some((action) => action.includes("Screen 4"))
+  || !pluginReworkAuth.actions.some((action) => action.includes("readiness"))) throw new Error("LB-016 latest plugin/runtime rework preauthorization invalid");
+
+console.log("LB016_CONTRACT=PASS six_screens=true no_screen7=true screen3_visual=PENDING_HUMAN screen4=two_persisted_rows plugins_url=fixed connector_url=fixed runtime_ready_before_screen4=true copy_feedback=green_3s_stable typed_verified_endpoint=true fake_chatgpt_state=false checks=3 confirm_gated=true exact_success=true fixed_window=900x620 logical_dip=true single_custom_chrome=true full_page=true latest_preauth=EXEC-PREAUTH-LB016-013");

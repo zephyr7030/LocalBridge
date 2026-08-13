@@ -20,6 +20,7 @@ use crate::state::RuntimeState;
 pub const OPENAI_TUNNEL_SETTINGS_URL: &str =
     "https://platform.openai.com/settings/organization/tunnels";
 pub const OPENAI_API_KEYS_URL: &str = "https://platform.openai.com/api-keys";
+pub const CHATGPT_PLUGINS_SETTINGS_URL: &str = "https://chatgpt.com/plugins#settings/Plugins";
 pub const CHATGPT_CUSTOM_CONNECTOR_URL: &str = "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -42,6 +43,7 @@ pub struct OnboardingState {
     complete: bool,
     connection_configured: bool,
     runtime_key_saved: bool,
+    tunnel_id: Option<String>,
     readiness: OnboardingReadiness,
 }
 
@@ -104,6 +106,11 @@ pub fn open_openai_api_keys() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn open_chatgpt_plugins_settings() -> Result<(), String> {
+    open_allowlisted_url(CHATGPT_PLUGINS_SETTINGS_URL)
+}
+
+#[tauri::command]
 pub fn open_chatgpt_custom_connector_settings() -> Result<(), String> {
     open_allowlisted_url(CHATGPT_CUSTOM_CONNECTOR_URL)
 }
@@ -151,10 +158,10 @@ fn project_state(app: &AppHandle, lifecycle: &DesktopLifecycle) -> Result<Onboar
     let profile = StartupProfileStore::new(app_data.join(STARTUP_PROFILE_FILE_NAME))
         .load()
         .map_err(|_| "无法读取 OpenAI 连接设置".to_string())?;
-    let connection_configured = profile
+    let tunnel_id = profile
         .validated_tunnel_id()
-        .map_err(|_| "Tunnel ID 格式无效".to_string())?
-        .is_some();
+        .map_err(|_| "Tunnel ID 格式无效".to_string())?;
+    let connection_configured = tunnel_id.is_some();
     let runtime_key_saved = WindowsCredentialStore::default()
         .runtime_api_key_metadata()
         .map_err(|_| "无法读取运行密钥状态".to_string())?
@@ -163,6 +170,7 @@ fn project_state(app: &AppHandle, lifecycle: &DesktopLifecycle) -> Result<Onboar
         complete: data.settings.onboarding_complete,
         connection_configured,
         runtime_key_saved,
+        tunnel_id: tunnel_id.map(|value| value.expose().to_owned()),
         readiness: readiness(lifecycle),
     })
 }
@@ -214,7 +222,10 @@ fn production_install_root() -> Result<PathBuf, String> {
 fn open_allowlisted_url(url: &str) -> Result<(), String> {
     if !matches!(
         url,
-        OPENAI_TUNNEL_SETTINGS_URL | OPENAI_API_KEYS_URL | CHATGPT_CUSTOM_CONNECTOR_URL
+        OPENAI_TUNNEL_SETTINGS_URL
+            | OPENAI_API_KEYS_URL
+            | CHATGPT_PLUGINS_SETTINGS_URL
+            | CHATGPT_CUSTOM_CONNECTOR_URL
     ) {
         return Err("不允许打开此地址".to_string());
     }
@@ -289,12 +300,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn browser_allowlist_is_fixed_to_the_three_setup_destinations() {
+    fn browser_allowlist_is_fixed_to_the_four_setup_destinations() {
         assert_eq!(
             OPENAI_TUNNEL_SETTINGS_URL,
             "https://platform.openai.com/settings/organization/tunnels"
         );
         assert_eq!(OPENAI_API_KEYS_URL, "https://platform.openai.com/api-keys");
+        assert_eq!(
+            CHATGPT_PLUGINS_SETTINGS_URL,
+            "https://chatgpt.com/plugins#settings/Plugins"
+        );
         assert_eq!(
             CHATGPT_CUSTOM_CONNECTOR_URL,
             "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins"

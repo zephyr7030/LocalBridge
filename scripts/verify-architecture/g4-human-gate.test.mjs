@@ -81,6 +81,10 @@ ratifiedContracts.prs["LB-016"] = {
   required_artifacts: ["six-screen onboarding flow"],
   required_tests: [
     "onboarding has exactly six screens",
+    "screen 4 custom connector setup button",
+    "system browser allowlist is the exact fixed ChatGPT custom connector URL",
+    "screen 4 opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser",
+    "screen 4 custom connector guidance is concise and foolproof",
     "screen 6 success message is 设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！",
   ],
 };
@@ -109,6 +113,56 @@ authorizedLb016Rework.prs["LB-016"].required_tests.push(
   "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
 );
 assert.deepEqual(validatePreG4GateAuthorization(authorizedLb016Rework, ratifiedGit, expected, ratification), []);
+const finalLb016Rework = structuredClone(authorizedLb016Rework);
+finalLb016Rework.prs["LB-016"].required_artifacts.push(
+  "screen 4 create-custom-plugin persisted-information panel",
+);
+finalLb016Rework.prs["LB-016"].required_tests = finalLb016Rework.prs["LB-016"].required_tests.map((item) => {
+  if (item === "screen 4 custom connector setup button") return "screen 4 lower plugin action label is 打开插件管理页";
+  if (item === "screen 4 opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser") return "screen 4 plugin management action opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser through a fixed Rust allowlist";
+  if (item === "screen 4 custom connector guidance is concise and foolproof") return "screen 4 developer-mode guidance is 在插件设置页面最底端，打开“开发者模式”";
+  return item;
+});
+finalLb016Rework.prs["LB-016"].required_tests.push(
+  "screen 4 title is 创建自定义插件",
+  "screen 4 ChatGPT plugin-settings action opens only https://chatgpt.com/plugins#settings/Plugins in the system default browser through a fixed Rust allowlist",
+  "screen 4 shows exactly two concise information rows 名称 Tunnel ID and does not show 本地服务",
+  "screen 4 名称 value is Local Bridge",
+  "screen 4 Tunnel ID value reflects the current persisted saved value rather than an unsaved frontend-only value",
+  "each of the two screen 4 information rows has its own copy action and successful copy shows green 已复制 for exactly 3 seconds before restoring without layout shift",
+  "screen 3 permission mode buttons preserve clearly visible balanced content-to-border spacing in the real 900x620 render and grow safely for wrapped descriptive text; final visual PASS requires human inspection and cannot be inferred from CSS padding markers alone",
+  "the selected project runtime MCP and OpenAI Tunnel are all ready before screen 4 becomes reachable so plugin creation is executable rather than premature guidance",
+  "onboarding never defers its only runtime startup edge until screen 5 or screen 6",
+);
+assert.deepEqual(validatePreG4GateAuthorization(finalLb016Rework, ratifiedGit, expected, ratification), []);
+const alteredPluginSettingsUrl = structuredClone(finalLb016Rework);
+alteredPluginSettingsUrl.prs["LB-016"].required_tests = alteredPluginSettingsUrl.prs["LB-016"].required_tests
+  .map((item) => item.startsWith("screen 4 ChatGPT plugin-settings action opens only ")
+    ? "screen 4 ChatGPT plugin-settings action opens an unauthorized URL"
+    : item);
+assert.match(validatePreG4GateAuthorization(alteredPluginSettingsUrl, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+const alteredPluginManagementUrl = structuredClone(finalLb016Rework);
+alteredPluginManagementUrl.prs["LB-016"].required_tests = alteredPluginManagementUrl.prs["LB-016"].required_tests
+  .map((item) => item.startsWith("screen 4 plugin management action opens only ")
+    ? "screen 4 plugin management action opens only https://example.invalid/manage in the system default browser through a fixed Rust allowlist"
+    : item);
+assert.match(validatePreG4GateAuthorization(alteredPluginManagementUrl, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+const alteredInformationRows = structuredClone(finalLb016Rework);
+alteredInformationRows.prs["LB-016"].required_tests = alteredInformationRows.prs["LB-016"].required_tests
+  .map((item) => item.startsWith("screen 4 shows exactly two concise information rows")
+    ? "screen 4 shows three information rows including local service"
+    : item);
+assert.match(validatePreG4GateAuthorization(alteredInformationRows, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+const alteredScreen4Title = structuredClone(finalLb016Rework);
+alteredScreen4Title.prs["LB-016"].required_tests = alteredScreen4Title.prs["LB-016"].required_tests
+  .map((item) => item === "screen 4 title is 创建自定义插件" ? "screen 4 title is Local Bridge 设置" : item);
+assert.match(validatePreG4GateAuthorization(alteredScreen4Title, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+const alteredReadinessEdge = structuredClone(finalLb016Rework);
+alteredReadinessEdge.prs["LB-016"].required_tests = alteredReadinessEdge.prs["LB-016"].required_tests
+  .map((item) => item.startsWith("the selected project runtime MCP and OpenAI Tunnel")
+    ? "runtime may start after Screen 4"
+    : item);
+assert.match(validatePreG4GateAuthorization(alteredReadinessEdge, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
 const alteredFixedWindowRequirement = structuredClone(authorizedLb016Rework);
 alteredFixedWindowRequirement.prs["LB-016"].required_tests = alteredFixedWindowRequirement.prs["LB-016"].required_tests
   .map((item) => item.startsWith("main window is fixed to 900x620")

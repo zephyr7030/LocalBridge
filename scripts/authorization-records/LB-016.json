@@ -223,6 +223,62 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-012",
+      "scope": [
+        "src/App.tsx",
+        "src/features/diagnostics/Diagnostics.tsx",
+        "tests/integration/diagnostics/lb017_contract.test.mjs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Add an 打开欢迎页 control to the existing diagnostics surface for explicit manual onboarding testing",
+        "Route that control through App as session-only onboarding preview state without resetting or rewriting persisted onboarding completion",
+        "Add a regression proving preview completion skips the persisted complete_onboarding path and does not change browser/runtime security boundaries"
+      ],
+      "reason": "The user explicitly requested a diagnostics button that opens the welcome page so the current onboarding UI can be manually tested while LB-016 remains in rework.",
+      "evidence_ref": "Explicit user instruction on 2026-08-13: 在诊断里增加打开欢迎页按钮，我需要进行测试",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-013",
+      "scope": [
+        "AGENTS.md",
+        "START_HERE.md",
+        "PR_CONTRACTS.json",
+        "PROJECT_STATE.json",
+        "docs/01_PRODUCT_UX.md",
+        "docs/04_UX_SPEC.md",
+        "docs/06_PR_PLAN.md",
+        "docs/07_ACCEPTANCE.md",
+        "docs/07_ACCEPTANCE_MATRIX.md",
+        "docs/08_FINAL_REVIEW.md",
+        "skills/ui/SKILL.md",
+        "src/features/onboarding/Onboarding.tsx",
+        "src/features/onboarding/api.ts",
+        "src/features/onboarding/onboarding.css",
+        "src-tauri/src/commands/onboarding.rs",
+        "src-tauri/src/lib.rs",
+        "tests/e2e/onboarding/lb016_contract.test.mjs",
+        "scripts/verify-architecture/g4-human-gate.mjs",
+        "scripts/verify-architecture/g4-human-gate.test.mjs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Freeze and implement Screen 4 as 创建自定义插件 with exactly two persisted information rows 名称 and Tunnel ID, independent stable green three-second copy feedback, and no 本地服务 row",
+        "Add argument-free frontend actions backed by exact Rust fixed allowlists for the ChatGPT plugins-settings URL and custom-plugin management URL, using only the system default browser and no WebView or frontend URL input",
+        "Project the current persisted validated Tunnel ID from StartupProfileStore into onboarding state instead of displaying an unsaved React input value",
+        "Move selected-project startup and bounded all-three readiness gating to the Screen 3 to Screen 4 transition so runtime MCP and OpenAI Tunnel are ready before plugin creation is exposed",
+        "Synchronize the frozen LB-016 machine contract, UX documentation, tests and fail-closed architecture normalization for this explicitly authorized Screen 4/readiness correction"
+      ],
+      "reason": "The post-review execution plan replaced the prior Screen-4 local-service row with a strict two-row persisted plugin-creation screen and identified the deferred Screen-5 runtime startup edge as a real plugin-creation failure mode.",
+      "evidence_ref": "Explicit user instruction on 2026-08-13 freezing 创建自定义插件 with https://chatgpt.com/plugins#settings/Plugins, the fixed custom-connector URL, exactly 名称/Tunnel ID rows, independent 3-second 已复制 feedback, persisted Tunnel ID sourcing, deletion of 本地服务, and selected-project/runtime/MCP/OpenAI Tunnel readiness before Screen 4.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

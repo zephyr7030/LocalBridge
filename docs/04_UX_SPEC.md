@@ -74,15 +74,25 @@
 - 后台开机不会自动弹出系统授权；
 - 只有管理员代理获得管理员令牌。
 
-## 第 4 屏 — Local Bridge 设置
+三个权限模式按钮不得设置会挤压说明文字的固定/最小高度；标题与说明之间使用明确间距，四周保留均衡内容留白，说明换行时按钮随内容自动增高。最终视觉质量必须在固定 900×620 实际运行窗口中人工确认；自动化可防止固定高度、缺少换行等结构回退，但不得仅因 CSS 出现 `padding` 就判定视觉 PASS。
 
-只提供完成配置所需的简短步骤与一个主要动作：`打开 Local Bridge 设置`。用户可见术语统一为 `Local Bridge`。
+## 第 4 屏 — 创建自定义插件
 
-只允许系统默认浏览器打开：
+标题固定为 `创建自定义插件`。提示固定表达：`在插件设置页面最底端，打开“开发者模式”`。
+
+`打开 ChatGPT插件设置` 只能由 Rust 固定 allowlist 通过系统默认浏览器打开：
+
+`https://chatgpt.com/plugins#settings/Plugins`
+
+中部严格只有两行：`名称 = Local Bridge`、`Tunnel ID = 当前已持久化保存值`。禁止“本地服务”行；Tunnel ID 禁止直接使用尚未保存的 React/input 临时值。两行各有独立复制按钮，成功后绿色 `已复制` 精确保持 3 秒再恢复 `复制`，按钮几何尺寸不得变化。
+
+`打开插件管理页` 只能由 Rust 固定 allowlist 通过系统默认浏览器打开：
 
 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
 
-禁止 WebView、禁止前端传任意 URL、禁止读取 ChatGPT 会话。
+两个浏览器入口均禁止 WebView、禁止前端传入/拼接/修改 URL、禁止读取 ChatGPT 会话。
+
+第 3 屏保存项目与权限后必须先启动 selected project、本地 runtime / MCP / OpenAI Tunnel；只有本地运行环境、编码服务、OpenAI Tunnel 三项全部真实就绪后才进入第 4 屏。第 5/6 屏不得承担 onboarding 的唯一 runtime 启动边沿。
 
 ## 第 5 屏 — Local Bridge 使用确认
 

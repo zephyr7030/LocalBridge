@@ -165,7 +165,7 @@
 
 | A171 | 首次启动 | 严格 6 屏，无第 7 屏 |
 | A172 | 3/6 项目选择 | 新项目使用原生 Windows 文件夹选择器 |
-| A173 | 4/6 Local Bridge 设置 | 系统浏览器打开固定 custom-connector deep link；用户可见术语统一为 Local Bridge；无 WebView/任意 URL |
+| A173 | 4/6 创建自定义插件 | 固定开发者模式提示；两个 Rust 固定 allowlist 系统浏览器入口；中部严格只有名称/Tunnel ID，持久化 Tunnel ID，禁止本地服务行；两行独立 3 秒绿色复制反馈不位移；第 3 屏启动 runtime/MCP/Tunnel 并全就绪后才能进入；无 WebView/任意 URL |
 | A174 | 5/6 Local Bridge 使用确认 | 不伪造 ChatGPT 状态；endpoint 只来自 Rust verified metadata projection |
 | A175 | 5/6 copy feedback | 不造成布局位移 |
 | A176 | 6/6 | 三项全绿前确定 disabled；全绿后才显示完成提示，不自动跳转 |

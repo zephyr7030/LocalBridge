@@ -24,13 +24,14 @@
 
 PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRED。
 
-21. 首次启动严格 6 屏：欢迎 → OpenAI → 项目与权限 → Local Bridge 设置 → Local Bridge 使用确认 → 启动检查。禁止第 7 屏。
+21. 首次启动严格 6 屏：欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → Local Bridge 使用确认 → 启动检查。禁止第 7 屏。
 22. 第 6 屏三项未全绿时“确定”必须灰色 disabled；全绿后才显示完成提示并启用“确定”；禁止自动跳转。
 
 23. 品牌图标固定为 `assets/icons/localbridge.png` / `localbridge.ico`；应用、安装包、托盘使用该资产，未经明确合同不得替换、重绘或引入图标库。
 24. G3→G4 人工 Gate 期间，审查智能体可质疑、复核、独立验证或拒绝采信用户与执行智能体提供的事实性材料；这些材料只作为待验证证据，不自动构成 PASS。
 25. 执行智能体可使用预授权，但每项实际使用的预授权必须记录 `authorization_id/scope/actions/evidence_ref/recorded_by/user_audit_status`；人工 Gate PASS 前，所有记录的预授权都必须经用户审核为 `PASS`。
-26. Local Bridge 设置入口只允许系统默认浏览器打开固定 ChatGPT custom-connector URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView、任意前端 URL 或伪造 ChatGPT 连接状态。
-27. 第 3 屏项目选择以原生 Windows 文件夹选择器为主交互；按钮必须使用一致且可辨识的视觉系统，禁止白底上的纯白/近不可见按钮；提示遵循最小必要原则，复制成功反馈不得引起布局位移。
+26. 第 4 屏标题固定为“创建自定义插件”，提示固定表达“在插件设置页面最底端，打开‘开发者模式’”。顶部“打开 ChatGPT插件设置”只允许 Rust 固定 allowlist 通过系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Plugins`，前端不得传入、拼接或修改 URL，禁止 WebView。中部严格只有两行可复制信息：`名称：Local Bridge`、`Tunnel ID：<当前持久化保存值>`；禁止“本地服务”行。Tunnel ID 必须来自 Rust 当前已持久化 StartupProfile，而非 React/input 临时值。两行各有独立复制按钮，成功后按钮以绿色稳定显示“已复制”精确 3 秒再恢复“复制”，切换不得造成布局位移。下方“打开插件管理页”只允许 Rust 固定 allowlist 通过系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止任意 URL、WebView 或伪造 ChatGPT 连接状态。
+27. 第 3 屏项目选择以原生 Windows 文件夹选择器为主交互；三个权限模式按钮必须为标题与说明文字预留清晰、均衡的上下/左右内容边距，文字不得在 900×620 实际渲染中贴近或碰触按钮边框，且换行时按钮高度必须随内容安全增长；该项必须保留为 900×620 实机人工视觉验收项，自动化只能检查结构性防回退，禁止仅凭 CSS 存在 padding 等标记判定视觉 PASS；按钮必须使用一致且可辨识的视觉系统，禁止白底上的纯白/近不可见按钮；提示遵循最小必要原则，复制成功反馈不得引起布局位移。
 28. 主窗口固定为 900×620；minimum/maximum inner size 均为 900×620，`resizable=false`、`maximizable=false`。原生 Windows decorations 必须关闭；产品只能显示一层自定义风格化窗口 chrome，并以 `inset:0` / 100%×100% 精确贴合 native client area，禁止“原生边框 + 自定义边框”双层窗口。自定义 chrome 提供拖拽区、最小化和关闭，不提供最大化；Dashboard 与 onboarding 必须在固定 client area 内完整可操作。
 29. 首次 onboarding 本身就是窗口内容页，必须直接占满自定义 chrome 的可用内容区；禁止在大面积空白背景中再居中放置作为整个向导外壳的 card/modal/dialog，也禁止用圆角、阴影或边框制造“窗口里的弹窗”。允许页面级 padding、字段分组和局部控件，但 6 屏共同外壳必须是整页布局。
+30. 第 4 屏是创建插件的真实可执行步骤，而不是提前展示的说明页：第 3 屏保存项目与权限后必须启动 selected project、本地 runtime / MCP / OpenAI Tunnel，并等待 `本地运行环境 + 编码服务 + OpenAI Tunnel` 全部真实就绪后才允许进入第 4 屏；不得把唯一 runtime 启动边沿延迟到第 5/6 屏。

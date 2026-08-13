@@ -189,9 +189,9 @@
 | A175 | 2/6 | 字段为 `Tunnel ID` / `Runtime API Key` |
 | A176 | 2/6 | 密钥下方仅一行安全保存说明 |
 | A177 | 3/6 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器 |
-| A178 | 4/6 | “打开 Local Bridge 设置”只打开固定 ChatGPT custom-connector deep link |
-| A179 | 4/6 | 使用系统默认浏览器，禁止 WebView/任意前端 URL |
-| A180 | 4/6 | 用户可见术语统一为 `Local Bridge`；引导简短、傻瓜式，不堆叠非必要提示 |
+| A178 | 4/6 创建自定义插件 | 标题为“创建自定义插件”，提示为“在插件设置页面最底端，打开‘开发者模式’”；`打开 ChatGPT插件设置` 只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Plugins` |
+| A179 | 4/6 信息与复制 | 中部严格只有“名称 / Tunnel ID”两行，禁止“本地服务”；Tunnel ID 来自持久化值；两行独立复制成功绿色 `已复制` 精确 3 秒且不位移 |
+| A180 | 4/6 插件管理与时序 | `打开插件管理页` 只经 Rust 固定 allowlist + 系统浏览器打开固定 custom-connector URL；禁止 WebView/任意前端 URL；第 3 屏启动 selected project/runtime/MCP/OpenAI Tunnel 且三项 readiness 全部真实就绪后才可进入第 4 屏，唯一启动边沿不得延迟至第 5/6 屏 |
 | A181 | 5/6 | 使用 `Local Bridge` 术语，不伪造或猜测 ChatGPT 状态 |
 | A182 | 5/6 connector endpoint | 如展示/复制，只来自 Rust typed projection 的已验证 Tunnel/control-plane metadata |
 | A183 | 5/6 connector endpoint | 前端不得从 Tunnel ID 推导、拼接或伪造 endpoint |
@@ -216,3 +216,4 @@
 | A201 | 窗口外框 | native `decorations=false`；仅存在一层 edge-to-edge 自定义 chrome，不出现原生标题栏/边框 + 自定义边框的双框 |
 | A202 | 自定义标题栏 | 可拖拽窗口；提供最小化与关闭；不提供最大化；chrome 从 client `(0,0)` 覆盖 100% 宽高 |
 | A203 | 首次引导整页布局 | onboarding 直接占用 custom chrome 内容区，不存在“大面积空白画布 + 居中 floating card/modal/dialog”整体向导外壳；页面级 padding 与局部分组允许 |
+| A204 | 3/6 权限模式按钮视觉 | 固定 900×620 实际运行窗口中标题/说明与边框留白均衡、换行不拥挤且按钮自动增高；此项为人工视觉验收，CSS 标记存在本身不得构成 PASS |

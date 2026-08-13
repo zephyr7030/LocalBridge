@@ -11,13 +11,16 @@
 固定：
 
 ```text
-欢迎 → OpenAI → 项目与权限 → Local Bridge 设置 → Local Bridge 使用确认 → 启动检查
+欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → Local Bridge 使用确认 → 启动检查
 ```
 
 第 3 屏新项目使用原生 Windows 文件夹选择器。
 
-第 4 屏用户可见术语统一为 `Local Bridge`，只允许系统浏览器打开固定 custom-connector URL：
-`https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`。
+第 4 屏标题固定为 `创建自定义插件`，提示固定表达 `在插件设置页面最底端，打开“开发者模式”`。中部严格只有 `名称 = Local Bridge` 与 `Tunnel ID = 当前持久化保存值` 两行，禁止“本地服务”；两行独立复制反馈绿色 `已复制` 保持 3 秒且不得位移。
+
+`打开 ChatGPT插件设置` 只允许 Rust 固定 allowlist 通过系统浏览器打开 `https://chatgpt.com/plugins#settings/Plugins`；`打开插件管理页` 只允许 Rust 固定 allowlist 通过系统浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`。前端不得提供、拼接或修改任意 URL，禁止 WebView。
+
+第 3 屏保存后必须启动 selected project/runtime/MCP/OpenAI Tunnel，并在三项 readiness 全部真实就绪后才能进入第 4 屏；唯一 runtime 启动边沿不得延迟到第 5/6 屏。
 
 第 5 屏标题为 `Local Bridge 使用确认`，不伪造 ChatGPT 状态；如展示/复制 endpoint，只能使用 Rust typed projection 的已验证 Tunnel/control-plane metadata，禁止根据 Tunnel ID 推导；复制反馈不得造成布局位移。
 

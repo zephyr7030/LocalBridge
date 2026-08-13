@@ -31,6 +31,7 @@ macro_rules! localbridge_invoke_handler {
             commands::onboarding::save_onboarding_connection,
             commands::onboarding::open_openai_tunnel_settings,
             commands::onboarding::open_openai_api_keys,
+            commands::onboarding::open_chatgpt_plugins_settings,
             commands::onboarding::open_chatgpt_custom_connector_settings,
             commands::onboarding::get_connector_endpoint,
             commands::onboarding::choose_onboarding_workspace_folder,

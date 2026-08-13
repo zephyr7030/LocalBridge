@@ -12,7 +12,7 @@ const brokerText = {
 
 const attemptText = { running: "进行中", failed: "失败" } as const;
 
-export function Diagnostics({ onClose }: { onClose: () => void }) {
+export function Diagnostics({ onClose, onOpenWelcome }: { onClose: () => void; onOpenWelcome: () => void }) {
   const [snapshot, setSnapshot] = useState<DiagnosticsSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
@@ -86,6 +86,7 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
           <button className="secondary" onClick={() => void refresh()}>刷新</button>
           {snapshot?.reconnect ? <button className="secondary" onClick={() => void retry()}>重试连接</button> : null}
           <button className="secondary" onClick={() => void exportReport()}>导出诊断</button>
+          <button className="secondary" onClick={onOpenWelcome}>打开欢迎页</button>
           <button className="primary" onClick={onClose}>完成</button>
         </div>
       </section>

@@ -68,11 +68,12 @@ UI 冻结补充：
 
 ```text
 首次启动       = 6 屏
-顺序           = 欢迎 → OpenAI → 项目与权限 → Local Bridge 设置 → Local Bridge 使用确认 → 启动检查
+顺序           = 欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → Local Bridge 使用确认 → 启动检查
 第 7 屏        = 禁止
 第 6 屏确认    = 三项全绿后才启用
 自动进入主界面 = 禁止
-Local Bridge设置= 系统浏览器固定 deep link；禁止 WebView/任意 URL
+创建自定义插件 = 两个 Rust 固定 allowlist 系统浏览器入口；信息仅“名称 / Tunnel ID”；禁止 WebView/任意 URL/本地服务行
+第3→4屏       = 保存项目与权限后先启动项目/runtime/MCP/Tunnel并全就绪，再进入第4屏
 项目选择       = 原生 Windows 文件夹选择器为主交互
 按钮           = 统一且可辨识；禁止白底白按钮
 窗口           = 固定 900×620；minimum=maximum=900×620；禁止缩放与最大化

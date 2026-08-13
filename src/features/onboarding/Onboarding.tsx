@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { WizardFrame } from "../../components/WizardFrame";
 import { ReadinessCheck } from "../../components/ReadinessCheck";
 import { bridge, type AccessCode, type MainProjection } from "../../bridge";
@@ -7,11 +7,15 @@ import { onboardingApi, type OnboardingState } from "./api";
 import "./onboarding.css";
 
 const KEY_HINT = "Runtime API Key 仅保存在 Windows 安全凭据中，不会写入配置文件、日志、命令行或浏览器存储。";
+const READY_POLL_INTERVAL_MS = 1000;
+const READY_POLL_ATTEMPTS = 60;
+
+type Screen4CopyKey = "name" | "tunnel";
 
 const messageFrom = (value: unknown, fallback: string) =>
   typeof value === "string" ? value : value instanceof Error ? value.message : fallback;
 
-export function Onboarding({ initial, onComplete }: { initial: OnboardingState; onComplete: () => void }) {
+export function Onboarding({ initial, onComplete, previewMode = false }: { initial: OnboardingState; onComplete: () => void; previewMode?: boolean }) {
   const [step, setStep] = useState(1);
   const [state, setState] = useState(initial);
   const [main, setMain] = useState<MainProjection | null>(null);
@@ -22,8 +26,17 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   const [permission, setPermission] = useState<AccessCode>("edit");
   const [connectorEndpoint, setConnectorEndpoint] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
+  const [copiedRows, setCopiedRows] = useState<Record<Screen4CopyKey, boolean>>({ name: false, tunnel: false });
+  const copyTimers = useRef<Record<Screen4CopyKey, number | null>>({ name: null, tunnel: null });
+  const [preparingProject, setPreparingProject] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const allGreen = state.readiness.localEnvironment && state.readiness.codingService && state.readiness.openaiTunnel;
+
+  useEffect(() => () => {
+    for (const timer of Object.values(copyTimers.current)) {
+      if (timer !== null) window.clearTimeout(timer);
+    }
+  }, []);
 
   useEffect(() => {
     void bridge.read().then((projection) => {
@@ -35,7 +48,7 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   }, []);
 
   useEffect(() => {
-    if (step !== 5 && step !== 6) return;
+    if (step !== 4 && step !== 5 && step !== 6) return;
     let active = true;
     const refresh = async () => {
       try {
@@ -85,16 +98,34 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   };
 
   const saveProjectAndPermission = async () => {
+    if (preparingProject) return;
     setError(null);
+    setPreparingProject(true);
     try {
       await bridge.setAccess(permission);
       let selectedProject = rememberedProject;
       if (selectedFolder) selectedProject = await onboardingApi.rememberProject(selectedFolder);
       if (!selectedProject) throw new Error("请选择项目文件夹");
       setRememberedProject(selectedProject);
+      await onboardingApi.startProject(selectedProject);
+      let readyState: OnboardingState | null = null;
+      for (let attempt = 0; attempt < READY_POLL_ATTEMPTS; attempt += 1) {
+        const next = await onboardingApi.read();
+        setState(next);
+        if (next.readiness.localEnvironment && next.readiness.codingService && next.readiness.openaiTunnel) {
+          readyState = next;
+          break;
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, READY_POLL_INTERVAL_MS));
+      }
+      if (!readyState) throw new Error("本地服务未在预期时间内就绪，请重试");
+      setState(readyState);
+      setSelectedFolder("");
       setStep(4);
     } catch (value) {
-      setError(messageFrom(value, "项目或权限设置未完成"));
+      setError(messageFrom(value, "本地服务启动失败，请重试"));
+    } finally {
+      setPreparingProject(false);
     }
   };
 
@@ -106,22 +137,35 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
     setError(null);
     try {
       await onboardingApi.startProject(rememberedProject);
-      const [next, endpoint] = await Promise.all([
-        onboardingApi.read(),
-        onboardingApi.readConnectorEndpoint(),
-      ]);
+      let next = await onboardingApi.read();
+      for (let attempt = 0; attempt < READY_POLL_ATTEMPTS; attempt += 1) {
+        setState(next);
+        if (next.readiness.localEnvironment && next.readiness.codingService && next.readiness.openaiTunnel) break;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, READY_POLL_INTERVAL_MS));
+        next = await onboardingApi.read();
+      }
       setState(next);
+      const endpoint = await onboardingApi.readConnectorEndpoint();
       setConnectorEndpoint(endpoint.endpoint);
     } catch (value) {
       setError(messageFrom(value, "本地服务启动失败，请重试"));
     }
   };
 
-  useEffect(() => {
-    if (step === 5) void startSelectedProject();
-    // Screen 5 is the single explicit startup edge in onboarding.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
+  const copyScreen4Value = async (key: Screen4CopyKey, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      const previousTimer = copyTimers.current[key];
+      if (previousTimer !== null) window.clearTimeout(previousTimer);
+      setCopiedRows((current) => ({ ...current, [key]: true }));
+      copyTimers.current[key] = window.setTimeout(() => {
+        setCopiedRows((current) => ({ ...current, [key]: false }));
+        copyTimers.current[key] = null;
+      }, 3000);
+    } catch {
+      setError("复制失败，请重试");
+    }
+  };
 
   const copyEndpoint = async () => {
     if (!connectorEndpoint) return;
@@ -137,7 +181,7 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
     if (!allGreen) return;
     setError(null);
     try {
-      await onboardingApi.complete();
+      if (!previewMode) await onboardingApi.complete();
       onComplete();
     } catch (value) {
       setError(messageFrom(value, "设置尚未完成"));
@@ -162,7 +206,7 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   );
 
   if (step === 3) return (
-    <WizardFrame step={3} title="项目与权限" footer={<><button className="secondary" onClick={() => setStep(2)}>返回</button><button className="primary" disabled={!selectedFolder && !rememberedProject} onClick={() => void saveProjectAndPermission()}>继续</button></>}>
+    <WizardFrame step={3} title="项目与权限" footer={<><button className="secondary" disabled={preparingProject} onClick={() => setStep(2)}>返回</button><button className="primary" disabled={preparingProject || (!selectedFolder && !rememberedProject)} onClick={() => void saveProjectAndPermission()}>{preparingProject ? "正在启动…" : "继续"}</button></>}>
       {main?.projects.length ? <div className="onboarding-field"><label htmlFor="remembered-project">已保存项目</label><select id="remembered-project" value={rememberedProject} onChange={(event) => { setRememberedProject(event.target.value); setSelectedFolder(""); }}><option value="">选择项目</option>{main.projects.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select></div> : null}
       <div className="onboarding-folder-row"><button className="secondary" onClick={() => void chooseFolder()}>选择项目文件夹</button><span className="onboarding-selected-folder">{selectedFolder || chosenProject?.path || "尚未选择"}</span></div>
       <div className="onboarding-permissions">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} className={`choice onboarding-permission ${permission === mode ? "selected" : ""}`} aria-pressed={permission === mode} onClick={() => setPermission(mode)}><strong>{accessText[mode]}</strong><small>{mode === "edit" ? "读取、搜索和修改项目文件" : mode === "full" ? "允许运行测试、编译和其他本地命令" : "在完整模式基础上允许显式管理员操作"}</small></button>)}</div>
@@ -172,9 +216,14 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   );
 
   if (step === 4) return (
-    <WizardFrame step={4} title="Local Bridge 设置" footer={<><button className="secondary" onClick={() => setStep(3)}>返回</button><button className="primary" onClick={() => { setError(null); setStep(5); }}>继续</button></>}>
-      <ol className="onboarding-setup-steps"><li>点击“打开 Local Bridge 设置”</li><li>新建 Local Bridge</li><li>保存后返回 LocalBridge</li></ol>
-      <div className="onboarding-link-row"><button className="secondary" onClick={() => void onboardingApi.openConnectorSettings().catch(() => setError("无法打开 Local Bridge 设置"))}>打开 Local Bridge 设置</button></div>
+    <WizardFrame step={4} title="创建自定义插件" footer={<button className="primary" disabled={!allGreen} onClick={() => { setError(null); setStep(5); }}>继续</button>}>
+      <p className="onboarding-copy">在插件设置页面最底端，打开“开发者模式”</p>
+      <div className="onboarding-plugin-top-action"><button className="secondary" onClick={() => void onboardingApi.openPluginsSettings().catch(() => setError("无法打开 ChatGPT插件设置"))}>打开 ChatGPT插件设置</button></div>
+      <div className="onboarding-plugin-info">
+        <div className="onboarding-info-row"><span className="onboarding-info-label">名称</span><span className="onboarding-info-value">Local Bridge</span><button className={`secondary onboarding-copy-action ${copiedRows.name ? "copied" : ""}`} onClick={() => void copyScreen4Value("name", "Local Bridge")}>{copiedRows.name ? "已复制" : "复制"}</button></div>
+        <div className="onboarding-info-row"><span className="onboarding-info-label">Tunnel ID</span><span className="onboarding-info-value">{state.tunnelId ?? "—"}</span><button className={`secondary onboarding-copy-action ${copiedRows.tunnel ? "copied" : ""}`} disabled={!state.tunnelId} onClick={() => state.tunnelId && void copyScreen4Value("tunnel", state.tunnelId)}>{copiedRows.tunnel ? "已复制" : "复制"}</button></div>
+      </div>
+      <div className="onboarding-plugin-management"><button className="secondary" disabled={!allGreen} onClick={() => void onboardingApi.openConnectorSettings().catch(() => setError("无法打开插件管理页"))}>打开插件管理页</button></div>
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
   );
