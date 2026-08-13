@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -139,7 +139,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Revalidate LB-017 diagnostics and redacted export against the corrected full-page six-screen onboarding and logical 900x620 custom-chrome baseline; then return G3 to REVIEW_REQUIRED"
+    "next_action": "Run formal G3 independent adversarial review generation 3 against the completed logical 900x620, single-custom-chrome, full-page six-screen onboarding and diagnostics baseline; keep G4 blocked pending adversarial PASS and subsequent human/manual review"
   },
   "current_task_ui": {
     "enabled": true,
