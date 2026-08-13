@@ -139,7 +139,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run formal G3 independent adversarial review generation 3 against the completed logical 900x620, single-custom-chrome, full-page six-screen onboarding and diagnostics baseline; keep G4 blocked pending adversarial PASS and subsequent human/manual review"
+    "next_action": "Run G3 human manual/detail review generation 1 against the adversarially accepted G3 baseline; keep G4/LB-018 blocked until human review PASS and user-audited executor pre-authorizations are satisfied"
   },
   "current_task_ui": {
     "enabled": true,

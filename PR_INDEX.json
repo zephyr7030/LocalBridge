@@ -347,11 +347,11 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
-      "review_generation": 2,
-      "human_review_status": "BLOCKED",
-      "human_review_generation": 0,
+      "status": "PASS",
+      "review_status": "PASS",
+      "review_generation": 3,
+      "human_review_status": "REQUIRED",
+      "human_review_generation": 1,
       "review_provenance": {
         "generation": 2,
         "kind": "independent_adversarial",
