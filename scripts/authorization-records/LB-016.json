@@ -205,6 +205,24 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-011",
+      "scope": [
+        "src/components/WizardFrame.tsx",
+        "src/features/onboarding/onboarding.css",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Remove the centered onboarding card/modal wrapper and make the shared six-screen wizard root directly fill the single custom-chrome content area",
+        "Remove the onboarding outer-surface border, border-radius, shadow, constrained card width and centered-card layout while preserving page padding and legitimate local field/group styling",
+        "Preserve the exact six-screen flow, secure Runtime API Key handling, native folder picker, fixed system-browser connector link, typed verified endpoint projection, readiness gating and logical 900x620 DPI semantics"
+      ],
+      "reason": "The user explicitly required first-run onboarding to be a full-page view rather than a card/dialog placed inside a large blank window background, matching the frozen LB-016 full-page contract and the observed production defect.",
+      "evidence_ref": "Explicit user instruction on 2026-08-13: '首次引导必须整页呈现，直接占用自定义 chrome 内容区；禁止“大面积空白背景 + 居中 card/modal/dialog”，禁止圆角/阴影/边框制造“窗口里的窗口”。页面 padding、字段分组可以保留。'",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }
