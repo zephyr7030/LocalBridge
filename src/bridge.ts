@@ -8,7 +8,7 @@ export type TaskStateCode = "idle" | "running" | "waiting" | "blocked" | "failed
 export interface ProjectProjection { id: string; path: string; active: boolean }
 export interface TaskProjection { kind: TaskKindCode; summary: string | null; state: TaskStateCode }
 export interface ReconnectProjection { generation: number }
-export interface MainProjection { permission: AccessCode; privilege: PrivilegeCode; tunnelService: ServiceCode; codingService: ServiceCode; currentProject: string | null; projects: ProjectProjection[]; currentTask: TaskProjection | null; runtimeKeySaved: boolean; autoStart: boolean; reconnect: ReconnectProjection | null; }
+export interface MainProjection { permission: AccessCode; privilege: PrivilegeCode; localEnvironmentService: ServiceCode; tunnelService: ServiceCode; codingService: ServiceCode; currentProject: string | null; projects: ProjectProjection[]; currentTask: TaskProjection | null; runtimeKeySaved: boolean; autoStart: boolean; reconnect: ReconnectProjection | null; }
 export const bridge = {
   read: () => invoke<MainProjection>("get_main_projection"),
   setAccess: (mode: AccessCode) => invoke<void>("set_permission_mode", { mode }),

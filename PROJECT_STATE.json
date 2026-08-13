@@ -1,5 +1,5 @@
 {
-  "schema_version": 15,
+  "schema_version": 16,
   "phase": "PRE_CODE",
   "current_pr": null,
   "architecture_frozen_candidate": true,
@@ -8,7 +8,7 @@
   "ux_hard_requirements": [
     "No embedded ChatGPT",
     "Wizard screen 4 exposes only fixed Rust-allowlisted ChatGPT plugin settings and custom-plugin management destinations in the system default browser",
-    "Wizard uses exactly six screens and no seventh screen",
+    "Wizard uses exactly five screens and has no sixth screen",
     "Workspace selection uses the native Windows folder picker as the primary new-project interaction",
     "Buttons use a coherent visible affordance system and never disappear into white surfaces",
     "Copy-success feedback does not shift layout",
@@ -22,7 +22,10 @@
     "Dashboard exposes one current-task status panel",
     "Current-task UI is status-only; no recent activity feed or history list",
     "Task summary is grounded in actual MCP/Broker execution and secret-redacted",
-    "Onboarding screens 4 and 5 use Local Bridge as the user-facing connector term",
+    "Onboarding screen 4 uses Local Bridge as the user-facing connector term",
+    "Ordinary primary and selected UI uses blue #0071e3; black is not the standard product accent",
+    "Administrator mode uses amber logical styling in onboarding and Dashboard and is not overridden by ordinary blue selected styling",
+    "Onboarding and Dashboard service-status dots use the same typed status source and Ready green Starting amber Fault red Unknown gray semantics",
     "Main window is fixed at 900x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
@@ -139,7 +142,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Run the next G3 independent adversarial review generation against the current committed LB-013 through LB-017 repair baseline; keep Screen-3 900x620 visual spacing and all executor preauthorization audits pending for the later human gate, and keep G4 blocked"
+    "next_action": "Create an auditable committed baseline for the completed G3 human-review rework, then run a fresh G3 independent adversarial review generation 4 from REVIEW_REQUIRED. If that review passes, run a new human manual/detail Gate; keep G4/LB-018 blocked until both fresh gates pass and executor preauthorizations are user-audited as required."
   },
   "current_task_ui": {
     "enabled": true,
@@ -179,6 +182,32 @@
     "mcp_can_mutate_registry": false
   },
   "current_group": "G3",
+  "g3_human_review": {
+    "status": "FAIL",
+    "generation": 1,
+    "date": "2026-08-13",
+    "reopen_from_pr": "LB-015",
+    "reason": "Manual G3 review found Dashboard/UI-shell accent and service-status defects plus LB-016 onboarding contract and flow defects; contracts amended before implementation rework.",
+    "verified_disk_findings": {
+      "runtime_start_before_screen_4": "CURRENTLY_COMPLIANT: saveProjectAndPermission starts the selected project and bounded-polls localEnvironment/codingService/openaiTunnel before setStep(4); do not move this edge later.",
+      "stale_claim_rejected": "The claim that current production defers its unique runtime start until the old Screen 5 is not supported by the current disk code.",
+      "original_blue_history": "#0071e3 is present in prior repository UI history and is the frozen ordinary product accent."
+    },
+    "resolved_executor_blockers": [
+      "RESOLVED_BY_REWORK: LB-015 ordinary accent changed from black to #0071e3 while administrator selection uses a later amber logical override.",
+      "RESOLVED_BY_REWORK: Dashboard tunnel/coding rows now use shared typed ServiceStatusDot semantics Ready green Starting/recovering amber Fault red Unknown/stopped gray; local-environment projection is also derived from typed RuntimeState.",
+      "RESOLVED_BY_REWORK: production onboarding is strict five screens; Local Bridge 使用确认 and every sixth-screen path were removed and startup check is Screen 5.",
+      "RESOLVED_BY_REWORK: Screen 4 contains the exact plugin-management guidance, explicit back/continue actions, and both fixed browser actions are left-aligned.",
+      "RESOLVED_BY_REWORK: onboarding readiness uses shared ServiceCode/ServiceStatusDot rather than fixed gray boolean dots.",
+      "RESOLVED_BY_REWORK: LB-016 schema19 regression and frozen-contract verifier now enforce the five-screen amendment and reject rollback while preserving historical ratification fixtures."
+    ],
+    "executor_rework_validation": "LB-015 and LB-016 automated contracts, frontend build/tests, full Rust tests, Clippy, release check, fixed-window 150% DPI runtime E2E and schema19 fail-closed verifier tests passed on 2026-08-13; overall Architecture remains intentionally blocked only by this historical human-review FAIL until a fresh Gate is run.",
+    "historical_record_policy": "scripts/authorization-records/LB-016.json contains superseded six-screen wording as historical authorization provenance; preserve it as immutable/non-authoritative history rather than rewriting past evidence.",
+    "g4_unlocked": false,
+    "rework_status": "COMPLETED_AWAITING_FRESH_G3_REVIEW",
+    "rework_completed_date": "2026-08-13",
+    "next_required_adversarial_generation": 4
+  },
   "recovery_policy": {
     "automatic_reconnect": true,
     "attempts": 5,
@@ -211,7 +240,18 @@
     "button_system": "coherent_visible_affordance",
     "white_on_white_ambiguous_buttons": false,
     "minimum_necessary_prompts": true,
-    "copy_feedback_layout_shift": false
+    "copy_feedback_layout_shift": false,
+    "standard_primary_accent": "#0071e3",
+    "black_as_standard_accent": false,
+    "administrator_mode_logic_accent": "amber",
+    "administrator_mode_blue_override": false,
+    "service_status_dot_semantics": {
+      "Ready": "green",
+      "Starting": "amber",
+      "Fault": "red",
+      "Unknown": "gray"
+    },
+    "service_status_dot_source": "shared_typed_projection_for_onboarding_and_dashboard"
   },
   "pr_group_policy": {
     "groups": [
@@ -230,19 +270,20 @@
     "executor_pre_authorization_requires_concrete_record_and_user_audit": true
   },
   "onboarding_ui": {
-    "screens": 6,
+    "screens": 5,
+    "screen_6_forbidden": true,
     "screen_order": [
       "welcome",
       "openai",
       "workspace_and_permission",
       "create_custom_plugin",
-      "chatgpt_connector_use",
       "runtime_check"
     ],
     "screen_1": {
       "title": "简单设置 即可开始",
       "description": "LocalBridge是链接ChatGPT与本地代码的工具",
-      "primary_action": "开始"
+      "primary_action": "开始",
+      "back_action": false
     },
     "screen_2": {
       "tunnel_term": "Tunnel",
@@ -250,7 +291,8 @@
         "Tunnel ID",
         "Runtime API Key"
       ],
-      "runtime_key_security_hint": "运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志或命令行。"
+      "runtime_key_security_hint": "运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志或命令行。",
+      "back_action": true
     },
     "screen_3": {
       "workspace_and_permission_combined": true,
@@ -258,7 +300,10 @@
       "raw_path_entry_primary": false,
       "permission_button_content_spacing": "clear_balanced_and_wrap_safe_at_900x620",
       "permission_button_visual_acceptance": "PENDING_HUMAN_900x620",
-      "permission_button_css_only_auto_pass_forbidden": true
+      "permission_button_css_only_auto_pass_forbidden": true,
+      "ordinary_selected_accent": "#0071e3",
+      "administrator_selected_accent": "amber",
+      "back_action": true
     },
     "screen_4": {
       "purpose": "create_custom_plugin",
@@ -266,11 +311,12 @@
       "plugin_settings_url": "https://chatgpt.com/plugins#settings/Plugins",
       "plugin_management_url": "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins",
       "embedded_webview": false,
-      "guidance": "minimum_foolproof_steps",
       "title": "创建自定义插件",
-      "developer_mode_guidance": true,
+      "developer_mode_guidance": "在插件设置页面最底端，打开“开发者模式”",
       "plugin_settings_action_label": "打开 ChatGPT插件设置",
+      "plugin_settings_action_alignment": "left",
       "plugin_settings_action_source": "independent_fixed_rust_allowlisted_chatgpt_plugin_settings_destination",
+      "plugin_management_guidance": "打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件",
       "information_rows": [
         "名称",
         "Tunnel ID"
@@ -284,30 +330,34 @@
       "copy_success_duration_seconds": 3,
       "copy_feedback_layout_shift": false,
       "plugin_management_action_label": "打开插件管理页",
+      "plugin_management_action_alignment": "left",
       "runtime_readiness_before_screen_4": "local_environment_and_coding_service_and_openai_tunnel_all_ready",
-      "runtime_start_deferred_until_screen_5_or_6": false
+      "runtime_start_deferred_until_screen_5": false,
+      "back_action": true,
+      "continue_action": true
     },
     "screen_5": {
-      "purpose": "chatgpt_connector_use_confirmation",
-      "automatic_chatgpt_state_detection": false,
-      "connector_endpoint_source": "typed_rust_projection_from_verified_tunnel_or_control_plane_metadata_only",
-      "frontend_endpoint_derivation": false,
-      "copy_success_layout_shift": false,
-      "title": "Local Bridge 使用确认"
-    },
-    "screen_6": {
       "title": "启动检查",
       "checks": [
         "本地运行环境",
         "编码服务",
         "OpenAI Tunnel"
       ],
+      "status_dot_semantics": {
+        "Ready": "green",
+        "Starting": "amber",
+        "Fault": "red",
+        "Unknown": "gray"
+      },
+      "status_source": "shared_typed_projection_with_dashboard",
       "confirm_disabled_until_all_green": true,
       "success_message": "配置完成，在插件中选择刚刚添加的Local Bridge试试吧",
       "success_message_visible_before_ready": false,
       "auto_advance": false,
-      "extra_chatgpt_check": false
+      "extra_chatgpt_check": false,
+      "back_action": true
     },
+    "failure_backtracking_required": true,
     "user_facing_connector_term": "Local Bridge",
     "layout": {
       "presentation": "full_page",

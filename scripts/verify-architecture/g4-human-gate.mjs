@@ -87,8 +87,89 @@ const LB016_AUTHORIZED_G3_REWORK_2026_08_13 = Object.freeze({
   ],
 });
 
-function normalizeAuthorizedSemanticCorrections(prs) {
+const G3_HUMAN_REVIEW_AMENDMENT_2026_08_13 = Object.freeze({
+  schemaVersion: 19,
+  lb015AddedArtifacts: [
+    "blue #0071e3 standard product accent with amber administrator-mode exception",
+    "shared typed service-status dot presentation for Dashboard and onboarding",
+  ],
+  lb015AddedTests: [
+    "primary and ordinary selected controls use the blue #0071e3 accent rather than black",
+    "administrator mode uses amber logical selection styling and is not overridden by ordinary blue selected styling",
+    "Dashboard tunnel and coding service states render status dots using Ready green Starting amber Fault red Unknown gray semantics from the same typed status source used by onboarding",
+    "Dashboard does not maintain an independent conflicting service-status color state",
+  ],
+  lb016ArtifactReplacement: ["five-screen onboarding flow", "six-screen onboarding flow"],
+  lb016AddedTests: [
+    "screen 4 ChatGPT plugin-settings action is placed in the left-side action flow",
+    "screen 4 shows 打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件 beneath the plugin-settings action",
+    "screen 4 lower plugin-management action is placed in the left-side action flow",
+    "ordinary selected permission modes use the standard blue accent while administrator mode uses amber logical styling in onboarding and Dashboard",
+    "screen 4 provides an explicit back action to screen 3 and a continue action to screen 5",
+    "screens 2 3 4 and 5 each provide an explicit back path and save start or configuration failure never traps the user",
+    "screen 5 status dots map Ready to green Starting to amber Fault to red and Unknown to gray using the shared typed service-status source",
+    "screen 5 provides an explicit back action to screen 4",
+    "primary and ordinary selected wizard controls use the blue #0071e3 accent rather than black",
+  ],
+  lb016ReplacedTests: [
+    ["onboarding has exactly five screens", "onboarding has exactly six screens"],
+    ["onboarding never defers its only runtime startup edge until screen 5", "onboarding never defers its only runtime startup edge until screen 5 or screen 6"],
+    ["screen 5 contains only local runtime environment coding service and OpenAI Tunnel checks", "screen 6 contains only local runtime environment coding service and OpenAI Tunnel checks"],
+    ["screen 5 confirm is disabled until all three checks are green", "screen 6 confirm is disabled until all three checks are green"],
+    ["screen 5 success message is hidden until all three checks are green", "screen 6 success message is hidden until all three checks are green"],
+    ["screen 5 success message is 配置完成，在插件中选择刚刚添加的Local Bridge试试吧", "screen 6 success message is 配置完成，在插件中选择刚刚添加的Local Bridge试试吧"],
+    ["screen 5 does not auto-advance", "screen 6 does not auto-advance"],
+    ["screen 5 confirm enters main UI after readiness", "screen 6 confirm enters main UI after readiness"],
+    ["onboarding has no sixth screen", "onboarding has no seventh screen"],
+    ["screen 4 uses Local Bridge as the user-facing connector term", "screens 4 and 5 use Local Bridge as the user-facing connector term"],
+  ],
+  lb016RemovedTests: [
+    "screen 5 provides only the minimum connector confirmation/use guidance and does not pretend to detect ChatGPT state",
+    "if a connector endpoint is displayed or copied it comes from a typed Rust projection backed by verified tunnel or control-plane metadata",
+    "frontend never derives a connector endpoint from Tunnel ID or fabricates one",
+  ],
+  lb016LegacyInsertBefore: "copy-success feedback reserves layout space and causes no layout shift",
+});
+
+export function hasExactG3HumanReviewAmendment(prs) {
+  const lb015 = prs?.["LB-015"];
+  const lb016 = prs?.["LB-016"];
+  if (!Array.isArray(lb015?.required_artifacts)
+    || !Array.isArray(lb015?.required_tests)
+    || !Array.isArray(lb016?.required_artifacts)
+    || !Array.isArray(lb016?.required_tests)) return false;
+  const [currentArtifact, oldArtifact] = G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016ArtifactReplacement;
+  return G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb015AddedArtifacts.every((item) => lb015.required_artifacts.includes(item))
+    && G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb015AddedTests.every((item) => lb015.required_tests.includes(item))
+    && lb016.required_artifacts.includes(currentArtifact)
+    && !lb016.required_artifacts.includes(oldArtifact)
+    && G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016AddedTests.every((item) => lb016.required_tests.includes(item))
+    && G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016ReplacedTests.every(([current, old]) => lb016.required_tests.includes(current) && !lb016.required_tests.includes(old))
+    && G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016RemovedTests.every((item) => !lb016.required_tests.includes(item));
+}
+
+export function normalizeG3HumanReviewAmendment(prs) {
   const normalized = structuredClone(prs ?? null);
+  if (!hasExactG3HumanReviewAmendment(normalized)) return normalized;
+  const lb015 = normalized["LB-015"];
+  const lb016 = normalized["LB-016"];
+  lb015.required_artifacts = lb015.required_artifacts.filter((item) => !G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb015AddedArtifacts.includes(item));
+  lb015.required_tests = lb015.required_tests.filter((item) => !G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb015AddedTests.includes(item));
+  const [currentArtifact, oldArtifact] = G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016ArtifactReplacement;
+  lb016.required_artifacts = lb016.required_artifacts.map((item) => item === currentArtifact ? oldArtifact : item);
+  lb016.required_tests = lb016.required_tests
+    .filter((item) => !G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016AddedTests.includes(item))
+    .map((item) => {
+      const replacement = G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016ReplacedTests.find(([current]) => current === item);
+      return replacement ? replacement[1] : item;
+    });
+  const insertAt = lb016.required_tests.indexOf(G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016LegacyInsertBefore);
+  if (insertAt >= 0) lb016.required_tests.splice(insertAt, 0, ...G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.lb016RemovedTests);
+  return normalized;
+}
+
+function normalizeAuthorizedSemanticCorrections(prs) {
+  const normalized = normalizeG3HumanReviewAmendment(prs);
   const lb016 = normalized?.["LB-016"];
   if (Array.isArray(lb016?.required_artifacts)) {
     lb016.required_artifacts = lb016.required_artifacts.filter((item) =>
@@ -155,6 +236,10 @@ export function validatePreG4GateAuthorization(
   laterRatification = G3_SIX_SCREEN_CONTRACT_RATIFICATION,
 ) {
   const findings = [];
+  if ((contractsDoc?.schema_version ?? 0) >= G3_HUMAN_REVIEW_AMENDMENT_2026_08_13.schemaVersion
+    && !hasExactG3HumanReviewAmendment(contractsDoc?.prs)) {
+    findings.push(`${expected.id}:human-review-contract-amendment-drift`);
+  }
   const entries = contractsDoc?.rules?.governance_authorizations;
   const entry = Array.isArray(entries) ? entries.find((candidate) => candidate?.id === expected.id) : null;
   if (!entry

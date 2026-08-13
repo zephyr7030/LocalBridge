@@ -22,6 +22,7 @@ use crate::workspace::{WorkspaceId, WorkspaceValidator};
 pub struct MainProjection {
     permission: &'static str,
     privilege: &'static str,
+    local_environment_service: &'static str,
     tunnel_service: &'static str,
     coding_service: &'static str,
     current_project: Option<String>,
@@ -94,6 +95,7 @@ pub fn get_main_projection(
     Ok(MainProjection {
         permission: stored_permission_code(data.settings.permission_mode),
         privilege: privilege_code(&privilege),
+        local_environment_service: local_environment_service_code(&snapshot.state),
         tunnel_service,
         coding_service,
         current_project,
@@ -531,6 +533,23 @@ fn service_codes(state: &RuntimeState) -> (&'static str, &'static str) {
         },
         RuntimeState::SwitchingWorkspace { .. } => ("recovering", "recovering"),
         RuntimeState::Faulted(_) => ("fault", "fault"),
+    }
+}
+fn local_environment_service_code(state: &RuntimeState) -> &'static str {
+    match state {
+        RuntimeState::Stopped => "off",
+        RuntimeState::StartingMcp | RuntimeState::WaitingMcpReady => "starting",
+        RuntimeState::StartingPolicyEnforcement
+        | RuntimeState::WaitingPolicyReady
+        | RuntimeState::StartingTunnel
+        | RuntimeState::WaitingTunnelReady
+        | RuntimeState::Ready => "online",
+        RuntimeState::Recovering { component, .. } => match component {
+            RuntimeComponent::CodingRuntime => "recovering",
+            RuntimeComponent::PolicyEnforcement | RuntimeComponent::Tunnel => "online",
+        },
+        RuntimeState::SwitchingWorkspace { .. } => "recovering",
+        RuntimeState::Faulted(_) => "fault",
     }
 }
 fn task_projection(status: &CurrentTaskStatus) -> Option<TaskProjection> {

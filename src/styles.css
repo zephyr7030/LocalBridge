@@ -10,6 +10,14 @@
   --control-neutral:#f2f2f7;
   --control-neutral-hover:#e8e8ed;
   --control-focus:rgba(0,122,255,.3);
+  --accent:#0071e3;
+  --accent-hover:#0077ed;
+  --admin-accent:#b66a00;
+  --admin-accent-hover:#9f5d00;
+  --status-ready:#30a46c;
+  --status-starting:#d99000;
+  --status-fault:#d70015;
+  --status-unknown:#aeaeb2;
 }
 *{box-sizing:border-box}
 html,body,#root{width:100%;min-width:0;height:100%;min-height:0}
@@ -36,12 +44,14 @@ button{cursor:pointer}
   line-height:1.2;
   transition:background-color .14s ease,border-color .14s ease,box-shadow .14s ease,transform .06s ease;
 }
-.primary{background:#1d1d1f;border-color:#1d1d1f;color:#fff}
+.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .secondary{background:var(--control-neutral);border-color:var(--control-border);color:#1d1d1f}
 .ghost{background:#fff;border-color:var(--control-border);color:#1d1d1f}
 .choice{background:var(--control-neutral);border-color:var(--control-border);color:#3a3a3c}
-.choice.selected{background:#1d1d1f;border-color:#1d1d1f;color:#fff}
-.primary:not(:disabled):hover,.choice.selected:not(:disabled):hover{background:#343437;border-color:#343437}
+.choice.selected{background:var(--accent);border-color:var(--accent);color:#fff}
+.choice.admin-choice.selected{background:var(--admin-accent);border-color:var(--admin-accent);color:#fff}
+.primary:not(:disabled):hover,.choice.selected:not(:disabled):hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.choice.admin-choice.selected:not(:disabled):hover{background:var(--admin-accent-hover);border-color:var(--admin-accent-hover)}
 .secondary:not(:disabled):hover,.choice:not(.selected):not(:disabled):hover{background:var(--control-neutral-hover);border-color:var(--control-border-hover)}
 .ghost:not(:disabled):hover{background:#f5f5f7;border-color:var(--control-border-hover)}
 .ghost:not(:disabled):active,.secondary:not(:disabled):active,.primary:not(:disabled):active,.choice:not(:disabled):active{transform:translateY(1px)}
@@ -59,6 +69,12 @@ button{cursor:pointer}
 .project-actions,.inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 select,input[type="text"],input[type="password"]{min-height:var(--control-height);border:1px solid rgba(0,0,0,.12);border-radius:var(--control-radius);background:#fff;padding:0 11px;color:#1d1d1f}
 .access-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.service-value{display:inline-flex;align-items:center;justify-content:flex-end;gap:8px}
+.service-status-dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--status-unknown)}
+.service-status-dot.status-ready{background:var(--status-ready)}
+.service-status-dot.status-starting{background:var(--status-starting)}
+.service-status-dot.status-fault{background:var(--status-fault)}
+.service-status-dot.status-unknown{background:var(--status-unknown)}
 .task-row{display:flex;align-items:center;gap:10px;min-height:26px;padding:2px;font-size:14px}
 .activity-dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:#8e8e93}
 .activity-dot.active{background:#34c759;animation:task-pulse 1.35s ease-in-out infinite}

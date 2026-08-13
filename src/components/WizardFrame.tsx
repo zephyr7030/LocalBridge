@@ -4,7 +4,7 @@ export function WizardFrame({ step, title, children, footer }: { step: number; t
   return (
     <main className="onboarding-shell">
       <section className="onboarding-page" aria-labelledby="onboarding-title">
-        <div className="onboarding-step">{step} / 6</div>
+        <div className="onboarding-step">{step} / 5</div>
         <h1 id="onboarding-title">{title}</h1>
         <div className="onboarding-body">{children}</div>
         <div className="onboarding-footer">{footer}</div>

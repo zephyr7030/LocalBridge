@@ -137,20 +137,20 @@ icon package
 
 ## 首次引导
 
-首次启动固定为 **6 屏**，不得自行增加第 7 屏、说明卡片或冗余按钮。
+首次启动固定为 **严格 5 屏**，不得增加第 6 屏、说明卡片或冗余步骤。旧 `Local Bridge 使用确认` 整页已经废弃并删除。
 
-首次引导本身就是当前窗口的唯一主要内容，视觉上必须采用**整页布局**：6 屏共同页面直接使用自定义 window chrome 下的完整内容区。禁止先铺一块大面积空白背景，再在中央放置一个带圆角、阴影或边框的“向导卡片/弹窗/对话框”作为整个页面；不得形成“窗口里又套一个窗口”的观感。页面级 padding、字段分组、状态行和局部控件可以保留，但不得重新构造一个浮动的整体向导外壳。
+首次引导本身就是当前窗口的唯一主要内容，视觉上必须采用**整页布局**：5 屏共同页面直接使用自定义 window chrome 下的完整内容区。禁止先铺一块大面积空白背景，再在中央放置一个带圆角、阴影或边框的“向导卡片/弹窗/对话框”作为整个页面；不得形成“窗口里又套一个窗口”的观感。页面级 padding、字段分组、状态行和局部控件可以保留，但不得重新构造一个浮动的整体向导外壳。
 
 顺序：
 
 ```text
-欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → Local Bridge 使用确认 → 启动检查 → 主界面
+欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → 启动检查 → 主界面
 ```
 
 ### 第 1 屏
 
 ```text
-1 / 6
+1 / 5
 
 
 简单设置 即可开始
@@ -168,7 +168,7 @@ LocalBridge是链接ChatGPT与本地代码的工具
 字段标签固定为 `Tunnel ID` 与 `Runtime API Key`。
 
 ```text
-2 / 6
+2 / 5
 
 
 连接 OpenAI
@@ -183,15 +183,15 @@ Runtime API Key
 运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志或命令行。
 
 
-                                      继续
+返回                                  继续
 ```
 
-`继续` 只做基础校验和安全保存；Runtime API Key 不进入 settings、日志、CLI 或 browser storage。
+`继续` 只做基础校验和安全保存；Runtime API Key 不进入 settings、日志、CLI 或 browser storage。第 2 屏必须提供明确 `返回` 到第 1 屏。
 
 ### 第 3 屏
 
 ```text
-3 / 6
+3 / 5
 
 
 项目与权限
@@ -211,29 +211,33 @@ Runtime API Key
   允许管理员操作
 
 
-                                      继续
+返回                                  继续
 ```
 
-项目与权限必须位于同一屏。新项目选择以原生 Windows 文件夹选择器为主交互，不以手填绝对路径作为主流程。管理员模式只保存偏好，不自动弹 UAC。
+项目与权限必须位于同一屏。新项目选择以原生 Windows 文件夹选择器为主交互，不以手填绝对路径作为主流程。管理员模式只保存偏好，不自动弹 UAC。第 3 屏必须提供明确 `返回` 到第 2 屏。
+
+三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白；禁止固定高度压缩说明，说明换行时按钮必须安全自动增高，固定 900×620 实机渲染不得出现文字贴边。此项是人工视觉 Gate，不能仅凭 CSS 存在 `padding` 自动判 PASS。普通选中项使用统一蓝色 `#0071e3`；管理员模式在 onboarding 与 Dashboard 均使用黄色/琥珀逻辑色，不得被普通蓝色 selected 规则覆盖。
 
 ### 第 4 屏
 
 ```text
-4 / 6
+4 / 5
 
 
 创建自定义插件
 
 在插件设置页面最底端，打开“开发者模式”
-                              打开 ChatGPT插件设置
+打开 ChatGPT插件设置
+
+打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件
 
 名称       Local Bridge                         复制
 Tunnel ID  <当前已保存 Tunnel ID>               复制
 
-                                      打开插件管理页
+打开插件管理页
 
 
-                                      继续
+返回                                  继续
 ```
 
 `打开 ChatGPT插件设置` 只允许 Rust 固定 allowlist 通过系统默认浏览器打开：
@@ -244,31 +248,16 @@ Tunnel ID  <当前已保存 Tunnel ID>               复制
 
 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`
 
-前端不能传入、拼接或修改上述 URL；不使用 WebView。中部严格只有 `名称` 与 `Tunnel ID` 两行，不显示“本地服务”。名称固定为 `Local Bridge`；Tunnel ID 必须来自当前已持久化的 StartupProfile，而非尚未保存的输入框值。两行复制按钮状态独立，成功后绿色显示 `已复制` 精确 3 秒并保持按钮几何尺寸不变。
+前端不能传入、拼接或修改上述 URL；不使用 WebView。两个“打开”按钮都属于左侧操作流，不得右对齐。信息区严格只有 `名称` 与 `Tunnel ID` 两行，不显示“本地服务”。名称固定为 `Local Bridge`；Tunnel ID 必须来自当前已持久化的 StartupProfile，而非尚未保存的输入框值。两行复制按钮状态独立，成功后绿色显示 `已复制` 精确 3 秒并保持按钮几何尺寸不变。第 4 屏底部必须同时有明确 `返回` 与 `继续`。
 
-第 3 屏保存项目与权限后，必须先启动 selected project、本地 runtime / MCP / OpenAI Tunnel，并等待三项 readiness 全部真实就绪，之后才能进入第 4 屏。不得把唯一 runtime 启动边沿留到第 5/6 屏。
+第 3 屏保存项目与权限后，必须先启动 selected project、本地 runtime / MCP / OpenAI Tunnel，并等待三项 readiness 全部真实就绪，之后才能进入第 4 屏。不得把唯一 runtime 启动边沿留到第 5 屏。第 4 屏必须是用户能够真实创建插件的可执行步骤，而不是服务尚未启动时的说明页。
 
 ### 第 5 屏
-
-```text
-5 / 6
-
-
-Local Bridge 使用确认
-
-返回 ChatGPT 后即可尝试选择 Local Bridge；LocalBridge 不判断 ChatGPT 是否已连接。
-
-                                      继续
-```
-
-LocalBridge 不伪造或猜测 ChatGPT 是否已创建 Local Bridge，不读取 ChatGPT 会话。若本屏需要展示或复制 connector endpoint，必须来自 Rust 的 typed projection，并以已验证 Tunnel/control-plane metadata 为依据；禁止前端从 Tunnel ID 推导或自行拼接 URL。复制成功反馈预留固定空间，不得推动布局。
-
-### 第 6 屏
 
 检查中：
 
 ```text
-6 / 6
+5 / 5
 
 
 正在准备
@@ -279,8 +268,8 @@ LocalBridge 不伪造或猜测 ChatGPT 是否已创建 Local Bridge，不读取 
 ○ OpenAI Tunnel
 
 
-                                  确定
-                                  灰色
+返回                              确定
+                                  灰色/disabled
 ```
 
 后台：
@@ -301,7 +290,7 @@ Tunnel start → ready
 三项全部通过后：
 
 ```text
-6 / 6
+5 / 5
 
 
 正在准备
@@ -315,7 +304,7 @@ Tunnel start → ready
 配置完成，在插件中选择刚刚添加的Local Bridge试试吧
 
 
-                                  确定
+返回                              确定
 ```
 
 此时才：
@@ -324,15 +313,19 @@ Tunnel start → ready
 - 启用 `确定`；
 - 用户点击 `确定` 后设置 `onboarding_complete = true` 并进入主界面。
 
+第 5 屏必须提供明确 `返回` 到第 4 屏。启动检查的状态圆点必须直接跟随同源 typed 状态：`Ready / 正常 → 绿色`、`Starting / 等待 → 黄色/琥珀色`、`Fault / 失败 → 红色`、`Unknown / 未启动 → 灰色`。Dashboard 的主要服务状态旁必须使用完全相同的状态来源与颜色语义，禁止两处各维护一套状态或出现“文字已变化但圆点颜色固定”。
+
 禁止：
 
 - 自动跳转；
-- 第 7 屏；
+- 第 6 屏；
 - “ChatGPT 连接”第四个检查项；
 - 第二个完成按钮；
 - 测试通过前显示完成提示。
 
-失败时只显示一句最关键错误和一个必要动作。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。所有提示遵循最小必要原则。
+除第 1 屏外，第 2/3/4/5 屏都必须有明确 `返回`。任何保存、启动或配置失败都不能把用户锁死，最终启动检查页必须能返回第 4 屏重新配置。
+
+失败时只显示一句最关键错误和一个必要动作。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。普通产品 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；管理员模式是黄色/琥珀逻辑色例外。所有提示遵循最小必要原则。
 
 主窗口固定为 900×620。minimum inner size 与 maximum inner size 均固定为 900×620，`resizable=false`、`maximizable=false`。原生 Windows 窗口 decorations 必须关闭；LocalBridge 只允许一层自定义风格化窗口 chrome，并且外框必须从 client area 的 `(0,0)` 开始、以 100% 宽高贴合整个窗口，不能在原生边框内部再绘制一个内缩“假窗口”。自定义 chrome 必须提供窗口拖拽区、最小化和关闭；不提供最大化。Dashboard 与 onboarding 必须在该固定 client area 内完整可操作。
 ## 权限

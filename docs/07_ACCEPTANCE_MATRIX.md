@@ -163,17 +163,17 @@
 | A151 | MCP tool call | 不能新增/选择/移除项目 |
 | A152 | 当前项目启动时不存在 | 不静默切换其他项目 |
 
-| A171 | 首次启动 | 严格 6 屏，无第 7 屏 |
-| A172 | 3/6 项目选择 | 新项目使用原生 Windows 文件夹选择器 |
-| A173 | 4/6 创建自定义插件 | 固定开发者模式提示；两个 Rust 固定 allowlist 系统浏览器入口；中部严格只有名称/Tunnel ID，持久化 Tunnel ID，禁止本地服务行；两行独立 3 秒绿色复制反馈不位移；第 3 屏启动 runtime/MCP/Tunnel 并全就绪后才能进入；无 WebView/任意 URL |
-| A174 | 5/6 Local Bridge 使用确认 | 不伪造 ChatGPT 状态；endpoint 只来自 Rust verified metadata projection |
-| A175 | 5/6 copy feedback | 不造成布局位移 |
-| A176 | 6/6 | 三项全绿前确定 disabled；全绿后才显示完成提示，不自动跳转 |
-| A177 | G3 按钮 | 一致且可辨识；禁止白底白按钮 |
-| A178 | G3 提示 | 最小必要，不重复堆叠自解释说明 |
+| A171 | 首次启动 | 严格 5 屏，无第 6 屏；欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → 启动检查 |
+| A172 | 3/5 项目与权限 | 新项目使用原生 Windows 文件夹选择器；权限按钮换行自动增高，900×620 视觉留白需人工 Gate；普通 selected 蓝色 `#0071e3`、管理员黄色/琥珀；有明确返回 |
+| A173 | 4/5 创建自定义插件 | 固定开发者模式提示；`打开 ChatGPT插件设置` 左侧固定 Rust allowlist 系统浏览器入口；其下显示“打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件”；中部严格只有名称/Tunnel ID，持久化 Tunnel ID，禁止本地服务行；两行独立 3 秒绿色复制反馈不位移；`打开插件管理页` 同样左侧且固定 allowlist；无 WebView/任意前端 URL；底部返回/继续 |
+| A174 | 3→4 runtime / 返回 | 第 3 屏保存后启动 selected project/runtime/MCP/Tunnel 并全就绪后才进入第 4 屏，唯一启动边沿不得延迟至第 5 屏；除第1屏外第2/3/4/5屏均有返回，失败不得锁死 |
+| A175 | 5/5 状态点 | 仅本地运行环境/编码服务/OpenAI Tunnel；与 Dashboard 使用同源 typed 状态，Ready绿 / Starting琥珀 / Fault红 / Unknown灰 |
+| A176 | 5/5 完成 Gate | 三项全绿前确定 disabled 且隐藏完成提示；全绿后显示固定完成提示并启用确定；不自动跳转；仍可返回第4屏 |
+| A177 | G3 强调色 / 按钮 | 普通 primary、普通 selected 与主要交互统一蓝色 `#0071e3`，黑色不得作为普通 accent；管理员模式黄色/琥珀；按钮一致可辨识，禁止白底白按钮 |
+| A178 | G3 提示 / 状态来源 | 最小必要，不重复堆叠自解释说明；复制/状态反馈不位移；Dashboard 与 onboarding 不得各维护冲突服务状态 |
 | A179 | 固定窗口尺寸 | inner/minimum/maximum size 均为 900×620 |
 | A180 | 禁止缩放 | `resizable=false`，拖拽边框不能改变窗口尺寸 |
 | A181 | 禁止最大化 | `maximizable=false`，最大化入口不可用；Dashboard/onboarding 在固定 client area 内完整可操作 |
 | A182 | 单层窗口 chrome | native `decorations=false`；自定义 chrome edge-to-edge 覆盖 client area，不存在双边框 |
 | A183 | 自定义窗口控制 | 有拖拽区、最小化、关闭，无最大化 |
-| A184 | onboarding 整页布局 | 6 屏直接使用 custom chrome 内容区；不得用居中 floating card/modal/dialog 或大圆角+整体阴影/边框制造“窗口里的窗口” |
+| A184 | onboarding 整页布局 | 5 屏直接使用 custom chrome 内容区；不得用居中 floating card/modal/dialog 或大圆角+整体阴影/边框制造“窗口里的窗口” |

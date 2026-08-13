@@ -67,15 +67,19 @@ Groups         = 5
 UI 冻结补充：
 
 ```text
-首次启动       = 6 屏
-顺序           = 欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → Local Bridge 使用确认 → 启动检查
-第 7 屏        = 禁止
-第 6 屏确认    = 三项全绿后才启用
+首次启动       = 严格 5 屏
+顺序           = 欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → 启动检查
+第 6 屏        = 禁止；`Local Bridge 使用确认` 页面已删除
+第 5 屏确认    = 三项全绿后才启用
 自动进入主界面 = 禁止
-创建自定义插件 = 两个 Rust 固定 allowlist 系统浏览器入口；信息仅“名称 / Tunnel ID”；禁止 WebView/任意 URL/本地服务行
+创建自定义插件 = 两个 Rust 固定 allowlist 系统浏览器入口且均位于左侧操作流；插件设置按钮下显示“打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件”；信息仅“名称 / Tunnel ID”；禁止 WebView/任意 URL/本地服务行；底部有返回/继续
 第3→4屏       = 保存项目与权限后先启动项目/runtime/MCP/Tunnel并全就绪，再进入第4屏
+返回路径       = 除第1屏外，第2/3/4/5屏均必须明确可返回；失败不得锁死
 项目选择       = 原生 Windows 文件夹选择器为主交互
 按钮           = 统一且可辨识；禁止白底白按钮
+普通强调色     = 蓝色 #0071e3；黑色不得作为普通 primary/selected accent
+管理员逻辑色   = onboarding 与 Dashboard 均为黄色/琥珀色，不得被蓝色 selected 覆盖
+服务状态点     = Ready绿 / Starting琥珀 / Fault红 / Unknown灰；onboarding 与 Dashboard 使用同源状态
 窗口           = 固定 900×620；minimum=maximum=900×620；禁止缩放与最大化
 窗口验收       = `resizable=false`、`maximizable=false`；拖拽边框/最大化均不能改变 client size
 窗口边框       = `decorations=false`；唯一自定义 chrome 必须贴满 client area；禁止原生+自定义双边框；保留拖拽/最小化/关闭

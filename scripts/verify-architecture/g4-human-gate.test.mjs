@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { PRE_G4_GATE_AUTHORIZATION, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, normalizeG3HumanReviewAmendment, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -183,6 +183,79 @@ postRatificationDrift.prs["LB-018"].writable_paths.push("src/**");
 assert.match(validatePreG4GateAuthorization(postRatificationDrift, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
 const badRatificationGit = { ...ratifiedGit, commitPaths: (commit) => commit === ratificationCommit ? [...ratification.paths, "src-tauri/src/lib.rs"] : ratifiedGit.commitPaths(commit) };
 assert.match(validatePreG4GateAuthorization(ratifiedContracts, badRatificationGit, expected, ratification).join("|"), /later-contract-ratification-commit-scope/);
+
+const humanReviewAmendmentFixture = {
+  "LB-015": {
+    required_artifacts: [
+      "blue #0071e3 standard product accent with amber administrator-mode exception",
+      "shared typed service-status dot presentation for Dashboard and onboarding",
+    ],
+    required_tests: [
+      "primary and ordinary selected controls use the blue #0071e3 accent rather than black",
+      "administrator mode uses amber logical selection styling and is not overridden by ordinary blue selected styling",
+      "Dashboard tunnel and coding service states render status dots using Ready green Starting amber Fault red Unknown gray semantics from the same typed status source used by onboarding",
+      "Dashboard does not maintain an independent conflicting service-status color state",
+    ],
+  },
+  "LB-016": {
+    required_artifacts: ["five-screen onboarding flow"],
+    required_tests: [
+      "screen 4 ChatGPT plugin-settings action is placed in the left-side action flow",
+      "screen 4 shows 打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件 beneath the plugin-settings action",
+      "screen 4 lower plugin-management action is placed in the left-side action flow",
+      "onboarding has exactly five screens",
+      "ordinary selected permission modes use the standard blue accent while administrator mode uses amber logical styling in onboarding and Dashboard",
+      "onboarding never defers its only runtime startup edge until screen 5",
+      "screen 4 provides an explicit back action to screen 3 and a continue action to screen 5",
+      "screens 2 3 4 and 5 each provide an explicit back path and save start or configuration failure never traps the user",
+      "copy-success feedback reserves layout space and causes no layout shift",
+      "screen 5 contains only local runtime environment coding service and OpenAI Tunnel checks",
+      "screen 5 status dots map Ready to green Starting to amber Fault to red and Unknown to gray using the shared typed service-status source",
+      "screen 5 confirm is disabled until all three checks are green",
+      "screen 5 success message is hidden until all three checks are green",
+      "screen 5 success message is 配置完成，在插件中选择刚刚添加的Local Bridge试试吧",
+      "screen 5 does not auto-advance",
+      "screen 5 provides an explicit back action to screen 4",
+      "screen 5 confirm enters main UI after readiness",
+      "onboarding has no sixth screen",
+      "screen 4 uses Local Bridge as the user-facing connector term",
+      "primary and ordinary selected wizard controls use the blue #0071e3 accent rather than black",
+    ],
+  },
+};
+assert.equal(hasExactG3HumanReviewAmendment(humanReviewAmendmentFixture), true);
+const normalizedHumanReview = normalizeG3HumanReviewAmendment(humanReviewAmendmentFixture);
+assert.deepEqual(normalizedHumanReview["LB-015"].required_artifacts, []);
+assert.deepEqual(normalizedHumanReview["LB-015"].required_tests, []);
+assert.deepEqual(normalizedHumanReview["LB-016"].required_artifacts, ["six-screen onboarding flow"]);
+for (const restored of [
+  "onboarding has exactly six screens",
+  "onboarding never defers its only runtime startup edge until screen 5 or screen 6",
+  "screen 5 provides only the minimum connector confirmation/use guidance and does not pretend to detect ChatGPT state",
+  "if a connector endpoint is displayed or copied it comes from a typed Rust projection backed by verified tunnel or control-plane metadata",
+  "frontend never derives a connector endpoint from Tunnel ID or fabricates one",
+  "screen 6 contains only local runtime environment coding service and OpenAI Tunnel checks",
+  "onboarding has no seventh screen",
+]) assert.equal(normalizedHumanReview["LB-016"].required_tests.includes(restored), true);
+
+const changedTunelHint = structuredClone(humanReviewAmendmentFixture);
+changedTunelHint["LB-016"].required_tests = changedTunelHint["LB-016"].required_tests.map((item) => item.includes("刚刚添加的Tunel") ? item.replace("刚刚添加的Tunel", "刚刚添加的Tunnel") : item);
+assert.equal(hasExactG3HumanReviewAmendment(changedTunelHint), false);
+const rolledBackToSix = structuredClone(humanReviewAmendmentFixture);
+rolledBackToSix["LB-016"].required_artifacts = ["six-screen onboarding flow"];
+assert.equal(hasExactG3HumanReviewAmendment(rolledBackToSix), false);
+const changedBackPath = structuredClone(humanReviewAmendmentFixture);
+changedBackPath["LB-016"].required_tests = changedBackPath["LB-016"].required_tests.map((item) => item.startsWith("screens 2 3 4 and 5 each provide") ? "screens 2 3 and 4 provide a back path" : item);
+assert.equal(hasExactG3HumanReviewAmendment(changedBackPath), false);
+const changedTypedStatus = structuredClone(humanReviewAmendmentFixture);
+changedTypedStatus["LB-016"].required_tests = changedTypedStatus["LB-016"].required_tests.map((item) => item.startsWith("screen 5 status dots map") ? "screen 5 status dots may use independent boolean state" : item);
+assert.equal(hasExactG3HumanReviewAmendment(changedTypedStatus), false);
+const changedRuntimeEdge = structuredClone(humanReviewAmendmentFixture);
+changedRuntimeEdge["LB-016"].required_tests = changedRuntimeEdge["LB-016"].required_tests.map((item) => item.startsWith("onboarding never defers its only runtime startup edge") ? "onboarding may defer runtime startup until screen 5" : item);
+assert.equal(hasExactG3HumanReviewAmendment(changedRuntimeEdge), false);
+const schema19FullRollback = structuredClone(ratifiedContracts);
+schema19FullRollback.schema_version = 19;
+assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
 const base = {
   execution: { current_group: "G3", current_pr: null },

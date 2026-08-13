@@ -24,8 +24,33 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     ] {
         assert_eq!(service_codes(&state), expected);
     }
+    for (state, expected) in [
+        (RuntimeState::Stopped, "off"),
+        (RuntimeState::StartingMcp, "starting"),
+        (RuntimeState::WaitingMcpReady, "starting"),
+        (RuntimeState::StartingPolicyEnforcement, "online"),
+        (RuntimeState::StartingTunnel, "online"),
+        (RuntimeState::Ready, "online"),
+        (
+            RuntimeState::Recovering {
+                component: RuntimeComponent::CodingRuntime,
+                attempt: 1,
+            },
+            "recovering",
+        ),
+        (
+            RuntimeState::Recovering {
+                component: RuntimeComponent::Tunnel,
+                attempt: 1,
+            },
+            "online",
+        ),
+        (RuntimeState::Faulted(RuntimeFault::Unknown), "fault"),
+    ] {
+        assert_eq!(local_environment_service_code(&state), expected);
+    }
     let rendered = serde_json::to_string(&MainProjection {
-        permission: "admin", privilege: "active", tunnel_service: "online", coding_service: "online",
+        permission: "admin", privilege: "active", local_environment_service: "online", tunnel_service: "online", coding_service: "online",
         current_project: None, projects: vec![], current_task: None, runtime_key_saved: true,
         auto_start: true, reconnect: None,
     }).unwrap();

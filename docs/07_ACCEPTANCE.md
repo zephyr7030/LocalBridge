@@ -182,26 +182,26 @@
 | A169 | review governance write | 只能改 PR_INDEX/PROJECT_STATE 状态字段 |
 | A170 | execution | 组内仍严格按 LB 编号顺序 |
 
-| A171 | 首次启动 | 总屏数严格为 6，不存在第 7 屏 |
-| A172 | 1/6 | 标题为“简单设置 即可开始” |
-| A173 | 1/6 | 说明为“LocalBridge是链接ChatGPT与本地代码的工具” |
-| A174 | 1/6 | 只有一个“开始”主按钮 |
-| A175 | 2/6 | 字段为 `Tunnel ID` / `Runtime API Key` |
-| A176 | 2/6 | 密钥下方仅一行安全保存说明 |
-| A177 | 3/6 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器 |
-| A178 | 4/6 创建自定义插件 | 标题为“创建自定义插件”，提示为“在插件设置页面最底端，打开‘开发者模式’”；`打开 ChatGPT插件设置` 只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Plugins` |
-| A179 | 4/6 信息与复制 | 中部严格只有“名称 / Tunnel ID”两行，禁止“本地服务”；Tunnel ID 来自持久化值；两行独立复制成功绿色 `已复制` 精确 3 秒且不位移 |
-| A180 | 4/6 插件管理与时序 | `打开插件管理页` 只经 Rust 固定 allowlist + 系统浏览器打开固定 custom-connector URL；禁止 WebView/任意前端 URL；第 3 屏启动 selected project/runtime/MCP/OpenAI Tunnel 且三项 readiness 全部真实就绪后才可进入第 4 屏，唯一启动边沿不得延迟至第 5/6 屏 |
-| A181 | 5/6 | 使用 `Local Bridge` 术语，不伪造或猜测 ChatGPT 状态 |
-| A182 | 5/6 connector endpoint | 如展示/复制，只来自 Rust typed projection 的已验证 Tunnel/control-plane metadata |
-| A183 | 5/6 connector endpoint | 前端不得从 Tunnel ID 推导、拼接或伪造 endpoint |
-| A184 | 5/6 copy feedback | 复制成功提示不造成布局位移 |
-| A185 | 6/6 未全部 Ready | “确定”灰色且 disabled，不显示完成提示 |
-| A186 | 6/6 全部 Ready | 仅本地运行环境/编码服务/OpenAI Tunnel 三项全部绿色 |
-| A187 | 6/6 全部 Ready | 显示“配置完成，在插件中选择刚刚添加的Local Bridge试试吧” |
-| A188 | 6/6 全部 Ready | “确定”启用但不自动跳转；点击后标记 onboarding_complete 并进入主界面 |
-| A189 | G3 UI 按钮 | 主/次/ghost 使用一致且可辨识的按钮系统，白色表面上不存在难识别白色按钮 |
-| A190 | G3 UI 提示 | 自解释操作不重复堆叠说明，遵循最小必要提示原则 |
+| A171 | 首次启动 | 总屏数严格为 5，不存在第 6 屏；顺序为欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → 启动检查 |
+| A172 | 1/5 | 标题为“简单设置 即可开始” |
+| A173 | 1/5 | 说明为“LocalBridge是链接ChatGPT与本地代码的工具” |
+| A174 | 1/5 | 只有一个“开始”主按钮；第 1 屏是唯一无需返回的屏幕 |
+| A175 | 2/5 | 字段为 `Tunnel ID` / `Runtime API Key`，并有明确“返回” |
+| A176 | 2/5 | 密钥下方仅一行安全保存说明；保存失败时仍可返回，不得锁死 |
+| A177 | 3/5 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器，并有明确“返回” |
+| A178 | 3/5 权限模式 | 三个权限按钮说明换行时安全自动增高，900×620 实机文字与边框留白均衡；该项必须人工视觉验收，不能凭 CSS padding 自动 PASS；普通 selected 使用蓝色 `#0071e3`，管理员模式使用黄色/琥珀逻辑色 |
+| A179 | 4/5 ChatGPT 插件设置 | 标题为“创建自定义插件”，提示为“在插件设置页面最底端，打开‘开发者模式’”；`打开 ChatGPT插件设置` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Plugins` |
+| A180 | 4/5 信息与复制 | 插件设置按钮下显示“打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件”；信息严格只有“名称 / Tunnel ID”两行，禁止“本地服务”；Tunnel ID 来自当前持久化值；两行独立复制成功绿色 `已复制` 精确 3 秒且不位移 |
+| A181 | 4/5 插件管理 | `打开插件管理页` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView/任意前端 URL；底部有“返回 / 继续” |
+| A182 | 3→4 runtime 时序 | 第 3 屏保存项目与权限后立即启动 selected project/runtime/MCP/OpenAI Tunnel，三项 readiness 全部真实就绪后才可进入第 4 屏；唯一启动边沿不得延迟至第 5 屏 |
+| A183 | 5/5 启动检查 | 严格只有本地运行环境/编码服务/OpenAI Tunnel；状态点与 Dashboard 使用同源 typed 状态并映射 Ready=绿、Starting=黄色/琥珀、Fault=红、Unknown=灰 |
+| A184 | 5/5 未全部 Ready | “确定”灰色且 disabled，不显示完成提示；仍有明确“返回”到第 4 屏 |
+| A185 | 5/5 全部 Ready | 显示“配置完成，在插件中选择刚刚添加的Local Bridge试试吧”；“确定”启用但不自动跳转，点击后标记 onboarding_complete 并进入主界面 |
+| A186 | onboarding 返回路径 | 除第 1 屏外，第 2/3/4/5 屏均有明确“返回”；任何保存、启动、配置失败都不能锁死用户 |
+| A187 | G3 普通强调色 | primary、普通 selected、主要交互统一使用原方案蓝色 `#0071e3`；黑色不得作为普通产品 accent |
+| A188 | G3 管理员逻辑色 | onboarding 与 Dashboard 管理员模式统一使用黄色/琥珀色，不得被普通蓝色 selected 规则覆盖 |
+| A189 | Dashboard 服务状态点 | 主要服务状态旁显示状态圆点，与 onboarding 使用同一 typed 状态来源和 Ready/Starting/Fault/Unknown 颜色语义；不得维护冲突状态 |
+| A190 | G3 UI 按钮与提示 | 主/次/ghost 一致且可辨识，白色表面无难识别白色按钮；自解释操作只保留最小必要提示，复制/状态反馈不得造成布局位移 |
 
 | A191 | 品牌资源 | PNG 为 1024×1024 RGBA |
 | A192 | Windows 图标 | ICO 包含 16/24/32/48/64/128/256 px |
@@ -216,4 +216,4 @@
 | A201 | 窗口外框 | native `decorations=false`；仅存在一层 edge-to-edge 自定义 chrome，不出现原生标题栏/边框 + 自定义边框的双框 |
 | A202 | 自定义标题栏 | 可拖拽窗口；提供最小化与关闭；不提供最大化；chrome 从 client `(0,0)` 覆盖 100% 宽高 |
 | A203 | 首次引导整页布局 | onboarding 直接占用 custom chrome 内容区，不存在“大面积空白画布 + 居中 floating card/modal/dialog”整体向导外壳；页面级 padding 与局部分组允许 |
-| A204 | 3/6 权限模式按钮视觉 | 固定 900×620 实际运行窗口中标题/说明与边框留白均衡、换行不拥挤且按钮自动增高；此项为人工视觉验收，CSS 标记存在本身不得构成 PASS |
+| A204 | 3/5 权限模式按钮视觉 | 固定 900×620 实际运行窗口中标题/说明与边框留白均衡、换行不拥挤且按钮自动增高；此项为人工视觉验收，CSS 标记存在本身不得构成 PASS |

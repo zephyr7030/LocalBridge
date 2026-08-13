@@ -143,6 +143,8 @@ Tunnel
 同时冻结全产品共享的按钮与提示基础层：
 
 - 主/次/ghost 按钮使用一致的几何、状态和层级语言；
+- 普通 primary、普通 selected 与主要交互使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；
+- 管理员模式在 onboarding 与 Dashboard 使用黄色/琥珀逻辑色，禁止被普通蓝色 selected 覆盖；
 - 白色或近白背景上的次级按钮必须保持清晰可辨，禁止白底白按钮；
 - 自解释操作不重复堆叠说明，只保留最小必要提示；
 - 状态反馈不得造成布局位移。
@@ -153,6 +155,8 @@ Dashboard 必须直接显示：
 - Coding Runtime 状态；
 - 当前权限模式；
 - **管理员权限实际运行状态**。
+
+Dashboard 的主要服务状态必须显示状态圆点，并与 onboarding 启动检查消费同源 typed 状态：Ready=绿、Starting=黄色/琥珀、Fault=红、Unknown=灰；禁止两处各维护互相冲突的状态颜色。
 
 管理员状态至少支持：
 
@@ -183,31 +187,32 @@ Dashboard 必须直接显示：
 
 ## LB-016 — First-run Wizard
 
-严格 6 屏：
+严格 5 屏，无第 6 屏：
 
 ```text
 欢迎
 → OpenAI
 → 项目与权限
 → 创建自定义插件（第 3 屏先启动项目/runtime/MCP/Tunnel并全就绪；第 4 屏仅名称/Tunnel ID与两个 Rust 固定浏览器入口）
-→ Local Bridge 使用确认
 → 启动检查
 ```
 
 - Screen 2 字段：`Tunnel ID` / `Runtime API Key`；
-- Screen 3 项目与权限合并，新项目以原生 Windows 文件夹选择器为主交互；
-- Screen 4 用户可见术语统一为 `Local Bridge`，只允许系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；
-- Screen 4 不使用 WebView，前端不得传入任意 URL；
-- Screen 5 只做最小必要的 Local Bridge 完成/使用引导，不伪造 ChatGPT 状态；
-- 若展示/复制 connector endpoint，只能使用 Rust typed projection 的已验证 Tunnel/control-plane metadata，禁止根据 Tunnel ID 推导；
-- 复制成功反馈不得造成布局位移；
-- Screen 6 只检查本地运行环境、编码服务、OpenAI Tunnel，三项全绿前 `确定` disabled，不自动跳转；
-- Screen 6 全绿后完成提示严格为 `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`；
+- Screen 3 项目与权限合并，新项目以原生 Windows 文件夹选择器为主交互；权限按钮不得固定高度压缩说明，换行自动增高，900×620 视觉留白必须由人工 Gate 验收；普通 selected 为蓝色 `#0071e3`，管理员模式为黄色/琥珀；
+- Screen 3 保存项目与权限后立即启动 selected project/runtime/MCP/OpenAI Tunnel，三项真实就绪后才允许进入 Screen 4；唯一 runtime 启动边沿不得延迟到 Screen 5；
+- Screen 4 标题固定 `创建自定义插件`，开发者模式提示固定；`打开 ChatGPT插件设置` 左侧放置，只允许 Rust 固定 allowlist + 系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Plugins`；
+- 其下固定显示 `打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件`；
+- Screen 4 信息严格只有 `名称 = Local Bridge` / `Tunnel ID = 当前持久化保存值`，禁止“本地服务”；两行各自复制，绿色 `已复制` 精确 3 秒，不得布局位移；
+- `打开插件管理页` 同样位于左侧，只允许 Rust 固定 allowlist + 系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；两个入口均禁止 WebView 和前端 URL 参数；
+- Screen 4 底部必须有 `返回` / `继续`；
+- Screen 5 只检查本地运行环境、编码服务、OpenAI Tunnel；状态点使用与 Dashboard 同源 typed 状态并映射 Ready绿 / Starting琥珀 / Fault红 / Unknown灰；三项全绿前 `确定` disabled，不自动跳转；
+- Screen 5 全绿后完成提示严格为 `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`；
+- 除 Screen 1 外，Screen 2/3/4/5 都必须有明确 `返回`；保存、启动、配置失败不得锁死用户；
 - 主窗口固定 900×620；minimum/maximum inner size 均为 900×620，`resizable=false`、`maximizable=false`，不允许用户改变窗口尺寸；
 - native decorations 关闭；全产品共享唯一自定义 chrome，外框 edge-to-edge 绑定完整 client area，禁止原生边框与风格化边框同时存在；自定义 chrome 负责拖拽、最小化、关闭且无最大化；
 - Dashboard 与 onboarding 必须在固定 900×620 client area 内完整可操作；不再要求 resize/maximize 响应式布局或真实 resize E2E；
 - onboarding 采用整页布局并直接使用 custom chrome 内容区；禁止将整个向导做成居中 floating card/modal/dialog，也禁止大面积空白背景包围一个带圆角/阴影/边框的二级“窗口”；
-- 权限包含编辑/完整/管理员三档；向导不自动触发 UAC。
+- 权限包含编辑/完整/管理员三档；向导不自动触发 UAC；普通产品 accent 为蓝色 `#0071e3`，管理员模式为黄色/琥珀逻辑色。
 
 ## LB-017 — Diagnostics
 

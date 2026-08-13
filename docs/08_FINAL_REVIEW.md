@@ -48,23 +48,27 @@ current_pr    = LB-000
 
 G0 审查 PASS 前 G1 不得开始。
 
-Additional UI freeze (superseded by explicit user contract amendment on 2026-08-13):
+Current UI freeze (explicit user contract amendment on 2026-08-13; supersedes all earlier onboarding/UI freezes):
 
-- onboarding = exactly 6 screens;
-- 1/6 = `简单设置 即可开始`;
-- OpenAI = screen 2 with `Tunnel ID` and `Runtime API Key` labels;
-- workspace + permission = screen 3 and uses the native Windows folder picker as the primary new-project interaction;
-- screen 4 = `创建自定义插件`; exact developer-mode hint; only two information rows `名称 / Tunnel ID` with persisted Tunnel ID and independent 3-second stable copy feedback; no `本地服务`; `打开 ChatGPT插件设置` and `打开插件管理页` are argument-free frontend actions backed by Rust fixed allowlists and the system browser for `https://chatgpt.com/plugins#settings/Plugins` and `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`; Screen 3 starts selected project/runtime/MCP/Tunnel and reaches all-ready before Screen 4;
-- screen 5 = `Local Bridge 使用确认`, with minimum guidance and no fabricated ChatGPT-state detection;
-- no screen 7;
-- screen 6 confirm disabled until all three checks are green;
-- completion hint appears only after readiness and is exactly `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`;
+- onboarding = exactly 5 screens: 欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → 启动检查; there is no screen 6 and the former `Local Bridge 使用确认` page is removed;
+- 1/5 = `简单设置 即可开始`; screen 1 is the only screen without a back action;
+- OpenAI = screen 2 with `Tunnel ID` and `Runtime API Key` labels and an explicit back action;
+- workspace + permission = screen 3 and uses the native Windows folder picker as the primary new-project interaction; all three permission buttons grow safely for wrapped descriptive text and require human 900×620 visual acceptance for balanced content-to-border spacing; ordinary selected state uses blue `#0071e3`, administrator mode uses amber/yellow in onboarding and Dashboard; screen 3 has an explicit back action;
+- after screen 3 saves project and permission, it starts selected project/runtime/MCP/OpenAI Tunnel and reaches real all-ready before screen 4; the unique runtime startup edge must not be deferred until screen 5;
+- screen 4 = `创建自定义插件`; exact developer-mode hint; `打开 ChatGPT插件设置` is in the left-side action flow and is an argument-free frontend action backed by a Rust fixed allowlist + system browser for `https://chatgpt.com/plugins#settings/Plugins`; directly beneath it display `打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件`;
+- screen 4 has exactly two information rows `名称 = Local Bridge` / `Tunnel ID = current persisted saved value`, no `本地服务`; each row has independent stable green `已复制` feedback for exactly 3 seconds with no layout shift;
+- `打开插件管理页` is also in the left-side action flow and is an argument-free frontend action backed by a Rust fixed allowlist + system browser for `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`; both browser actions forbid WebView and arbitrary/frontend-provided URLs; screen 4 has explicit `返回` and `继续`;
+- screen 5 is `启动检查`, containing only 本地运行环境 / 编码服务 / OpenAI Tunnel; status dots consume the same typed status source as Dashboard and map Ready=green, Starting=amber/yellow, Fault=red, Unknown=gray;
+- screen 5 confirm is disabled and completion hint hidden until all three checks are green; completion hint is exactly `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`; no auto-advance; screen 5 has an explicit back action to screen 4;
+- screens 2/3/4/5 all have explicit back paths; save/start/configuration failures must never trap the user;
+- ordinary primary/selected/product-accent UI uses original blue `#0071e3`; black is not the ordinary product accent; administrator mode is the amber/yellow logical-color exception;
+- Dashboard primary service status dots use the same typed source and Ready/Starting/Fault/Unknown color semantics as onboarding; independent conflicting state is forbidden;
 - main window is fixed at 900×620; minimum and maximum inner size are both 900×620;
 - `resizable=false` and `maximizable=false`; ordinary user interaction cannot change the main-window size;
 - native Windows decorations are disabled; exactly one custom edge-to-edge chrome fills the client area and provides drag/minimize/close without maximize or a double frame;
 - Dashboard/onboarding must remain complete and operable inside that fixed client area; no resize/maximize responsive E2E is required;
 - onboarding itself is a full-page single-content layout inside the custom chrome content area; a centered floating wizard card/modal/dialog surrounded by a large empty canvas is forbidden;
-- user clicks confirm to enter main UI;
+- user clicks screen-5 confirm to enter main UI;
 - buttons use one coherent visible affordance system; white-on-white ambiguous controls and layout-shifting copy feedback are forbidden.
 
 

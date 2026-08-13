@@ -84,6 +84,31 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB015-006",
+      "scope": [
+        "src/styles.css",
+        "src/App.tsx",
+        "src/bridge.ts",
+        "src/presentation.ts",
+        "src/components/ServiceStatusDot.tsx",
+        "src/__tests__/presentation.test.ts",
+        "src-tauri/src/commands/ui.rs",
+        "tests/unit/ui/backend_projection.rs",
+        "tests/unit/ui/lb015_status_accent_contract.test.mjs",
+        "scripts/authorization-records/LB-015.json"
+      ],
+      "actions": [
+        "Restore the ordinary product primary and selected accent to exact blue #0071e3 while giving administrator selection a later amber logical override",
+        "Add Dashboard service status dots and a shared ServiceStatusDot presentation mapping Ready green Starting or recovering amber Fault red and Unknown or stopped gray",
+        "Project local-environment status from the same typed RuntimeState lifecycle used by the Dashboard runtime projection instead of an independent filesystem-derived visual state"
+      ],
+      "reason": "G3 human manual review generation 1 found the ordinary product accent had regressed to black, administrator selection could be overridden by global selected styling, and Dashboard/onboarding service status presentation lacked a shared typed color semantic.",
+      "evidence_ref": "Explicit user G3 review repair instruction on 2026-08-13 requiring #0071e3 ordinary accent, amber administrator mode, Dashboard status dots, and one shared typed Ready/Starting/Fault/Unknown source for onboarding and Dashboard.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

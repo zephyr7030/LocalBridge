@@ -89,6 +89,23 @@ G4 = BLOCKED
 LB-018 = BLOCKED
 ```
 
+若后续人工实测细审核 FAIL，不得抹掉已经成立的独立对抗审查 PASS provenance；人工 Gate 与独立组审是两个不同维度。状态迁移固定为：
+
+```text
+G3.status = REWORK_REQUIRED
+G3.review_status = PASS
+G3.human_review_status = FAIL
+G3.reopen_from_pr = 最早受影响的 G3 PR
+reopen_from_pr = REWORK_REQUIRED
+其后同组 PR = BLOCKED
+current_group = G3
+current_pr = reopen_from_pr
+G4 = BLOCKED
+LB-018 = BLOCKED
+```
+
+从 `reopen_from_pr` 起重新按 LB 编号顺序执行；完成返工后必须重新通过所需 G3 审查与人工 Gate，不能仅凭旧的人工截图、旧测试 PASS 或旧 review generation 解锁 G4。
+
 人工 Gate 的事实证据默认不可信：审查智能体可质疑、要求复测、独立验证或拒绝采信执行智能体和用户提供的日志、截图、口头结论与测试描述。用户/执行智能体陈述不是自动 PASS。
 
 执行智能体允许预授权，但每一项实际使用的预授权必须具体记录：

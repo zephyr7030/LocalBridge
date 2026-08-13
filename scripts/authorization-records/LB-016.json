@@ -279,6 +279,30 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-014",
+      "scope": [
+        "src/components/WizardFrame.tsx",
+        "src/components/ReadinessCheck.tsx",
+        "src/features/onboarding/Onboarding.tsx",
+        "src/features/onboarding/onboarding.css",
+        "tests/e2e/onboarding/lb016_contract.test.mjs",
+        "scripts/verify-architecture/g4-human-gate.mjs",
+        "scripts/verify-architecture/g4-human-gate.test.mjs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Migrate production onboarding from the superseded six-screen flow to the exact five-screen flow 欢迎 OpenAI 项目与权限 创建自定义插件 启动检查, removing Local Bridge 使用确认 and any sixth-screen path while preserving explicit back navigation on screens 2 through 5",
+        "Preserve the existing Screen-3 selected-project runtime/MCP/OpenAI Tunnel start-and-bounded-readiness edge before Screen 4; add the exact Screen-4 Tunel guidance, left-side browser-action flow, and explicit 返回/继续 controls",
+        "Make Screen-5 readiness consume the same typed MainProjection ServiceCode and shared ServiceStatusDot presentation as Dashboard so Ready Starting Fault Unknown have one green amber red gray semantic source",
+        "Update the LB-016 contract regression and frozen-contract verifier with an exact fail-closed authorization for the five-screen, blue-accent, shared-status correction without accepting unrelated PR contract drift"
+      ],
+      "reason": "G3 human manual review generation 1 replaced the obsolete six-screen onboarding contract with a strict five-screen flow and identified missing Screen-4 back/left-action guidance plus inconsistent readiness-dot semantics; the review explicitly required preserving the already-correct Screen-3 runtime-ready-before-Screen-4 logic.",
+      "evidence_ref": "Explicit user G3 review repair instruction on 2026-08-13 requiring strict 5 screens, removal of Local Bridge 使用确认 and Screen 6, exact Tunel guidance, left-side Screen-4 actions, back paths on Screens 2-5, shared typed green/amber/red/gray status dots, and preservation of Screen-3 runtime readiness before Screen 4.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }
