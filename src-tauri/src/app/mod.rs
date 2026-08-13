@@ -3,23 +3,23 @@ use crate::state::{
     WorkspaceControlState,
 };
 
-mod background;
 #[cfg(windows)]
 mod autostart;
+mod background;
 #[cfg(windows)]
 mod single_instance;
 #[cfg(windows)]
 mod startup;
 mod startup_profile;
 
+#[cfg(windows)]
+pub use autostart::{
+    AutostartError, AutostartManager, CURRENT_USER_RUN_KEY, LOCALBRIDGE_RUN_VALUE,
+};
 pub use background::{
     BackgroundRecoveryAction, DesktopExitError, DesktopLifecycle, DesktopRuntimeStartError,
     ExitRuntime, PrivilegeExit, ShutdownReport, StartupMode, attention_action, recovery_action,
     shutdown_in_security_order,
-};
-#[cfg(windows)]
-pub use autostart::{
-    AutostartError, AutostartManager, CURRENT_USER_RUN_KEY, LOCALBRIDGE_RUN_VALUE,
 };
 #[cfg(windows)]
 pub use single_instance::{SingleInstanceAcquire, SingleInstanceError, SingleInstanceGuard};
@@ -29,8 +29,8 @@ pub use startup::{
     manual_stop_services,
 };
 pub use startup_profile::{
-    STARTUP_PROFILE_FILE_NAME, STARTUP_PROFILE_SCHEMA_VERSION, StartupProfile,
-    StartupProfileError, StartupProfileStore,
+    STARTUP_PROFILE_FILE_NAME, STARTUP_PROFILE_SCHEMA_VERSION, StartupProfile, StartupProfileError,
+    StartupProfileStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -88,6 +88,106 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-006",
+      "scope": [
+        "src-tauri/Cargo.toml",
+        "src-tauri/src/app/background.rs",
+        "src-tauri/src/runtime/orchestrator.rs",
+        "src-tauri/src/tunnel/health.rs",
+        "src-tauri/src/tunnel/mod.rs",
+        "src-tauri/src/tunnel/runtime.rs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "project the connector endpoint from verified Tunnel control-plane metadata through a typed Rust value instead of deriving it from Tunnel ID in the frontend",
+        "expose the typed connector endpoint through the existing runtime lifecycle boundary for LB-016 onboarding",
+        "enable only the Windows API features required by the native folder picker and existing system-browser adapter"
+      ],
+      "reason": "The ratified six-screen LB-016 contract requires a typed connector endpoint backed by verified Tunnel/control-plane metadata and a native Windows folder picker; the stable runtime adapter and lifecycle projection live outside LB-016 normal writable paths.",
+      "evidence_ref": "Explicit user G3 REWORK_REQUIRED repair instruction on 2026-08-13 requiring typed verified connector endpoint projection and native Windows folder selection; PR_CONTRACTS.json schema 18 six-screen ratification",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-007",
+      "scope": [
+        "AGENTS.md",
+        "START_HERE.md",
+        "PR_CONTRACTS.json",
+        "PROJECT_STATE.json",
+        "docs/01_PRODUCT_UX.md",
+        "docs/04_UX_SPEC.md",
+        "docs/06_PR_PLAN.md",
+        "docs/07_ACCEPTANCE.md",
+        "docs/07_ACCEPTANCE_MATRIX.md",
+        "docs/08_FINAL_REVIEW.md",
+        "skills/ui/SKILL.md",
+        "src-tauri/src/tray/mod.rs",
+        "scripts/verify-architecture/g4-human-gate.mjs",
+        "scripts/verify-architecture/g4-human-gate.test.mjs",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Synchronize the frozen LB-016 contract, UX, acceptance, UI skill, production onboarding and tests to the exact final success copy and Local Bridge user-facing terminology",
+        "Add the 900x620 default / 720x500 minimum resizable-window and viewport-responsive onboarding contract at the existing main-window creation seam",
+        "Allow only this exact authorized LB-016 semantic correction through the frozen-contract verifier while unrelated contract drift remains fail-closed"
+      ],
+      "reason": "G3 independent pre-review found that LB-016 production and frozen requirements still self-certified the obsolete completion copy and generic connector terminology, and that the resizable 900x620 window lacked a minimum/viewport-responsive wizard contract.",
+      "evidence_ref": "Explicit user G3 repair instruction on 2026-08-13 requiring exact success copy 配置完成，在插件中选择刚刚添加的Local Bridge试试吧, Local Bridge user-facing terminology, and complete responsive behavior under window resizing.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-008",
+      "scope": [
+        "授权信息.txt",
+        "scripts/authorization-records/LB-016.json"
+      ],
+      "actions": [
+        "Restore the immutable governance evidence file 授权信息.txt byte-for-byte from the committed HEAD version after validation detected it had been deleted from the working tree",
+        "Preserve the existing governance evidence content, canonical SHA256 and historical authorization semantics without widening any verifier"
+      ],
+      "reason": "During the explicitly authorized LB-016 repair, ARCH-024 failed with working-evidence-drift and git status confirmed 授权信息.txt was deleted from the working tree even though the committed evidence remained intact. Exact restoration is required to preserve, rather than bypass, the governance trust evidence.",
+      "evidence_ref": "Explicit user G3 repair instruction on 2026-08-13 plus deterministic ARCH-024 validation evidence in the same repair showing the immutable governance evidence file was missing from the working tree.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB016-009",
+      "scope": [
+        "src-tauri/src/main.rs",
+        "src-tauri/src/lib.rs",
+        "src-tauri/src/tray/mod.rs",
+        "PR_CONTRACTS.json",
+        "AGENTS.md",
+        "docs/01_PRODUCT_UX.md",
+        "docs/04_UX_SPEC.md",
+        "docs/06_PR_PLAN.md",
+        "docs/07_ACCEPTANCE.md",
+        "docs/07_ACCEPTANCE_MATRIX.md",
+        "docs/08_FINAL_REVIEW.md",
+        "scripts/verify-architecture/g4-human-gate.mjs",
+        "scripts/verify-architecture/g4-human-gate.test.mjs",
+        "scripts/authorization-records/LB-016.json",
+        "START_HERE.md",
+        "PROJECT_STATE.json",
+        "skills/ui/SKILL.md"
+      ],
+      "actions": [
+        "Bind the production main WebView bounds explicitly to the native main-window client area at creation and on every resize event",
+        "Freeze the requirement that Dashboard and onboarding must reflow with the real WebView viewport rather than only satisfy static CSS markers",
+        "Require a real Windows Tauri/WebView2 resize E2E that cross-checks native client dimensions against JavaScript viewport and component rectangles"
+      ],
+      "reason": "G3 resize pre-review reproduced a real native-window/WebView viewport desynchronization and identified the previous LB-016 static responsive test as a false-positive.",
+      "evidence_ref": "Explicit user repair instruction on 2026-08-13 requiring real maximized/drag-resized native-window to WebView client-area synchronization, Dashboard/onboarding reflow, and a true resize E2E before generation 2 review.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

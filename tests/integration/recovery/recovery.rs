@@ -28,6 +28,7 @@ impl RecoveryClock for FakeClock {
 #[derive(Clone)]
 struct RecoveryDriver {
     events: SharedEvents,
+    fail_mcp_starts: SharedFailures,
     fail_tunnel_starts: SharedFailures,
     tunnel_start_fault: SharedFault,
     cancel_on_tunnel_recovery_ready: SharedCancellation,
@@ -40,6 +41,7 @@ struct RecoveryDriver {
 impl RecoveryDriver {
     fn new() -> (Self, SharedEvents, SharedFailures, SharedHealth, SharedHealth) {
         let events = Rc::new(RefCell::new(Vec::new()));
+        let fail_mcp_starts = Rc::new(RefCell::new(0));
         let fail_tunnel_starts = Rc::new(RefCell::new(0));
         let tunnel_start_fault = Rc::new(RefCell::new(RuntimeFault::TunnelExited));
         let cancel_on_tunnel_recovery_ready = Rc::new(RefCell::new(None));
@@ -49,6 +51,7 @@ impl RecoveryDriver {
         (
             Self {
                 events: events.clone(),
+                fail_mcp_starts,
                 fail_tunnel_starts: fail_tunnel_starts.clone(),
                 tunnel_start_fault,
                 cancel_on_tunnel_recovery_ready,
@@ -77,7 +80,15 @@ impl RuntimeDriver for RecoveryDriver {
     type Pep = &'static str;
     type Tunnel = &'static str;
 
-    fn start_mcp(&mut self) -> Result<Self::Mcp, RuntimeFault> { self.event("mcp.start"); Ok("mcp") }
+    fn start_mcp(&mut self) -> Result<Self::Mcp, RuntimeFault> {
+        self.event("mcp.start");
+        let mut remaining = self.fail_mcp_starts.borrow_mut();
+        if *remaining > 0 {
+            *remaining -= 1;
+            return Err(RuntimeFault::McpSpawnFailed);
+        }
+        Ok("mcp")
+    }
     fn confirm_mcp_ready(&mut self, _mcp: &mut Self::Mcp) -> Result<(), RuntimeFault> {
         self.event("mcp.ready");
         if *self.mcp_healthy.borrow() { Ok(()) } else { Err(RuntimeFault::McpExited) }
@@ -468,6 +479,121 @@ fn permission_switch_during_backoff_rearms_same_generation_without_budget_reset(
     assert_eq!(outage.id, generation);
     assert!(!outage.user_attention_emitted());
     assert!(monitored.recovery_clock().sleeps.is_empty());
+}
+
+#[test]
+fn successful_workspace_switch_retires_exhausted_generation_and_new_workspace_gets_full_budget() {
+    let (driver, _, fail_counter, _, _) = RecoveryDriver::new();
+    let tunnel_healthy = driver.tunnel_healthy.clone();
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
+    *tunnel_healthy.borrow_mut() = false;
+    *fail_counter.borrow_mut() = 5;
+
+    assert!(monitored.monitor_once().is_none());
+    let mut exhausted = None;
+    for (index, delay) in [1, 2, 5, 10, 30].into_iter().enumerate() {
+        monitored.recovery_clock_mut().advance(Duration::from_secs(delay));
+        let outcome = monitored.monitor_once();
+        if index == 4 { exhausted = outcome; } else { assert!(outcome.is_none()); }
+    }
+    let old_generation = match exhausted.expect("old workspace exhausts") {
+        RecoveryOutcome::Exhausted { generation, user_attention_required, .. } => {
+            assert!(user_attention_required);
+            generation
+        }
+        other => panic!("expected old exhausted generation, got {other:?}"),
+    };
+    assert_eq!(monitored.controller.current_attempt(), 5);
+    assert!(monitored.runtime().active_outage().unwrap().user_attention_emitted());
+
+    *fail_counter.borrow_mut() = 0;
+    monitored.cancellation().cancel();
+    monitored
+        .switch_workspace_after_control_cancellation(
+            Path::new(r"D:\project\replacement"),
+            Some(Path::new(r"D:\project\active")),
+        )
+        .expect("explicit switch to replacement workspace succeeds");
+    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
+    assert!(monitored.runtime().active_outage().is_none());
+    assert_eq!(monitored.controller.active_generation(), None);
+    assert_eq!(monitored.controller.current_attempt(), 0);
+
+    *tunnel_healthy.borrow_mut() = false;
+    *fail_counter.borrow_mut() = 5;
+    assert!(monitored.monitor_once().is_none());
+    let new_generation = monitored.runtime().active_outage().unwrap().id;
+    assert_ne!(new_generation, old_generation);
+    let mut new_exhausted = None;
+    for (index, delay) in [1, 2, 5, 10, 30].into_iter().enumerate() {
+        monitored.recovery_clock_mut().advance(Duration::from_secs(delay));
+        let outcome = monitored.monitor_once();
+        if index == 4 { new_exhausted = outcome; } else { assert!(outcome.is_none()); }
+    }
+    assert!(matches!(
+        new_exhausted,
+        Some(RecoveryOutcome::Exhausted { generation, user_attention_required: true, .. })
+            if generation == new_generation
+    ));
+    assert_eq!(monitored.controller.current_attempt(), 5);
+    assert!(monitored.recovery_clock().sleeps.is_empty());
+}
+
+#[test]
+fn failed_workspace_switch_and_failed_rollback_retire_stale_auto_recovery_fail_closed() {
+    let (driver, events, _, _, _) = RecoveryDriver::new();
+    let fail_mcp_starts = driver.fail_mcp_starts.clone();
+    let tunnel_healthy = driver.tunnel_healthy.clone();
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
+    events.borrow_mut().clear();
+    *tunnel_healthy.borrow_mut() = false;
+
+    assert!(monitored.monitor_once().is_none());
+    assert!(monitored.runtime().active_outage().is_some());
+    assert!(monitored.pending_auto.is_some());
+
+    monitored.cancellation().cancel();
+    *fail_mcp_starts.borrow_mut() = 2;
+    let error = monitored
+        .switch_workspace_after_control_cancellation(
+            Path::new(r"D:\project\replacement"),
+            Some(Path::new(r"D:\project\active")),
+        )
+        .expect_err("candidate start and rollback start both fail");
+    assert_eq!(error.candidate_fault, RuntimeFault::McpSpawnFailed);
+    assert_eq!(error.rollback_fault, Some(RuntimeFault::McpSpawnFailed));
+    assert_eq!(error.rollback_cleanup_fault, None);
+    assert_eq!(
+        monitored.runtime().state(),
+        &RuntimeState::Faulted(RuntimeFault::McpSpawnFailed)
+    );
+    assert!(monitored.pending_auto.is_none(), "stale automatic recovery must be retired");
+    assert_eq!(monitored.controller.active_generation(), None);
+    assert!(monitored.runtime().active_outage().is_none());
+    assert_eq!(monitored.controller.current_attempt(), 0);
+
+    let starts_after_failure = events
+        .borrow()
+        .iter()
+        .filter(|event| **event == "mcp.start")
+        .count();
+    for _ in 0..3 {
+        monitored.recovery_clock_mut().advance(Duration::from_secs(60));
+        assert!(monitored.monitor_once().is_none());
+    }
+    assert_eq!(
+        events.borrow().iter().filter(|event| **event == "mcp.start").count(),
+        starts_after_failure,
+        "Faulted rollback failure must not reactivate the stale generation"
+    );
+    assert!(
+        monitored.manual_retry_current_outage().is_none(),
+        "retired stale outage cannot be replayed against an uncertain workspace configuration"
+    );
 }
 
 #[test]

@@ -142,7 +142,7 @@ icon package
 顺序：
 
 ```text
-欢迎 → OpenAI → 项目与权限 → ChatGPT 自定义连接器设置 → ChatGPT 使用确认 → 启动检查 → 主界面
+欢迎 → OpenAI → 项目与权限 → Local Bridge 设置 → Local Bridge 使用确认 → 启动检查 → 主界面
 ```
 
 ### 第 1 屏
@@ -220,14 +220,14 @@ Runtime API Key
 4 / 6
 
 
-添加 ChatGPT 自定义连接器
+Local Bridge 设置
 
 
-1. 点击“打开连接器设置”
-2. 在 ChatGPT 中创建自定义连接器
-3. 按页面要求填写 LocalBridge 连接信息
+1. 点击“打开 Local Bridge 设置”
+2. 新建 Local Bridge
+3. 保存后返回 LocalBridge
 
-                              打开连接器设置
+                              打开 Local Bridge 设置
 
 
                                       继续
@@ -245,14 +245,14 @@ URL 由 Rust allowlisted 常量控制；前端不能提供任意 URL；不使用
 5 / 6
 
 
-在 ChatGPT 中使用 LocalBridge
+Local Bridge 使用确认
 
-完成连接器创建后，返回这里继续。
+返回 ChatGPT 后即可尝试选择 Local Bridge；LocalBridge 不判断 ChatGPT 是否已连接。
 
                                       继续
 ```
 
-LocalBridge 不伪造或猜测 ChatGPT 是否已创建连接器，不读取 ChatGPT 会话。若本屏需要展示或复制连接器 endpoint，必须来自 Rust 的 typed projection，并以已验证 Tunnel/control-plane metadata 为依据；禁止前端从 Tunnel ID 推导或自行拼接 URL。复制成功反馈预留固定空间，不得推动布局。
+LocalBridge 不伪造或猜测 ChatGPT 是否已创建 Local Bridge，不读取 ChatGPT 会话。若本屏需要展示或复制 connector endpoint，必须来自 Rust 的 typed projection，并以已验证 Tunnel/control-plane metadata 为依据；禁止前端从 Tunnel ID 推导或自行拼接 URL。复制成功反馈预留固定空间，不得推动布局。
 
 ### 第 6 屏
 
@@ -303,7 +303,7 @@ Tunnel start → ready
 ● OpenAI Tunnel
 
 
-设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！
+配置完成，在插件中选择刚刚添加的Local Bridge试试吧
 
 
                                   确定
@@ -324,6 +324,10 @@ Tunnel start → ready
 - 测试通过前显示完成提示。
 
 失败时只显示一句最关键错误和一个必要动作。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。所有提示遵循最小必要原则。
+
+主窗口默认 900×620，最小 720×500，保持可缩放。向导卡片不得依赖固定 `min-height`；布局必须随可用 viewport 高度收缩，主体内容区在空间不足时内部滚动，标题和底部操作保持可达。
+
+窗口 resize/maximize 后，主 WebView 必须重新绑定到 native main-window 的完整 client area；不能只让原生窗口外壳变大。主控界面与 onboarding 都必须按 live WebView viewport 重新布局。`.inner_size/.min_inner_size/.resizable`、`100dvh`、`overflow-y:auto`、无固定 `min-height` 等静态源码检查只属于辅助回归，不能单独构成响应式验收。必须有真实 Windows Tauri/WebView2 resize E2E：至少设置两个不同 native size 并执行 maximize，交叉比较 Tauri `inner_size()` 与 live JS `window.innerWidth/innerHeight × devicePixelRatio`，同时证明 Dashboard/onboarding 的实际 DOM rect 随 viewport 改变。
 ## 权限
 
 ```text

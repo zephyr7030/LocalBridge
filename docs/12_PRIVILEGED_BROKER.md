@@ -91,6 +91,8 @@ LocalBridge 主程序：
 3. 用户由 Windows UAC 决定允许/拒绝；
 4. 只有 Broker 得到管理员令牌。
 
+正式安装必须是机器级 `perMachine`，Broker 位于 Program Files 安装根。发起 `runas` 前，LocalBridge 必须 canonicalize 当前自身路径和 Broker 路径，只允许当前安装目录的精确 sibling `LocalBridge-Privileged-Broker.exe`。路径身份检查后还必须验证实际 Windows security descriptor：Broker、安装目录以及正式安装中一直到 Program Files 根的祖先目录 owner 必须属于受信任 system/admin installer principal，DACL 不得向其他 principal 授予任何内容写入、增加/删除子项、删除、改 DACL/owner 等 mutation right；未知/不可安全解释的 ACL 状态直接拒绝。随后再对当前未提权 token 做非破坏性逐项有效访问探测，只有每个危险 right 都明确 `ACCESS_DENIED` 才可继续；任一 mutation right 可获得或探测出现其他错误都 fail-closed。这样即使目录名处于 Program Files 下，只要其实际 ACL 可被低权限主体修改，也不能成为 UAC Broker 来源。当前 v0.1 不依赖 Authenticode 或 Broker 文件哈希，文档与产品不得暗示存在未实现的签名/hash binding。
+
 禁止：
 
 - LocalBridge 自行绕过 UAC；
@@ -266,19 +268,21 @@ package_install
 privileged_file_operation
 ```
 
-v0.1 正式支持任意管理员命令能力：
+v0.1 暴露通用结构化管理员执行网关：
 
 ```text
 elevated_exec
 ```
 
-它是最高风险 capability，不是 Broker 的默认无条件 RPC。
+它是最高风险 capability，但**不代表任意管理员程序或任意 shell**。每个可执行文件/动作必须有明确 review profile；v0.1 初始 profile 仅包含受信任 Windows System32 `whoami.exe` 的窄只读身份查询动作，用于验证完整 Broker 路径。未来扩展必须逐项增加 contract + adversarial tests。
 
 `elevated_exec` 必须：
 
 - 仅在 Elevated + Broker Active；
-- PEP policy 明确 allow；
+- PEP 使用真实 `program / args / workdir` 明确 review 后 allow；
 - 通过 PEP capability policy；
+- arbitrary program、shell/interpreter、未审核 workdir/参数 fail-closed；
+- 通过外部程序间接修改 LocalBridge control-plane 仍为 deny-always；
 - 不允许 MCP 改写 Broker policy；
 - 完整审计命令元数据；
 - 日志 secret redaction；

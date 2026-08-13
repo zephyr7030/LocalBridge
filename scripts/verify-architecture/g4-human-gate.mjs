@@ -33,16 +33,57 @@ export const PRE_G4_GATE_AUTHORIZATION = Object.freeze({
   ],
 });
 
+export const G3_SIX_SCREEN_CONTRACT_RATIFICATION = Object.freeze({
+  commit: "6084c69a03892a79ce066b2c532378dd2b2d3e44",
+  paths: [
+    "AGENTS.md",
+    "PROJECT_STATE.json",
+    "PR_CONTRACTS.json",
+    "PR_INDEX.json",
+    "START_HERE.md",
+    "docs/01_PRODUCT_UX.md",
+    "docs/04_UX_SPEC.md",
+    "docs/06_PR_PLAN.md",
+    "docs/07_ACCEPTANCE.md",
+    "docs/07_ACCEPTANCE_MATRIX.md",
+    "docs/08_FINAL_REVIEW.md",
+    "skills/ui/SKILL.md",
+  ],
+});
+
 const canonicalText = (value) => String(value ?? "").replace(/\r\n/g, "\n");
 const canonicalSha256 = (value) => createHash("sha256").update(canonicalText(value), "utf8").digest("hex");
 const normalizePaths = (values) => [...new Set(values ?? [])].map((value) => value.replaceAll("\\", "/")).sort();
 const nonEmptyString = (value) => typeof value === "string" && value.trim().length > 0;
 
+const LB016_AUTHORIZED_G3_REWORK_2026_08_13 = Object.freeze({
+  oldSuccessTest: "screen 6 success message is 设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！",
+  newSuccessTest: "screen 6 success message is 配置完成，在插件中选择刚刚添加的Local Bridge试试吧",
+  addedArtifacts: [
+    "viewport-responsive resizable onboarding layout",
+    "native-window/WebView client-area resize synchronization",
+  ],
+  addedTests: [
+    "screens 4 and 5 use Local Bridge as the user-facing connector term",
+    "resizable onboarding window has a 720x500 minimum and wizard body adapts to viewport height without fixed card minimum height",
+    "real Windows Tauri resize E2E cross-checks native client area against live WebView JS viewport for two native sizes plus maximize and proves Dashboard and onboarding reflow",
+  ],
+});
+
 function normalizeAuthorizedSemanticCorrections(prs) {
   const normalized = structuredClone(prs ?? null);
   const lb016 = normalized?.["LB-016"];
   if (Array.isArray(lb016?.required_artifacts)) {
-    lb016.required_artifacts = lb016.required_artifacts.filter((item) => item !== "6-screen wizard");
+    lb016.required_artifacts = lb016.required_artifacts.filter((item) =>
+      item !== "6-screen wizard"
+      && !LB016_AUTHORIZED_G3_REWORK_2026_08_13.addedArtifacts.includes(item));
+  }
+  if (Array.isArray(lb016?.required_tests)) {
+    lb016.required_tests = lb016.required_tests
+      .filter((item) => !LB016_AUTHORIZED_G3_REWORK_2026_08_13.addedTests.includes(item))
+      .map((item) => item === LB016_AUTHORIZED_G3_REWORK_2026_08_13.newSuccessTest
+        ? LB016_AUTHORIZED_G3_REWORK_2026_08_13.oldSuccessTest
+        : item);
   }
   return normalized;
 }
@@ -60,7 +101,40 @@ function requiredAuthorizationEvidenceFragments() {
   ];
 }
 
-export function validatePreG4GateAuthorization(contractsDoc, git, expected = PRE_G4_GATE_AUTHORIZATION) {
+function validateLaterContractRatification(git, ratification) {
+  const findings = [];
+  if (!ratification || !EXACT_COMMIT.test(ratification.commit ?? "")
+    || !git.commitExists(ratification.commit) || !git.isAncestor(ratification.commit)) {
+    return ["later-contract-ratification-commit-missing"];
+  }
+  if (JSON.stringify(normalizePaths(git.commitPaths(ratification.commit)))
+    !== JSON.stringify(normalizePaths(ratification.paths))) {
+    findings.push("later-contract-ratification-commit-scope");
+  }
+  const ratified = git.jsonAt(ratification.commit, "PR_CONTRACTS.json");
+  const lb015 = ratified?.prs?.["LB-015"];
+  const lb016 = ratified?.prs?.["LB-016"];
+  const rules = ratified?.rules;
+  if (ratified?.schema_version !== 18
+    || rules?.onboarding_screen_count !== 6
+    || rules?.onboarding_screen_7_forbidden !== true
+    || rules?.ui_button_visible_affordance_required !== true
+    || rules?.ui_white_on_white_ambiguous_button_forbidden !== true
+    || rules?.ui_minimum_prompt_required !== true
+    || !lb015?.required_artifacts?.includes("coherent visible button token system shared across product UI")
+    || !lb016?.required_artifacts?.includes("six-screen onboarding flow")
+    || !lb016?.required_tests?.includes("onboarding has exactly six screens")) {
+    findings.push("later-contract-ratification-content");
+  }
+  return findings;
+}
+
+export function validatePreG4GateAuthorization(
+  contractsDoc,
+  git,
+  expected = PRE_G4_GATE_AUTHORIZATION,
+  laterRatification = G3_SIX_SCREEN_CONTRACT_RATIFICATION,
+) {
   const findings = [];
   const entries = contractsDoc?.rules?.governance_authorizations;
   const entry = Array.isArray(entries) ? entries.find((candidate) => candidate?.id === expected.id) : null;
@@ -100,7 +174,15 @@ export function validatePreG4GateAuthorization(contractsDoc, git, expected = PRE
     findings.push(`${expected.id}:implementation-child-scope`);
   }
   const beforeContracts = git.jsonAt(expected.evidenceCommit, "PR_CONTRACTS.json");
-  if (JSON.stringify(normalizeAuthorizedSemanticCorrections(beforeContracts?.prs))
+  let contractBaseline = beforeContracts;
+  if (laterRatification) {
+    const ratificationFindings = validateLaterContractRatification(git, laterRatification);
+    for (const detail of ratificationFindings) findings.push(detail);
+    if (ratificationFindings.length === 0) {
+      contractBaseline = git.jsonAt(laterRatification.commit, "PR_CONTRACTS.json");
+    }
+  }
+  if (JSON.stringify(normalizeAuthorizedSemanticCorrections(contractBaseline?.prs))
     !== JSON.stringify(normalizeAuthorizedSemanticCorrections(contractsDoc?.prs))) {
     findings.push(`${expected.id}:ordinary-pr-contract-drift`);
   }

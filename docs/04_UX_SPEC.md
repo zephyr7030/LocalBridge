@@ -66,9 +66,9 @@
 - 后台开机不会自动弹出系统授权；
 - 只有管理员代理获得管理员令牌。
 
-## 第 4 屏 — ChatGPT 自定义连接器设置
+## 第 4 屏 — Local Bridge 设置
 
-只提供完成配置所需的简短步骤与一个主要动作：`打开连接器设置`。
+只提供完成配置所需的简短步骤与一个主要动作：`打开 Local Bridge 设置`。用户可见术语统一为 `Local Bridge`。
 
 只允许系统默认浏览器打开：
 
@@ -76,9 +76,9 @@
 
 禁止 WebView、禁止前端传任意 URL、禁止读取 ChatGPT 会话。
 
-## 第 5 屏 — ChatGPT 使用确认
+## 第 5 屏 — Local Bridge 使用确认
 
-提示用户完成连接器创建后返回并继续，不伪造“已连接 ChatGPT”等无法由 LocalBridge 独立证明的状态。
+提示用户完成 Local Bridge 创建后返回并继续，不伪造“已连接 ChatGPT”等无法由 LocalBridge 独立证明的状态。
 
 若需要展示/复制连接器 endpoint：
 
@@ -108,7 +108,17 @@ OpenAI Tunnel
 
 失败项只给一个最有价值的修复动作，不暴露 Guard、PID、端口、transport 等内部结构。
 
-三项未全绿时 `确定` disabled 且不显示完成提示；全绿后才显示 `设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！` 并启用 `确定`。禁止自动跳转。
+三项未全绿时 `确定` disabled 且不显示完成提示；全绿后才显示 `配置完成，在插件中选择刚刚添加的Local Bridge试试吧` 并启用 `确定`。禁止自动跳转。
+
+## 窗口缩放
+
+- 主窗口默认 900×620，最小 720×500，保持 `resizable`；
+- 向导布局必须以可用 viewport 为约束，不依赖固定卡片最小高度；
+- 高度不足时主体内容区内部滚动，标题与底部按钮保持可达；
+- 小高度 viewport 通过减少 padding/gap 适配，不得反向提高卡片最小高度。
+- 每次 native window resize/maximize 都必须把主 WebView bounds 同步到完整 client area；Dashboard 与 onboarding 都必须依据 live WebView viewport 重排；
+- 静态检查 `.inner_size/.min_inner_size/.resizable`、`100dvh`、`overflow` 或旧固定高度是否消失，只能作为辅助证据；
+- 必须运行真实 Windows Tauri/WebView2 resize E2E，至少覆盖两个 native size 与 maximize，并验证 Tauri `inner_size()` ≈ `window.innerWidth/innerHeight × devicePixelRatio`，同时验证 Dashboard/onboarding 实际 rect 发生对应变化。
 
 ## 按钮与提示
 

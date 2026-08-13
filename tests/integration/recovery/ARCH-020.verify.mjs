@@ -65,7 +65,23 @@ for (const required of [
   "resume_after_control_interruption",
   "pending.permit = fresh_permit",
   "next_attempt: attempt",
+  "retire_recovery_for_failed_workspace_switch",
+  "previous_runtime_restored",
 ]) if (!recovery.includes(required)) throw new Error(`ARCH-020 missing cooperative reconnect invariant: ${required}`);
+const switchStart = recovery.indexOf("pub fn switch_workspace_after_control_cancellation");
+const switchEnd = recovery.indexOf("pub fn monitor_once", switchStart);
+const workspaceSwitch = recovery.slice(switchStart, switchEnd);
+for (const required of [
+  "self.runtime.state() == &RuntimeState::Ready",
+  "error.candidate_cleanup_fault.is_none()",
+  "error.rollback_fault.is_none()",
+  "error.rollback_cleanup_fault.is_none()",
+  "self.resume_after_control_interruption()",
+  "self.retire_recovery_for_failed_workspace_switch()",
+]) if (!workspaceSwitch.includes(required)) throw new Error(`ARCH-020 workspace-switch recovery gate missing: ${required}`);
+if (workspaceSwitch.indexOf("self.resume_after_control_interruption()") < workspaceSwitch.indexOf("if previous_runtime_restored")) {
+  throw new Error("ARCH-020 workspace-switch failure may resume recovery before proving clean rollback to Ready");
+}
 if (cooperative.includes(".sleep(")) throw new Error("ARCH-020 cooperative automatic recovery must use deadlines, not blocking sleep");
 const cancellableCalls = (cooperative.match(/recover_minimal_cancellable/g) ?? []).length;
 if (cancellableCalls !== 1) throw new Error(`ARCH-020 cooperative monitor must execute at most one reconnect attempt per advancement, found ${cancellableCalls} call sites`);
@@ -82,4 +98,4 @@ for (const required of [
   "self.state = RuntimeState::Recovering { component, attempt }",
 ]) if (!cancellable.includes(required)) throw new Error(`ARCH-020 control cancellation can terminalize cooperative recovery: ${required}`);
 if (/while\s*\([^)]*reconnect|loop\s*\{[\s\S]{0,200}recover_minimal/.test(recovery)) throw new Error("ARCH-020 unbounded reconnect loop detected");
-console.log("ARCH-020_VERIFY=PASS sync_attempts=5 cooperative_deadlines=1,2,5,10,30 cooperative_sleep=false post_attempt_retryability=true cancellable=true control_interrupt_resume=true same_generation_exhaustion_terminal=true minimal_layer_health_gate=true");
+console.log("ARCH-020_VERIFY=PASS sync_attempts=5 cooperative_deadlines=1,2,5,10,30 cooperative_sleep=false post_attempt_retryability=true cancellable=true control_interrupt_resume=true failed_workspace_rollback_fail_closed=true same_generation_exhaustion_terminal=true minimal_layer_health_gate=true");

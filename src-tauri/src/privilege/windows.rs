@@ -1,47 +1,80 @@
+#[cfg(not(debug_assertions))]
+use std::ffi::OsString;
 use std::ffi::{OsStr, c_void};
 use std::fmt;
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStrExt;
+#[cfg(not(debug_assertions))]
+use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY,
-    ERROR_PIPE_CONNECTED,
-    GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_OBJECT_0,
-    WAIT_TIMEOUT,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_FILE_NOT_FOUND,
+    ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_ALL, GENERIC_READ, GENERIC_WRITE, HANDLE,
+    INVALID_HANDLE_VALUE, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
 };
-use windows_sys::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
+use windows_sys::Win32::Security::Cryptography::{
+    BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
+};
 use windows_sys::Win32::Security::{
-    GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetTokenInformation,
+    INHERIT_ONLY_ACE, OWNER_SECURITY_INFORMATION, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+    TokenUser,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FlushFileBuffers, OPEN_EXISTING,
-    ReadFile, WriteFile,
+    CreateFileW, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL,
+    FILE_DELETE_CHILD, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_FIRST_PIPE_INSTANCE,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
+    FILE_WRITE_EA, FlushFileBuffers, OPEN_EXISTING, ReadFile, WriteFile,
 };
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeClientProcessId,
-    PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
-    WaitNamedPipeW,
+    PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, WaitNamedPipeW,
 };
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetProcessId, OpenProcessToken, TerminateProcess, WaitForSingleObject,
 };
+#[cfg(not(debug_assertions))]
+use windows_sys::Win32::UI::Shell::{CSIDL_PROGRAM_FILES, SHGFP_TYPE_CURRENT, SHGetFolderPathW};
 use windows_sys::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
 
-use super::{
-    MAX_BROKER_FRAME_BYTES, SESSION_NONCE_BYTES, SessionNonce,
-};
 use super::protocol::is_valid_broker_pipe_name;
+use super::{MAX_BROKER_FRAME_BYTES, SESSION_NONCE_BYTES, SessionNonce};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PIPE_BUFFER_BYTES: u32 = MAX_BROKER_FRAME_BYTES as u32 + 4;
 const PIPE_ACCESS_DUPLEX_MODE: u32 = 0x0000_0003;
+const ACCESS_ALLOWED_ACE_KIND: u8 = 0x00;
+const ACCESS_DENIED_ACE_KIND: u8 = 0x01;
+const DELETE_ACCESS: u32 = 0x0001_0000;
+const WRITE_DAC_ACCESS: u32 = 0x0004_0000;
+const WRITE_OWNER_ACCESS: u32 = 0x0008_0000;
+const TRUSTED_INSTALL_MUTATION_SIDS: [&str; 5] = [
+    "S-1-5-18",
+    "S-1-5-32-544",
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+    "S-1-3-0",
+    "S-1-3-4",
+];
+const INSTALL_MUTATION_MASK: u32 = GENERIC_ALL
+    | GENERIC_WRITE
+    | DELETE_ACCESS
+    | WRITE_DAC_ACCESS
+    | WRITE_OWNER_ACCESS
+    | FILE_WRITE_DATA
+    | FILE_APPEND_DATA
+    | FILE_WRITE_EA
+    | FILE_WRITE_ATTRIBUTES
+    | FILE_ADD_FILE
+    | FILE_ADD_SUBDIRECTORY
+    | FILE_DELETE_CHILD;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrivilegeIpcError {
@@ -62,12 +95,26 @@ impl fmt::Display for PrivilegeIpcError {
         match self {
             Self::RandomUnavailable => f.write_str("secure random generation unavailable"),
             Self::CurrentUserSidUnavailable => f.write_str("current user SID unavailable"),
-            Self::SecurityDescriptorUnavailable => f.write_str("pipe security descriptor unavailable"),
-            Self::PipeCreateFailed(code) => write!(f, "named pipe creation failed with code {code}"),
-            Self::PipeConnectFailed(code) => write!(f, "named pipe connection failed with code {code}"),
-            Self::UnauthorizedPeer { expected_pid, actual_pid } => write!(f, "named pipe peer mismatch: expected pid {expected_pid}, got {actual_pid}"),
+            Self::SecurityDescriptorUnavailable => {
+                f.write_str("pipe security descriptor unavailable")
+            }
+            Self::PipeCreateFailed(code) => {
+                write!(f, "named pipe creation failed with code {code}")
+            }
+            Self::PipeConnectFailed(code) => {
+                write!(f, "named pipe connection failed with code {code}")
+            }
+            Self::UnauthorizedPeer {
+                expected_pid,
+                actual_pid,
+            } => write!(
+                f,
+                "named pipe peer mismatch: expected pid {expected_pid}, got {actual_pid}"
+            ),
             Self::Disconnected => f.write_str("named pipe disconnected"),
-            Self::IoFailed { operation, code } => write!(f, "named pipe {operation} failed with code {code}"),
+            Self::IoFailed { operation, code } => {
+                write!(f, "named pipe {operation} failed with code {code}")
+            }
             Self::EmptyFrame => f.write_str("named pipe frame is empty"),
             Self::OversizedFrame => f.write_str("named pipe frame exceeds limit"),
         }
@@ -88,9 +135,13 @@ impl fmt::Display for UacLaunchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidBrokerExecutable => f.write_str("privileged broker executable is invalid"),
-            Self::InvalidLaunchContext => f.write_str("privileged broker launch context is invalid"),
+            Self::InvalidLaunchContext => {
+                f.write_str("privileged broker launch context is invalid")
+            }
             Self::UacDenied => f.write_str("privileged broker UAC request was denied"),
-            Self::LaunchFailed(code) => write!(f, "privileged broker launch failed with code {code}"),
+            Self::LaunchFailed(code) => {
+                write!(f, "privileged broker launch failed with code {code}")
+            }
         }
     }
 }
@@ -113,8 +164,12 @@ impl fmt::Debug for ElevatedBrokerProcess {
 }
 
 impl ElevatedBrokerProcess {
-    pub const fn pid(&self) -> u32 { self.pid }
-    pub fn executable(&self) -> &Path { &self.executable }
+    pub const fn pid(&self) -> u32 {
+        self.pid
+    }
+    pub fn executable(&self) -> &Path {
+        &self.executable
+    }
 
     pub fn is_running(&self) -> Result<bool, UacLaunchError> {
         match unsafe { WaitForSingleObject(self.handle, 0) } {
@@ -160,16 +215,10 @@ pub fn launch_broker_with_explicit_uac(
     pipe_name: &str,
     generation: u64,
 ) -> Result<ElevatedBrokerProcess, UacLaunchError> {
-    let valid_name = broker_executable
-        .file_name()
-        .and_then(|value| value.to_str())
-        .is_some_and(|value| value.eq_ignore_ascii_case("localbridge-privileged-broker.exe"));
-    if !broker_executable.is_absolute() || !broker_executable.is_file() || !valid_name {
-        return Err(UacLaunchError::InvalidBrokerExecutable);
-    }
+    let trusted_broker = validate_broker_executable_for_current_install(broker_executable)?;
     let parameters = build_uac_parameters(pipe_name, generation)?;
     let verb = wide_null(OsStr::new("runas"));
-    let executable = wide_null(broker_executable.as_os_str());
+    let executable = wide_null(trusted_broker.as_os_str());
     let parameters = wide_null(OsStr::new(&parameters));
     let mut info: SHELLEXECUTEINFOW = unsafe { zeroed() };
     info.cbSize = size_of::<SHELLEXECUTEINFOW>() as u32;
@@ -198,8 +247,293 @@ pub fn launch_broker_with_explicit_uac(
     Ok(ElevatedBrokerProcess {
         handle: info.hProcess,
         pid,
-        executable: broker_executable.to_path_buf(),
+        executable: trusted_broker,
     })
+}
+
+fn validate_broker_executable_for_current_install(
+    broker_executable: &Path,
+) -> Result<PathBuf, UacLaunchError> {
+    let current_executable =
+        std::env::current_exe().map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    #[cfg(debug_assertions)]
+    let protected_root: Option<PathBuf> = None;
+    #[cfg(not(debug_assertions))]
+    let protected_root = Some(protected_machine_install_root()?);
+    let trusted_broker = validate_broker_executable(
+        broker_executable,
+        &current_executable,
+        protected_root.as_deref(),
+    )?;
+    let current = current_executable
+        .canonicalize()
+        .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    let install_root = current
+        .parent()
+        .ok_or(UacLaunchError::InvalidBrokerExecutable)?;
+    verify_broker_installation_not_mutable_by_unprivileged_principal(
+        install_root,
+        &trusted_broker,
+        protected_root.as_deref(),
+    )?;
+    Ok(trusted_broker)
+}
+
+fn validate_broker_executable(
+    broker_executable: &Path,
+    current_executable: &Path,
+    protected_root: Option<&Path>,
+) -> Result<PathBuf, UacLaunchError> {
+    let valid_name = broker_executable
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("localbridge-privileged-broker.exe"));
+    if !broker_executable.is_absolute() || !current_executable.is_absolute() || !valid_name {
+        return Err(UacLaunchError::InvalidBrokerExecutable);
+    }
+    let metadata = std::fs::symlink_metadata(broker_executable)
+        .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(UacLaunchError::InvalidBrokerExecutable);
+    }
+    let current = current_executable
+        .canonicalize()
+        .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    let install_root = current
+        .parent()
+        .ok_or(UacLaunchError::InvalidBrokerExecutable)?
+        .to_path_buf();
+    let expected = install_root
+        .join("localbridge-privileged-broker.exe")
+        .canonicalize()
+        .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    let requested = broker_executable
+        .canonicalize()
+        .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    if !same_windows_path(&requested, &expected)
+        || !requested
+            .parent()
+            .is_some_and(|parent| same_windows_path(parent, &install_root))
+    {
+        return Err(UacLaunchError::InvalidBrokerExecutable);
+    }
+    if let Some(protected_root) = protected_root {
+        let protected_root = protected_root
+            .canonicalize()
+            .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+        if !windows_path_is_within(&install_root, &protected_root) {
+            return Err(UacLaunchError::InvalidBrokerExecutable);
+        }
+    }
+    Ok(requested)
+}
+
+#[cfg(not(debug_assertions))]
+fn protected_machine_install_root() -> Result<PathBuf, UacLaunchError> {
+    let mut buffer = [0u16; 260];
+    let result = unsafe {
+        SHGetFolderPathW(
+            null_mut(),
+            CSIDL_PROGRAM_FILES as i32,
+            null_mut(),
+            SHGFP_TYPE_CURRENT as u32,
+            buffer.as_mut_ptr(),
+        )
+    };
+    if result < 0 {
+        return Err(UacLaunchError::InvalidBrokerExecutable);
+    }
+    let length = buffer
+        .iter()
+        .position(|value| *value == 0)
+        .unwrap_or(buffer.len());
+    if length == 0 {
+        return Err(UacLaunchError::InvalidBrokerExecutable);
+    }
+    Ok(PathBuf::from(OsString::from_wide(&buffer[..length])))
+}
+
+fn same_windows_path(left: &Path, right: &Path) -> bool {
+    left.to_string_lossy()
+        .eq_ignore_ascii_case(&right.to_string_lossy())
+}
+
+fn windows_path_is_within(path: &Path, root: &Path) -> bool {
+    let normalize = |value: &Path| {
+        value
+            .to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_ascii_lowercase()
+    };
+    let path = normalize(path);
+    let root = normalize(root);
+    path == root || path.strip_prefix(&(root + "\\")).is_some()
+}
+
+fn verify_broker_installation_not_mutable_by_unprivileged_principal(
+    install_root: &Path,
+    broker_executable: &Path,
+    protected_root: Option<&Path>,
+) -> Result<(), UacLaunchError> {
+    validate_install_object_security(broker_executable)?;
+    require_each_access_right_denied(
+        broker_executable,
+        &[
+            FILE_WRITE_DATA,
+            FILE_APPEND_DATA,
+            DELETE_ACCESS,
+            WRITE_DAC_ACCESS,
+            WRITE_OWNER_ACCESS,
+        ],
+        FILE_ATTRIBUTE_NORMAL,
+    )?;
+    validate_install_directory_security(install_root)?;
+
+    if let Some(protected_root) = protected_root {
+        let protected_root = protected_root
+            .canonicalize()
+            .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+        let mut ancestor = install_root.parent();
+        let mut reached_protected_root = same_windows_path(install_root, &protected_root);
+        while let Some(directory) = ancestor {
+            if !windows_path_is_within(directory, &protected_root) {
+                break;
+            }
+            validate_install_directory_security(directory)?;
+            if same_windows_path(directory, &protected_root) {
+                reached_protected_root = true;
+                break;
+            }
+            ancestor = directory.parent();
+        }
+        if !reached_protected_root {
+            return Err(UacLaunchError::InvalidBrokerExecutable);
+        }
+    }
+    Ok(())
+}
+
+fn validate_install_directory_security(path: &Path) -> Result<(), UacLaunchError> {
+    validate_install_object_security(path)?;
+    require_each_access_right_denied(
+        path,
+        &[
+            FILE_ADD_FILE,
+            FILE_ADD_SUBDIRECTORY,
+            FILE_DELETE_CHILD,
+            DELETE_ACCESS,
+            WRITE_DAC_ACCESS,
+            WRITE_OWNER_ACCESS,
+        ],
+        FILE_FLAG_BACKUP_SEMANTICS,
+    )
+}
+
+fn validate_install_object_security(path: &Path) -> Result<(), UacLaunchError> {
+    let path_wide = wide_null(path.as_os_str());
+    let mut owner = null_mut();
+    let mut dacl: *mut ACL = null_mut();
+    let mut descriptor = null_mut();
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            path_wide.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            &mut dacl,
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != 0 || descriptor.is_null() || owner.is_null() || dacl.is_null() {
+        if !descriptor.is_null() {
+            unsafe { LocalFree(descriptor) };
+        }
+        return Err(UacLaunchError::InvalidBrokerExecutable);
+    }
+
+    let validation = (|| {
+        let owner_sid = sid_to_string(owner)?;
+        if !trusted_install_mutation_sid(&owner_sid) {
+            return Err(UacLaunchError::InvalidBrokerExecutable);
+        }
+        let ace_count = unsafe { (*dacl).AceCount };
+        for index in 0..ace_count {
+            let mut ace = null_mut();
+            if unsafe { GetAce(dacl, u32::from(index), &mut ace) } == 0 || ace.is_null() {
+                return Err(UacLaunchError::InvalidBrokerExecutable);
+            }
+            let header = unsafe { &*ace.cast::<ACE_HEADER>() };
+            if header.AceFlags & INHERIT_ONLY_ACE as u8 != 0 {
+                continue;
+            }
+            match header.AceType {
+                ACCESS_ALLOWED_ACE_KIND => {
+                    let allowed = unsafe { &*ace.cast::<ACCESS_ALLOWED_ACE>() };
+                    if allowed.Mask & INSTALL_MUTATION_MASK == 0 {
+                        continue;
+                    }
+                    let sid = (&raw const allowed.SidStart).cast_mut().cast();
+                    let sid = sid_to_string(sid)?;
+                    if !trusted_install_mutation_sid(&sid) {
+                        return Err(UacLaunchError::InvalidBrokerExecutable);
+                    }
+                }
+                ACCESS_DENIED_ACE_KIND => {}
+                _ => return Err(UacLaunchError::InvalidBrokerExecutable),
+            }
+        }
+        Ok(())
+    })();
+    unsafe { LocalFree(descriptor) };
+    validation
+}
+
+fn sid_to_string(sid: *mut c_void) -> Result<String, UacLaunchError> {
+    let mut sid_text: *mut u16 = null_mut();
+    if unsafe { ConvertSidToStringSidW(sid, &mut sid_text) } == 0 || sid_text.is_null() {
+        return Err(UacLaunchError::InvalidBrokerExecutable);
+    }
+    let text = unsafe { wide_ptr_to_string(sid_text) };
+    unsafe { LocalFree(sid_text.cast()) };
+    Ok(text)
+}
+
+fn trusted_install_mutation_sid(sid: &str) -> bool {
+    TRUSTED_INSTALL_MUTATION_SIDS
+        .iter()
+        .any(|trusted| sid.eq_ignore_ascii_case(trusted))
+}
+
+fn require_each_access_right_denied(
+    path: &Path,
+    mutation_rights: &[u32],
+    flags: u32,
+) -> Result<(), UacLaunchError> {
+    let path = wide_null(path.as_os_str());
+    for desired_access in mutation_rights {
+        let handle = unsafe {
+            CreateFileW(
+                path.as_ptr(),
+                *desired_access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                null(),
+                OPEN_EXISTING,
+                flags,
+                null_mut(),
+            )
+        };
+        if handle != INVALID_HANDLE_VALUE {
+            unsafe { CloseHandle(handle) };
+            return Err(UacLaunchError::InvalidBrokerExecutable);
+        }
+        if last_error_code() != ERROR_ACCESS_DENIED {
+            return Err(UacLaunchError::InvalidBrokerExecutable);
+        }
+    }
+    Ok(())
 }
 
 fn build_uac_parameters(pipe_name: &str, generation: u64) -> Result<String, UacLaunchError> {
@@ -224,7 +558,11 @@ fn fill_random(bytes: &mut [u8]) -> Result<(), PrivilegeIpcError> {
             BCRYPT_USE_SYSTEM_PREFERRED_RNG,
         )
     };
-    if status == 0 { Ok(()) } else { Err(PrivilegeIpcError::RandomUnavailable) }
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(PrivilegeIpcError::RandomUnavailable)
+    }
 }
 
 pub struct NamedPipeServer {
@@ -246,7 +584,10 @@ impl NamedPipeServer {
     pub fn create() -> Result<Self, PrivilegeIpcError> {
         let mut suffix = [0u8; 16];
         fill_random(&mut suffix)?;
-        let suffix = suffix.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+        let suffix = suffix
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         let name = format!(r"\\.\pipe\LocalBridge-Privileged-{suffix}");
         let current_user_sid = current_user_sid_string()?;
         let sddl = current_user_pipe_sddl(&current_user_sid);
@@ -285,13 +626,24 @@ impl NamedPipeServer {
         if handle == INVALID_HANDLE_VALUE {
             return Err(PrivilegeIpcError::PipeCreateFailed(last_error_code()));
         }
-        Ok(Self { handle, name, current_user_sid })
+        Ok(Self {
+            handle,
+            name,
+            current_user_sid,
+        })
     }
 
-    pub fn name(&self) -> &str { &self.name }
-    pub fn current_user_sid(&self) -> &str { &self.current_user_sid }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn current_user_sid(&self) -> &str {
+        &self.current_user_sid
+    }
 
-    pub fn accept_expected_client(mut self, expected_pid: u32) -> Result<NamedPipeConnection, PrivilegeIpcError> {
+    pub fn accept_expected_client(
+        mut self,
+        expected_pid: u32,
+    ) -> Result<NamedPipeConnection, PrivilegeIpcError> {
         let connected = unsafe { ConnectNamedPipe(self.handle, null_mut()) };
         if connected == 0 {
             let code = last_error_code();
@@ -301,15 +653,24 @@ impl NamedPipeServer {
         }
         let mut actual_pid = 0u32;
         if unsafe { GetNamedPipeClientProcessId(self.handle, &mut actual_pid) } == 0 {
-            return Err(PrivilegeIpcError::IoFailed { operation: "GetNamedPipeClientProcessId", code: last_error_code() });
+            return Err(PrivilegeIpcError::IoFailed {
+                operation: "GetNamedPipeClientProcessId",
+                code: last_error_code(),
+            });
         }
         if actual_pid != expected_pid {
             unsafe { DisconnectNamedPipe(self.handle) };
-            return Err(PrivilegeIpcError::UnauthorizedPeer { expected_pid, actual_pid });
+            return Err(PrivilegeIpcError::UnauthorizedPeer {
+                expected_pid,
+                actual_pid,
+            });
         }
         let handle = self.handle;
         self.handle = INVALID_HANDLE_VALUE;
-        Ok(NamedPipeConnection { handle, server_side: true })
+        Ok(NamedPipeConnection {
+            handle,
+            server_side: true,
+        })
     }
 
     pub fn accept_elevated_client(
@@ -345,7 +706,10 @@ impl NamedPipeClient {
                 )
             };
             if handle != INVALID_HANDLE_VALUE {
-                return Ok(NamedPipeConnection { handle, server_side: false });
+                return Ok(NamedPipeConnection {
+                    handle,
+                    server_side: false,
+                });
             }
             let code = last_error_code();
             if code != ERROR_PIPE_BUSY && code != ERROR_FILE_NOT_FOUND {
@@ -370,18 +734,27 @@ unsafe impl Send for NamedPipeConnection {}
 
 impl fmt::Debug for NamedPipeConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NamedPipeConnection").field("server_side", &self.server_side).finish()
+        f.debug_struct("NamedPipeConnection")
+            .field("server_side", &self.server_side)
+            .finish()
     }
 }
 
 impl NamedPipeConnection {
     pub fn write_frame(&mut self, payload: &[u8]) -> Result<(), PrivilegeIpcError> {
-        if payload.is_empty() { return Err(PrivilegeIpcError::EmptyFrame); }
-        if payload.len() > MAX_BROKER_FRAME_BYTES { return Err(PrivilegeIpcError::OversizedFrame); }
+        if payload.is_empty() {
+            return Err(PrivilegeIpcError::EmptyFrame);
+        }
+        if payload.len() > MAX_BROKER_FRAME_BYTES {
+            return Err(PrivilegeIpcError::OversizedFrame);
+        }
         self.write_all(&(payload.len() as u32).to_le_bytes())?;
         self.write_all(payload)?;
         if unsafe { FlushFileBuffers(self.handle) } == 0 {
-            return Err(PrivilegeIpcError::IoFailed { operation: "FlushFileBuffers", code: last_error_code() });
+            return Err(PrivilegeIpcError::IoFailed {
+                operation: "FlushFileBuffers",
+                code: last_error_code(),
+            });
         }
         Ok(())
     }
@@ -390,8 +763,12 @@ impl NamedPipeConnection {
         let mut length = [0u8; 4];
         self.read_exact(&mut length)?;
         let length = u32::from_le_bytes(length) as usize;
-        if length == 0 { return Err(PrivilegeIpcError::EmptyFrame); }
-        if length > MAX_BROKER_FRAME_BYTES { return Err(PrivilegeIpcError::OversizedFrame); }
+        if length == 0 {
+            return Err(PrivilegeIpcError::EmptyFrame);
+        }
+        if length > MAX_BROKER_FRAME_BYTES {
+            return Err(PrivilegeIpcError::OversizedFrame);
+        }
         let mut payload = vec![0u8; length];
         self.read_exact(&mut payload)?;
         Ok(payload)
@@ -400,9 +777,24 @@ impl NamedPipeConnection {
     fn write_all(&mut self, mut bytes: &[u8]) -> Result<(), PrivilegeIpcError> {
         while !bytes.is_empty() {
             let mut written = 0u32;
-            let ok = unsafe { WriteFile(self.handle, bytes.as_ptr(), bytes.len() as u32, &mut written, null_mut()) };
-            if ok == 0 { return Err(PrivilegeIpcError::IoFailed { operation: "WriteFile", code: last_error_code() }); }
-            if written == 0 { return Err(PrivilegeIpcError::Disconnected); }
+            let ok = unsafe {
+                WriteFile(
+                    self.handle,
+                    bytes.as_ptr(),
+                    bytes.len() as u32,
+                    &mut written,
+                    null_mut(),
+                )
+            };
+            if ok == 0 {
+                return Err(PrivilegeIpcError::IoFailed {
+                    operation: "WriteFile",
+                    code: last_error_code(),
+                });
+            }
+            if written == 0 {
+                return Err(PrivilegeIpcError::Disconnected);
+            }
             bytes = &bytes[written as usize..];
         }
         Ok(())
@@ -411,13 +803,28 @@ impl NamedPipeConnection {
     fn read_exact(&mut self, mut bytes: &mut [u8]) -> Result<(), PrivilegeIpcError> {
         while !bytes.is_empty() {
             let mut read = 0u32;
-            let ok = unsafe { ReadFile(self.handle, bytes.as_mut_ptr(), bytes.len() as u32, &mut read, null_mut()) };
+            let ok = unsafe {
+                ReadFile(
+                    self.handle,
+                    bytes.as_mut_ptr(),
+                    bytes.len() as u32,
+                    &mut read,
+                    null_mut(),
+                )
+            };
             if ok == 0 {
                 let code = last_error_code();
-                if code == ERROR_BROKEN_PIPE { return Err(PrivilegeIpcError::Disconnected); }
-                return Err(PrivilegeIpcError::IoFailed { operation: "ReadFile", code });
+                if code == ERROR_BROKEN_PIPE {
+                    return Err(PrivilegeIpcError::Disconnected);
+                }
+                return Err(PrivilegeIpcError::IoFailed {
+                    operation: "ReadFile",
+                    code,
+                });
             }
-            if read == 0 { return Err(PrivilegeIpcError::Disconnected); }
+            if read == 0 {
+                return Err(PrivilegeIpcError::Disconnected);
+            }
             let (_, rest) = std::mem::take(&mut bytes).split_at_mut(read as usize);
             bytes = rest;
         }
@@ -442,14 +849,27 @@ fn current_user_sid_string() -> Result<String, PrivilegeIpcError> {
     let result = (|| {
         let mut bytes_needed = 0u32;
         unsafe { GetTokenInformation(token, TokenUser, null_mut(), 0, &mut bytes_needed) };
-        if bytes_needed == 0 { return Err(PrivilegeIpcError::CurrentUserSidUnavailable); }
+        if bytes_needed == 0 {
+            return Err(PrivilegeIpcError::CurrentUserSidUnavailable);
+        }
         let mut buffer = vec![0u8; bytes_needed as usize];
-        if unsafe { GetTokenInformation(token, TokenUser, buffer.as_mut_ptr().cast(), bytes_needed, &mut bytes_needed) } == 0 {
+        if unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buffer.as_mut_ptr().cast(),
+                bytes_needed,
+                &mut bytes_needed,
+            )
+        } == 0
+        {
             return Err(PrivilegeIpcError::CurrentUserSidUnavailable);
         }
         let token_user = unsafe { &*(buffer.as_ptr().cast::<TOKEN_USER>()) };
         let mut sid_text: *mut u16 = null_mut();
-        if unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_text) } == 0 || sid_text.is_null() {
+        if unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_text) } == 0
+            || sid_text.is_null()
+        {
             return Err(PrivilegeIpcError::CurrentUserSidUnavailable);
         }
         let text = unsafe { wide_ptr_to_string(sid_text) };
@@ -466,7 +886,9 @@ fn current_user_pipe_sddl(sid: &str) -> String {
 
 unsafe fn wide_ptr_to_string(ptr: *const u16) -> String {
     let mut len = 0usize;
-    while unsafe { *ptr.add(len) } != 0 { len += 1; }
+    while unsafe { *ptr.add(len) } != 0 {
+        len += 1;
+    }
     String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(ptr, len) })
 }
 
@@ -488,6 +910,8 @@ fn last_error_code() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn current_user_acl_sddl_contains_only_current_sid_allow_entry() {
@@ -528,5 +952,52 @@ mod tests {
         }
         assert!(build_uac_parameters("bad pipe", 1).is_err());
         assert!(build_uac_parameters(r"\\.\pipe\LocalBridge-Privileged-a", 0).is_err());
+    }
+
+    #[test]
+    fn broker_launch_target_is_bound_to_canonical_protected_sibling() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-broker-trust-{}-{nonce}",
+            std::process::id()
+        ));
+        let protected = root.join("Program Files");
+        let install = protected.join("LocalBridge");
+        let decoy = root.join("attacker");
+        fs::create_dir_all(&install).unwrap();
+        fs::create_dir_all(&decoy).unwrap();
+        let app = install.join("localbridge.exe");
+        let broker = install.join("localbridge-privileged-broker.exe");
+        let decoy_broker = decoy.join("localbridge-privileged-broker.exe");
+        fs::write(&app, b"test app").unwrap();
+        fs::write(&broker, b"trusted test broker").unwrap();
+        fs::write(&decoy_broker, b"attacker test broker").unwrap();
+
+        let accepted = validate_broker_executable(&broker, &app, Some(&protected)).unwrap();
+        assert!(same_windows_path(
+            &accepted,
+            &broker.canonicalize().unwrap()
+        ));
+        assert_eq!(
+            validate_broker_executable(&decoy_broker, &app, Some(&protected)),
+            Err(UacLaunchError::InvalidBrokerExecutable)
+        );
+        assert_eq!(
+            validate_broker_executable(&broker, &app, Some(&decoy)),
+            Err(UacLaunchError::InvalidBrokerExecutable)
+        );
+        assert_eq!(
+            verify_broker_installation_not_mutable_by_unprivileged_principal(
+                &install,
+                &broker,
+                Some(&protected),
+            ),
+            Err(UacLaunchError::InvalidBrokerExecutable),
+            "a canonical Broker under a same-user-writable Program Files-shaped tree must fail ACL trust"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 }

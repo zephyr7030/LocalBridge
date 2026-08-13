@@ -6,8 +6,7 @@ use std::time::{Duration, Instant};
 use serde_json::Value;
 
 use crate::runtime::{
-    ManagedProcessSpec, ProcessSnapshot, StopDisposition, SupervisorError,
-    WindowsProcessSupervisor,
+    ManagedProcessSpec, ProcessSnapshot, StopDisposition, SupervisorError, WindowsProcessSupervisor,
 };
 use crate::state::RuntimeFault;
 
@@ -140,12 +139,20 @@ impl fmt::Display for CodingToolsRuntimeError {
             Self::InvalidConfiguration => f.write_str("invalid coding runtime configuration"),
             Self::WorkspaceMissing => f.write_str("workspace is missing"),
             Self::WorkspaceInvalid => f.write_str("workspace is not a directory"),
-            Self::RuntimeMissing(component) => write!(f, "bundled runtime component is missing: {component:?}"),
-            Self::RuntimeChecksumMismatch(component) => write!(f, "bundled runtime integrity check failed: {component:?}"),
+            Self::RuntimeMissing(component) => {
+                write!(f, "bundled runtime component is missing: {component:?}")
+            }
+            Self::RuntimeChecksumMismatch(component) => {
+                write!(f, "bundled runtime integrity check failed: {component:?}")
+            }
             Self::PortUnavailable => f.write_str("coding runtime loopback port is unavailable"),
             Self::Supervisor(error) => write!(f, "coding runtime supervisor failure: {error}"),
-            Self::ConnectionUnavailable => f.write_str("coding runtime loopback connection is unavailable"),
-            Self::HttpStatus(status) => write!(f, "coding runtime returned unexpected HTTP status {status}"),
+            Self::ConnectionUnavailable => {
+                f.write_str("coding runtime loopback connection is unavailable")
+            }
+            Self::HttpStatus(status) => {
+                write!(f, "coding runtime returned unexpected HTTP status {status}")
+            }
             Self::ProtocolMismatch => f.write_str("coding runtime protocol identity mismatch"),
             Self::UpstreamRpcError => f.write_str("coding runtime returned an MCP RPC error"),
             Self::McpExited => f.write_str("coding runtime exited before readiness"),
@@ -204,11 +211,9 @@ impl CodingToolsRuntime {
             return Err(CodingToolsRuntimeError::Cancelled);
         }
         let mut runtime = Self::spawn_unready(config, bearer)?;
-        if let Err(error) = runtime.wait_ready_for_recovery(
-            readiness_timeout,
-            probe_timeout,
-            &cancelled,
-        ) {
+        if let Err(error) =
+            runtime.wait_ready_for_recovery(readiness_timeout, probe_timeout, &cancelled)
+        {
             let _ = runtime.supervisor.force_stop();
             return Err(error);
         }
@@ -249,7 +254,10 @@ impl CodingToolsRuntime {
             ("CODING_TOOLS_MCP_SHELL_ENV_INHERIT", "core"),
             ("CODING_TOOLS_MCP_SHELL_ENV_SET", "{}"),
             ("CODING_TOOLS_MCP_DANGEROUSLY_SKIP_ALL_PERMISSIONS", "0"),
-            ("CODING_TOOLS_MCP_DANGEROUSLY_FAKE_READONLY_ANNOTATIONS", "0"),
+            (
+                "CODING_TOOLS_MCP_DANGEROUSLY_FAKE_READONLY_ANNOTATIONS",
+                "0",
+            ),
             ("CODING_TOOLS_MCP_GENERATE_AUTH_TOKEN", "0"),
             ("CODING_TOOLS_MCP_OAUTH_MODE", "0"),
             ("CODING_TOOLS_MCP_ALLOWED_ORIGINS", ""),
@@ -292,7 +300,11 @@ impl CodingToolsRuntime {
         self.session.list_tools()
     }
 
-    pub fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, CodingToolsRuntimeError> {
+    pub fn call_tool(
+        &mut self,
+        name: &str,
+        arguments: Value,
+    ) -> Result<Value, CodingToolsRuntimeError> {
         self.session.call_tool(name, arguments)
     }
 
@@ -303,12 +315,16 @@ impl CodingToolsRuntime {
         request_id: Option<&Value>,
     ) -> Result<Value, CodingToolsRuntimeError> {
         match request_id {
-            Some(request_id) => self.session.call_tool_with_request_id(name, arguments, request_id),
+            Some(request_id) => self
+                .session
+                .call_tool_with_request_id(name, arguments, request_id),
             None => self.session.call_tool(name, arguments),
         }
     }
 
-    pub(crate) fn cancellation_client(&self) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
+    pub(crate) fn cancellation_client(
+        &self,
+    ) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
         self.session.cancellation_client()
     }
 
@@ -354,11 +370,13 @@ impl CodingToolsRuntime {
                 return Err(CodingToolsRuntimeError::McpExited);
             }
             match self.session.initialize_with_timeout(probe_timeout) {
-                Ok(_) => return if cancelled() {
-                    Err(CodingToolsRuntimeError::Cancelled)
-                } else {
-                    Ok(())
-                },
+                Ok(_) => {
+                    return if cancelled() {
+                        Err(CodingToolsRuntimeError::Cancelled)
+                    } else {
+                        Ok(())
+                    };
+                }
                 Err(CodingToolsRuntimeError::ConnectionUnavailable) => {}
                 Err(CodingToolsRuntimeError::HttpStatus(503)) => {}
                 Err(error) => return Err(error),
@@ -378,7 +396,9 @@ fn validate_workspace(workspace: &Path) -> Result<(), CodingToolsRuntimeError> {
     match std::fs::metadata(workspace) {
         Ok(metadata) if metadata.is_dir() => Ok(()),
         Ok(_) => Err(CodingToolsRuntimeError::WorkspaceInvalid),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(CodingToolsRuntimeError::WorkspaceMissing),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(CodingToolsRuntimeError::WorkspaceMissing)
+        }
         Err(_) => Err(CodingToolsRuntimeError::WorkspaceInvalid),
     }
 }

@@ -19,11 +19,15 @@ pub enum WorkspaceControlError {
 }
 
 impl From<WorkspaceRegistryError> for WorkspaceControlError {
-    fn from(value: WorkspaceRegistryError) -> Self { Self::Registry(value) }
+    fn from(value: WorkspaceRegistryError) -> Self {
+        Self::Registry(value)
+    }
 }
 
 impl From<SettingsStoreError> for WorkspaceControlError {
-    fn from(value: SettingsStoreError) -> Self { Self::Settings(value) }
+    fn from(value: SettingsStoreError) -> Self {
+        Self::Settings(value)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,13 +47,22 @@ pub struct WorkspaceCoordinator {
 impl WorkspaceCoordinator {
     pub fn load(store: SettingsStore) -> Result<Self, WorkspaceControlError> {
         let data = store.load()?;
-        Ok(Self { validator: WorkspaceValidator, store, data })
+        Ok(Self {
+            validator: WorkspaceValidator,
+            store,
+            data,
+        })
     }
 
-    pub fn data(&self) -> &AppData { &self.data }
+    pub fn data(&self) -> &AppData {
+        &self.data
+    }
 
     pub fn validate_active_state(&self) -> Result<WorkspaceControlState, WorkspaceControlError> {
-        self.data.workspace.to_control_state(&self.validator).map_err(Into::into)
+        self.data
+            .workspace
+            .to_control_state(&self.validator)
+            .map_err(Into::into)
     }
 
     pub fn add_and_select<D: RuntimeDriver>(
@@ -68,15 +81,22 @@ impl WorkspaceCoordinator {
             &validated,
             last_opened_at,
         )?;
-        if let Err(error) = runtime.switch_workspace_to(validated.resolved_path(), previous_runtime.as_deref()) {
+        if let Err(error) =
+            runtime.switch_workspace_to(validated.resolved_path(), previous_runtime.as_deref())
+        {
             self.data = before;
             return Err(WorkspaceControlError::RuntimeSwitch(error));
         }
-        self.data.workspace.set_active_reference(selected_id.clone())?;
+        self.data
+            .workspace
+            .set_active_reference(selected_id.clone())?;
         if let Err(error) = self.store.save(&self.data) {
             self.data = before;
             let runtime_rollback_fault = rollback_runtime(runtime, previous_runtime);
-            return Err(WorkspaceControlError::SettingsCommitFailed { error, runtime_rollback_fault });
+            return Err(WorkspaceControlError::SettingsCommitFailed {
+                error,
+                runtime_rollback_fault,
+            });
         }
         Ok(selected_id)
     }
@@ -103,15 +123,22 @@ impl WorkspaceCoordinator {
             &validated,
             last_opened_at,
         )?;
-        if let Err(error) = runtime.switch_workspace_to(validated.resolved_path(), previous_runtime.as_deref()) {
+        if let Err(error) =
+            runtime.switch_workspace_to(validated.resolved_path(), previous_runtime.as_deref())
+        {
             self.data = before;
             return Err(WorkspaceControlError::RuntimeSwitch(error));
         }
-        self.data.workspace.set_active_reference(workspace_id.clone())?;
+        self.data
+            .workspace
+            .set_active_reference(workspace_id.clone())?;
         if let Err(error) = self.store.save(&self.data) {
             self.data = before;
             let runtime_rollback_fault = rollback_runtime(runtime, previous_runtime);
-            return Err(WorkspaceControlError::SettingsCommitFailed { error, runtime_rollback_fault });
+            return Err(WorkspaceControlError::SettingsCommitFailed {
+                error,
+                runtime_rollback_fault,
+            });
         }
         Ok(())
     }
@@ -140,9 +167,16 @@ impl WorkspaceCoordinator {
             } else {
                 None
             };
-            return Err(WorkspaceControlError::SettingsCommitFailed { error, runtime_rollback_fault });
+            return Err(WorkspaceControlError::SettingsCommitFailed {
+                error,
+                runtime_rollback_fault,
+            });
         }
-        Ok(if is_active { WorkspaceRemoval::RemovedActive } else { WorkspaceRemoval::RemovedRemembered })
+        Ok(if is_active {
+            WorkspaceRemoval::RemovedActive
+        } else {
+            WorkspaceRemoval::RemovedRemembered
+        })
     }
 }
 
@@ -165,7 +199,13 @@ fn rollback_runtime<D: RuntimeDriver>(
         Some(previous) => runtime
             .switch_workspace_to(&previous, None)
             .err()
-            .map(|error| error.rollback_fault.unwrap_or(error.candidate_fault)),
+            .map(|error| {
+                error
+                    .rollback_cleanup_fault
+                    .or(error.rollback_fault)
+                    .or(error.candidate_cleanup_fault)
+                    .unwrap_or(error.candidate_fault)
+            }),
         None => runtime.stop().err().map(|error| error.fault),
     }
 }
@@ -182,5 +222,8 @@ fn previous_authorized_runtime<D: RuntimeDriver>(
 
 #[cfg(test)]
 mod tests {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/integration/workspace_switch/workspace_switch.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/integration/workspace_switch/workspace_switch.rs"
+    ));
 }

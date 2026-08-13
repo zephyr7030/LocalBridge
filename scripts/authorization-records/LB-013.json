@@ -50,6 +50,24 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB013-004",
+      "scope": [
+        "src-tauri/src/tray/mod.rs",
+        "tests/integration/background/lb013_contract.test.mjs",
+        "scripts/authorization-records/LB-013.json"
+      ],
+      "actions": [
+        "Render the frozen LocalBridge default window icon in the Windows tray through a tray-only 90 percent center crop so the notification-area glyph is visually larger",
+        "Keep assets/icons/localbridge.png and assets/icons/localbridge.ico byte-for-byte unchanged and preserve their frozen hashes for application and installer branding",
+        "Add regression coverage proving the tray still originates from the frozen default window icon and the visual zoom cannot silently disappear"
+      ],
+      "reason": "Human manual review found the Windows notification-area icon visually undersized. The user explicitly authorized this LB-013 cross-PR correction on 2026-08-13; a tray-only in-memory crop is the narrowest change because it improves small-slot legibility without replacing or redrawing the frozen brand asset.",
+      "evidence_ref": "Explicit user authorization on 2026-08-13: '授权，和修改', referring to the reported LB-013 tray icon visual-size issue.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

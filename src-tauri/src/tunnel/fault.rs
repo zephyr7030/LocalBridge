@@ -5,7 +5,10 @@ use crate::runtime::SupervisorError;
 use crate::state::RuntimeFault;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Retryability { Recoverable, NonRecoverable }
+pub enum Retryability {
+    Recoverable,
+    NonRecoverable,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlPlaneFault {
@@ -23,8 +26,14 @@ pub enum ControlPlaneFault {
 impl ControlPlaneFault {
     pub const fn retryability(self) -> Retryability {
         match self {
-            Self::RateLimited | Self::Server | Self::Timeout | Self::Network => Retryability::Recoverable,
-            Self::Authentication | Self::Authorization | Self::TunnelNotFound | Self::Tls | Self::Unknown => Retryability::NonRecoverable,
+            Self::RateLimited | Self::Server | Self::Timeout | Self::Network => {
+                Retryability::Recoverable
+            }
+            Self::Authentication
+            | Self::Authorization
+            | Self::TunnelNotFound
+            | Self::Tls
+            | Self::Unknown => Retryability::NonRecoverable,
         }
     }
 }
@@ -56,7 +65,9 @@ pub enum TunnelError {
 impl TunnelError {
     pub const fn retryability(&self) -> Retryability {
         match self {
-            Self::TunnelExited | Self::HealthTimeout | Self::HealthUnavailable => Retryability::Recoverable,
+            Self::TunnelExited | Self::HealthTimeout | Self::HealthUnavailable => {
+                Retryability::Recoverable
+            }
             Self::ControlPlane(fault) => fault.retryability(),
             _ => Retryability::NonRecoverable,
         }
@@ -72,9 +83,18 @@ impl TunnelError {
             Self::TunnelSpawnFailed(_) => RuntimeFault::TunnelSpawnFailed,
             Self::ProcessOwnershipFailed(_) => RuntimeFault::ProcessOwnershipFailed,
             Self::TunnelExited => RuntimeFault::TunnelExited,
-            Self::HealthStateIo | Self::HealthTimeout | Self::HealthUnavailable => RuntimeFault::TunnelHealthTimeout,
-            Self::ControlPlane(ControlPlaneFault::Authentication | ControlPlaneFault::Authorization) => RuntimeFault::TunnelAuthFailed,
-            Self::ControlPlane(ControlPlaneFault::RateLimited | ControlPlaneFault::Server | ControlPlaneFault::Timeout | ControlPlaneFault::Network) => RuntimeFault::TunnelHealthTimeout,
+            Self::HealthStateIo | Self::HealthTimeout | Self::HealthUnavailable => {
+                RuntimeFault::TunnelHealthTimeout
+            }
+            Self::ControlPlane(
+                ControlPlaneFault::Authentication | ControlPlaneFault::Authorization,
+            ) => RuntimeFault::TunnelAuthFailed,
+            Self::ControlPlane(
+                ControlPlaneFault::RateLimited
+                | ControlPlaneFault::Server
+                | ControlPlaneFault::Timeout
+                | ControlPlaneFault::Network,
+            ) => RuntimeFault::TunnelHealthTimeout,
             Self::InvalidInstallRoot
             | Self::InvalidTunnelId
             | Self::InvalidMcpTarget
@@ -83,7 +103,11 @@ impl TunnelError {
             | Self::HealthUrlInvalid
             | Self::HealthProtocol
             | Self::RestartDenied
-            | Self::ControlPlane(ControlPlaneFault::TunnelNotFound | ControlPlaneFault::Tls | ControlPlaneFault::Unknown) => RuntimeFault::ConfigurationInvalid,
+            | Self::ControlPlane(
+                ControlPlaneFault::TunnelNotFound
+                | ControlPlaneFault::Tls
+                | ControlPlaneFault::Unknown,
+            ) => RuntimeFault::ConfigurationInvalid,
         }
     }
 }
@@ -94,23 +118,33 @@ impl fmt::Display for TunnelError {
             Self::InvalidInstallRoot => f.write_str("invalid tunnel installation root"),
             Self::InvalidTunnelId => f.write_str("invalid Tunnel ID"),
             Self::InvalidMcpTarget => f.write_str("invalid MCP tunnel target"),
-            Self::InvalidHealthStateDirectory => f.write_str("invalid tunnel health state directory"),
+            Self::InvalidHealthStateDirectory => {
+                f.write_str("invalid tunnel health state directory")
+            }
             Self::InvalidControlPlaneOverride => f.write_str("invalid test control-plane override"),
             Self::RuntimeMissing => f.write_str("bundled tunnel runtime is missing"),
-            Self::RuntimeChecksumMismatch => f.write_str("bundled tunnel runtime integrity check failed"),
+            Self::RuntimeChecksumMismatch => {
+                f.write_str("bundled tunnel runtime integrity check failed")
+            }
             Self::RuntimeKeyMissing => f.write_str("Runtime API Key is missing"),
             Self::SecretStoreFailed(error) => write!(f, "secure credential read failed: {error}"),
-            Self::SecretInjectionUnsupported => f.write_str("safe tunnel secret injection is unsupported"),
+            Self::SecretInjectionUnsupported => {
+                f.write_str("safe tunnel secret injection is unsupported")
+            }
             Self::HealthStateIo => f.write_str("tunnel health state I/O failed"),
             Self::HealthUrlInvalid => f.write_str("tunnel health URL is not a valid loopback URL"),
             Self::HealthUnavailable => f.write_str("tunnel local health endpoint is unavailable"),
             Self::TunnelSpawnFailed(error) => write!(f, "tunnel process spawn failed: {error}"),
-            Self::ProcessOwnershipFailed(error) => write!(f, "tunnel process ownership failed: {error}"),
+            Self::ProcessOwnershipFailed(error) => {
+                write!(f, "tunnel process ownership failed: {error}")
+            }
             Self::TunnelExited => f.write_str("tunnel process exited"),
             Self::HealthTimeout => f.write_str("tunnel readiness timed out"),
             Self::HealthProtocol => f.write_str("tunnel local health protocol is invalid"),
             Self::ControlPlane(fault) => write!(f, "tunnel control-plane fault: {fault:?}"),
-            Self::RestartDenied => f.write_str("non-recoverable tunnel fault cannot be automatically restarted"),
+            Self::RestartDenied => {
+                f.write_str("non-recoverable tunnel fault cannot be automatically restarted")
+            }
         }
     }
 }
@@ -119,21 +153,41 @@ impl std::error::Error for TunnelError {}
 
 pub fn classify_control_plane_error(message: &str) -> ControlPlaneFault {
     let lower = message.to_ascii_lowercase();
-    if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid api key") {
+    if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid api key")
+    {
         ControlPlaneFault::Authentication
-    } else if lower.contains("403") || lower.contains("forbidden") || lower.contains("tunnel_use_forbidden") {
+    } else if lower.contains("403")
+        || lower.contains("forbidden")
+        || lower.contains("tunnel_use_forbidden")
+    {
         ControlPlaneFault::Authorization
-    } else if lower.contains("404") || lower.contains("tunnel_not_found") || lower.contains("not found") {
+    } else if lower.contains("404")
+        || lower.contains("tunnel_not_found")
+        || lower.contains("not found")
+    {
         ControlPlaneFault::TunnelNotFound
     } else if lower.contains("429") || lower.contains("rate limit") {
         ControlPlaneFault::RateLimited
-    } else if lower.contains("500") || lower.contains("502") || lower.contains("503") || lower.contains("504") || lower.contains("server error") {
+    } else if lower.contains("500")
+        || lower.contains("502")
+        || lower.contains("503")
+        || lower.contains("504")
+        || lower.contains("server error")
+    {
         ControlPlaneFault::Server
-    } else if lower.contains("408") || lower.contains("timeout") || lower.contains("deadline exceeded") {
+    } else if lower.contains("408")
+        || lower.contains("timeout")
+        || lower.contains("deadline exceeded")
+    {
         ControlPlaneFault::Timeout
     } else if lower.contains("x509") || lower.contains("certificate") || lower.contains("tls") {
         ControlPlaneFault::Tls
-    } else if lower.contains("dial tcp") || lower.contains("connection refused") || lower.contains("actively refused") || lower.contains("no such host") || lower.contains("network") {
+    } else if lower.contains("dial tcp")
+        || lower.contains("connection refused")
+        || lower.contains("actively refused")
+        || lower.contains("no such host")
+        || lower.contains("network")
+    {
         ControlPlaneFault::Network
     } else {
         ControlPlaneFault::Unknown
@@ -147,15 +201,51 @@ mod tests {
     #[test]
     fn control_plane_faults_have_stable_typed_retryability() {
         for (message, expected, retryability) in [
-            ("401 unauthorized", ControlPlaneFault::Authentication, Retryability::NonRecoverable),
-            ("403 tunnel_use_forbidden", ControlPlaneFault::Authorization, Retryability::NonRecoverable),
-            ("404 tunnel_not_found", ControlPlaneFault::TunnelNotFound, Retryability::NonRecoverable),
-            ("429 rate limit", ControlPlaneFault::RateLimited, Retryability::Recoverable),
-            ("503 server error", ControlPlaneFault::Server, Retryability::Recoverable),
-            ("deadline exceeded", ControlPlaneFault::Timeout, Retryability::Recoverable),
-            ("x509 certificate error", ControlPlaneFault::Tls, Retryability::NonRecoverable),
-            ("dial tcp connection refused", ControlPlaneFault::Network, Retryability::Recoverable),
-            ("unclassified failure", ControlPlaneFault::Unknown, Retryability::NonRecoverable),
+            (
+                "401 unauthorized",
+                ControlPlaneFault::Authentication,
+                Retryability::NonRecoverable,
+            ),
+            (
+                "403 tunnel_use_forbidden",
+                ControlPlaneFault::Authorization,
+                Retryability::NonRecoverable,
+            ),
+            (
+                "404 tunnel_not_found",
+                ControlPlaneFault::TunnelNotFound,
+                Retryability::NonRecoverable,
+            ),
+            (
+                "429 rate limit",
+                ControlPlaneFault::RateLimited,
+                Retryability::Recoverable,
+            ),
+            (
+                "503 server error",
+                ControlPlaneFault::Server,
+                Retryability::Recoverable,
+            ),
+            (
+                "deadline exceeded",
+                ControlPlaneFault::Timeout,
+                Retryability::Recoverable,
+            ),
+            (
+                "x509 certificate error",
+                ControlPlaneFault::Tls,
+                Retryability::NonRecoverable,
+            ),
+            (
+                "dial tcp connection refused",
+                ControlPlaneFault::Network,
+                Retryability::Recoverable,
+            ),
+            (
+                "unclassified failure",
+                ControlPlaneFault::Unknown,
+                Retryability::NonRecoverable,
+            ),
         ] {
             let fault = classify_control_plane_error(message);
             assert_eq!(fault, expected);
@@ -165,8 +255,17 @@ mod tests {
 
     #[test]
     fn health_protocol_is_non_recoverable_but_endpoint_unavailability_is_recoverable() {
-        assert_eq!(TunnelError::HealthProtocol.retryability(), Retryability::NonRecoverable);
-        assert_eq!(TunnelError::HealthUnavailable.retryability(), Retryability::Recoverable);
-        assert_eq!(TunnelError::HealthUnavailable.runtime_fault(), RuntimeFault::TunnelHealthTimeout);
+        assert_eq!(
+            TunnelError::HealthProtocol.retryability(),
+            Retryability::NonRecoverable
+        );
+        assert_eq!(
+            TunnelError::HealthUnavailable.retryability(),
+            Retryability::Recoverable
+        );
+        assert_eq!(
+            TunnelError::HealthUnavailable.runtime_fault(),
+            RuntimeFault::TunnelHealthTimeout
+        );
     }
 }

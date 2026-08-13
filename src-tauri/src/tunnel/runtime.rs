@@ -5,12 +5,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::credentials::{CredentialStore, SecretString};
-use crate::runtime::{ManagedProcessSpec, ProcessSnapshot, StopDisposition, SupervisorError, WindowsProcessSupervisor};
+use crate::runtime::{
+    ManagedProcessSpec, ProcessSnapshot, StopDisposition, SupervisorError, WindowsProcessSupervisor,
+};
 
 use super::bundle::{VerifiedTunnelBundle, verify_bundle};
 use super::config::TunnelRuntimeConfig;
 use super::fault::{Retryability, TunnelError};
-use super::health::HealthEndpoint;
+use super::health::{ConnectorEndpoint, HealthEndpoint};
 
 const API_KEY_ENV: &str = "LOCALBRIDGE_RUNTIME_API_KEY";
 const TUNNEL_ID_ENV: &str = "CONTROL_PLANE_TUNNEL_ID";
@@ -90,14 +92,30 @@ impl fmt::Debug for PreparedTunnelStart {
 }
 
 impl PreparedTunnelStart {
-    pub fn prepare<C: CredentialStore>(config: TunnelRuntimeConfig, store: &C) -> Result<Self, TunnelError> {
+    pub fn prepare<C: CredentialStore>(
+        config: TunnelRuntimeConfig,
+        store: &C,
+    ) -> Result<Self, TunnelError> {
         let bundle = verify_bundle(&config.install_root)?;
-        let secret = store.read_runtime_api_key().map_err(TunnelError::SecretStoreFailed)?.ok_or(TunnelError::RuntimeKeyMissing)?;
+        let secret = store
+            .read_runtime_api_key()
+            .map_err(TunnelError::SecretStoreFailed)?
+            .ok_or(TunnelError::RuntimeKeyMissing)?;
         fs::create_dir_all(&config.health_state_dir).map_err(|_| TunnelError::HealthStateIo)?;
         let generation = HEALTH_GENERATION.fetch_add(1, Ordering::Relaxed);
-        let health_url_file = config.health_state_dir.join(format!("tunnel-health-{}-{generation}.url", std::process::id()));
-        if health_url_file.exists() { fs::remove_file(&health_url_file).map_err(|_| TunnelError::HealthStateIo)?; }
-        Ok(Self { config, bundle, secret, health_url_file })
+        let health_url_file = config.health_state_dir.join(format!(
+            "tunnel-health-{}-{generation}.url",
+            std::process::id()
+        ));
+        if health_url_file.exists() {
+            fs::remove_file(&health_url_file).map_err(|_| TunnelError::HealthStateIo)?;
+        }
+        Ok(Self {
+            config,
+            bundle,
+            secret,
+            health_url_file,
+        })
     }
 
     pub fn command_line_arguments(&self) -> Vec<String> {
@@ -134,23 +152,44 @@ impl PreparedTunnelStart {
         arguments
     }
 
-    pub fn health_url_file(&self) -> &Path { &self.health_url_file }
+    pub fn health_url_file(&self) -> &Path {
+        &self.health_url_file
+    }
 
     pub fn spawn(self) -> Result<TunnelRuntime, TunnelError> {
         validate_api_key_reference(API_KEY_REFERENCE)?;
-        let mut spec = ManagedProcessSpec::new("tunnel-client", &self.bundle.executable).map_err(classify_supervisor)?
+        let mut spec = ManagedProcessSpec::new("tunnel-client", &self.bundle.executable)
+            .map_err(classify_supervisor)?
             .args(self.command_line_arguments())
-            .current_dir(self.bundle.executable.parent().ok_or(TunnelError::RuntimeMissing)?);
+            .current_dir(
+                self.bundle
+                    .executable
+                    .parent()
+                    .ok_or(TunnelError::RuntimeMissing)?,
+            );
         for key in REMOVED_PARENT_ENV {
             spec = spec.env_remove(key).map_err(classify_supervisor)?;
         }
         spec = spec.env(API_KEY_ENV, self.secret.expose_secret()).map_err(classify_supervisor)?;
         spec = spec.env(TUNNEL_ID_ENV, self.config.tunnel_id.expose()).map_err(classify_supervisor)?;
-        spec = spec.env("CONTROL_PLANE_BASE_URL", self.config.control_plane_base_url()).map_err(classify_supervisor)?;
-        spec = spec.env("HEALTH_LISTEN_ADDR", "127.0.0.1:0").map_err(classify_supervisor)?;
+        spec = spec
+            .env(
+                "CONTROL_PLANE_BASE_URL",
+                self.config.control_plane_base_url(),
+            )
+            .map_err(classify_supervisor)?;
+        spec = spec
+            .env("HEALTH_LISTEN_ADDR", "127.0.0.1:0")
+            .map_err(classify_supervisor)?;
         spec = spec.env("DO_NOT_TRACK", "1").map_err(classify_supervisor)?;
         let supervisor = WindowsProcessSupervisor::spawn(&spec).map_err(classify_supervisor)?;
-        Ok(TunnelRuntime { config: self.config, supervisor, health_url_file: self.health_url_file, health: None })
+        Ok(TunnelRuntime {
+            config: self.config,
+            supervisor,
+            health_url_file: self.health_url_file,
+            health: None,
+            connector_endpoint: None,
+        })
     }
 }
 
@@ -159,6 +198,7 @@ pub struct TunnelRuntime {
     supervisor: WindowsProcessSupervisor,
     health_url_file: PathBuf,
     health: Option<HealthEndpoint>,
+    connector_endpoint: Option<ConnectorEndpoint>,
 }
 
 impl fmt::Debug for TunnelRuntime {
@@ -168,21 +208,38 @@ impl fmt::Debug for TunnelRuntime {
             .field("process", self.supervisor.snapshot())
             .field("health_url_file", &self.health_url_file)
             .field("health_resolved", &self.health.is_some())
+            .field(
+                "connector_endpoint_available",
+                &self.connector_endpoint.is_some(),
+            )
             .finish()
     }
 }
 
 impl TunnelRuntime {
-    pub fn start<C: CredentialStore>(config: TunnelRuntimeConfig, store: &C, timeout: Duration) -> Result<Self, TunnelError> {
+    pub fn start<C: CredentialStore>(
+        config: TunnelRuntimeConfig,
+        store: &C,
+        timeout: Duration,
+    ) -> Result<Self, TunnelError> {
         let mut runtime = PreparedTunnelStart::prepare(config, store)?.spawn()?;
-        if let Err(error) = runtime.wait_ready(timeout) { let _ = runtime.stop(); return Err(error); }
+        if let Err(error) = runtime.wait_ready(timeout) {
+            let _ = runtime.stop();
+            return Err(error);
+        }
         Ok(runtime)
     }
 
     pub fn wait_ready(&mut self, timeout: Duration) -> Result<(), TunnelError> {
         let deadline = Instant::now() + timeout;
         loop {
-            if !self.supervisor.root_is_running().map_err(classify_supervisor)? { return Err(TunnelError::TunnelExited); }
+            if !self
+                .supervisor
+                .root_is_running()
+                .map_err(classify_supervisor)?
+            {
+                return Err(TunnelError::TunnelExited);
+            }
             if self.health.is_none() {
                 match fs::read_to_string(&self.health_url_file) {
                     Ok(value) => self.health = Some(HealthEndpoint::parse(&value)?),
@@ -191,13 +248,18 @@ impl TunnelRuntime {
                 }
             }
             if let Some(health) = self.health {
-                match health.probe_ready() {
-                    Ok(true) => return Ok(()),
-                    Ok(false) | Err(TunnelError::HealthUnavailable) => {}
+                match health.probe_ready_metadata() {
+                    Ok(probe) if probe.ready => {
+                        self.connector_endpoint = probe.connector_endpoint;
+                        return Ok(());
+                    }
+                    Ok(_) | Err(TunnelError::HealthUnavailable) => {}
                     Err(error) => return Err(error),
                 }
             }
-            if Instant::now() >= deadline { return Err(TunnelError::HealthTimeout); }
+            if Instant::now() >= deadline {
+                return Err(TunnelError::HealthTimeout);
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
     }
@@ -210,8 +272,16 @@ impl TunnelRuntime {
     ) -> Result<(), TunnelError> {
         let deadline = Instant::now() + timeout;
         loop {
-            if cancelled() { return Err(TunnelError::HealthUnavailable); }
-            if !self.supervisor.root_is_running().map_err(classify_supervisor)? { return Err(TunnelError::TunnelExited); }
+            if cancelled() {
+                return Err(TunnelError::HealthUnavailable);
+            }
+            if !self
+                .supervisor
+                .root_is_running()
+                .map_err(classify_supervisor)?
+            {
+                return Err(TunnelError::TunnelExited);
+            }
             if self.health.is_none() {
                 match fs::read_to_string(&self.health_url_file) {
                     Ok(value) => self.health = Some(HealthEndpoint::parse(&value)?),
@@ -219,32 +289,67 @@ impl TunnelRuntime {
                     Err(_) => return Err(TunnelError::HealthStateIo),
                 }
             }
-            if cancelled() { return Err(TunnelError::HealthUnavailable); }
+            if cancelled() {
+                return Err(TunnelError::HealthUnavailable);
+            }
             if let Some(health) = self.health {
-                match health.probe_ready_with_timeout(probe_timeout) {
-                    Ok(true) => return if cancelled() { Err(TunnelError::HealthUnavailable) } else { Ok(()) },
-                    Ok(false) | Err(TunnelError::HealthUnavailable) => {}
+                match health.probe_ready_metadata_with_timeout(probe_timeout) {
+                    Ok(probe) if probe.ready => {
+                        if cancelled() {
+                            return Err(TunnelError::HealthUnavailable);
+                        }
+                        self.connector_endpoint = probe.connector_endpoint;
+                        return Ok(());
+                    }
+                    Ok(_) | Err(TunnelError::HealthUnavailable) => {}
                     Err(error) => return Err(error),
                 }
             }
-            if cancelled() { return Err(TunnelError::HealthUnavailable); }
-            if Instant::now() >= deadline { return Err(TunnelError::HealthTimeout); }
+            if cancelled() {
+                return Err(TunnelError::HealthUnavailable);
+            }
+            if Instant::now() >= deadline {
+                return Err(TunnelError::HealthTimeout);
+            }
             std::thread::sleep(Duration::from_millis(50));
         }
     }
 
-    pub const fn process_snapshot(&self) -> &ProcessSnapshot { self.supervisor.snapshot() }
-    pub fn root_is_running(&self) -> Result<bool, TunnelError> { self.supervisor.root_is_running().map_err(classify_supervisor) }
-    pub fn active_processes(&self) -> Result<u32, TunnelError> { self.supervisor.active_processes().map_err(classify_supervisor) }
-    pub fn stop(&mut self) -> Result<StopDisposition, TunnelError> { self.supervisor.force_stop().map_err(classify_supervisor) }
-    pub fn config(&self) -> &TunnelRuntimeConfig { &self.config }
+    pub const fn process_snapshot(&self) -> &ProcessSnapshot {
+        self.supervisor.snapshot()
+    }
+    pub fn root_is_running(&self) -> Result<bool, TunnelError> {
+        self.supervisor
+            .root_is_running()
+            .map_err(classify_supervisor)
+    }
+    pub fn active_processes(&self) -> Result<u32, TunnelError> {
+        self.supervisor
+            .active_processes()
+            .map_err(classify_supervisor)
+    }
+    pub fn stop(&mut self) -> Result<StopDisposition, TunnelError> {
+        self.supervisor.force_stop().map_err(classify_supervisor)
+    }
+    pub fn config(&self) -> &TunnelRuntimeConfig {
+        &self.config
+    }
+    pub fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
+        self.connector_endpoint.clone()
+    }
 }
 
 pub struct TunnelRestartPrimitive;
 
 impl TunnelRestartPrimitive {
-    pub fn prepare<C: CredentialStore>(config: TunnelRuntimeConfig, store: &C, fault: &TunnelError) -> Result<PreparedTunnelStart, TunnelError> {
-        if fault.retryability() != Retryability::Recoverable { return Err(TunnelError::RestartDenied); }
+    pub fn prepare<C: CredentialStore>(
+        config: TunnelRuntimeConfig,
+        store: &C,
+        fault: &TunnelError,
+    ) -> Result<PreparedTunnelStart, TunnelError> {
+        if fault.retryability() != Retryability::Recoverable {
+            return Err(TunnelError::RestartDenied);
+        }
         PreparedTunnelStart::prepare(config, store)
     }
 }
@@ -259,7 +364,10 @@ fn validate_api_key_reference(reference: &str) -> Result<(), TunnelError> {
 
 fn classify_supervisor(error: SupervisorError) -> TunnelError {
     match error {
-        SupervisorError::WindowsApi { operation: "CreateProcessW", .. } => TunnelError::TunnelSpawnFailed(error),
+        SupervisorError::WindowsApi {
+            operation: "CreateProcessW",
+            ..
+        } => TunnelError::TunnelSpawnFailed(error),
         _ => TunnelError::ProcessOwnershipFailed(error),
     }
 }
@@ -291,15 +399,25 @@ mod tests {
         fn new(values: impl IntoIterator<Item = Option<&'static str>>) -> Self {
             Self {
                 reads: Cell::new(0),
-                values: RefCell::new(values.into_iter().map(|value| value.map(str::to_owned)).collect()),
+                values: RefCell::new(
+                    values
+                        .into_iter()
+                        .map(|value| value.map(str::to_owned))
+                        .collect(),
+                ),
             }
         }
 
-        fn reads(&self) -> usize { self.reads.get() }
+        fn reads(&self) -> usize {
+            self.reads.get()
+        }
     }
 
     impl CredentialStore for FakeStore {
-        fn save_runtime_api_key(&self, _secret: &SecretString) -> Result<CredentialMetadata, CredentialStoreError> {
+        fn save_runtime_api_key(
+            &self,
+            _secret: &SecretString,
+        ) -> Result<CredentialMetadata, CredentialStoreError> {
             unreachable!("LB-008 fake store is read-only")
         }
 
@@ -334,7 +452,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("localbridge-lb008-{label}-{}-{nonce}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "localbridge-lb008-{label}-{}-{nonce}",
+            std::process::id()
+        ))
     }
 
     fn config(label: &str) -> TunnelRuntimeConfig {
@@ -371,7 +492,9 @@ mod tests {
                 .expect("query Win32 process command line");
             if output.status.success() {
                 let value = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-                if !value.is_empty() { return value; }
+                if !value.is_empty() {
+                    return value;
+                }
             }
             std::thread::sleep(Duration::from_millis(25));
         }
@@ -388,7 +511,9 @@ mod tests {
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(2)))
+                            .unwrap();
                         let mut request = [0u8; 4096];
                         let count = stream.read(&mut request).unwrap_or(0);
                         let request = String::from_utf8_lossy(&request[..count]);
@@ -397,13 +522,16 @@ mod tests {
                         let body = r#"{"error":"synthetic blocked control plane"}"#;
                         let response = format!(
                             "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                            body.len(), body
+                            body.len(),
+                            body
                         );
                         let _ = stream.write_all(response.as_bytes());
                         return;
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        if Instant::now() >= deadline { return; }
+                        if Instant::now() >= deadline {
+                            return;
+                        }
                         thread::sleep(Duration::from_millis(10));
                     }
                     Err(error) => panic!("fake control plane accept failed: {error}"),
@@ -466,7 +594,11 @@ mod tests {
         let mut names = REMOVED_PARENT_ENV.to_vec();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), REMOVED_PARENT_ENV.len(), "duplicate runtime env isolation entry");
+        assert_eq!(
+            names.len(),
+            REMOVED_PARENT_ENV.len(),
+            "duplicate runtime env isolation entry"
+        );
         assert!(!REMOVED_PARENT_ENV.contains(&"HTTP_PROXY"));
         assert!(!REMOVED_PARENT_ENV.contains(&"HTTPS_PROXY"));
     }
@@ -479,7 +611,9 @@ mod tests {
         assert_eq!(store.reads(), 1);
         drop(first);
 
-        let second = TunnelRestartPrimitive::prepare(base.clone(), &store, &TunnelError::TunnelExited).unwrap();
+        let second =
+            TunnelRestartPrimitive::prepare(base.clone(), &store, &TunnelError::TunnelExited)
+                .unwrap();
         assert_eq!(store.reads(), 2);
         assert!(!format!("{second:?}").contains(SECRET_TWO));
         drop(second);
@@ -506,7 +640,9 @@ mod tests {
         )
         .unwrap();
         let health_dir = prepared.config.health_state_dir.clone();
-        let mut runtime = prepared.spawn().expect("vendored tunnel-client must spawn locally");
+        let mut runtime = prepared
+            .spawn()
+            .expect("vendored tunnel-client must spawn locally");
         assert!(runtime.root_is_running().unwrap());
         assert!(runtime.active_processes().unwrap() >= 1);
 

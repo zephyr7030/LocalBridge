@@ -18,7 +18,7 @@ const expectFailure = args.includes("--expect-failure");
 const expectedIds = new Set((valueAfter("--expected") ?? "").split(",").map((v) => v.trim()).filter(Boolean));
 const repoRoot = resolve(".");
 const rulesDoc = JSON.parse(readFileSync(join(repoRoot, "ARCHITECTURE_RULES.json"), "utf8"));
-if (!Array.isArray(rulesDoc.rules) || rulesDoc.rules.length !== 24) throw new Error("architecture rule inventory must contain exactly 24 rules");
+if (!Array.isArray(rulesDoc.rules) || rulesDoc.rules.length !== 26) throw new Error("architecture rule inventory must contain exactly 26 rules");
 const progressPath = resolve(progressArg && !progressArg.startsWith("--") ? progressArg : join(repoRoot, "PR_INDEX.json"));
 const progressDoc = JSON.parse(readFileSync(progressPath, "utf8"));
 const contractsDoc = JSON.parse(readFileSync(join(repoRoot, "PR_CONTRACTS.json"), "utf8"));
@@ -33,6 +33,8 @@ const supportedTypes = new Set([
   "visual_dependency_absence",
   "group_review_gate",
   "task_summary_redaction",
+  "privileged_broker_install_trust",
+  "reviewed_elevated_exec",
 ]);
 const classification = classifyArchitectureRules(rulesDoc, progressDoc, supportedTypes);
 
@@ -230,6 +232,105 @@ const verifiers = {
       const r = rel(p);
       if (r === "src-tauri/src/state/task.rs" || (!r.startsWith("src-tauri/") && !r.startsWith("src/"))) continue;
       if (/SafeTaskSummary::Text\s*\(/.test(read(p))) findings.push([rule.id, `${r}:direct-SafeTaskSummary-Text`]);
+    }
+  },
+  privileged_broker_install_trust(rule, findings) {
+    const configPath = join(root, "src-tauri", "tauri.conf.json");
+    const windowsPath = join(root, "src-tauri", "src", "privilege", "windows.rs");
+    if (!existsSync(configPath)) {
+      findings.push([rule.id, "src-tauri/tauri.conf.json:missing"]);
+      return;
+    }
+    const config = JSON.parse(read(configPath));
+    if (config.bundle?.windows?.nsis?.installMode !== "perMachine") {
+      findings.push([rule.id, "src-tauri/tauri.conf.json:nsis-installMode"]);
+    }
+    if (!existsSync(windowsPath)) {
+      findings.push([rule.id, "src-tauri/src/privilege/windows.rs:missing"]);
+      return;
+    }
+    const body = read(windowsPath);
+    for (const marker of [
+      "validate_broker_executable_for_current_install",
+      "std::env::current_exe",
+      "symlink_metadata",
+      "canonicalize",
+      "protected_machine_install_root",
+      "SHGetFolderPathW",
+      "CSIDL_PROGRAM_FILES",
+      "trusted_broker",
+      "verify_broker_installation_not_mutable_by_unprivileged_principal",
+      "validate_install_object_security",
+      "GetNamedSecurityInfoW",
+      "OWNER_SECURITY_INFORMATION",
+      "DACL_SECURITY_INFORMATION",
+      "TRUSTED_INSTALL_MUTATION_SIDS",
+      "INSTALL_MUTATION_MASK",
+      "require_each_access_right_denied",
+      "ERROR_ACCESS_DENIED",
+      "FILE_WRITE_DATA",
+      "FILE_ADD_FILE",
+      "FILE_DELETE_CHILD",
+      "WRITE_DAC_ACCESS",
+      "WRITE_OWNER_ACCESS",
+    ]) {
+      if (!body.includes(marker)) findings.push([rule.id, `src-tauri/src/privilege/windows.rs:${marker}`]);
+    }
+    const trustStart = body.indexOf("fn validate_broker_executable_for_current_install");
+    const trustEnd = body.indexOf("fn validate_broker_executable(", trustStart);
+    const trust = body.slice(trustStart, trustEnd);
+    if (!trust.includes("verify_broker_installation_not_mutable_by_unprivileged_principal") || !trust.includes("Ok(trusted_broker)")) {
+      findings.push([rule.id, "src-tauri/src/privilege/windows.rs:acl-mutation-check-before-trust"]);
+    }
+    const objectSecurityStart = body.indexOf("fn validate_install_object_security");
+    const objectSecurityEnd = body.indexOf("fn sid_to_string", objectSecurityStart);
+    const objectSecurity = body.slice(objectSecurityStart, objectSecurityEnd);
+    for (const marker of ["GetNamedSecurityInfoW", "owner.is_null()", "dacl.is_null()", "trusted_install_mutation_sid", "INSTALL_MUTATION_MASK", "ACCESS_ALLOWED_ACE_KIND", "ACCESS_DENIED_ACE_KIND"]) {
+      if (!objectSecurity.includes(marker)) findings.push([rule.id, `src-tauri/src/privilege/windows.rs:object-security:${marker}`]);
+    }
+    const accessStart = body.indexOf("fn require_each_access_right_denied");
+    const accessEnd = body.indexOf("fn build_uac_parameters", accessStart);
+    const access = body.slice(accessStart, accessEnd);
+    if (!access.includes("for desired_access in mutation_rights") || !access.includes("last_error_code() != ERROR_ACCESS_DENIED")) {
+      findings.push([rule.id, "src-tauri/src/privilege/windows.rs:per-right-fail-closed-access-probe"]);
+    }
+  },
+  reviewed_elevated_exec(rule, findings) {
+    const policyTomlPath = join(root, "runtime-policy.toml");
+    const policyPath = join(root, "src-tauri", "src", "mcp", "policy.rs");
+    const guardPath = join(root, "src-tauri", "src", "mcp", "guard.rs");
+    const serverPath = join(root, "src-tauri", "src", "mcp", "server.rs");
+    for (const [path, label] of [[policyTomlPath, "runtime-policy.toml"], [policyPath, "policy.rs"], [guardPath, "guard.rs"], [serverPath, "server.rs"]]) {
+      if (!existsSync(path)) findings.push([rule.id, `${label}:missing`]);
+    }
+    if (![policyTomlPath, policyPath, guardPath, serverPath].every(existsSync)) return;
+    const policyToml = read(policyTomlPath);
+    for (const marker of [
+      'review_model = "exact_trusted_program_and_args"',
+      'arbitrary_programs = "deny"',
+      'shells_and_interpreters = "deny"',
+      'control_plane_mutation = "deny_always"',
+      'workdir_policy = "deny_unless_reviewed"',
+    ]) {
+      if (!policyToml.includes(marker)) findings.push([rule.id, `runtime-policy.toml:${marker}`]);
+    }
+    const policy = read(policyPath);
+    for (const marker of ["decide_request", "reviewed_elevated_exec", "reviewed_elevated_program", "GetSystemDirectoryW", "whoami.exe", "ElevatedExecNotReviewed"]) {
+      if (!policy.includes(marker)) findings.push([rule.id, `src-tauri/src/mcp/policy.rs:${marker}`]);
+    }
+    const guard = read(guardPath);
+    if (!guard.includes("decide_request(mode, &request.name, &indirect_capabilities, &request.arguments)")) {
+      findings.push([rule.id, "src-tauri/src/mcp/guard.rs:actual-arguments-policy"]);
+    }
+    const server = read(serverPath);
+    const start = server.indexOf("fn handle_elevated_exec");
+    const end = server.indexOf("fn request_id", start);
+    const handler = start >= 0 && end > start ? server.slice(start, end) : "";
+    if (!handler.includes("arguments.clone()") || handler.includes('ToolCallRequest::new("elevated_exec", json!({}))')) {
+      findings.push([rule.id, "src-tauri/src/mcp/server.rs:actual-elevated-arguments"]);
+    }
+    if (!handler.includes("let execution_guard = guard") || !handler.includes("drop(execution_guard)")) {
+      findings.push([rule.id, "src-tauri/src/mcp/server.rs:single-execution-gate"]);
     }
   },
 };

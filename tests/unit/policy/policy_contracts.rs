@@ -83,4 +83,39 @@ fn malformed_or_semantically_widened_policy_is_rejected() {
     let unknown_allow = include_str!("../../../runtime-policy.toml")
         .replace("unknown = \"deny\"", "unknown = \"allow\"");
     assert!(CapabilityPolicy::from_toml(&unknown_allow).is_err());
+    let arbitrary_elevated = include_str!("../../../runtime-policy.toml")
+        .replace("arbitrary_programs = \"deny\"", "arbitrary_programs = \"allow\"");
+    assert!(CapabilityPolicy::from_toml(&arbitrary_elevated).is_err());
+}
+
+#[test]
+fn elevated_exec_review_consumes_real_program_args_and_workdir() {
+    let policy = policy();
+    let program = localbridge_lib::mcp::reviewed_elevated_program()
+        .expect("Windows reviewed elevated diagnostic must exist");
+    let allowed = ToolCallRequest::new("elevated_exec", json!({
+        "program": program.to_string_lossy(),
+        "args": ["/user"],
+        "workdir": null,
+        "timeout_ms": 1000,
+        "max_output_bytes": 4096
+    }));
+    assert!(policy.decide_request(
+        PermissionMode::Elevated,
+        &allowed.name,
+        &[],
+        &allowed.arguments,
+    ).allowed);
+
+    for arguments in [
+        json!({"program":"C:/Windows/System32/cmd.exe","args":["/c","whoami"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096}),
+        json!({"program":"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe","args":["-Command","whoami"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096}),
+        json!({"program":"C:/Windows/System32/reg.exe","args":["add","HKLM\\Software\\LocalBridge"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096}),
+        json!({"program":program.to_string_lossy(),"args":["/user"],"workdir":"C:/Windows/Temp","timeout_ms":1000,"max_output_bytes":4096}),
+        json!({"program":program.to_string_lossy(),"args":["/user","extra"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096}),
+    ] {
+        let decision = policy.decide_request(PermissionMode::Elevated, "elevated_exec", &[], &arguments);
+        assert!(!decision.allowed);
+        assert_eq!(decision.deny_reason, Some(DenyReason::ElevatedExecNotReviewed));
+    }
 }

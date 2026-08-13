@@ -13,27 +13,67 @@ pub mod workspace;
 
 pub const PRODUCT_NAME: &str = "LocalBridge";
 
+macro_rules! localbridge_invoke_handler {
+    ($($extra:path),* $(,)?) => {
+        tauri::generate_handler![
+            commands::ui::get_main_projection,
+            commands::ui::set_permission_mode,
+            commands::ui::set_auto_start,
+            commands::ui::save_runtime_key,
+            commands::ui::delete_runtime_key,
+            commands::ui::enable_admin,
+            commands::ui::disable_admin,
+            commands::ui::retry_connection,
+            commands::ui::add_project,
+            commands::ui::select_project,
+            commands::ui::remove_project,
+            commands::onboarding::get_onboarding_state,
+            commands::onboarding::save_onboarding_connection,
+            commands::onboarding::open_openai_tunnel_settings,
+            commands::onboarding::open_openai_api_keys,
+            commands::onboarding::open_chatgpt_custom_connector_settings,
+            commands::onboarding::get_connector_endpoint,
+            commands::onboarding::choose_onboarding_workspace_folder,
+            commands::onboarding::complete_onboarding,
+            commands::diagnostics::get_diagnostics,
+            commands::diagnostics::diagnostics_retry_connection,
+            commands::diagnostics::export_diagnostics,
+            $($extra),*
+        ]
+    };
+}
+
+#[cfg(debug_assertions)]
+pub struct ResizeE2eMetricsSink(std::sync::Mutex<std::sync::mpsc::Sender<String>>);
+
+#[cfg(debug_assertions)]
+impl ResizeE2eMetricsSink {
+    pub fn new(sender: std::sync::mpsc::Sender<String>) -> Self {
+        Self(std::sync::Mutex::new(sender))
+    }
+}
+
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn resize_e2e_report(
+    metrics: String,
+    sink: tauri::State<'_, ResizeE2eMetricsSink>,
+) -> Result<(), String> {
+    sink.0
+        .lock()
+        .map_err(|_| "resize E2E metrics sink poisoned".to_string())?
+        .send(metrics)
+        .map_err(|_| "resize E2E metrics receiver closed".to_string())
+}
+
+#[cfg(debug_assertions)]
 pub fn build_app() -> tauri::Builder<tauri::Wry> {
-    tauri::Builder::default().invoke_handler(tauri::generate_handler![
-        commands::ui::get_main_projection,
-        commands::ui::set_permission_mode,
-        commands::ui::set_auto_start,
-        commands::ui::save_runtime_key,
-        commands::ui::delete_runtime_key,
-        commands::ui::enable_admin,
-        commands::ui::disable_admin,
-        commands::ui::retry_connection,
-        commands::ui::add_project,
-        commands::ui::select_project,
-        commands::ui::remove_project,
-        commands::onboarding::get_onboarding_state,
-        commands::onboarding::save_onboarding_connection,
-        commands::onboarding::open_chatgpt_mcp_page,
-        commands::onboarding::complete_onboarding,
-        commands::diagnostics::get_diagnostics,
-        commands::diagnostics::diagnostics_retry_connection,
-        commands::diagnostics::export_diagnostics,
-    ])
+    tauri::Builder::default().invoke_handler(localbridge_invoke_handler![resize_e2e_report])
+}
+
+#[cfg(not(debug_assertions))]
+pub fn build_app() -> tauri::Builder<tauri::Wry> {
+    tauri::Builder::default().invoke_handler(localbridge_invoke_handler![])
 }
 
 pub fn run() {

@@ -88,8 +88,12 @@ impl McpSession {
             }),
         )?;
         if result.get("protocolVersion").and_then(Value::as_str) != Some(PROTOCOL_VERSION)
-            || result.pointer("/serverInfo/name").and_then(Value::as_str) != Some("coding-tools-mcp")
-            || result.pointer("/serverInfo/version").and_then(Value::as_str) != Some(CODING_TOOLS_VERSION)
+            || result.pointer("/serverInfo/name").and_then(Value::as_str)
+                != Some("coding-tools-mcp")
+            || result
+                .pointer("/serverInfo/version")
+                .and_then(Value::as_str)
+                != Some(CODING_TOOLS_VERSION)
         {
             return Err(CodingToolsRuntimeError::ProtocolMismatch);
         }
@@ -117,8 +121,12 @@ impl McpSession {
             transport_timeout,
         )?;
         if result.get("protocolVersion").and_then(Value::as_str) != Some(PROTOCOL_VERSION)
-            || result.pointer("/serverInfo/name").and_then(Value::as_str) != Some("coding-tools-mcp")
-            || result.pointer("/serverInfo/version").and_then(Value::as_str) != Some(CODING_TOOLS_VERSION)
+            || result.pointer("/serverInfo/name").and_then(Value::as_str)
+                != Some("coding-tools-mcp")
+            || result
+                .pointer("/serverInfo/version")
+                .and_then(Value::as_str)
+                != Some(CODING_TOOLS_VERSION)
             || self.session_id.is_none()
         {
             return Err(CodingToolsRuntimeError::ProtocolMismatch);
@@ -155,7 +163,9 @@ impl McpSession {
         )
     }
 
-    pub(crate) fn cancellation_client(&self) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
+    pub(crate) fn cancellation_client(
+        &self,
+    ) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
         let session_id = self
             .session_id
             .as_ref()
@@ -191,7 +201,11 @@ impl McpSession {
             return Err(CodingToolsRuntimeError::HttpStatus(response.status));
         }
         if let Some(session) = response.session_id {
-            if self.session_id.as_deref().is_some_and(|existing| existing != session) {
+            if self
+                .session_id
+                .as_deref()
+                .is_some_and(|existing| existing != session)
+            {
                 return Err(CodingToolsRuntimeError::ProtocolMismatch);
             }
             self.session_id = Some(Arc::from(session));
@@ -227,7 +241,11 @@ impl McpSession {
             return Err(CodingToolsRuntimeError::HttpStatus(response.status));
         }
         if let Some(session) = response.session_id {
-            if self.session_id.as_deref().is_some_and(|existing| existing != session) {
+            if self
+                .session_id
+                .as_deref()
+                .is_some_and(|existing| existing != session)
+            {
                 return Err(CodingToolsRuntimeError::ProtocolMismatch);
             }
             self.session_id = Some(Arc::from(session));
@@ -342,8 +360,10 @@ fn post_json_with_timeouts(
         .set_write_timeout(Some(io_timeout))
         .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
 
-    let mut body = serde_json::to_vec(payload).map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
-    let mut request = Vec::with_capacity(body.len() + 512 + bearer.map_or(0, |value| value.expose().len()));
+    let mut body =
+        serde_json::to_vec(payload).map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
+    let mut request =
+        Vec::with_capacity(body.len() + 512 + bearer.map_or(0, |value| value.expose().len()));
     request.extend_from_slice(b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:");
     request.extend_from_slice(port.to_string().as_bytes());
     request.extend_from_slice(b"\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2025-11-25\r\nConnection: close\r\nContent-Length: ");
@@ -385,10 +405,12 @@ fn parse_response(response: Vec<u8>) -> Result<HttpResponse, CodingToolsRuntimeE
         .ok_or(CodingToolsRuntimeError::ProtocolMismatch)?;
     let header_bytes = &response[..split];
     let body = response[(split + 4)..].to_vec();
-    let headers = std::str::from_utf8(header_bytes)
-        .map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
+    let headers =
+        std::str::from_utf8(header_bytes).map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
     let mut lines = headers.split("\r\n");
-    let status_line = lines.next().ok_or(CodingToolsRuntimeError::ProtocolMismatch)?;
+    let status_line = lines
+        .next()
+        .ok_or(CodingToolsRuntimeError::ProtocolMismatch)?;
     let status = status_line
         .split_whitespace()
         .nth(1)

@@ -20,6 +20,6 @@ pub use recovery::{
 
 #[cfg(windows)]
 pub use windows_supervisor::{
-    classify_persisted_snapshot, ManagedProcessSpec, ProcessGeneration, ProcessSnapshot,
-    SnapshotDisposition, StopDisposition, SupervisorError, WindowsProcessSupervisor,
+    ManagedProcessSpec, ProcessGeneration, ProcessSnapshot, SnapshotDisposition, StopDisposition,
+    SupervisorError, WindowsProcessSupervisor, classify_persisted_snapshot,
 };

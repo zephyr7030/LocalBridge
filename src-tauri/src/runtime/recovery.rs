@@ -1,10 +1,11 @@
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::state::{PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState};
 
 use super::{
     OutageGenerationId, RecoveryCancellation, RecoveryPermit, RecoveryScope, RuntimeDriver,
-    RuntimeOrchestrator,
+    RuntimeOrchestrator, WorkspaceSwitchError,
 };
 
 pub const RECONNECT_BACKOFF_SECONDS: [u64; 5] = [1, 2, 5, 10, 30];
@@ -50,7 +51,11 @@ impl RuntimeOutage {
             | RuntimeFault::UserStopped
             | RuntimeFault::Unknown => RecoveryDisposition::NonRecoverable,
         };
-        Self { component, fault, disposition }
+        Self {
+            component,
+            fault,
+            disposition,
+        }
     }
 
     pub const fn recovery_scope(&self) -> RecoveryScope {
@@ -74,7 +79,9 @@ pub struct SystemRecoveryClock {
 
 impl Default for SystemRecoveryClock {
     fn default() -> Self {
-        Self { origin: Instant::now() }
+        Self {
+            origin: Instant::now(),
+        }
     }
 }
 
@@ -90,7 +97,10 @@ impl RecoveryClock for SystemRecoveryClock {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryOutcome {
-    Recovered { generation: OutageGenerationId, attempt: u32 },
+    Recovered {
+        generation: OutageGenerationId,
+        attempt: u32,
+    },
     Exhausted {
         generation: OutageGenerationId,
         final_fault: RuntimeFault,
@@ -183,6 +193,34 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
         result
     }
 
+    pub fn switch_workspace_after_control_cancellation(
+        &mut self,
+        candidate: &Path,
+        rollback_workspace: Option<&Path>,
+    ) -> Result<(), WorkspaceSwitchError> {
+        match self
+            .runtime
+            .switch_workspace_to(candidate, rollback_workspace)
+        {
+            Ok(()) => {
+                self.retire_recovery_for_successful_workspace_switch();
+                Ok(())
+            }
+            Err(error) => {
+                let previous_runtime_restored = self.runtime.state() == &RuntimeState::Ready
+                    && error.candidate_cleanup_fault.is_none()
+                    && error.rollback_fault.is_none()
+                    && error.rollback_cleanup_fault.is_none();
+                if previous_runtime_restored {
+                    self.resume_after_control_interruption();
+                } else {
+                    self.retire_recovery_for_failed_workspace_switch();
+                }
+                Err(error)
+            }
+        }
+    }
+
     pub fn monitor_once(&mut self) -> Option<RecoveryOutcome> {
         if self.pending_auto.is_some() {
             return self.advance_pending_auto();
@@ -195,10 +233,8 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
                 let _ = self.controller.observe_stable_ready(&mut self.runtime);
                 None
             }
-            Err(failure) => self.begin_cooperative_auto(RuntimeOutage::classify(
-                failure.component,
-                failure.fault,
-            )),
+            Err(failure) => self
+                .begin_cooperative_auto(RuntimeOutage::classify(failure.component, failure.fault)),
         }
     }
 
@@ -255,6 +291,28 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
             next_deadline: self.controller.clock.now(),
             permit: self.cancellation.permit(),
         });
+    }
+
+    fn retire_recovery_for_successful_workspace_switch(&mut self) {
+        self.retire_recovery_generation();
+    }
+
+    fn retire_recovery_for_failed_workspace_switch(&mut self) {
+        self.cancellation.cancel();
+        self.retire_recovery_generation();
+    }
+
+    fn retire_recovery_generation(&mut self) {
+        self.pending_auto = None;
+        if let Some(generation) = self.controller.generation {
+            let _ = self.runtime.clear_outage(generation);
+        } else if let Some(outage) = self.runtime.active_outage().cloned() {
+            let _ = self.runtime.clear_outage(outage.id);
+        }
+        self.controller.generation = None;
+        self.controller.stable_since = None;
+        self.controller.current_attempt = 0;
+        self.controller.exhausted_generation = None;
     }
 
     fn begin_cooperative_auto(&mut self, outage: RuntimeOutage) -> Option<RecoveryOutcome> {
@@ -370,8 +428,8 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
                 let next_delay = RECONNECT_BACKOFF_SECONDS[(next_attempt - 1) as usize];
                 if let Some(pending) = self.pending_auto.as_mut() {
                     pending.next_attempt = next_attempt;
-                    pending.next_deadline = self.controller.clock.now()
-                        + Duration::from_secs(next_delay);
+                    pending.next_deadline =
+                        self.controller.clock.now() + Duration::from_secs(next_delay);
                 }
                 None
             }
@@ -470,7 +528,9 @@ impl<C: RecoveryClock> RecoveryController<C> {
         &mut self,
         runtime: &mut RuntimeOrchestrator<D>,
     ) -> bool {
-        let Some(generation) = self.generation else { return false; };
+        let Some(generation) = self.generation else {
+            return false;
+        };
         if runtime.state() != &RuntimeState::Ready {
             self.stable_since = None;
             return false;
@@ -479,7 +539,9 @@ impl<C: RecoveryClock> RecoveryController<C> {
             self.stable_since = Some(self.clock.now());
             return false;
         };
-        if self.clock.now().saturating_sub(stable_since) < Duration::from_secs(STABILITY_RESET_SECONDS) {
+        if self.clock.now().saturating_sub(stable_since)
+            < Duration::from_secs(STABILITY_RESET_SECONDS)
+        {
             return false;
         }
         let cleared = runtime.clear_outage(generation);
@@ -520,7 +582,10 @@ impl<C: RecoveryClock> RecoveryController<C> {
                     self.current_attempt = 0;
                     self.stable_since = Some(self.clock.now());
                     self.exhausted_generation = None;
-                    return RecoveryOutcome::Recovered { generation, attempt };
+                    return RecoveryOutcome::Recovered {
+                        generation,
+                        attempt,
+                    };
                 }
                 Err(error) => {
                     final_fault = error.fault;
@@ -549,11 +614,18 @@ impl<C: RecoveryClock> RecoveryController<C> {
             generation,
             final_fault: final_fault.clone(),
         });
-        RecoveryOutcome::Exhausted { generation, final_fault, user_attention_required }
+        RecoveryOutcome::Exhausted {
+            generation,
+            final_fault,
+            user_attention_required,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/integration/recovery/recovery.rs"));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/integration/recovery/recovery.rs"
+    ));
 }

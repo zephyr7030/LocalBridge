@@ -24,11 +24,13 @@
 
 PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRED。
 
-21. 首次启动严格 6 屏：欢迎 → OpenAI → 项目与权限 → ChatGPT 自定义连接器设置 → ChatGPT 使用确认 → 启动检查。禁止第 7 屏。
+21. 首次启动严格 6 屏：欢迎 → OpenAI → 项目与权限 → Local Bridge 设置 → Local Bridge 使用确认 → 启动检查。禁止第 7 屏。
 22. 第 6 屏三项未全绿时“确定”必须灰色 disabled；全绿后才显示完成提示并启用“确定”；禁止自动跳转。
 
 23. 品牌图标固定为 `assets/icons/localbridge.png` / `localbridge.ico`；应用、安装包、托盘使用该资产，未经明确合同不得替换、重绘或引入图标库。
 24. G3→G4 人工 Gate 期间，审查智能体可质疑、复核、独立验证或拒绝采信用户与执行智能体提供的事实性材料；这些材料只作为待验证证据，不自动构成 PASS。
 25. 执行智能体可使用预授权，但每项实际使用的预授权必须记录 `authorization_id/scope/actions/evidence_ref/recorded_by/user_audit_status`；人工 Gate PASS 前，所有记录的预授权都必须经用户审核为 `PASS`。
-26. ChatGPT 自定义连接器入口只允许系统默认浏览器打开固定 URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView、任意前端 URL 或伪造 ChatGPT 连接状态。
+26. Local Bridge 设置入口只允许系统默认浏览器打开固定 ChatGPT custom-connector URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView、任意前端 URL 或伪造 ChatGPT 连接状态。
 27. 第 3 屏项目选择以原生 Windows 文件夹选择器为主交互；按钮必须使用一致且可辨识的视觉系统，禁止白底上的纯白/近不可见按钮；提示遵循最小必要原则，复制成功反馈不得引起布局位移。
+28. 主窗口默认 900×620、最小 720×500 且允许缩放；向导必须随可用 viewport 高度调整，内容区可滚动，禁止依赖固定卡片最小高度保证完整性。
+29. 窗口 resize/maximize 时，主 WebView bounds 必须始终等于 native main-window client area，Dashboard 与 onboarding 必须随 live viewport 重排。`.inner_size/.min_inner_size/.resizable`、`100dvh`、`overflow` 等静态源码断言只能作为辅助证据，不能单独验收；LB-016 必须执行真实 Windows Tauri/WebView2 resize E2E，覆盖至少两个 native size 与 maximize，并交叉验证 Tauri `inner_size()`、live JS `window.innerWidth/innerHeight × devicePixelRatio` 和组件 rect。

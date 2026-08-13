@@ -189,19 +189,23 @@ Dashboard 必须直接显示：
 欢迎
 → OpenAI
 → 项目与权限
-→ ChatGPT 自定义连接器设置
-→ ChatGPT 使用确认
+→ Local Bridge 设置
+→ Local Bridge 使用确认
 → 启动检查
 ```
 
 - Screen 2 字段：`Tunnel ID` / `Runtime API Key`；
 - Screen 3 项目与权限合并，新项目以原生 Windows 文件夹选择器为主交互；
-- Screen 4 只允许系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；
+- Screen 4 用户可见术语统一为 `Local Bridge`，只允许系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；
 - Screen 4 不使用 WebView，前端不得传入任意 URL；
-- Screen 5 只做最小必要的连接器完成/使用引导，不伪造 ChatGPT 状态；
+- Screen 5 只做最小必要的 Local Bridge 完成/使用引导，不伪造 ChatGPT 状态；
 - 若展示/复制 connector endpoint，只能使用 Rust typed projection 的已验证 Tunnel/control-plane metadata，禁止根据 Tunnel ID 推导；
 - 复制成功反馈不得造成布局位移；
 - Screen 6 只检查本地运行环境、编码服务、OpenAI Tunnel，三项全绿前 `确定` disabled，不自动跳转；
+- Screen 6 全绿后完成提示严格为 `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`；
+- 主窗口默认 900×620、最小 720×500 且可缩放；向导随 viewport 高度响应，主体可滚动，禁止固定 500/540px 卡片最小高度；
+- native window resize/maximize 后，主 WebView bounds 必须等于完整 client area，Dashboard 与 onboarding 必须随 live viewport 重排；
+- LB-016 必须有真实 Windows Tauri/WebView2 resize E2E：至少两个 native size + maximize，交叉验证 Tauri `inner_size()`、live JS viewport×DPR 与 Dashboard/onboarding rect；静态 CSS/Tauri 配置检查不得单独作为 PASS；
 - 权限包含编辑/完整/管理员三档；向导不自动触发 UAC。
 
 ## LB-017 — Diagnostics

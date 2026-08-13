@@ -43,5 +43,5 @@ const cooperativeEnd = recovery.indexOf("impl<C: RecoveryClock> RecoveryControll
 const cooperative = recovery.slice(cooperativeStart, cooperativeEnd);
 if (!/self\s*\.\s*controller\s*\.\s*begin_or_refresh_generation\s*\(/s.test(cooperative)) throw new Error("ARCH-022 cooperative recovery bypasses the single generation owner");
 if (!cooperative.includes("self.controller.exhausted_generation = Some(ExhaustedGeneration")) throw new Error("ARCH-022 cooperative exhaustion is not terminalized on the shared controller");
-if (!recovery.includes("self.cancellation.cancel();\n        self.pending_auto = None;")) throw new Error("ARCH-022 manual retry does not cancel cooperative generation before creating a fresh budget");
+if (!/self\.cancellation\.cancel\(\);\s*self\.pending_auto\s*=\s*None;/s.test(recovery)) throw new Error("ARCH-022 manual retry does not cancel cooperative generation before creating a fresh budget");
 console.log("ARCH-022_VERIFY=PASS single_active_generation=true sync_and_cooperative_exhaustion_terminal=true duplicate_attention_suppressed=true manual_retry_fresh_generation=true cooperative_cancel_before_manual=true stable_reset_60s=true");

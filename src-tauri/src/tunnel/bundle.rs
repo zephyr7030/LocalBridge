@@ -13,8 +13,7 @@ pub(crate) const CLOUDFLARED_SHA256: &str =
     "88024cf82cec72d10604c13aa4670016dca375c602e200b551ec9d53b31e874d";
 const CLOUDFLARED_MANIFEST_SHA256: &str =
     "149c1b5c0095ffab41c3986d620ca18c35373e05c5b6ca0bea88ac19f6d4a7a5";
-const LICENSE_SHA256: &str =
-    "f4c1d7ba32ef5bcf5cf03e2eefec5825ebafedf50fa330a36700a49c605c1ef4";
+const LICENSE_SHA256: &str = "f4c1d7ba32ef5bcf5cf03e2eefec5825ebafedf50fa330a36700a49c605c1ef4";
 
 #[derive(Debug, Clone)]
 pub(crate) struct VerifiedTunnelBundle {
@@ -28,7 +27,10 @@ pub(crate) fn verify_bundle(install_root: &Path) -> Result<VerifiedTunnelBundle,
     for (path, expected) in [
         (&executable, TUNNEL_CLIENT_SHA256),
         (&cloudflared, CLOUDFLARED_SHA256),
-        (&root.join("cloudflared-manifest.json"), CLOUDFLARED_MANIFEST_SHA256),
+        (
+            &root.join("cloudflared-manifest.json"),
+            CLOUDFLARED_MANIFEST_SHA256,
+        ),
         (&root.join("LICENSE"), LICENSE_SHA256),
     ] {
         verify_file(path, expected)?;
@@ -40,17 +42,25 @@ pub(crate) fn verify_bundle(install_root: &Path) -> Result<VerifiedTunnelBundle,
 fn verify_file(path: &Path, expected: &str) -> Result<(), TunnelError> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Err(TunnelError::RuntimeMissing),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Err(TunnelError::RuntimeMissing);
+        }
         Err(_) => return Err(TunnelError::RuntimeChecksumMismatch),
     };
     let actual = format!("{:x}", Sha256::digest(&bytes));
-    if actual == expected { Ok(()) } else { Err(TunnelError::RuntimeChecksumMismatch) }
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(TunnelError::RuntimeChecksumMismatch)
+    }
 }
 
 fn verify_cloudflared_manifest_version(path: &Path) -> Result<(), TunnelError> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Err(TunnelError::RuntimeMissing),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Err(TunnelError::RuntimeMissing);
+        }
         Err(_) => return Err(TunnelError::RuntimeChecksumMismatch),
     };
     let value: serde_json::Value =
@@ -79,21 +89,31 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("localbridge-lb008-{label}-{}-{nonce}", std::process::id()))
+        std::env::temp_dir().join(format!(
+            "localbridge-lb008-{label}-{}-{nonce}",
+            std::process::id()
+        ))
     }
 
     #[test]
     fn pinned_bundle_hashes_and_cloudflared_manifest_version_are_valid() {
         let verified = verify_bundle(&repo_root()).expect("vendored LB-008 bundle must verify");
         assert!(verified.executable.ends_with("tunnel-client.exe"));
-        assert!(repo_root().join("runtime/tunnel-client/cloudflared.exe").is_file());
+        assert!(
+            repo_root()
+                .join("runtime/tunnel-client/cloudflared.exe")
+                .is_file()
+        );
     }
 
     #[test]
     fn missing_and_corrupt_bundle_fail_closed() {
         let missing = temp_root("missing");
         fs::create_dir_all(&missing).unwrap();
-        assert!(matches!(verify_bundle(&missing), Err(TunnelError::RuntimeMissing)));
+        assert!(matches!(
+            verify_bundle(&missing),
+            Err(TunnelError::RuntimeMissing)
+        ));
 
         let corrupt = temp_root("corrupt");
         let runtime = corrupt.join("runtime").join("tunnel-client");

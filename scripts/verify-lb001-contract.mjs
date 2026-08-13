@@ -26,11 +26,11 @@ if (deps.some((d) => /lucide|heroicons|fontawesome|react-icons/i.test(d))) throw
 if (!pkg.devDependencies?.["@tauri-apps/cli"]) throw new Error("local Tauri CLI dependency missing");
 
 const rules = JSON.parse(readFileSync("ARCHITECTURE_RULES.json", "utf8"));
-const supported = new Set(["frontend_process_ownership", "system_python_fallback", "socket_bind_address_policy", "whole_app_elevation", "self_update_absence", "telemetry_absence", "visual_dependency_absence", "group_review_gate", "task_summary_redaction"]);
-if (!Array.isArray(rules.rules) || rules.rules.length !== 24) throw new Error("architecture rule inventory must contain 24 rules");
+const supported = new Set(["frontend_process_ownership", "system_python_fallback", "socket_bind_address_policy", "whole_app_elevation", "self_update_absence", "telemetry_absence", "visual_dependency_absence", "group_review_gate", "task_summary_redaction", "privileged_broker_install_trust", "reviewed_elevated_exec"]);
+if (!Array.isArray(rules.rules) || rules.rules.length !== 26) throw new Error("architecture rule inventory must contain 26 rules");
 const enforced = rules.rules.filter((r) => r.verification?.mode === "enforced");
 const deferred = rules.rules.filter((r) => r.verification?.mode === "deferred");
-if (enforced.length !== 8 || deferred.length !== 16) throw new Error(`architecture evidence counts mismatch enforced=${enforced.length} deferred=${deferred.length}`);
+if (enforced.length !== 8 || deferred.length !== 18) throw new Error(`architecture evidence counts mismatch enforced=${enforced.length} deferred=${deferred.length}`);
 for (const rule of rules.rules) {
   const v = rule.verification;
   if (!v) throw new Error(`${rule.id} missing verification declaration`);

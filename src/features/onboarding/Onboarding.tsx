@@ -6,7 +6,10 @@ import { accessText } from "../../presentation";
 import { onboardingApi, type OnboardingState } from "./api";
 import "./onboarding.css";
 
-const KEY_HINT = "运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志、命令行或浏览器存储。";
+const KEY_HINT = "Runtime API Key 仅保存在 Windows 安全凭据中，不会写入配置文件、日志、命令行或浏览器存储。";
+
+const messageFrom = (value: unknown, fallback: string) =>
+  typeof value === "string" ? value : value instanceof Error ? value.message : fallback;
 
 export function Onboarding({ initial, onComplete }: { initial: OnboardingState; onComplete: () => void }) {
   const [step, setStep] = useState(1);
@@ -14,11 +17,12 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   const [main, setMain] = useState<MainProjection | null>(null);
   const [tunnelId, setTunnelId] = useState("");
   const [runtimeKey, setRuntimeKey] = useState("");
-  const [projectPath, setProjectPath] = useState("");
+  const [selectedFolder, setSelectedFolder] = useState("");
   const [rememberedProject, setRememberedProject] = useState("");
   const [permission, setPermission] = useState<AccessCode>("edit");
+  const [connectorEndpoint, setConnectorEndpoint] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [startupAttempt, setStartupAttempt] = useState(0);
   const allGreen = state.readiness.localEnvironment && state.readiness.codingService && state.readiness.openaiTunnel;
 
   useEffect(() => {
@@ -31,35 +35,28 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
   }, []);
 
   useEffect(() => {
-    if (step !== 5) return;
+    if (step !== 5 && step !== 6) return;
     let active = true;
-    if (!rememberedProject) {
-      setError("请选择项目目录");
-      return () => { active = false; };
-    }
     const refresh = async () => {
       try {
-        const next = await onboardingApi.read();
-        if (active) setState(next);
+        const [next, endpoint] = await Promise.all([
+          onboardingApi.read(),
+          onboardingApi.readConnectorEndpoint(),
+        ]);
+        if (!active) return;
+        setState(next);
+        setConnectorEndpoint(endpoint.endpoint);
       } catch {
         if (active) setError("无法检查本地服务状态");
       }
     };
-    const start = async () => {
-      setError(null);
-      try {
-        await onboardingApi.startProject(rememberedProject);
-      } catch (value) {
-        if (active) setError(typeof value === "string" ? value : value instanceof Error ? value.message : "本地服务启动失败，请重试");
-      } finally {
-        if (active) void refresh();
-      }
-    };
     void refresh();
     const timer = window.setInterval(() => void refresh(), 1000);
-    void start();
-    return () => { active = false; window.clearInterval(timer); };
-  }, [step, rememberedProject, startupAttempt]);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [step]);
 
   const chosenProject = useMemo(() => main?.projects.find((item) => item.id === rememberedProject) ?? null, [main, rememberedProject]);
 
@@ -71,7 +68,19 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
       setState(await onboardingApi.read());
       setStep(3);
     } catch (value) {
-      setError(typeof value === "string" ? value : "OpenAI 连接设置未保存");
+      setError(messageFrom(value, "OpenAI 连接设置未保存"));
+    }
+  };
+
+  const chooseFolder = async () => {
+    setError(null);
+    try {
+      const folder = await onboardingApi.chooseWorkspaceFolder();
+      if (!folder) return;
+      setSelectedFolder(folder);
+      setRememberedProject("");
+    } catch (value) {
+      setError(messageFrom(value, "无法选择项目文件夹"));
     }
   };
 
@@ -80,12 +89,47 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
     try {
       await bridge.setAccess(permission);
       let selectedProject = rememberedProject;
-      if (projectPath.trim()) selectedProject = await onboardingApi.rememberProject(projectPath.trim());
-      if (!selectedProject) throw new Error("请选择项目目录");
+      if (selectedFolder) selectedProject = await onboardingApi.rememberProject(selectedFolder);
+      if (!selectedProject) throw new Error("请选择项目文件夹");
       setRememberedProject(selectedProject);
       setStep(4);
     } catch (value) {
-      setError(typeof value === "string" ? value : value instanceof Error ? value.message : "项目或权限设置未完成");
+      setError(messageFrom(value, "项目或权限设置未完成"));
+    }
+  };
+
+  const startSelectedProject = async () => {
+    if (!rememberedProject) {
+      setError("请选择项目文件夹");
+      return;
+    }
+    setError(null);
+    try {
+      await onboardingApi.startProject(rememberedProject);
+      const [next, endpoint] = await Promise.all([
+        onboardingApi.read(),
+        onboardingApi.readConnectorEndpoint(),
+      ]);
+      setState(next);
+      setConnectorEndpoint(endpoint.endpoint);
+    } catch (value) {
+      setError(messageFrom(value, "本地服务启动失败，请重试"));
+    }
+  };
+
+  useEffect(() => {
+    if (step === 5) void startSelectedProject();
+    // Screen 5 is the single explicit startup edge in onboarding.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
+  const copyEndpoint = async () => {
+    if (!connectorEndpoint) return;
+    try {
+      await navigator.clipboard.writeText(connectorEndpoint);
+      setCopyStatus("已复制");
+    } catch {
+      setCopyStatus("复制失败");
     }
   };
 
@@ -96,53 +140,62 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingState; 
       await onboardingApi.complete();
       onComplete();
     } catch (value) {
-      setError(typeof value === "string" ? value : "设置尚未完成");
+      setError(messageFrom(value, "设置尚未完成"));
     }
   };
 
   if (step === 1) return (
-    <WizardFrame step={1} title="简单设置 即可开始" footer={<button className="onboarding-primary" onClick={() => setStep(2)}>开始</button>}>
+    <WizardFrame step={1} title="简单设置 即可开始" footer={<button className="primary" onClick={() => setStep(2)}>开始</button>}>
       <p className="onboarding-copy">LocalBridge是链接ChatGPT与本地代码的工具</p>
     </WizardFrame>
   );
 
   if (step === 2) return (
-    <WizardFrame step={2} title="连接 OpenAI" footer={<><button className="onboarding-secondary" onClick={() => setStep(1)}>返回</button><button className="onboarding-primary" disabled={!tunnelId.trim() || (!runtimeKey && !state.runtimeKeySaved)} onClick={() => void saveConnection()}>继续</button></>}>
+    <WizardFrame step={2} title="OpenAI 设置" footer={<><button className="secondary" onClick={() => setStep(1)}>返回</button><button className="primary" disabled={!tunnelId.trim() || (!runtimeKey && !state.runtimeKeySaved)} onClick={() => void saveConnection()}>继续</button></>}>
       <div className="onboarding-field"><label htmlFor="tunnel-id">Tunnel ID</label><input id="tunnel-id" value={tunnelId} onChange={(event) => setTunnelId(event.target.value)} placeholder="tunnel_…" autoComplete="off" /></div>
-      <div className="onboarding-field"><label htmlFor="runtime-key-onboarding">运行密钥</label><input id="runtime-key-onboarding" type="password" value={runtimeKey} onChange={(event) => setRuntimeKey(event.target.value)} placeholder={state.runtimeKeySaved ? "已安全保存，可保持不变" : "输入运行密钥"} autoComplete="off" /></div>
+      <div className="onboarding-link-row"><button className="secondary" onClick={() => void onboardingApi.openTunnelSettings().catch(() => setError("无法打开 Tunnel ID 设置"))}>打开 Tunnel ID 设置</button></div>
+      <div className="onboarding-field"><label htmlFor="runtime-key-onboarding">Runtime API Key</label><input id="runtime-key-onboarding" type="password" value={runtimeKey} onChange={(event) => setRuntimeKey(event.target.value)} placeholder={state.runtimeKeySaved ? "已安全保存，可保持不变" : "输入 Runtime API Key"} autoComplete="off" /></div>
+      <div className="onboarding-link-row"><button className="secondary" onClick={() => void onboardingApi.openApiKeys().catch(() => setError("无法打开 Runtime API Key 设置"))}>打开 Runtime API Key 设置</button></div>
       <p className="onboarding-hint">{KEY_HINT}</p>
-      <div className="onboarding-link-row"><button className="onboarding-secondary" onClick={() => void onboardingApi.openChatGpt().catch(() => setError("无法打开 ChatGPT"))}>打开 ChatGPT MCP 应用页</button></div>
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
   );
 
   if (step === 3) return (
-    <WizardFrame step={3} title="项目与权限" footer={<><button className="onboarding-secondary" onClick={() => setStep(2)}>返回</button><button className="onboarding-primary" disabled={!projectPath.trim() && !rememberedProject} onClick={() => void saveProjectAndPermission()}>继续</button></>}>
-      {main?.projects.length ? <div className="onboarding-field"><label htmlFor="remembered-project">已保存项目</label><select id="remembered-project" value={rememberedProject} onChange={(event) => { setRememberedProject(event.target.value); setProjectPath(""); }}><option value="">选择项目</option>{main.projects.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select></div> : null}
-      <div className="onboarding-field"><label htmlFor="project-path-onboarding">项目目录</label><input id="project-path-onboarding" value={projectPath} onChange={(event) => { setProjectPath(event.target.value); if (event.target.value) setRememberedProject(""); }} placeholder={chosenProject?.path ?? "输入代码文件夹路径"} /></div>
-      <div className="onboarding-permissions">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} className={`onboarding-permission ${permission === mode ? "selected" : ""}`} aria-pressed={permission === mode} onClick={() => setPermission(mode)}><strong>{accessText[mode]}</strong><small>{mode === "edit" ? "读取、搜索和修改项目文件" : mode === "full" ? "允许运行测试、编译和其他本地命令" : "在完整模式基础上允许显式管理员操作"}</small></button>)}</div>
+    <WizardFrame step={3} title="项目与权限" footer={<><button className="secondary" onClick={() => setStep(2)}>返回</button><button className="primary" disabled={!selectedFolder && !rememberedProject} onClick={() => void saveProjectAndPermission()}>继续</button></>}>
+      {main?.projects.length ? <div className="onboarding-field"><label htmlFor="remembered-project">已保存项目</label><select id="remembered-project" value={rememberedProject} onChange={(event) => { setRememberedProject(event.target.value); setSelectedFolder(""); }}><option value="">选择项目</option>{main.projects.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select></div> : null}
+      <div className="onboarding-folder-row"><button className="secondary" onClick={() => void chooseFolder()}>选择项目文件夹</button><span className="onboarding-selected-folder">{selectedFolder || chosenProject?.path || "尚未选择"}</span></div>
+      <div className="onboarding-permissions">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} className={`choice onboarding-permission ${permission === mode ? "selected" : ""}`} aria-pressed={permission === mode} onClick={() => setPermission(mode)}><strong>{accessText[mode]}</strong><small>{mode === "edit" ? "读取、搜索和修改项目文件" : mode === "full" ? "允许运行测试、编译和其他本地命令" : "在完整模式基础上允许显式管理员操作"}</small></button>)}</div>
       {permission === "admin" ? <p className="onboarding-hint">管理员模式不会自动弹出系统授权窗口；需要时再由你显式启用。</p> : null}
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
   );
 
   if (step === 4) return (
-    <WizardFrame step={4} title="连接 ChatGPT" footer={<><button className="onboarding-secondary" onClick={() => setStep(3)}>返回</button><button className="onboarding-primary" onClick={() => { setError(null); setStep(5); }}>继续</button></>}>
-      <p className="onboarding-copy">在 ChatGPT 中选择刚刚配置的 LocalBridge 工具。</p>
-      <div className="onboarding-link-row"><button className="onboarding-secondary" onClick={() => void onboardingApi.openChatGpt().catch(() => setError("无法打开 ChatGPT"))}>打开 ChatGPT MCP 应用页</button></div>
-      <p className="onboarding-hint">页面只会通过系统默认浏览器打开，LocalBridge 不读取 ChatGPT 会话。</p>
+    <WizardFrame step={4} title="Local Bridge 设置" footer={<><button className="secondary" onClick={() => setStep(3)}>返回</button><button className="primary" onClick={() => { setError(null); setStep(5); }}>继续</button></>}>
+      <ol className="onboarding-setup-steps"><li>点击“打开 Local Bridge 设置”</li><li>新建 Local Bridge</li><li>保存后返回 LocalBridge</li></ol>
+      <div className="onboarding-link-row"><button className="secondary" onClick={() => void onboardingApi.openConnectorSettings().catch(() => setError("无法打开 Local Bridge 设置"))}>打开 Local Bridge 设置</button></div>
+      {error && <p className="onboarding-error" role="alert">{error}</p>}
+    </WizardFrame>
+  );
+
+  if (step === 5) return (
+    <WizardFrame step={5} title="Local Bridge 使用确认" footer={<><button className="secondary" onClick={() => setStep(4)}>返回</button><button className="primary" onClick={() => { setError(null); setStep(6); }}>继续</button></>}>
+      {connectorEndpoint ? <div className="onboarding-endpoint"><code>{connectorEndpoint}</code><button className="secondary" onClick={() => void copyEndpoint()}>复制 Local Bridge 地址</button></div> : <p className="onboarding-hint">Local Bridge 地址将在 OpenAI Tunnel 就绪后显示。</p>}
+      <div className="onboarding-copy-feedback" aria-live="polite">{copyStatus || "\u00a0"}</div>
+      <p className="onboarding-copy">返回 ChatGPT 后即可尝试选择 Local Bridge；LocalBridge 不判断 ChatGPT 是否已连接。</p>
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
   );
 
   return (
-    <WizardFrame step={5} title="正在准备" footer={<><button className="onboarding-secondary" onClick={() => setStep(4)}>返回</button>{error ? <button className="onboarding-secondary" onClick={() => setStartupAttempt((value) => value + 1)}>重试</button> : null}<button className="onboarding-primary" disabled={!allGreen} onClick={() => void finish()}>确定</button></>}>
+    <WizardFrame step={6} title="启动检查" footer={<><button className="secondary" onClick={() => setStep(5)}>返回</button>{!allGreen ? <button className="secondary" onClick={() => void startSelectedProject()}>重试</button> : null}<button className="primary" disabled={!allGreen} onClick={() => void finish()}>确定</button></>}>
       <div className="readiness-list">
         <ReadinessCheck label="本地运行环境" ready={state.readiness.localEnvironment} />
         <ReadinessCheck label="编码服务" ready={state.readiness.codingService} />
         <ReadinessCheck label="OpenAI Tunnel" ready={state.readiness.openaiTunnel} />
       </div>
-      {allGreen ? <p className="onboarding-success">设置完成，尝试在插件中选择刚刚添加的工具吧！</p> : null}
+      {allGreen ? <p className="onboarding-success">配置完成，在插件中选择刚刚添加的Local Bridge试试吧</p> : null}
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
   );

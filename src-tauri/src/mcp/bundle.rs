@@ -10,14 +10,11 @@ use super::runtime::{CodingToolsRuntimeError, RuntimeIntegrityComponent};
 pub(crate) const PYTHON_VERSION: &str = "3.12.10";
 pub(crate) const PYTHON_EXE_SHA256: &str =
     "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a";
-const PYTHON_DLL_SHA256: &str =
-    "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120";
+const PYTHON_DLL_SHA256: &str = "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120";
 const PYTHON_STDLIB_SHA256: &str =
     "fb131c0ef7e35cc5250a74c8cd18744bf4115fb8163710711f3758d7df3d1f88";
-const PYTHON_PTH_SHA256: &str =
-    "3840e706682aa41ec7e599a50763bec6c6ddd6bde66e81c64afe2394539ea4fa";
-const PYTHON_TREE_SHA256: &str =
-    "48546587a8bb59d03016ea4edf82c292a477dec6acec530745b78c8935558682";
+const PYTHON_PTH_SHA256: &str = "3840e706682aa41ec7e599a50763bec6c6ddd6bde66e81c64afe2394539ea4fa";
+const PYTHON_TREE_SHA256: &str = "48546587a8bb59d03016ea4edf82c292a477dec6acec530745b78c8935558682";
 
 pub(crate) const CODING_TOOLS_VERSION: &str = "0.2.2";
 const CODING_TOOLS_COMMIT: &str = "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc";
@@ -29,8 +26,7 @@ const CODING_TOOLS_SUBSET_SHA256: &str =
 const CODING_TOOLS_TREE_SHA256: &str =
     "793c2f5de976c29cffc04ef43c778820089ae3cb1a4b80947e7fba7461e927c1";
 const PYJWT_VERSION: &str = "2.10.1";
-const PYJWT_WHEEL_SHA256: &str =
-    "dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb";
+const PYJWT_WHEEL_SHA256: &str = "dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb";
 
 #[derive(Debug, Deserialize)]
 struct PythonMetadata {
@@ -70,7 +66,9 @@ pub(crate) struct VerifiedBundle {
     pub(crate) python_executable: PathBuf,
 }
 
-pub(crate) fn verify_bundle(install_root: &Path) -> Result<VerifiedBundle, CodingToolsRuntimeError> {
+pub(crate) fn verify_bundle(
+    install_root: &Path,
+) -> Result<VerifiedBundle, CodingToolsRuntimeError> {
     let python_root = install_root.join("runtime").join("python");
     let coding_root = install_root.join("runtime").join("coding-tools-mcp");
     let python_executable = python_root.join("python.exe");
@@ -79,10 +77,26 @@ pub(crate) fn verify_bundle(install_root: &Path) -> Result<VerifiedBundle, Codin
     require_file(&python_executable, RuntimeIntegrityComponent::Python)?;
     require_file(&coding_package, RuntimeIntegrityComponent::CodingTools)?;
 
-    verify_hash(&python_executable, PYTHON_EXE_SHA256, RuntimeIntegrityComponent::Python)?;
-    verify_hash(&python_root.join("python312.dll"), PYTHON_DLL_SHA256, RuntimeIntegrityComponent::Python)?;
-    verify_hash(&python_root.join("python312.zip"), PYTHON_STDLIB_SHA256, RuntimeIntegrityComponent::Python)?;
-    verify_hash(&python_root.join("python312._pth"), PYTHON_PTH_SHA256, RuntimeIntegrityComponent::Python)?;
+    verify_hash(
+        &python_executable,
+        PYTHON_EXE_SHA256,
+        RuntimeIntegrityComponent::Python,
+    )?;
+    verify_hash(
+        &python_root.join("python312.dll"),
+        PYTHON_DLL_SHA256,
+        RuntimeIntegrityComponent::Python,
+    )?;
+    verify_hash(
+        &python_root.join("python312.zip"),
+        PYTHON_STDLIB_SHA256,
+        RuntimeIntegrityComponent::Python,
+    )?;
+    verify_hash(
+        &python_root.join("python312._pth"),
+        PYTHON_PTH_SHA256,
+        RuntimeIntegrityComponent::Python,
+    )?;
 
     let python_meta: PythonMetadata = read_metadata(
         &python_root.join("runtime-metadata.json"),
@@ -145,11 +159,16 @@ pub(crate) fn verify_bundle(install_root: &Path) -> Result<VerifiedBundle, Codin
     Ok(VerifiedBundle { python_executable })
 }
 
-fn require_file(path: &Path, component: RuntimeIntegrityComponent) -> Result<(), CodingToolsRuntimeError> {
+fn require_file(
+    path: &Path,
+    component: RuntimeIntegrityComponent,
+) -> Result<(), CodingToolsRuntimeError> {
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => Ok(()),
         Ok(_) => Err(CodingToolsRuntimeError::RuntimeMissing(component)),
-        Err(error) if error.kind() == ErrorKind::NotFound => Err(CodingToolsRuntimeError::RuntimeMissing(component)),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            Err(CodingToolsRuntimeError::RuntimeMissing(component))
+        }
         Err(_) => Err(CodingToolsRuntimeError::RuntimeChecksumMismatch(component)),
     }
 }

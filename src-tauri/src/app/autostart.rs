@@ -1,10 +1,10 @@
 #[cfg(windows)]
 use std::ffi::OsStr;
-use std::path::PathBuf;
-#[cfg(test)]
-use std::path::Path;
 #[cfg(windows)]
 use std::os::windows::ffi::OsStrExt;
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 #[cfg(windows)]
 use std::ptr::{null, null_mut};
 
@@ -33,7 +33,10 @@ impl std::fmt::Display for AutostartError {
             Self::InvalidExecutable => f.write_str("autostart executable must be an absolute path"),
             Self::InvalidRegistryData => f.write_str("autostart registry data is invalid"),
             Self::WindowsApi { operation, code } => {
-                write!(f, "autostart Windows registry operation {operation} failed with code {code}")
+                write!(
+                    f,
+                    "autostart Windows registry operation {operation} failed with code {code}"
+                )
             }
             Self::UnsupportedPlatform => f.write_str("autostart is supported only on Windows"),
         }
@@ -209,7 +212,8 @@ impl RegistryKey {
     fn open(subkey: &str, access: u32) -> Result<Option<Self>, AutostartError> {
         let subkey = wide(subkey);
         let mut key = null_mut();
-        let code = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, access, &mut key) };
+        let code =
+            unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, access, &mut key) };
         if code == ERROR_FILE_NOT_FOUND {
             return Ok(None);
         }

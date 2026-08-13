@@ -51,14 +51,23 @@ for (const required of [
   'canonical_request = "structured_program_args"',
   'shell_true_default = false',
   'requires_broker = true',
+  'review_model = "exact_trusted_program_and_args"',
+  'arbitrary_programs = "deny"',
+  'shells_and_interpreters = "deny"',
+  'control_plane_mutation = "deny_always"',
 ]) if (!policyToml.includes(required)) throw new Error(`LB-012 runtime policy missing: ${required}`);
 if (!policy.includes('if name == "elevated_exec"') || !policy.includes("Capability::ElevatedExec")) throw new Error("LB-012 elevated_exec capability classification missing");
+for (const required of ["decide_request", "reviewed_elevated_exec", "reviewed_elevated_program", "GetSystemDirectoryW", "whoami.exe", "ElevatedExecNotReviewed"]) {
+  if (!policy.includes(required)) throw new Error(`LB-012 reviewed elevated_exec enforcement missing: ${required}`);
+}
 if (!guard.includes('name != "elevated_exec"') || !guard.includes("PrivilegedRouteNotAvailable")) throw new Error("LB-012 ordinary upstream route does not reserve elevated_exec");
 
 const handlerStart = server.indexOf("fn handle_elevated_exec");
 const handlerEnd = server.indexOf("fn request_id", handlerStart);
 if (handlerStart < 0 || handlerEnd <= handlerStart) throw new Error("LB-012 elevated_exec PEP handler missing");
 const handler = server.slice(handlerStart, handlerEnd);
+if (!handler.includes("arguments.clone()") || handler.includes('ToolCallRequest::new("elevated_exec", json!({}))')) throw new Error("LB-012 policy decision does not consume real elevated_exec arguments");
+if (!handler.includes("let execution_guard = guard") || !handler.includes("drop(execution_guard)")) throw new Error("LB-012 elevated execution is not serialized by the Guard execution mutex");
 const toolsListStart = server.indexOf('"tools/list" =>');
 const toolsCallStart = server.indexOf('"tools/call" =>', toolsListStart);
 if (toolsListStart < 0 || toolsCallStart <= toolsListStart) throw new Error("LB-012 tools/list branch missing");

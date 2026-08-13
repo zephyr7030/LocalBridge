@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::migration::{migrate_bytes, MigrationError};
+use super::migration::{MigrationError, migrate_bytes};
 use super::model::AppData;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -98,7 +98,7 @@ fn atomic_replace(temp: &Path, target: &Path, backup: &Path) -> Result<(), Setti
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null;
     use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, ReplaceFileW, MOVEFILE_WRITE_THROUGH,
+        MOVEFILE_WRITE_THROUGH, MoveFileExW, ReplaceFileW,
     };
 
     fn wide(path: &Path) -> Vec<u16> {

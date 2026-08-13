@@ -4,7 +4,7 @@
 |---|---|---|
 | A01 | 首次启动 | 进入 Wizard，不进入 Dashboard |
 | A02 | Screen 2 | 字段标签严格为 `Tunnel ID` / `Runtime API Key` |
-| A03 | Screen 4 连接器按钮 | 系统默认浏览器，不创建 WebView |
+| A03 | Screen 4 Local Bridge 按钮 | 系统默认浏览器，不创建 WebView |
 | A04 | ChatGPT URL | 只能打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins` |
 | A05 | 选择 workspace | 不自动授权父目录/磁盘根 |
 | A06 | Edit tools/list | 不出现 process-exec capability |
@@ -189,16 +189,16 @@
 | A175 | 2/6 | 字段为 `Tunnel ID` / `Runtime API Key` |
 | A176 | 2/6 | 密钥下方仅一行安全保存说明 |
 | A177 | 3/6 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器 |
-| A178 | 4/6 | “打开连接器设置”只打开固定 ChatGPT 自定义连接器 deep link |
+| A178 | 4/6 | “打开 Local Bridge 设置”只打开固定 ChatGPT custom-connector deep link |
 | A179 | 4/6 | 使用系统默认浏览器，禁止 WebView/任意前端 URL |
-| A180 | 4/6 | 引导简短、傻瓜式，不堆叠非必要提示 |
-| A181 | 5/6 | 不伪造或猜测 ChatGPT 连接器创建状态 |
+| A180 | 4/6 | 用户可见术语统一为 `Local Bridge`；引导简短、傻瓜式，不堆叠非必要提示 |
+| A181 | 5/6 | 使用 `Local Bridge` 术语，不伪造或猜测 ChatGPT 状态 |
 | A182 | 5/6 connector endpoint | 如展示/复制，只来自 Rust typed projection 的已验证 Tunnel/control-plane metadata |
 | A183 | 5/6 connector endpoint | 前端不得从 Tunnel ID 推导、拼接或伪造 endpoint |
 | A184 | 5/6 copy feedback | 复制成功提示不造成布局位移 |
 | A185 | 6/6 未全部 Ready | “确定”灰色且 disabled，不显示完成提示 |
 | A186 | 6/6 全部 Ready | 仅本地运行环境/编码服务/OpenAI Tunnel 三项全部绿色 |
-| A187 | 6/6 全部 Ready | 显示“设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！” |
+| A187 | 6/6 全部 Ready | 显示“配置完成，在插件中选择刚刚添加的Local Bridge试试吧” |
 | A188 | 6/6 全部 Ready | “确定”启用但不自动跳转；点击后标记 onboarding_complete 并进入主界面 |
 | A189 | G3 UI 按钮 | 主/次/ghost 使用一致且可辨识的按钮系统，白色表面上不存在难识别白色按钮 |
 | A190 | G3 UI 提示 | 自解释操作不重复堆叠说明，遵循最小必要提示原则 |
@@ -210,3 +210,6 @@
 | A195 | UI 实现 | 不因品牌图标引入第三方 icon library |
 | A196 | 资产完整性 | PNG SHA256 = `710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a` |
 | A197 | 资产完整性 | ICO SHA256 = `c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78` |
+| A198 | 向导窗口缩放 | 默认 900×620、最小 720×500；缩放后内容完整可操作，主体按 viewport 高度滚动且无固定 500/540px 卡片最小高度 |
+| A199 | native window resize/maximize | 主 WebView 始终等于完整 client area；Dashboard 与 onboarding 随 live viewport 重排，不出现只放大原生外壳的旧画布 |
+| A200 | 真实 resize E2E | Windows Tauri/WebView2 实机覆盖至少两个 native size + maximize；Tauri `inner_size()` 与 live JS `window.innerWidth/innerHeight × DPR` 一致并验证 Dashboard/onboarding rect 变化；静态配置/CSS 标记单独通过不得视为验收通过 |

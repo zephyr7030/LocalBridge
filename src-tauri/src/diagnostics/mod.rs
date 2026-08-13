@@ -232,12 +232,15 @@ fn reconnect_diagnostics(runtime: &DiagnosticsRuntimeInput) -> Option<ReconnectD
             .collect(),
         _ if outage.user_attention_required
             && RuntimeOutage::classify(outage.component, outage.fault.clone()).disposition
-                == RecoveryDisposition::Recoverable => (1..=5)
-            .map(|attempt| ReconnectAttempt {
-                attempt,
-                state: ReconnectAttemptState::Failed,
-            })
-            .collect(),
+                == RecoveryDisposition::Recoverable =>
+        {
+            (1..=5)
+                .map(|attempt| ReconnectAttempt {
+                    attempt,
+                    state: ReconnectAttemptState::Failed,
+                })
+                .collect()
+        }
         _ => Vec::new(),
     };
 
@@ -270,7 +273,10 @@ pub fn export_snapshot(
     let sequence = EXPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path = directory.join(format!("localbridge-diagnostics-{seconds}-{sequence}.json"));
     let bytes = serde_json::to_vec_pretty(snapshot).map_err(std::io::Error::other)?;
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&path)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
     file.write_all(&bytes)?;
     file.write_all(b"\n")?;
     file.sync_all()?;

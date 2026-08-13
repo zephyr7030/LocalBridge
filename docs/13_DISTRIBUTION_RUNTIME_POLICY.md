@@ -24,6 +24,8 @@ Windows 11 x64
 
 LocalBridge v0.1.0 采用完整 Runtime Bundle。
 
+安装范围固定为 Windows 机器级 `perMachine`，正式文件位于 Program Files 安装根。Privileged Broker 的 UAC 目标必须绑定为当前 LocalBridge 可执行文件的 canonical 同目录 sibling；在 `runas` 前还必须验证 Broker/安装目录/Program Files 祖先链的实际 owner+DACL 不向非受信任主体授予 mutation 权限，并用当前未提权 token 逐项确认危险写入、删除、子项创建/删除、DACL/owner 修改权限全部明确 `ACCESS_DENIED`。因此路径字符串在 Program Files 下并不足够：权限宽松的子目录仍必须拒绝。不得从 `%LOCALAPPDATA%`、临时目录或其他普通用户可写位置提权启动 Broker。v0.1 不声称 Broker 使用 Authenticode 或文件哈希绑定。
+
 安装包必须包含：
 
 ```text
@@ -242,7 +244,7 @@ Installed > 250 MiB
 
 ---
 
-# generic elevated_exec
+# generic reviewed elevated_exec
 
 Elevated 模式正式支持：
 
@@ -250,14 +252,18 @@ Elevated 模式正式支持：
 elevated_exec
 ```
 
-它是最高风险 capability。
+它是最高风险 capability。“generic”只表示统一的 structured Broker gateway，并不表示允许任意管理员 executable/shell。
 
 合同：
 
 - Edit：deny；
 - Full：deny；
 - Elevated + Broker Active：allow if reviewed；
+- policy decision 必须消费真实 `program / args / workdir`；
+- executable identity 必须命中受信任系统位置和精确 reviewed action profile；
+- arbitrary program、shell/interpreter、同名伪造 executable、未审核参数/workdir：deny；
 - LocalBridge control-plane：仍 deny；
+- 通过 `elevated_exec` 间接修改 LocalBridge settings/workspace/runtime policy/credential/tunnel 等 control-plane 资源：deny-always；
 - UAC 必须由用户显式启用 Broker；
 - Broker 不使用 `shell=true` 作为默认；
 - structured command + args；
@@ -270,3 +276,5 @@ elevated_exec
 - 不记录敏感参数明文。
 
 `elevated_exec` 的存在不意味着管理员模式绕过 PEP。
+
+v0.1 初始 reviewed profile 仅为受信任 Windows System32 `whoami.exe` 的窄只读身份查询；它用于证明 structured Broker 执行链，而不是提供管理员 shell。新增管理员动作必须逐项 review 并添加 negative/adversarial tests。

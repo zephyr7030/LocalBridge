@@ -4,7 +4,7 @@
 |---|---|---|
 | A01 | 首次启动 | 进入 Wizard，不进入 Dashboard |
 | A02 | Screen 2 | 字段标签严格为 `Tunnel ID` / `Runtime API Key` |
-| A03 | Screen 4 连接器按钮 | 系统默认浏览器，不创建 WebView |
+| A03 | Screen 4 Local Bridge 按钮 | 系统默认浏览器，不创建 WebView |
 | A04 | ChatGPT URL | 只能打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins` |
 | A05 | 选择 workspace | 不自动授权父目录/磁盘根 |
 | A06 | Edit tools/list | 不出现 process-exec capability |
@@ -165,9 +165,12 @@
 
 | A171 | 首次启动 | 严格 6 屏，无第 7 屏 |
 | A172 | 3/6 项目选择 | 新项目使用原生 Windows 文件夹选择器 |
-| A173 | 4/6 连接器设置 | 系统浏览器打开固定自定义连接器 deep link；无 WebView/任意 URL |
-| A174 | 5/6 | 不伪造 ChatGPT 状态；endpoint 只来自 Rust verified metadata projection |
+| A173 | 4/6 Local Bridge 设置 | 系统浏览器打开固定 custom-connector deep link；用户可见术语统一为 Local Bridge；无 WebView/任意 URL |
+| A174 | 5/6 Local Bridge 使用确认 | 不伪造 ChatGPT 状态；endpoint 只来自 Rust verified metadata projection |
 | A175 | 5/6 copy feedback | 不造成布局位移 |
 | A176 | 6/6 | 三项全绿前确定 disabled；全绿后才显示完成提示，不自动跳转 |
 | A177 | G3 按钮 | 一致且可辨识；禁止白底白按钮 |
 | A178 | G3 提示 | 最小必要，不重复堆叠自解释说明 |
+| A179 | 向导窗口缩放 | 默认 900×620、最小 720×500；随 viewport 高度响应，主体可滚动且不依赖固定卡片最小高度 |
+| A180 | native/WebView resize | resize/maximize 后主 WebView 与 native client area 同尺寸，Dashboard/onboarding 使用 live viewport 重排 |
+| A181 | 真实 resize E2E | Windows Tauri/WebView2 覆盖两个 native size + maximize，交叉验证 native `inner_size()`、JS viewport×DPR 和组件 rect；静态 CSS/Tauri 标记不足以单独 PASS |

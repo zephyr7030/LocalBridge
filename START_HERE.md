@@ -68,13 +68,16 @@ UI 冻结补充：
 
 ```text
 首次启动       = 6 屏
-顺序           = 欢迎 → OpenAI → 项目与权限 → ChatGPT 自定义连接器设置 → ChatGPT 使用确认 → 启动检查
+顺序           = 欢迎 → OpenAI → 项目与权限 → Local Bridge 设置 → Local Bridge 使用确认 → 启动检查
 第 7 屏        = 禁止
 第 6 屏确认    = 三项全绿后才启用
 自动进入主界面 = 禁止
-连接器设置页   = 系统浏览器固定 deep link；禁止 WebView/任意 URL
+Local Bridge设置= 系统浏览器固定 deep link；禁止 WebView/任意 URL
 项目选择       = 原生 Windows 文件夹选择器为主交互
 按钮           = 统一且可辨识；禁止白底白按钮
+窗口           = 默认 900×620；最小 720×500；可缩放；向导随 viewport 高度响应且不依赖固定卡片高度
+WebView同步     = resize/maximize 后始终铺满 native client area；Dashboard/onboarding 随 live viewport 重排
+resize验收      = 必须真实运行 Windows Tauri/WebView2：至少两个 native size + maximize；静态 CSS/Tauri 配置断言不能单独 PASS
 ```
 
 ```text

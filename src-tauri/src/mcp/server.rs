@@ -92,9 +92,13 @@ impl fmt::Display for PolicyEnforcementError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BindFailed => f.write_str("policy enforcement loopback bind failed"),
-            Self::UpstreamSessionUnavailable => f.write_str("policy enforcement upstream MCP session is unavailable"),
+            Self::UpstreamSessionUnavailable => {
+                f.write_str("policy enforcement upstream MCP session is unavailable")
+            }
             Self::ThreadSpawnFailed => f.write_str("policy enforcement thread could not start"),
-            Self::ThreadTerminated => f.write_str("policy enforcement thread terminated unexpectedly"),
+            Self::ThreadTerminated => {
+                f.write_str("policy enforcement thread terminated unexpectedly")
+            }
         }
     }
 }
@@ -207,7 +211,9 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn is_running(&self) -> bool {
-        self.thread.as_ref().is_some_and(|thread| !thread.is_finished())
+        self.thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
     }
 
     pub fn upstream_root_is_running(
@@ -226,8 +232,13 @@ impl PolicyEnforcementRuntime {
     pub fn stop(mut self) -> Result<CodingToolsRuntime, PolicyEnforcementError> {
         self.signal_shutdown();
         drop(self.guard.take());
-        let thread = self.thread.take().ok_or(PolicyEnforcementError::ThreadTerminated)?;
-        let guard = thread.join().map_err(|_| PolicyEnforcementError::ThreadTerminated)?;
+        let thread = self
+            .thread
+            .take()
+            .ok_or(PolicyEnforcementError::ThreadTerminated)?;
+        let guard = thread
+            .join()
+            .map_err(|_| PolicyEnforcementError::ThreadTerminated)?;
         Ok(guard.into_runtime())
     }
 
@@ -325,7 +336,8 @@ fn serve(
             break;
         }
         for request_id in &active {
-            if let Some(broker_request_id) = privileged_request_id(&privileged_requests, request_id) {
+            if let Some(broker_request_id) = privileged_request_id(&privileged_requests, request_id)
+            {
                 if let Some(privileged) = privileged.as_ref() {
                     let _ = privileged.cancel_execute(broker_request_id);
                 }
@@ -349,18 +361,14 @@ fn serve(
     for worker in workers {
         let _ = worker.join();
     }
-    let guard = Arc::try_unwrap(guard).unwrap_or_else(|_| {
-        panic!("policy enforcement guard still shared after worker shutdown")
-    });
+    let guard = Arc::try_unwrap(guard)
+        .unwrap_or_else(|_| panic!("policy enforcement guard still shared after worker shutdown"));
     guard
         .into_inner()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn handle_connection(
-    mut stream: TcpStream,
-    context: ConnectionContext<'_>,
-) -> Result<(), ()> {
+fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> Result<(), ()> {
     let ConnectionContext {
         guard,
         cancellation,
@@ -372,8 +380,12 @@ fn handle_connection(
         privileged_requests,
         stopping,
     } = context;
-    stream.set_read_timeout(Some(CONNECTION_TIMEOUT)).map_err(|_| ())?;
-    stream.set_write_timeout(Some(CONNECTION_TIMEOUT)).map_err(|_| ())?;
+    stream
+        .set_read_timeout(Some(CONNECTION_TIMEOUT))
+        .map_err(|_| ())?;
+    stream
+        .set_write_timeout(Some(CONNECTION_TIMEOUT))
+        .map_err(|_| ())?;
     let request = match read_request(&mut stream) {
         Ok(request) => request,
         Err(status) => return write_empty(&mut stream, status, None),
@@ -405,22 +417,46 @@ fn handle_connection(
         Err(_) => return write_rpc_error(&mut stream, Value::Null, -32700, "Parse error", None),
     };
     if payload.is_array() {
-        return write_rpc_error(&mut stream, Value::Null, -32600, "Batch requests are not supported", None);
+        return write_rpc_error(
+            &mut stream,
+            Value::Null,
+            -32600,
+            "Batch requests are not supported",
+            None,
+        );
     }
     let Some(object) = payload.as_object() else {
         return write_rpc_error(&mut stream, Value::Null, -32600, "Invalid Request", None);
     };
     if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-        return write_rpc_error(&mut stream, request_id(object), -32600, "Invalid Request", None);
+        return write_rpc_error(
+            &mut stream,
+            request_id(object),
+            -32600,
+            "Invalid Request",
+            None,
+        );
     }
     let Some(method) = object.get("method").and_then(Value::as_str) else {
-        return write_rpc_error(&mut stream, request_id(object), -32600, "Invalid Request", None);
+        return write_rpc_error(
+            &mut stream,
+            request_id(object),
+            -32600,
+            "Invalid Request",
+            None,
+        );
     };
     let id = request_id(object);
 
     if method == "initialize" {
         if request.header("mcp-session-id").is_some() {
-            return write_rpc_error(&mut stream, id, -32600, "initialize must not include Mcp-Session-Id", None);
+            return write_rpc_error(
+                &mut stream,
+                id,
+                -32600,
+                "initialize must not include Mcp-Session-Id",
+                None,
+            );
         }
         let protocol = object
             .get("params")
@@ -430,7 +466,13 @@ fn handle_connection(
         let Some(protocol) = protocol.filter(|value| {
             *value == CURRENT_PROTOCOL_VERSION || *value == COMPATIBLE_PROTOCOL_VERSION
         }) else {
-            return write_rpc_error(&mut stream, id, -32602, "Unsupported MCP protocol version", None);
+            return write_rpc_error(
+                &mut stream,
+                id,
+                -32602,
+                "Unsupported MCP protocol version",
+                None,
+            );
         };
         let session = new_session_id();
         {
@@ -471,7 +513,13 @@ fn handle_connection(
         .header("mcp-protocol-version")
         .is_some_and(|version| version != protocol)
     {
-        return write_rpc_error(&mut stream, id, -32600, "MCP protocol version mismatch", Some(session));
+        return write_rpc_error(
+            &mut stream,
+            id,
+            -32600,
+            "MCP protocol version mismatch",
+            Some(session),
+        );
     }
 
     if id.is_null() {
@@ -482,7 +530,9 @@ fn handle_connection(
                 .and_then(|params| params.get("requestId"))
                 .filter(|request_id| valid_downstream_request_id(request_id))
             {
-                if let Some(broker_request_id) = privileged_request_id(privileged_requests, request_id) {
+                if let Some(broker_request_id) =
+                    privileged_request_id(privileged_requests, request_id)
+                {
                     let Some(privileged) = privileged else {
                         return write_empty(&mut stream, 503, Some(session));
                     };
@@ -525,22 +575,55 @@ fn handle_connection(
                     }
                     write_rpc_result(&mut stream, id, result, Some(session))
                 }
-                Err(_) => write_rpc_error(&mut stream, id, -32603, "Policy enforcement failed", Some(session)),
+                Err(_) => write_rpc_error(
+                    &mut stream,
+                    id,
+                    -32603,
+                    "Policy enforcement failed",
+                    Some(session),
+                ),
             }
         }
         "tools/call" => {
             if !valid_downstream_request_id(&id) {
-                return write_rpc_error(&mut stream, Value::Null, -32600, "Invalid Request", Some(session));
+                return write_rpc_error(
+                    &mut stream,
+                    Value::Null,
+                    -32600,
+                    "Invalid Request",
+                    Some(session),
+                );
             }
             let Some(params) = object.get("params").and_then(Value::as_object) else {
-                return write_rpc_error(&mut stream, id, -32602, "Invalid tools/call params", Some(session));
+                return write_rpc_error(
+                    &mut stream,
+                    id,
+                    -32602,
+                    "Invalid tools/call params",
+                    Some(session),
+                );
             };
             let Some(name) = params.get("name").and_then(Value::as_str) else {
-                return write_rpc_error(&mut stream, id, -32602, "Invalid tools/call name", Some(session));
+                return write_rpc_error(
+                    &mut stream,
+                    id,
+                    -32602,
+                    "Invalid tools/call name",
+                    Some(session),
+                );
             };
-            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let arguments = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             if !arguments.is_object() {
-                return write_rpc_error(&mut stream, id, -32602, "Invalid tools/call arguments", Some(session));
+                return write_rpc_error(
+                    &mut stream,
+                    id,
+                    -32602,
+                    "Invalid tools/call arguments",
+                    Some(session),
+                );
             }
             if stopping.load(Ordering::Acquire) {
                 return write_empty(&mut stream, 503, Some(session));
@@ -580,7 +663,7 @@ fn handle_connection(
                 mode,
                 ToolCallRequest::new(name, arguments).with_request_id(id.clone()),
                 |status| {
-                current_task.project(status);
+                    current_task.project(status);
                 },
             );
             remove_active_request(active_requests, &id);
@@ -593,7 +676,13 @@ fn handle_connection(
                     "Tool call denied by LocalBridge policy",
                     Some(session),
                 ),
-                Err(_) => write_rpc_error(&mut stream, id, -32603, "MCP runtime call failed", Some(session)),
+                Err(_) => write_rpc_error(
+                    &mut stream,
+                    id,
+                    -32603,
+                    "MCP runtime call failed",
+                    Some(session),
+                ),
             }
         }
         _ => write_rpc_error(&mut stream, id, -32601, "Method not found", Some(session)),
@@ -652,16 +741,15 @@ fn remove_privileged_request(
 
 fn project_elevated_task(current_task: &CurrentTaskProjection, state: TaskExecutionState) {
     current_task.project(
-        CurrentTaskStatus::project(
-            TaskKind::ElevatedOperation,
-            SafeTaskSummary::Omitted,
-            state,
-        )
-        .expect("elevated task state is a valid active task state"),
+        CurrentTaskStatus::project(TaskKind::ElevatedOperation, SafeTaskSummary::Omitted, state)
+            .expect("elevated task state is a valid active task state"),
     );
 }
 
-fn finish_elevated_task(current_task: &CurrentTaskProjection, terminal: Option<TaskExecutionState>) {
+fn finish_elevated_task(
+    current_task: &CurrentTaskProjection,
+    terminal: Option<TaskExecutionState>,
+) {
     if let Some(state) = terminal {
         project_elevated_task(current_task, state);
     }
@@ -690,13 +778,13 @@ fn handle_elevated_exec(
         privileged_requests,
         stopping,
     } = context;
-    let decision = guard
+    let execution_guard = guard
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .decision(
-            mode,
-            &ToolCallRequest::new("elevated_exec", json!({})),
-        );
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let decision = execution_guard.decision(
+        mode,
+        &ToolCallRequest::new("elevated_exec", arguments.clone()),
+    );
     if !decision.allowed || decision.descriptor.capability != Capability::ElevatedExec {
         finish_elevated_task(current_task, Some(TaskExecutionState::Blocked));
         return write_rpc_error(
@@ -709,11 +797,17 @@ fn handle_elevated_exec(
     }
 
     let Some(privileged) = privileged else {
-        finish_elevated_task(current_task, Some(TaskExecutionState::AwaitingAuthorization));
+        finish_elevated_task(
+            current_task,
+            Some(TaskExecutionState::AwaitingAuthorization),
+        );
         return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
     };
     if !matches!(privileged.state(), PrivilegeState::Active { .. }) {
-        finish_elevated_task(current_task, Some(TaskExecutionState::AwaitingAuthorization));
+        finish_elevated_task(
+            current_task,
+            Some(TaskExecutionState::AwaitingAuthorization),
+        );
         return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
     }
     let spec = match elevated_exec_spec(arguments) {
@@ -747,12 +841,21 @@ fn handle_elevated_exec(
         remove_privileged_request(privileged_requests, &id);
         return match error {
             PrivilegedExecError::GateClosed(_) => {
-                finish_elevated_task(current_task, Some(TaskExecutionState::AwaitingAuthorization));
+                finish_elevated_task(
+                    current_task,
+                    Some(TaskExecutionState::AwaitingAuthorization),
+                );
                 write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session))
             }
             PrivilegedExecError::Broker(_) => {
                 finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
-                write_rpc_error(stream, id, -32603, "Privileged broker execution failed", Some(session))
+                write_rpc_error(
+                    stream,
+                    id,
+                    -32603,
+                    "Privileged broker execution failed",
+                    Some(session),
+                )
             }
         };
     }
@@ -773,12 +876,21 @@ fn handle_elevated_exec(
     let execution = match execution {
         Ok(execution) => execution,
         Err(PrivilegedExecError::GateClosed(_)) => {
-            finish_elevated_task(current_task, Some(TaskExecutionState::AwaitingAuthorization));
+            finish_elevated_task(
+                current_task,
+                Some(TaskExecutionState::AwaitingAuthorization),
+            );
             return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
         }
         Err(PrivilegedExecError::Broker(_)) => {
             finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
-            return write_rpc_error(stream, id, -32603, "Privileged broker execution failed", Some(session));
+            return write_rpc_error(
+                stream,
+                id,
+                -32603,
+                "Privileged broker execution failed",
+                Some(session),
+            );
         }
     };
 
@@ -803,7 +915,9 @@ fn handle_elevated_exec(
         "isError": is_error
     });
     finish_elevated_task(current_task, terminal);
-    write_rpc_result(stream, id, response, Some(session))
+    let result = write_rpc_result(stream, id, response, Some(session));
+    drop(execution_guard);
+    result
 }
 
 fn request_id(object: &serde_json::Map<String, Value>) -> Value {
@@ -896,15 +1010,18 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, u16> {
     while body.len() < content_length {
         let remaining = content_length - body.len();
         let read_limit = remaining.min(chunk.len());
-        let count = stream
-            .read(&mut chunk[..read_limit])
-            .map_err(|_| 400u16)?;
+        let count = stream.read(&mut chunk[..read_limit]).map_err(|_| 400u16)?;
         if count == 0 {
             return Err(400);
         }
         body.extend_from_slice(&chunk[..count]);
     }
-    Ok(HttpRequest { method, path, headers, body })
+    Ok(HttpRequest {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 fn new_session_id() -> String {
@@ -922,7 +1039,12 @@ fn write_rpc_result(
     result: Value,
     session: Option<&str>,
 ) -> Result<(), ()> {
-    write_json(stream, 200, &json!({"jsonrpc":"2.0","id":id,"result":result}), session)
+    write_json(
+        stream,
+        200,
+        &json!({"jsonrpc":"2.0","id":id,"result":result}),
+        session,
+    )
 }
 
 fn write_rpc_error(
@@ -1000,7 +1122,9 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::super::runtime::{CodingToolsPermissionMode, CodingToolsRuntimeConfig, InternalBearer};
+    use super::super::runtime::{
+        CodingToolsPermissionMode, CodingToolsRuntimeConfig, InternalBearer,
+    };
 
     const SYNTHETIC_BEARER: &str = "LB009_PEP_INTERNAL_BEARER_SYNTHETIC_DO_NOT_LEAK";
 
@@ -1111,7 +1235,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("localbridge-lb009-pep-{}-{nonce}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "localbridge-lb009-pep-{}-{nonce}",
+            std::process::id()
+        ));
         fs::create_dir_all(&path).unwrap();
         fs::write(path.join("probe.txt"), b"LB009 PEP\n").unwrap();
         path
@@ -1128,8 +1255,10 @@ mod tests {
             match fs::remove_dir_all(path) {
                 Ok(()) => return,
                 Err(error)
-                    if matches!(error.kind(), std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Other)
-                        && std::time::Instant::now() < deadline =>
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Other
+                    ) && std::time::Instant::now() < deadline =>
                 {
                     thread::sleep(Duration::from_millis(25));
                 }
@@ -1145,7 +1274,9 @@ mod tests {
     fn post(port: u16, session: Option<&str>, payload: &Value) -> ClientResponse {
         let body = serde_json::to_vec(payload).unwrap();
         let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
         let mut request = format!(
             "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nMCP-Protocol-Version: {CURRENT_PROTOCOL_VERSION}\r\nConnection: close\r\nContent-Length: {}\r\n",
             body.len()
@@ -1175,7 +1306,10 @@ mod tests {
     fn parse_client_response(mut stream: TcpStream) -> ClientResponse {
         let mut bytes = Vec::new();
         stream.read_to_end(&mut bytes).unwrap();
-        let split = bytes.windows(4).position(|window| window == b"\r\n\r\n").unwrap();
+        let split = bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap();
         let headers = std::str::from_utf8(&bytes[..split]).unwrap();
         let mut lines = headers.split("\r\n");
         let status = lines
@@ -1198,7 +1332,11 @@ mod tests {
         } else {
             serde_json::from_slice(body_bytes).unwrap()
         };
-        ClientResponse { status, session, body }
+        ClientResponse {
+            status,
+            session,
+            body,
+        }
     }
 
     fn initialize(port: u16, id: u64) -> ClientResponse {
@@ -1242,7 +1380,10 @@ mod tests {
 
         let initialized = initialize(pep.port(), 1);
         assert_eq!(initialized.status, 200);
-        assert_eq!(initialized.body["result"]["protocolVersion"], CURRENT_PROTOCOL_VERSION);
+        assert_eq!(
+            initialized.body["result"]["protocolVersion"],
+            CURRENT_PROTOCOL_VERSION
+        );
         let session = initialized.session.expect("downstream MCP session");
         let notified = post(
             pep.port(),
@@ -1258,7 +1399,11 @@ mod tests {
         );
         let full_catalog = full_tools.body["result"]["tools"].as_array().unwrap();
         assert_eq!(full_catalog.len(), 19);
-        assert!(full_catalog.iter().any(|tool| tool["name"] == "exec_command"));
+        assert!(
+            full_catalog
+                .iter()
+                .any(|tool| tool["name"] == "exec_command")
+        );
 
         pep.set_permission_mode(PermissionMode::Edit);
         let denied = post(
@@ -1270,14 +1415,20 @@ mod tests {
             }),
         );
         assert_eq!(denied.body["error"]["code"], -32001);
-        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         let edit_tools = post(
             pep.port(),
             Some(&session),
             &json!({"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}),
         );
-        assert_eq!(edit_tools.body["result"]["tools"].as_array().unwrap().len(), 15);
+        assert_eq!(
+            edit_tools.body["result"]["tools"].as_array().unwrap().len(),
+            15
+        );
 
         let read = post(
             pep.port(),
@@ -1287,8 +1438,15 @@ mod tests {
                 "params":{"name":"read_file","arguments":{"path":"probe.txt"}}
             }),
         );
-        assert!(read.body.get("result").is_some(), "allowed read_file must forward: {}", read.body);
-        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+        assert!(
+            read.body.get("result").is_some(),
+            "allowed read_file must forward: {}",
+            read.body
+        );
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         let reinitialized = initialize(pep.port(), 6);
         let new_session = reinitialized.session.unwrap();
@@ -1374,7 +1532,10 @@ mod tests {
             ) {
                 break;
             }
-            assert!(std::time::Instant::now() < running_deadline, "tool call never projected Running");
+            assert!(
+                std::time::Instant::now() < running_deadline,
+                "tool call never projected Running"
+            );
             thread::sleep(Duration::from_millis(10));
         }
         thread::sleep(Duration::from_millis(100));
@@ -1390,16 +1551,25 @@ mod tests {
             }),
         );
         assert_eq!(cancelled.status, 202);
-        assert!(cancel_started.elapsed() < Duration::from_secs(2), "cancellation transport was blocked");
+        assert!(
+            cancel_started.elapsed() < Duration::from_secs(2),
+            "cancellation transport was blocked"
+        );
 
         let call_result = call.join().expect("tools/call client thread");
-        assert!(call_started.elapsed() < Duration::from_secs(5), "cancelled command ran near natural 10 second duration");
+        assert!(
+            call_started.elapsed() < Duration::from_secs(5),
+            "cancelled command ran near natural 10 second duration"
+        );
         assert!(
             call_result.body.get("result").is_some() || call_result.body.get("error").is_some(),
             "cancelled tools/call must terminate with a JSON-RPC response: {}",
             call_result.body
         );
-        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         let mut coding = pep.stop().expect("PEP stop after cancellation");
         coding.stop().expect("MCP Job stop after cancellation");
@@ -1466,8 +1636,33 @@ mod tests {
         });
 
         let secret = "LB012_SYNTHETIC_PEP_SECRET";
+        let reviewed_program = super::super::policy::reviewed_elevated_program()
+            .expect("reviewed Windows diagnostic exists")
+            .to_string_lossy()
+            .into_owned();
+        fs::write(workspace.join("whoami.exe"), b"untrusted same-name binary").unwrap();
+        for (index, arguments) in [
+            json!({"program":"C:/Windows/System32/cmd.exe","args":["/c","whoami"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096}),
+            json!({"program":"C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe","args":["-Command",format!("Set-Content C:/ProgramData/LocalBridge/settings.json {secret}")],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096}),
+            json!({"program":"C:/Windows/System32/reg.exe","args":["add","HKLM\\Software\\LocalBridge"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096}),
+            json!({"program":workspace.join("whoami.exe").to_string_lossy(),"args":["/user"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096}),
+        ].into_iter().enumerate() {
+            let denied = post(
+                pep.port(),
+                Some(&session),
+                &json!({
+                    "jsonrpc":"2.0","id":310 + index as u64,"method":"tools/call",
+                    "params":{"name":"elevated_exec","arguments":arguments}
+                }),
+            );
+            assert_eq!(denied.body["error"]["code"], -32001);
+            assert!(!denied.body.to_string().contains(secret));
+            assert_eq!(fake.start_count(), 0, "unreviewed elevated request reached Broker");
+        }
+
         let port = pep.port();
         let call_session = session.clone();
+        let call_program = reviewed_program.clone();
         let call = thread::spawn(move || {
             post(
                 port,
@@ -1479,9 +1674,9 @@ mod tests {
                     "params":{
                         "name":"elevated_exec",
                         "arguments":{
-                            "program":"C:/Windows/System32/cmd.exe",
-                            "args":["/d","/c",format!("echo {secret}"),"--api-key",secret],
-                            "workdir":"C:/Windows/Temp",
+                            "program":call_program,
+                            "args":["/user"],
+                            "workdir":null,
                             "timeout_ms":10000,
                             "max_output_bytes":4096
                         }
@@ -1525,7 +1720,10 @@ mod tests {
             "cancelled"
         );
         assert_eq!(cancelled_result.body["result"]["isError"], true);
-        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         pep.set_permission_mode(PermissionMode::Full);
         let full_tools = post(
@@ -1546,7 +1744,7 @@ mod tests {
             &json!({
                 "jsonrpc":"2.0","id":302,"method":"tools/call",
                 "params":{"name":"elevated_exec","arguments":{
-                    "program":"C:/Windows/System32/cmd.exe","args":[],
+                    "program":reviewed_program.clone(),"args":["/user"],"workdir":null,
                     "timeout_ms":1000,"max_output_bytes":1024
                 }}
             }),
@@ -1562,7 +1760,7 @@ mod tests {
             &json!({
                 "jsonrpc":"2.0","id":303,"method":"tools/call",
                 "params":{"name":"elevated_exec","arguments":{
-                    "program":"C:/Windows/System32/cmd.exe","args":[],
+                    "program":reviewed_program.clone(),"args":["/user"],"workdir":null,
                     "timeout_ms":1000,"max_output_bytes":1024
                 }}
             }),
@@ -1570,7 +1768,10 @@ mod tests {
         assert_eq!(awaiting.body["error"]["code"], -32002);
         assert_eq!(awaiting.body["error"]["message"], "ElevationRequired");
         assert_eq!(fake.start_count(), 1);
-        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         let control_plane = post(
             pep.port(),
@@ -1592,7 +1793,7 @@ mod tests {
             &json!({
                 "jsonrpc":"2.0","id":305,"method":"tools/call",
                 "params":{"name":"elevated_exec","arguments":{
-                    "program":"C:/Windows/System32/cmd.exe","args":["/c","echo ok"],
+                    "program":reviewed_program.clone(),"args":["/user"],"workdir":null,
                     "timeout_ms":1000,"max_output_bytes":1024
                 }}
             }),
@@ -1606,6 +1807,78 @@ mod tests {
             "LB012_FAKE_PRIVILEGED_OK"
         );
         assert_eq!(fake.start_count(), 2);
+
+        fake.complete.store(false, Ordering::Release);
+        let first_port = pep.port();
+        let first_session = session.clone();
+        let first_program = reviewed_program.clone();
+        let first = thread::spawn(move || {
+            post(
+                first_port,
+                Some(&first_session),
+                &json!({
+                    "jsonrpc":"2.0","id":"serialized-first","method":"tools/call",
+                    "params":{"name":"elevated_exec","arguments":{
+                        "program":first_program,"args":["/user"],"workdir":null,
+                        "timeout_ms":5000,"max_output_bytes":1024
+                    }}
+                }),
+            )
+        });
+        let first_deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while fake.start_count() != 3 {
+            assert!(
+                std::time::Instant::now() < first_deadline,
+                "first serialized elevated call did not start"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(matches!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Active(ref task)
+                if task.kind == TaskKind::ElevatedOperation && task.state == TaskExecutionState::Running
+        ));
+
+        let second_port = pep.port();
+        let second_session = session.clone();
+        let second_program = reviewed_program.clone();
+        let second = thread::spawn(move || {
+            post(
+                second_port,
+                Some(&second_session),
+                &json!({
+                    "jsonrpc":"2.0","id":"serialized-second","method":"tools/call",
+                    "params":{"name":"elevated_exec","arguments":{
+                        "program":second_program,"args":["/groups"],"workdir":null,
+                        "timeout_ms":5000,"max_output_bytes":1024
+                    }}
+                }),
+            )
+        });
+        thread::sleep(Duration::from_millis(150));
+        assert_eq!(
+            fake.start_count(),
+            3,
+            "second elevated call bypassed single execution gate"
+        );
+        assert!(matches!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
+        ));
+        fake.complete.store(true, Ordering::Release);
+        assert_eq!(
+            first.join().unwrap().body["result"]["structuredContent"]["outcome"],
+            "completed"
+        );
+        assert_eq!(
+            second.join().unwrap().body["result"]["structuredContent"]["outcome"],
+            "completed"
+        );
+        assert_eq!(fake.start_count(), 4);
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         let mut coding = pep.stop().expect("PEP stop after privileged routing");
         coding.stop().expect("MCP stop after privileged routing");

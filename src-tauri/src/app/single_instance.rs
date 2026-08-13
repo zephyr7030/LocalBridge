@@ -34,10 +34,17 @@ impl std::fmt::Display for SingleInstanceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::WindowsApi { operation, code } => {
-                write!(f, "single-instance Windows API {operation} failed with code {code}")
+                write!(
+                    f,
+                    "single-instance Windows API {operation} failed with code {code}"
+                )
             }
-            Self::ListenerAlreadyStarted => f.write_str("single-instance wake listener already started"),
-            Self::ListenerThreadSpawn => f.write_str("single-instance wake listener thread failed to start"),
+            Self::ListenerAlreadyStarted => {
+                f.write_str("single-instance wake listener already started")
+            }
+            Self::ListenerThreadSpawn => {
+                f.write_str("single-instance wake listener thread failed to start")
+            }
         }
     }
 }
@@ -61,7 +68,14 @@ pub struct SingleInstanceGuard {
 impl std::fmt::Debug for SingleInstanceGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SingleInstanceGuard")
-            .field("listener_started", &self.listener.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some())
+            .field(
+                "listener_started",
+                &self
+                    .listener
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_some(),
+            )
             .finish_non_exhaustive()
     }
 }

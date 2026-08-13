@@ -129,6 +129,9 @@ validate(candidate)
 - candidate 不 commit；
 - 保留 previous active metadata；
 - 可显式 rollback。
+- candidate cleanup fault、rollback fault、rollback cleanup fault 必须分别保留为 typed 状态，不得吞掉 cleanup 后伪装成正常 `Stopped`。
+
+成功的显式 workspace switch 是 recovery generation 边界：旧 workspace 的 outage、pending/exhausted retry budget、stable timer 与 user-attention 状态全部退役；新 workspace 后续发生故障时必须获得独立的新 generation 和完整 5 次恢复额度。切换失败且**干净 rollback 并实际恢复到 Ready** 的旧 workspace 才可继续旧 generation，不重置其已消耗额度。若 candidate cleanup、rollback 或 rollback cleanup 失败，或切换错误后运行时没有恢复到 Ready，则必须 fail-closed：旧 pending/outage/retry generation 全部退役，保持 typed Faulted/Stopped，禁止 watchdog 自动重启；需要新的显式用户控制动作重新建立授权 workspace/runtime。
 
 ## Process Ownership
 
@@ -306,6 +309,8 @@ RuntimeChecksumMismatch
 ```text
 tool call
 → PEP capability = elevated_exec
+→ review actual program / args / workdir
+→ exact reviewed action profile ?
 → mode == Elevated
 → PrivilegeState == Active
 → Broker typed request
@@ -313,6 +318,8 @@ tool call
 ```
 
 任一前置不满足时 fail-closed。
+
+`elevated_exec` 是 generic structured gateway，不等于 arbitrary administrator shell/program execution。v0.1 只允许明确登记并可机器验证的 reviewed action；shell、解释器、任意注册表/服务/任务修改器和无法证明不触及 LocalBridge control-plane 的请求在 Broker 启动前拒绝。当前任务投影与普通 MCP 调用共享单一 execution gate，多个管理员执行不得并发覆盖同一个 `CurrentTaskStatus`；取消请求走独立控制通道。
 
 没有 TTL / expires_at。
 

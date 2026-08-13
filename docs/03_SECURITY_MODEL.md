@@ -62,11 +62,15 @@ Full 模式必须明确显示：
 - 经审核的 `elevated_exec`；
 - 经审核的管理员能力。
 
+这里的 `elevated_exec` 是通用的**结构化管理员执行网关**，不是“任意管理员程序/任意 shell”。PEP 必须基于真实 `program / args / workdir` 命中明确 review profile 后才允许进入 Broker；未审核程序、shell/解释器和模糊参数均 fail-closed。
+
 仍然拒绝：
 
 - LocalBridge control-plane；
 - 未知 capability；
 - 未激活 Broker 时的管理员调用。
+
+`control-plane = deny_always` 同样覆盖经 `elevated_exec` 间接修改 LocalBridge settings、workspace metadata、runtime policy、credential/tunnel 配置等路径；不能只检查 MCP 工具名。
 
 LocalBridge 主程序、编码服务和安全隧道不得因管理员模式整体提权。
 
@@ -218,6 +222,8 @@ ordinary LocalBridge
 - UAC 拒绝。
 
 Broker 必须使用最小本地 IPC ACL、generation secret/nonce、typed schema 和 fail-closed policy。
+
+UAC 启动前还必须验证 Broker 二进制本身：正式安装使用机器级 Program Files 安装根，`runas` 只接受当前 LocalBridge 可执行文件的 canonical 同目录 `localbridge-privileged-broker.exe`。仅凭“路径位于 Program Files”不足以建立信任：LocalBridge 读取 Broker、安装目录及直到 Program Files 根的实际 owner/DACL，owner 必须是受信任 system/admin installer principal，任何非受信任 principal 获得写入、删除/替换、增加子项、修改 DACL/owner 等 mutation grant 都 fail-closed；同时再用当前未提权进程逐项请求危险 mutation right，只有每一项都明确返回 `ACCESS_DENIED` 才允许进入 `runas`。ACL 缺失、无法读取、出现当前实现无法安全解释的 ACE 类型或其他不确定结果同样拒绝。用户可写临时目录、权限宽松的 Program Files 子目录、同名替代文件、symlink/reparse 路径均不得作为提权目标。当前实现**不**以 Authenticode 或文件哈希作为 Broker UAC 信任判据，不得声称已实现签名/哈希校验。
 
 即使 Elevated：
 

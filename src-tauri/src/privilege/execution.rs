@@ -37,13 +37,19 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct ExecutionCancel(Arc<AtomicBool>);
 
 impl ExecutionCancel {
-    pub fn cancel(&self) { self.0.store(true, Ordering::Release); }
-    fn cancelled(&self) -> bool { self.0.load(Ordering::Acquire) }
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+    fn cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
 }
 
 impl fmt::Debug for ExecutionCancel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ExecutionCancel").field("cancelled", &self.cancelled()).finish()
+        f.debug_struct("ExecutionCancel")
+            .field("cancelled", &self.cancelled())
+            .finish()
     }
 }
 
@@ -67,7 +73,9 @@ impl fmt::Display for ExecutionError {
             Self::InvalidSpec => f.write_str("invalid elevated execution specification"),
             Self::CreatePipe(code) => write!(f, "CreatePipe failed with code {code}"),
             Self::CreateJob(code) => write!(f, "CreateJobObjectW failed with code {code}"),
-            Self::ConfigureJob(code) => write!(f, "SetInformationJobObject failed with code {code}"),
+            Self::ConfigureJob(code) => {
+                write!(f, "SetInformationJobObject failed with code {code}")
+            }
             Self::CreateProcess(code) => write!(f, "CreateProcessW failed with code {code}"),
             Self::AssignJob(code) => write!(f, "AssignProcessToJobObject failed with code {code}"),
             Self::Resume => f.write_str("ResumeThread failed"),
@@ -97,7 +105,10 @@ pub(crate) fn run_elevated_exec(
     let job = create_kill_on_close_job()?;
     let mut command_line = build_command_line(&spec.program, &spec.args);
     let application = wide_null(OsStr::new(&spec.program));
-    let current_dir = spec.workdir.as_deref().map(|value| wide_null(OsStr::new(value)));
+    let current_dir = spec
+        .workdir
+        .as_deref()
+        .map(|value| wide_null(OsStr::new(value)));
     let current_dir_ptr = current_dir.as_ref().map_or(null(), |value| value.as_ptr());
     let mut startup: STARTUPINFOW = unsafe { zeroed() };
     startup.cb = size_of::<STARTUPINFOW>() as u32;
@@ -131,7 +142,9 @@ pub(crate) fn run_elevated_exec(
 
     if unsafe { AssignProcessToJobObject(job, process_info.hProcess) } == 0 {
         let code = last_error();
-        unsafe { TerminateJobObject(job, CANCEL_EXIT_CODE); }
+        unsafe {
+            TerminateJobObject(job, CANCEL_EXIT_CODE);
+        }
         close_handle(process_info.hThread);
         close_handle(process_info.hProcess);
         close_handle(job);
@@ -139,7 +152,9 @@ pub(crate) fn run_elevated_exec(
         return Err(ExecutionError::AssignJob(code));
     }
     if unsafe { ResumeThread(process_info.hThread) } == u32::MAX {
-        unsafe { TerminateJobObject(job, CANCEL_EXIT_CODE); }
+        unsafe {
+            TerminateJobObject(job, CANCEL_EXIT_CODE);
+        }
         close_handle(process_info.hThread);
         close_handle(process_info.hProcess);
         close_handle(job);
@@ -155,11 +170,15 @@ pub(crate) fn run_elevated_exec(
     let timeout = Duration::from_millis(spec.timeout_ms as u64);
     let outcome = loop {
         if cancel.cancelled() {
-            unsafe { TerminateJobObject(job, CANCEL_EXIT_CODE); }
+            unsafe {
+                TerminateJobObject(job, CANCEL_EXIT_CODE);
+            }
             break ElevatedExecOutcome::Cancelled;
         }
         if started.elapsed() >= timeout {
-            unsafe { TerminateJobObject(job, TIMEOUT_EXIT_CODE); }
+            unsafe {
+                TerminateJobObject(job, TIMEOUT_EXIT_CODE);
+            }
             break ElevatedExecOutcome::TimedOut;
         }
         let active = active_processes(job)?;
@@ -184,7 +203,12 @@ pub(crate) fn run_elevated_exec(
 
     let (bytes, truncated) = reader.join().unwrap_or_else(|_| (Vec::new(), true));
     let output = redact_output(String::from_utf8_lossy(&bytes).into_owned(), &spec);
-    Ok(ElevatedExecResult { outcome, exit_code, output, truncated })
+    Ok(ElevatedExecResult {
+        outcome,
+        exit_code,
+        output,
+        truncated,
+    })
 }
 
 fn create_output_pipe() -> Result<(HANDLE, HANDLE), ExecutionError> {
@@ -270,7 +294,9 @@ fn drain_output(handle: HANDLE, limit: usize) -> (Vec<u8>, bool) {
                 let available = limit.saturating_sub(retained.len());
                 let keep = count.min(available);
                 retained.extend_from_slice(&chunk[..keep]);
-                if keep < count { truncated = true; }
+                if keep < count {
+                    truncated = true;
+                }
             }
         }
     }
@@ -278,7 +304,18 @@ fn drain_output(handle: HANDLE, limit: usize) -> (Vec<u8>, bool) {
 }
 
 fn redact_output(output: String, spec: &ElevatedExecSpec) -> String {
-    let markers = ["password", "passwd", "passphrase", "token", "secret", "api-key", "api_key", "authorization", "nonce", "credential"];
+    let markers = [
+        "password",
+        "passwd",
+        "passphrase",
+        "token",
+        "secret",
+        "api-key",
+        "api_key",
+        "authorization",
+        "nonce",
+        "credential",
+    ];
     if spec.args.iter().any(|arg| {
         let lower = arg.to_ascii_lowercase();
         markers.iter().any(|marker| lower.contains(marker))
@@ -286,7 +323,17 @@ fn redact_output(output: String, spec: &ElevatedExecSpec) -> String {
         return "[REDACTED]".to_string();
     }
     let lower = output.to_ascii_lowercase();
-    if ["authorization: bearer ", "api_key=", "api-key=", "password=", "token=", "secret="].iter().any(|marker| lower.contains(marker)) {
+    if [
+        "authorization: bearer ",
+        "api_key=",
+        "api-key=",
+        "password=",
+        "token=",
+        "secret=",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
         return "[REDACTED]".to_string();
     }
     output
@@ -309,7 +356,10 @@ fn quote_windows_arg(arg: &OsStr) -> String {
     let mut out = String::from("\"");
     let mut slashes = 0usize;
     for ch in text.chars() {
-        if ch == '\\' { slashes += 1; continue; }
+        if ch == '\\' {
+            slashes += 1;
+            continue;
+        }
         if ch == '"' {
             out.push_str(&"\\".repeat(slashes * 2 + 1));
             out.push('"');
@@ -325,15 +375,27 @@ fn quote_windows_arg(arg: &OsStr) -> String {
     out
 }
 
-fn wide_null(value: &OsStr) -> Vec<u16> { value.encode_wide().chain(std::iter::once(0)).collect() }
-fn close_handle(handle: HANDLE) { if handle != INVALID_HANDLE_VALUE && !handle.is_null() { unsafe { CloseHandle(handle); } } }
-fn last_error() -> u32 { std::io::Error::last_os_error().raw_os_error().unwrap_or(-1) as u32 }
+fn wide_null(value: &OsStr) -> Vec<u16> {
+    value.encode_wide().chain(std::iter::once(0)).collect()
+}
+fn close_handle(handle: HANDLE) {
+    if handle != INVALID_HANDLE_VALUE && !handle.is_null() {
+        unsafe {
+            CloseHandle(handle);
+        }
+    }
+}
+fn last_error() -> u32 {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(-1) as u32
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn cmd() -> String { r"C:\Windows\System32\cmd.exe".to_string() }
+    fn cmd() -> String {
+        r"C:\Windows\System32\cmd.exe".to_string()
+    }
     fn spec(args: &[&str]) -> ElevatedExecSpec {
         ElevatedExecSpec {
             program: cmd(),
@@ -346,7 +408,11 @@ mod tests {
 
     #[test]
     fn structured_process_exec_captures_output_without_shell_default() {
-        let result = run_elevated_exec(spec(&["/d", "/c", "echo LB012_STRUCTURED"]), ExecutionCancel::default()).unwrap();
+        let result = run_elevated_exec(
+            spec(&["/d", "/c", "echo LB012_STRUCTURED"]),
+            ExecutionCancel::default(),
+        )
+        .unwrap();
         assert_eq!(result.outcome, ElevatedExecOutcome::Completed);
         assert!(result.output.contains("LB012_STRUCTURED"));
         assert!(!result.truncated);
@@ -361,10 +427,19 @@ mod tests {
 
         let cancel = ExecutionCancel::default();
         let cancel_worker = cancel.clone();
-        let handle = thread::spawn(move || run_elevated_exec(spec(&["/d", "/c", "ping -n 6 127.0.0.1 >nul"]), cancel_worker).unwrap());
+        let handle = thread::spawn(move || {
+            run_elevated_exec(
+                spec(&["/d", "/c", "ping -n 6 127.0.0.1 >nul"]),
+                cancel_worker,
+            )
+            .unwrap()
+        });
         thread::sleep(Duration::from_millis(80));
         cancel.cancel();
-        assert_eq!(handle.join().unwrap().outcome, ElevatedExecOutcome::Cancelled);
+        assert_eq!(
+            handle.join().unwrap().outcome,
+            ElevatedExecOutcome::Cancelled
+        );
 
         let mut limited_spec = spec(&["/d", "/c", "for /L %i in (1,1,1000) do @echo 1234567890"]);
         limited_spec.max_output_bytes = 128;
@@ -373,7 +448,11 @@ mod tests {
         assert!(limited.truncated);
 
         let secret = "LB012_SYNTHETIC_SECRET_VALUE";
-        let redacted = run_elevated_exec(spec(&["/d", "/c", &format!("echo {secret}"), "--api-key", secret]), ExecutionCancel::default()).unwrap();
+        let redacted = run_elevated_exec(
+            spec(&["/d", "/c", &format!("echo {secret}"), "--api-key", secret]),
+            ExecutionCancel::default(),
+        )
+        .unwrap();
         assert!(!redacted.output.contains(secret));
         assert!(redacted.output.contains("[REDACTED]"));
     }

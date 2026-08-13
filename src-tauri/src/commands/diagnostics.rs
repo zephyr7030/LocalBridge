@@ -8,7 +8,10 @@ use crate::diagnostics::{
 };
 
 #[tauri::command]
-pub fn get_diagnostics(_app: AppHandle, lifecycle: State<'_, DesktopLifecycle>) -> Result<DiagnosticsSnapshot, String> {
+pub fn get_diagnostics(
+    _app: AppHandle,
+    lifecycle: State<'_, DesktopLifecycle>,
+) -> Result<DiagnosticsSnapshot, String> {
     let metadata = WindowsCredentialStore::default()
         .runtime_api_key_metadata()
         .map_err(|_| "无法读取运行密钥状态".to_string())?;
@@ -42,9 +45,15 @@ pub fn diagnostics_retry_connection(lifecycle: State<'_, DesktopLifecycle>) -> R
 }
 
 #[tauri::command]
-pub fn export_diagnostics(app: AppHandle, lifecycle: State<'_, DesktopLifecycle>) -> Result<String, String> {
+pub fn export_diagnostics(
+    app: AppHandle,
+    lifecycle: State<'_, DesktopLifecycle>,
+) -> Result<String, String> {
     let snapshot = get_diagnostics(app.clone(), lifecycle)?;
-    let root = app.path().app_data_dir().map_err(|_| "无法定位应用数据目录".to_string())?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "无法定位应用数据目录".to_string())?;
     export_snapshot(&root, &snapshot)
         .map(|path| path.to_string_lossy().into_owned())
         .map_err(|_| "无法导出诊断信息".to_string())

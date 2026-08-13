@@ -8,8 +8,9 @@ use std::time::Duration;
 use crate::state::{GenerationId, PrivilegeFault, PrivilegeState};
 
 use super::{
-    BrokerClientSession, BrokerRunError, ElevatedBrokerProcess, ElevatedExecResult, ElevatedExecSpec,
-    NamedPipeServer, PrivilegeIpcError, UacLaunchError, launch_broker_with_explicit_uac,
+    BrokerClientSession, BrokerRunError, ElevatedBrokerProcess, ElevatedExecResult,
+    ElevatedExecSpec, NamedPipeServer, PrivilegeIpcError, UacLaunchError,
+    launch_broker_with_explicit_uac,
 };
 
 const BROKER_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -92,18 +93,25 @@ impl fmt::Debug for PrivilegeController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PrivilegeController")
             .field("state", &self.state())
-            .field("call_gate_open", &self.shared.gate_open.load(Ordering::Acquire))
+            .field(
+                "call_gate_open",
+                &self.shared.gate_open.load(Ordering::Acquire),
+            )
             .finish()
     }
 }
 
 impl Default for PrivilegeController {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PrivilegeController {
     pub fn new() -> Self {
-        Self { shared: Arc::new(PrivilegeShared::default()) }
+        Self {
+            shared: Arc::new(PrivilegeShared::default()),
+        }
     }
 
     pub fn state(&self) -> PrivilegeState {
@@ -111,7 +119,9 @@ impl PrivilegeController {
     }
 
     pub fn gateway(&self) -> PrivilegedExecutionGateway {
-        PrivilegedExecutionGateway { shared: Arc::clone(&self.shared) }
+        PrivilegedExecutionGateway {
+            shared: Arc::clone(&self.shared),
+        }
     }
 
     pub fn request_without_uac(&self) -> Result<(), PrivilegeFault> {
@@ -125,24 +135,37 @@ impl PrivilegeController {
         broker_executable: &Path,
     ) -> Result<GenerationId, PrivilegeFault> {
         self.disable()?;
-        let generation_value = self.shared.next_generation.fetch_add(1, Ordering::AcqRel).max(1);
+        let generation_value = self
+            .shared
+            .next_generation
+            .fetch_add(1, Ordering::AcqRel)
+            .max(1);
         let generation = GenerationId::new(generation_value);
         self.set_state(PrivilegeState::Requested);
         let server = NamedPipeServer::create().map_err(|error| self.fail(map_ipc_fault(error)))?;
         self.set_state(PrivilegeState::AwaitingUac);
-        let process = launch_broker_with_explicit_uac(broker_executable, server.name(), generation_value)
-            .map_err(|error| self.fail(map_uac_fault(error)))?;
+        let process =
+            launch_broker_with_explicit_uac(broker_executable, server.name(), generation_value)
+                .map_err(|error| self.fail(map_uac_fault(error)))?;
         let connection = server
             .accept_elevated_client(&process)
             .map_err(|error| self.fail(map_ipc_fault(error)))?;
         let mut session = BrokerClientSession::handshake(connection, generation_value)
             .map_err(|error| self.fail(map_broker_fault(error)))?;
-        session.ping().map_err(|error| self.fail(map_broker_fault(error)))?;
+        session
+            .ping()
+            .map_err(|error| self.fail(map_broker_fault(error)))?;
         {
-            let mut active = self.shared.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut active = self
+                .shared
+                .active
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             *active = Some(ActiveBroker { session, process });
         }
-        self.set_state(PrivilegeState::Active { broker_generation: generation });
+        self.set_state(PrivilegeState::Active {
+            broker_generation: generation,
+        });
         self.shared.gate_open.store(true, Ordering::Release);
         Ok(generation)
     }
@@ -150,14 +173,28 @@ impl PrivilegeController {
     pub fn disable(&self) -> Result<(), PrivilegeFault> {
         self.shared.gate_open.store(false, Ordering::Release);
         self.set_state(PrivilegeState::Disabled);
-        let active = self.shared.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-        let Some(mut active) = active else { return Ok(()); };
+        let active = self
+            .shared
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let Some(mut active) = active else {
+            return Ok(());
+        };
         let shutdown_result = active.session.shutdown();
         drop(active.session);
-        let exited = active.process.wait_for_exit(BROKER_EXIT_TIMEOUT).map_err(map_uac_fault)?;
+        let exited = active
+            .process
+            .wait_for_exit(BROKER_EXIT_TIMEOUT)
+            .map_err(map_uac_fault)?;
         if !exited {
             active.process.terminate().map_err(map_uac_fault)?;
-            if !active.process.wait_for_exit(BROKER_EXIT_TIMEOUT).map_err(map_uac_fault)? {
+            if !active
+                .process
+                .wait_for_exit(BROKER_EXIT_TIMEOUT)
+                .map_err(map_uac_fault)?
+            {
                 return Err(PrivilegeFault::BrokerExited);
             }
         }
@@ -170,7 +207,11 @@ impl PrivilegeController {
 
     fn fail(&self, fault: PrivilegeFault) -> PrivilegeFault {
         self.shared.gate_open.store(false, Ordering::Release);
-        self.shared.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        self.shared
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         self.set_state(PrivilegeState::Faulted(fault.clone()));
         fault
     }
@@ -250,7 +291,11 @@ impl PrivilegedExecutionGateway {
         &self,
         operation: impl FnOnce(&mut BrokerClientSession) -> Result<T, BrokerRunError>,
     ) -> Result<T, PrivilegedExecError> {
-        let mut active = self.shared.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut active = self
+            .shared
+            .active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !self.shared.gate_open.load(Ordering::Acquire) {
             return Err(PrivilegedExecError::GateClosed(self.shared.cached_state()));
         }
@@ -267,7 +312,8 @@ impl PrivilegedExecutionGateway {
         operation(&mut broker.session).map_err(|error| {
             let fault = map_broker_fault(error);
             self.shared.gate_open.store(false, Ordering::Release);
-            self.shared.set_state(PrivilegeState::Faulted(fault.clone()));
+            self.shared
+                .set_state(PrivilegeState::Faulted(fault.clone()));
             PrivilegedExecError::Broker(fault)
         })
     }
@@ -304,7 +350,9 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
 fn map_uac_fault(error: UacLaunchError) -> PrivilegeFault {
     match error {
         UacLaunchError::UacDenied => PrivilegeFault::UacDenied,
-        UacLaunchError::InvalidBrokerExecutable | UacLaunchError::InvalidLaunchContext | UacLaunchError::LaunchFailed(_) => PrivilegeFault::BrokerLaunchFailed,
+        UacLaunchError::InvalidBrokerExecutable
+        | UacLaunchError::InvalidLaunchContext
+        | UacLaunchError::LaunchFailed(_) => PrivilegeFault::BrokerLaunchFailed,
     }
 }
 
@@ -318,10 +366,16 @@ fn map_ipc_fault(error: PrivilegeIpcError) -> PrivilegeFault {
 fn map_broker_fault(error: BrokerRunError) -> PrivilegeFault {
     match error {
         BrokerRunError::HandshakeMismatch => PrivilegeFault::HandshakeFailed,
-        BrokerRunError::Protocol(BrokerProtocolError::ProtocolMismatch) => PrivilegeFault::ProtocolMismatch,
-        BrokerRunError::Ipc(PrivilegeIpcError::UnauthorizedPeer { .. }) => PrivilegeFault::UnauthorizedPeer,
+        BrokerRunError::Protocol(BrokerProtocolError::ProtocolMismatch) => {
+            PrivilegeFault::ProtocolMismatch
+        }
+        BrokerRunError::Ipc(PrivilegeIpcError::UnauthorizedPeer { .. }) => {
+            PrivilegeFault::UnauthorizedPeer
+        }
         BrokerRunError::Ipc(_) => PrivilegeFault::IpcUnavailable,
-        BrokerRunError::Protocol(_) | BrokerRunError::InvalidArguments | BrokerRunError::UnexpectedResponse => PrivilegeFault::ProtocolMismatch,
+        BrokerRunError::Protocol(_)
+        | BrokerRunError::InvalidArguments
+        | BrokerRunError::UnexpectedResponse => PrivilegeFault::ProtocolMismatch,
     }
 }
 
@@ -334,11 +388,23 @@ mod tests {
     #[test]
     fn gate_accepts_calls_only_when_active_and_closes_before_disabled_state_is_observed() {
         let controller = PrivilegeController::new();
-        assert!(matches!(controller.gateway().execute("x".into(), ElevatedExecSpec {
-            program: r"C:\Windows\System32\cmd.exe".into(), args: vec![], workdir: None, timeout_ms: 1, max_output_bytes: 1
-        }), Err(PrivilegedExecError::GateClosed(PrivilegeState::Disabled))));
+        assert!(matches!(
+            controller.gateway().execute(
+                "x".into(),
+                ElevatedExecSpec {
+                    program: r"C:\Windows\System32\cmd.exe".into(),
+                    args: vec![],
+                    workdir: None,
+                    timeout_ms: 1,
+                    max_output_bytes: 1
+                }
+            ),
+            Err(PrivilegedExecError::GateClosed(PrivilegeState::Disabled))
+        ));
         controller.shared.gate_open.store(true, Ordering::Release);
-        controller.set_state(PrivilegeState::Active { broker_generation: GenerationId::new(1) });
+        controller.set_state(PrivilegeState::Active {
+            broker_generation: GenerationId::new(1),
+        });
         controller.shared.gate_open.store(false, Ordering::Release);
         controller.set_state(PrivilegeState::Disabled);
         assert!(!controller.shared.gate_open.load(Ordering::Acquire));
@@ -349,24 +415,34 @@ mod tests {
     fn broker_crash_immediately_closes_gate_and_leaves_active_state() {
         let controller = PrivilegeController::new();
         controller.shared.gate_open.store(true, Ordering::Release);
-        controller.set_state(PrivilegeState::Active { broker_generation: GenerationId::new(9) });
+        controller.set_state(PrivilegeState::Active {
+            broker_generation: GenerationId::new(9),
+        });
         controller.shared.apply_broker_liveness(false);
         assert!(!controller.shared.gate_open.load(Ordering::Acquire));
-        assert_eq!(controller.state(), PrivilegeState::Faulted(PrivilegeFault::BrokerExited));
+        assert_eq!(
+            controller.state(),
+            PrivilegeState::Faulted(PrivilegeFault::BrokerExited)
+        );
     }
 
     #[test]
     fn gateway_state_refreshes_stale_active_without_ui_or_diagnostics_poll() {
         let controller = PrivilegeController::new();
         controller.shared.gate_open.store(true, Ordering::Release);
-        controller.set_state(PrivilegeState::Active { broker_generation: GenerationId::new(10) });
+        controller.set_state(PrivilegeState::Active {
+            broker_generation: GenerationId::new(10),
+        });
 
         assert_eq!(
             controller.gateway().state(),
             PrivilegeState::Faulted(PrivilegeFault::BrokerExited)
         );
         assert!(!controller.shared.gate_open.load(Ordering::Acquire));
-        assert_eq!(controller.state(), PrivilegeState::Faulted(PrivilegeFault::BrokerExited));
+        assert_eq!(
+            controller.state(),
+            PrivilegeState::Faulted(PrivilegeFault::BrokerExited)
+        );
     }
 
     #[test]
@@ -391,8 +467,20 @@ mod tests {
 
     #[test]
     fn uac_and_ipc_errors_map_to_typed_privilege_faults() {
-        assert_eq!(map_uac_fault(UacLaunchError::UacDenied), PrivilegeFault::UacDenied);
-        assert_eq!(map_uac_fault(UacLaunchError::LaunchFailed(5)), PrivilegeFault::BrokerLaunchFailed);
-        assert_eq!(map_ipc_fault(PrivilegeIpcError::UnauthorizedPeer { expected_pid: 1, actual_pid: 2 }), PrivilegeFault::UnauthorizedPeer);
+        assert_eq!(
+            map_uac_fault(UacLaunchError::UacDenied),
+            PrivilegeFault::UacDenied
+        );
+        assert_eq!(
+            map_uac_fault(UacLaunchError::LaunchFailed(5)),
+            PrivilegeFault::BrokerLaunchFailed
+        );
+        assert_eq!(
+            map_ipc_fault(PrivilegeIpcError::UnauthorizedPeer {
+                expected_pid: 1,
+                actual_pid: 2
+            }),
+            PrivilegeFault::UnauthorizedPeer
+        );
     }
 }

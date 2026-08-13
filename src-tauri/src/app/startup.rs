@@ -6,9 +6,9 @@ use crate::state::{ActiveWorkspaceState, PermissionMode, PrivilegeFault};
 use crate::workspace::{WorkspaceRegistryError, WorkspaceValidator};
 
 use super::{
-    AutostartError, AutostartManager, DesktopLifecycle, DesktopRuntimeStartError, ShutdownReport,
-    StartupMode, StartupProfile, StartupProfileError, StartupProfileStore,
-    STARTUP_PROFILE_FILE_NAME,
+    AutostartError, AutostartManager, DesktopLifecycle, DesktopRuntimeStartError,
+    STARTUP_PROFILE_FILE_NAME, ShutdownReport, StartupMode, StartupProfile, StartupProfileError,
+    StartupProfileStore,
 };
 use crate::runtime::ProductionRuntimeConfig;
 
@@ -46,11 +46,17 @@ impl std::fmt::Display for DesktopStartupError {
             Self::Settings(error) => write!(f, "desktop startup settings failed: {error:?}"),
             Self::Profile(error) => write!(f, "desktop startup profile failed: {error}"),
             Self::Autostart(error) => write!(f, "desktop startup autostart failed: {error}"),
-            Self::Workspace(error) => write!(f, "desktop startup workspace validation failed: {error:?}"),
+            Self::Workspace(error) => {
+                write!(f, "desktop startup workspace validation failed: {error:?}")
+            }
             Self::Runtime(error) => write!(f, "desktop startup runtime failed: {error}"),
-            Self::Privilege(error) => write!(f, "desktop startup privilege state failed: {error:?}"),
+            Self::Privilege(error) => {
+                write!(f, "desktop startup privilege state failed: {error:?}")
+            }
             Self::AppDataIo(error) => write!(f, "desktop startup app-data setup failed: {error}"),
-            Self::InstallRootUnavailable => f.write_str("desktop startup install root is unavailable"),
+            Self::InstallRootUnavailable => {
+                f.write_str("desktop startup install root is unavailable")
+            }
         }
     }
 }

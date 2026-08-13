@@ -1,7 +1,7 @@
 {
   "schema_version": 15,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -21,7 +21,10 @@
     "No unnecessary English UI labels or internal enum strings",
     "Dashboard exposes one current-task status panel",
     "Current-task UI is status-only; no recent activity feed or history list",
-    "Task summary is grounded in actual MCP/Broker execution and secret-redacted"
+    "Task summary is grounded in actual MCP/Broker execution and secret-redacted",
+    "Onboarding screens 4 and 5 use Local Bridge as the user-facing connector term",
+    "Resizable onboarding defaults to 900x620, has a 720x500 minimum, and adapts to viewport height without fixed card minimum height",
+    "Native main-window client area and WebView stay synchronized while resizing/maximizing, and Dashboard/onboarding reflow to the live viewport"
   ],
   "known_blockers": [],
   "known_risks": [
@@ -136,7 +139,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Rework LB-015 first for the coherent visible button system and minimum-prompt UI baseline; then rework LB-016 to the newly ratified six-screen onboarding contract with native Windows folder picker and fixed ChatGPT custom connector deep link; re-run LB-017 and then G3 adversarial review generation 2"
+    "next_action": "Create an auditable implementation baseline commit for the tested G2/G3 repair working tree, then run G3 independent adversarial review generation 2; if PASS, proceed to required human manual/detail review before G4"
   },
   "current_task_ui": {
     "enabled": true,
@@ -259,14 +262,16 @@
       "system_browser_only": true,
       "url": "https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins",
       "embedded_webview": false,
-      "guidance": "minimum_foolproof_steps"
+      "guidance": "minimum_foolproof_steps",
+      "title": "Local Bridge 设置"
     },
     "screen_5": {
       "purpose": "chatgpt_connector_use_confirmation",
       "automatic_chatgpt_state_detection": false,
       "connector_endpoint_source": "typed_rust_projection_from_verified_tunnel_or_control_plane_metadata_only",
       "frontend_endpoint_derivation": false,
-      "copy_success_layout_shift": false
+      "copy_success_layout_shift": false,
+      "title": "Local Bridge 使用确认"
     },
     "screen_6": {
       "title": "正在准备",
@@ -276,10 +281,28 @@
         "OpenAI Tunnel"
       ],
       "confirm_disabled_until_all_green": true,
-      "success_message": "设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！",
+      "success_message": "配置完成，在插件中选择刚刚添加的Local Bridge试试吧",
       "success_message_visible_before_ready": false,
       "auto_advance": false,
       "extra_chatgpt_check": false
+    },
+    "user_facing_connector_term": "Local Bridge",
+    "window": {
+      "default_inner_size": [
+        900,
+        620
+      ],
+      "minimum_inner_size": [
+        720,
+        500
+      ],
+      "resizable": true,
+      "viewport_responsive": true,
+      "fixed_card_min_height": false,
+      "native_webview_client_sync": true,
+      "dashboard_reflow": true,
+      "real_resize_e2e_required": true,
+      "static_markers_sufficient": false
     }
   },
   "brand_icon": {

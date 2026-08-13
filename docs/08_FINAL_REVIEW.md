@@ -54,11 +54,14 @@ Additional UI freeze (superseded by explicit user contract amendment on 2026-08-
 - 1/6 = `简单设置 即可开始`;
 - OpenAI = screen 2 with `Tunnel ID` and `Runtime API Key` labels;
 - workspace + permission = screen 3 and uses the native Windows folder picker as the primary new-project interaction;
-- screen 4 = ChatGPT custom connector setup, system browser only, fixed URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`;
-- screen 5 = minimum connector confirmation/use guidance, with no fabricated ChatGPT-state detection;
+- screen 4 = `Local Bridge 设置`, system browser only, fixed ChatGPT custom-connector URL `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`;
+- screen 5 = `Local Bridge 使用确认`, with minimum guidance and no fabricated ChatGPT-state detection;
 - no screen 7;
 - screen 6 confirm disabled until all three checks are green;
-- completion hint appears only after readiness;
+- completion hint appears only after readiness and is exactly `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`;
+- onboarding window defaults to 900×620, has a 720×500 minimum, remains resizable and adapts to viewport height without fixed card minimum height;
+- native main-window resize/maximize keeps the main WebView equal to the complete client area, and both Dashboard/onboarding reflow against the live WebView viewport;
+- resize acceptance requires a real Windows Tauri/WebView2 E2E with at least two native sizes plus maximize, cross-checking Tauri `inner_size()` against live JS `window.innerWidth/innerHeight × devicePixelRatio` and component rectangles; static Tauri/CSS markers alone are insufficient;
 - user clicks confirm to enter main UI;
 - buttons use one coherent visible affordance system; white-on-white ambiguous controls and layout-shifting copy feedback are forbidden.
 

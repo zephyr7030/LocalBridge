@@ -286,7 +286,9 @@ impl WindowsProcessSupervisor {
             } else {
                 0
             };
-        let environment_ptr = environment.as_ref().map_or(null(), EnvironmentBlock::as_ptr);
+        let environment_ptr = environment
+            .as_ref()
+            .map_or(null(), EnvironmentBlock::as_ptr);
         let current_directory = spec
             .current_dir
             .as_ref()
@@ -685,7 +687,11 @@ mod tests {
             .collect::<Vec<_>>();
         let paths = entries
             .iter()
-            .filter(|entry| entry.split_once('=').is_some_and(|(key, _)| key.eq_ignore_ascii_case("path")))
+            .filter(|entry| {
+                entry
+                    .split_once('=')
+                    .is_some_and(|(key, _)| key.eq_ignore_ascii_case("path"))
+            })
             .collect::<Vec<_>>();
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0], "Path=LB006_ENV_SECRET_SENTINEL");
@@ -697,7 +703,10 @@ mod tests {
             .unwrap()
             .env("BAD=NAME", "value")
             .unwrap_err();
-        assert!(matches!(error, SupervisorError::InvalidSpec("invalid environment name")));
+        assert!(matches!(
+            error,
+            SupervisorError::InvalidSpec("invalid environment name")
+        ));
     }
 
     #[test]
@@ -721,7 +730,11 @@ mod tests {
                 .split_once('=')
                 .is_some_and(|(key, _)| key.eq_ignore_ascii_case("path"))
         }));
-        assert!(!entries.iter().any(|entry| entry.eq_ignore_ascii_case("path=")));
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| entry.eq_ignore_ascii_case("path="))
+        );
     }
 
     #[test]
@@ -740,6 +753,10 @@ mod tests {
             .filter(|entry| !entry.is_empty())
             .map(String::from_utf16_lossy)
             .collect::<Vec<_>>();
-        assert!(entries.iter().any(|entry| entry == "localbridge_test_env=synthetic-value"));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry == "localbridge_test_env=synthetic-value")
+        );
     }
 }

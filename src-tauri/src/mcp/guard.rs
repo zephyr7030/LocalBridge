@@ -52,7 +52,12 @@ pub struct ToolCallRequest {
 
 impl ToolCallRequest {
     pub fn new(name: impl Into<String>, arguments: Value) -> Self {
-        Self { name: name.into(), arguments, indirect_capabilities: Vec::new(), request_id: None }
+        Self {
+            name: name.into(),
+            arguments,
+            indirect_capabilities: Vec::new(),
+            request_id: None,
+        }
     }
 
     pub fn with_indirect_capabilities<I>(mut self, capabilities: I) -> Self
@@ -85,7 +90,11 @@ pub enum GuardError {
 impl fmt::Display for GuardError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Denied(denied) => write!(f, "MCP call denied by LocalBridge policy: {:?}", denied.reason),
+            Self::Denied(denied) => write!(
+                f,
+                "MCP call denied by LocalBridge policy: {:?}",
+                denied.reason
+            ),
             Self::Runtime(error) => write!(f, "MCP runtime call failed: {error}"),
             Self::MalformedToolsList => f.write_str("upstream tools/list response is malformed"),
         }
@@ -130,9 +139,7 @@ impl<R: GuardRuntime> McpGuard<R> {
         F: FnMut(CurrentTaskStatus),
     {
         let indirect_capabilities = effective_indirect_capabilities(&request);
-        let decision = self
-            .policy
-            .decide(mode, &request.name, &indirect_capabilities);
+        let decision = self.policy.decide_request(mode, &request.name, &indirect_capabilities, &request.arguments);
         let kind = refined_task_kind(decision.descriptor, &request.arguments);
         let summary = safe_summary(&request.name, &request.arguments);
         if decision.descriptor.capability == Capability::ElevatedExec {
@@ -156,8 +163,10 @@ impl<R: GuardRuntime> McpGuard<R> {
             }));
         }
 
-        project(CurrentTaskStatus::project(kind, summary, TaskExecutionState::Running)
-            .expect("Running is a valid active task state"));
+        project(
+            CurrentTaskStatus::project(kind, summary, TaskExecutionState::Running)
+                .expect("Running is a valid active task state"),
+        );
         match self.runtime.raw_call_tool(
             &request.name,
             request.arguments,
@@ -168,8 +177,14 @@ impl<R: GuardRuntime> McpGuard<R> {
                 Ok(result)
             }
             Err(error) => {
-                project(CurrentTaskStatus::project(kind, SafeTaskSummary::Omitted, TaskExecutionState::Failed)
-                    .expect("Failed is a valid active task state"));
+                project(
+                    CurrentTaskStatus::project(
+                        kind,
+                        SafeTaskSummary::Omitted,
+                        TaskExecutionState::Failed,
+                    )
+                    .expect("Failed is a valid active task state"),
+                );
                 project(CurrentTaskStatus::Idle);
                 Err(GuardError::Runtime(error))
             }
@@ -178,8 +193,12 @@ impl<R: GuardRuntime> McpGuard<R> {
 
     pub fn decision(&self, mode: PermissionMode, request: &ToolCallRequest) -> PolicyDecision {
         let indirect_capabilities = effective_indirect_capabilities(request);
-        self.policy
-            .decide(mode, &request.name, &indirect_capabilities)
+        self.policy.decide_request(
+            mode,
+            &request.name,
+            &indirect_capabilities,
+            &request.arguments,
+        )
     }
 
     pub fn privileged_tool_visible(&self, mode: PermissionMode, name: &str) -> bool {
@@ -220,7 +239,9 @@ fn safe_summary(name: &str, arguments: &Value) -> SafeTaskSummary {
         "git_show" => Some("git show".to_string()),
         "git_blame" => Some("git blame".to_string()),
         "apply_patch" => Some("修改项目文件".to_string()),
-        "write_stdin" | "kill_session" | "read_output" => string_argument(arguments, &["session_id", "session"]),
+        "write_stdin" | "kill_session" | "read_output" => {
+            string_argument(arguments, &["session_id", "session"])
+        }
         "server_info" => Some("运行环境信息".to_string()),
         "check_exec_environment" => Some("检查执行环境".to_string()),
         "get_default_cwd" => Some("当前工作目录".to_string()),
@@ -246,9 +267,16 @@ fn refined_task_kind(descriptor: ToolDescriptor, arguments: &Value) -> TaskKind 
         return TaskKind::ExecuteCommand;
     };
     let lower = command.to_ascii_lowercase();
-    if lower.contains("cargo test") || lower.contains("npm test") || lower.contains("vitest") || lower.contains("pytest") {
+    if lower.contains("cargo test")
+        || lower.contains("npm test")
+        || lower.contains("vitest")
+        || lower.contains("pytest")
+    {
         TaskKind::Test
-    } else if lower.contains("cargo build") || lower.contains("npm run build") || lower.contains("tauri build") {
+    } else if lower.contains("cargo build")
+        || lower.contains("npm run build")
+        || lower.contains("tauri build")
+    {
         TaskKind::Build
     } else {
         TaskKind::ExecuteCommand

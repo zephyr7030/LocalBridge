@@ -136,7 +136,10 @@ impl WorkspaceRegistry {
 
     /// Removes LocalBridge metadata only. This operation never touches the filesystem.
     pub fn remove(&mut self, id: &WorkspaceId) -> Option<WorkspaceEntry> {
-        let index = self.entries.iter().position(|entry| &entry.workspace_id == id)?;
+        let index = self
+            .entries
+            .iter()
+            .position(|entry| &entry.workspace_id == id)?;
         Some(self.entries.remove(index))
     }
 

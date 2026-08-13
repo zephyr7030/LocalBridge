@@ -108,7 +108,10 @@ impl StartupProfileStore {
         bytes.push(b'\n');
         let temp = self.path.with_file_name(format!(
             "{}.tmp-{}-{}",
-            self.path.file_name().and_then(|value| value.to_str()).unwrap_or(STARTUP_PROFILE_FILE_NAME),
+            self.path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(STARTUP_PROFILE_FILE_NAME),
             std::process::id(),
             TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
         ));
@@ -171,18 +174,31 @@ fn atomic_replace(temp: &Path, target: &Path) -> Result<(), StartupProfileError>
 
 #[derive(Debug)]
 pub enum StartupProfileError {
-    Io { operation: &'static str, message: String },
+    Io {
+        operation: &'static str,
+        message: String,
+    },
     Serialization(String),
-    UnsupportedSchema { found: u32, expected: u32 },
+    UnsupportedSchema {
+        found: u32,
+        expected: u32,
+    },
     Tunnel(TunnelError),
 }
 
 impl std::fmt::Display for StartupProfileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io { operation, message } => write!(f, "startup profile {operation} failed: {message}"),
-            Self::Serialization(message) => write!(f, "startup profile serialization failed: {message}"),
-            Self::UnsupportedSchema { found, expected } => write!(f, "startup profile schema {found} is unsupported; expected {expected}"),
+            Self::Io { operation, message } => {
+                write!(f, "startup profile {operation} failed: {message}")
+            }
+            Self::Serialization(message) => {
+                write!(f, "startup profile serialization failed: {message}")
+            }
+            Self::UnsupportedSchema { found, expected } => write!(
+                f,
+                "startup profile schema {found} is unsupported; expected {expected}"
+            ),
             Self::Tunnel(error) => write!(f, "startup profile Tunnel ID is invalid: {error}"),
         }
     }

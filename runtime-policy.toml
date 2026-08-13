@@ -1,4 +1,4 @@
-schema_version = 4
+schema_version = 5
 runtime_version = "0.2.2"
 status = "LB_000_VERIFIED"
 
@@ -60,6 +60,12 @@ timeout_required = true
 output_limit_required = true
 cancellation_required = true
 redaction_required = true
+review_model = "exact_trusted_program_and_args"
+arbitrary_programs = "deny"
+shells_and_interpreters = "deny"
+control_plane_mutation = "deny_always"
+workdir_policy = "deny_unless_reviewed"
+reviewed_actions = ["windows_whoami_identity"]
 
 
 [credentials]

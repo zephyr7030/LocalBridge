@@ -52,15 +52,81 @@ const authGit = {
   firstParentParent: (commit) => commit === implementationCommit ? evidenceCommit : null,
   jsonAt: (revision, path) => revision === evidenceCommit && path === "PR_CONTRACTS.json" ? beforePrContracts : null,
 };
-assert.deepEqual(validatePreG4GateAuthorization(contracts, authGit, expected), []);
+assert.deepEqual(validatePreG4GateAuthorization(contracts, authGit, expected, null), []);
 const widenedContracts = structuredClone(contracts);
 widenedContracts.prs["LB-018"].writable_paths.push("src/**");
-assert.match(validatePreG4GateAuthorization(widenedContracts, authGit, expected).join("|"), /ordinary-pr-contract-drift/);
+assert.match(validatePreG4GateAuthorization(widenedContracts, authGit, expected, null).join("|"), /ordinary-pr-contract-drift/);
 const widenedLb016 = structuredClone(contracts);
 widenedLb016.prs["LB-016"].required_artifacts.push("unexpected sixth-screen replacement");
-assert.match(validatePreG4GateAuthorization(widenedLb016, authGit, expected).join("|"), /ordinary-pr-contract-drift/);
+assert.match(validatePreG4GateAuthorization(widenedLb016, authGit, expected, null).join("|"), /ordinary-pr-contract-drift/);
 const badAuthGit = { ...authGit, commitPaths: (commit) => commit === implementationCommit ? [...expected.authorizedPaths, "src-tauri/src/lib.rs"] : authGit.commitPaths(commit) };
-assert.match(validatePreG4GateAuthorization(contracts, badAuthGit, expected).join("|"), /implementation-child-scope/);
+assert.match(validatePreG4GateAuthorization(contracts, badAuthGit, expected, null).join("|"), /implementation-child-scope/);
+
+const ratificationCommit = "e".repeat(40);
+const ratification = {
+  commit: ratificationCommit,
+  paths: ["AGENTS.md", "PR_CONTRACTS.json", "PR_INDEX.json"],
+};
+const ratifiedContracts = structuredClone(contracts);
+ratifiedContracts.schema_version = 18;
+ratifiedContracts.rules.onboarding_screen_count = 6;
+ratifiedContracts.rules.onboarding_screen_7_forbidden = true;
+ratifiedContracts.rules.ui_button_visible_affordance_required = true;
+ratifiedContracts.rules.ui_white_on_white_ambiguous_button_forbidden = true;
+ratifiedContracts.rules.ui_minimum_prompt_required = true;
+ratifiedContracts.prs["LB-015"] = {
+  required_artifacts: ["coherent visible button token system shared across product UI"],
+};
+ratifiedContracts.prs["LB-016"] = {
+  required_artifacts: ["six-screen onboarding flow"],
+  required_tests: [
+    "onboarding has exactly six screens",
+    "screen 6 success message is 设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！",
+  ],
+};
+const ratifiedGit = {
+  ...authGit,
+  commitExists: (commit) => commit === ratificationCommit || authGit.commitExists(commit),
+  isAncestor: (commit) => commit === ratificationCommit || authGit.isAncestor(commit),
+  commitPaths: (commit) => commit === ratificationCommit ? ratification.paths : authGit.commitPaths(commit),
+  jsonAt: (revision, path) => revision === ratificationCommit && path === "PR_CONTRACTS.json" ? ratifiedContracts : authGit.jsonAt(revision, path),
+};
+assert.deepEqual(validatePreG4GateAuthorization(ratifiedContracts, ratifiedGit, expected, ratification), []);
+const authorizedLb016Rework = structuredClone(ratifiedContracts);
+authorizedLb016Rework.prs["LB-016"].required_artifacts.push(
+  "viewport-responsive resizable onboarding layout",
+  "native-window/WebView client-area resize synchronization",
+);
+authorizedLb016Rework.prs["LB-016"].required_tests = authorizedLb016Rework.prs["LB-016"].required_tests
+  .map((item) => item === "screen 6 success message is 设置完成，尝试在 ChatGPT 中选择刚刚添加的连接器吧！"
+    ? "screen 6 success message is 配置完成，在插件中选择刚刚添加的Local Bridge试试吧"
+    : item);
+authorizedLb016Rework.prs["LB-016"].required_tests.push(
+  "screens 4 and 5 use Local Bridge as the user-facing connector term",
+  "resizable onboarding window has a 720x500 minimum and wizard body adapts to viewport height without fixed card minimum height",
+  "real Windows Tauri resize E2E cross-checks native client area against live WebView JS viewport for two native sizes plus maximize and proves Dashboard and onboarding reflow",
+);
+assert.deepEqual(validatePreG4GateAuthorization(authorizedLb016Rework, ratifiedGit, expected, ratification), []);
+const alteredResizeRequirement = structuredClone(authorizedLb016Rework);
+alteredResizeRequirement.prs["LB-016"].required_tests = alteredResizeRequirement.prs["LB-016"].required_tests
+  .map((item) => item.startsWith("real Windows Tauri resize E2E cross-checks")
+    ? "real Windows Tauri resize E2E with weakened unchecked semantics"
+    : item);
+assert.match(validatePreG4GateAuthorization(alteredResizeRequirement, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+const alteredAuthorizedCopy = structuredClone(authorizedLb016Rework);
+alteredAuthorizedCopy.prs["LB-016"].required_tests = alteredAuthorizedCopy.prs["LB-016"].required_tests
+  .map((item) => item.startsWith("screen 6 success message is ")
+    ? "screen 6 success message is unauthorized wording"
+    : item);
+assert.match(validatePreG4GateAuthorization(alteredAuthorizedCopy, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+const widenedAuthorizedLb016 = structuredClone(authorizedLb016Rework);
+widenedAuthorizedLb016.prs["LB-016"].required_tests.push("unrelated authorized-looking requirement");
+assert.match(validatePreG4GateAuthorization(widenedAuthorizedLb016, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+const postRatificationDrift = structuredClone(ratifiedContracts);
+postRatificationDrift.prs["LB-018"].writable_paths.push("src/**");
+assert.match(validatePreG4GateAuthorization(postRatificationDrift, ratifiedGit, expected, ratification).join("|"), /ordinary-pr-contract-drift/);
+const badRatificationGit = { ...ratifiedGit, commitPaths: (commit) => commit === ratificationCommit ? [...ratification.paths, "src-tauri/src/lib.rs"] : ratifiedGit.commitPaths(commit) };
+assert.match(validatePreG4GateAuthorization(ratifiedContracts, badRatificationGit, expected, ratification).join("|"), /later-contract-ratification-commit-scope/);
 
 const base = {
   execution: { current_group: "G3", current_pr: null },

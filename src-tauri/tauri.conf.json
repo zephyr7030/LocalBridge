@@ -19,6 +19,11 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["../assets/icons/localbridge.ico"],
-    "externalBin": ["binaries/dummy-sidecar"]
+    "externalBin": ["binaries/dummy-sidecar"],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
   }
 }

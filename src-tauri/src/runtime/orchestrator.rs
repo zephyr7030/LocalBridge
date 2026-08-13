@@ -13,7 +13,9 @@ use crate::privilege::PrivilegedExecution;
 use crate::state::{
     CurrentTaskStatus, PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState,
 };
-use crate::tunnel::{PreparedTunnelStart, TunnelId, TunnelRuntime, TunnelRuntimeConfig};
+use crate::tunnel::{
+    ConnectorEndpoint, PreparedTunnelStart, TunnelId, TunnelRuntime, TunnelRuntimeConfig,
+};
 
 use super::RecoveryPermit;
 
@@ -36,7 +38,11 @@ pub trait RuntimeDriver {
         &mut self,
         permit: &RecoveryPermit,
     ) -> Result<Self::Mcp, RuntimeFault> {
-        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.start_mcp() }
+        if permit.is_cancelled() {
+            Err(RuntimeFault::UserStopped)
+        } else {
+            self.start_mcp()
+        }
     }
 
     fn confirm_mcp_ready_for_recovery(
@@ -44,7 +50,11 @@ pub trait RuntimeDriver {
         mcp: &mut Self::Mcp,
         permit: &RecoveryPermit,
     ) -> Result<(), RuntimeFault> {
-        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.confirm_mcp_ready(mcp) }
+        if permit.is_cancelled() {
+            Err(RuntimeFault::UserStopped)
+        } else {
+            self.confirm_mcp_ready(mcp)
+        }
     }
 
     fn confirm_pep_ready_for_recovery(
@@ -52,7 +62,11 @@ pub trait RuntimeDriver {
         pep: &Self::Pep,
         permit: &RecoveryPermit,
     ) -> Result<(), RuntimeFault> {
-        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.confirm_pep_ready(pep) }
+        if permit.is_cancelled() {
+            Err(RuntimeFault::UserStopped)
+        } else {
+            self.confirm_pep_ready(pep)
+        }
     }
 
     fn start_tunnel_for_recovery(
@@ -60,7 +74,11 @@ pub trait RuntimeDriver {
         pep: &Self::Pep,
         permit: &RecoveryPermit,
     ) -> Result<Self::Tunnel, RuntimeFault> {
-        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.start_tunnel(pep) }
+        if permit.is_cancelled() {
+            Err(RuntimeFault::UserStopped)
+        } else {
+            self.start_tunnel(pep)
+        }
     }
 
     fn confirm_tunnel_ready_for_recovery(
@@ -68,7 +86,11 @@ pub trait RuntimeDriver {
         tunnel: &mut Self::Tunnel,
         permit: &RecoveryPermit,
     ) -> Result<(), RuntimeFault> {
-        if permit.is_cancelled() { Err(RuntimeFault::UserStopped) } else { self.confirm_tunnel_ready(tunnel) }
+        if permit.is_cancelled() {
+            Err(RuntimeFault::UserStopped)
+        } else {
+            self.confirm_tunnel_ready(tunnel)
+        }
     }
 
     fn stop_tunnel(&mut self, tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault>;
@@ -76,6 +98,10 @@ pub trait RuntimeDriver {
     fn stop_mcp(&mut self, mcp: &mut Self::Mcp) -> Result<(), RuntimeFault>;
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus;
+
+    fn connector_endpoint(&self, _tunnel: &Self::Tunnel) -> Option<ConnectorEndpoint> {
+        None
+    }
 
     fn probe_mcp_health(&mut self, _pep: &Self::Pep) -> Result<(), RuntimeFault> {
         Ok(())
@@ -126,7 +152,9 @@ pub enum RecoveryScope {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceSwitchError {
     pub candidate_fault: RuntimeFault,
+    pub candidate_cleanup_fault: Option<RuntimeFault>,
     pub rollback_fault: Option<RuntimeFault>,
+    pub rollback_cleanup_fault: Option<RuntimeFault>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,6 +250,12 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         self.driver.current_workspace()
     }
 
+    pub fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
+        self.ready
+            .as_ref()
+            .and_then(|ready| self.driver.connector_endpoint(&ready.tunnel))
+    }
+
     pub fn probe_ready_health(&mut self) -> Result<(), RuntimeHealthFailure> {
         if self.state != RuntimeState::Ready {
             return Ok(());
@@ -267,7 +301,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         self.start_with_state_projection(|_| {})
     }
 
-    pub fn start_with_state_projection<F>(&mut self, mut project: F) -> Result<(), OrchestratorError>
+    pub fn start_with_state_projection<F>(
+        &mut self,
+        mut project: F,
+    ) -> Result<(), OrchestratorError>
     where
         F: FnMut(&RuntimeState),
     {
@@ -497,26 +534,36 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         if candidate.as_os_str().is_empty() {
             return Err(WorkspaceSwitchError {
                 candidate_fault: RuntimeFault::WorkspaceInvalid,
+                candidate_cleanup_fault: None,
                 rollback_fault: None,
+                rollback_cleanup_fault: None,
             });
         }
         let previous = rollback_workspace.map(Path::to_path_buf);
         if let Err(error) = self.stop() {
             return Err(WorkspaceSwitchError {
                 candidate_fault: error.fault,
-                rollback_fault: error.cleanup_fault,
+                candidate_cleanup_fault: error.cleanup_fault,
+                rollback_fault: None,
+                rollback_cleanup_fault: None,
             });
         }
         if let Err(fault) = self.driver.configure_workspace(candidate.to_path_buf()) {
+            let (rollback_fault, rollback_cleanup_fault) = self.rollback_workspace(previous);
             return Err(WorkspaceSwitchError {
                 candidate_fault: fault,
-                rollback_fault: self.rollback_workspace(previous),
+                candidate_cleanup_fault: None,
+                rollback_fault,
+                rollback_cleanup_fault,
             });
         }
         if let Err(error) = self.start() {
+            let (rollback_fault, rollback_cleanup_fault) = self.rollback_workspace(previous);
             return Err(WorkspaceSwitchError {
                 candidate_fault: error.fault,
-                rollback_fault: self.rollback_workspace(previous),
+                candidate_cleanup_fault: error.cleanup_fault,
+                rollback_fault,
+                rollback_cleanup_fault,
             });
         }
         Ok(())
@@ -566,7 +613,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         if let Some(mut ready) = self.ready.take() {
             if let Err(fault) = self.driver.stop_tunnel(&mut ready.tunnel) {
                 self.ready = Some(ready);
-                return Err(OrchestratorError { fault, cleanup_fault: None });
+                return Err(OrchestratorError {
+                    fault,
+                    cleanup_fault: None,
+                });
             }
             self.recovering_pep = Some(ready.pep);
         }
@@ -581,7 +631,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         let pep = self.recovering_pep.as_ref().expect("checked retained PEP");
         if let Err(fault) = self.driver.confirm_pep_ready_for_recovery(pep, permit) {
             if fault == RuntimeFault::UserStopped {
-                return Err(OrchestratorError { fault, cleanup_fault: None });
+                return Err(OrchestratorError {
+                    fault,
+                    cleanup_fault: None,
+                });
             }
             return self.recover_policy_and_tunnel_cancellable(permit);
         }
@@ -628,7 +681,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         let mut tunnel = self
             .driver
             .start_tunnel_for_recovery(pep, permit)
-            .map_err(|fault| OrchestratorError { fault, cleanup_fault: None })?;
+            .map_err(|fault| OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            })?;
         if permit.is_cancelled() {
             let cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
             return Err(OrchestratorError {
@@ -641,7 +697,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
             .confirm_tunnel_ready_for_recovery(&mut tunnel, permit)
         {
             let cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
-            return Err(OrchestratorError { fault, cleanup_fault });
+            return Err(OrchestratorError {
+                fault,
+                cleanup_fault,
+            });
         }
         if permit.is_cancelled() {
             let cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
@@ -721,7 +780,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         if let Some(mut ready) = self.ready.take() {
             if let Err(fault) = self.driver.stop_tunnel(&mut ready.tunnel) {
                 self.ready = Some(ready);
-                return Err(OrchestratorError { fault, cleanup_fault: None });
+                return Err(OrchestratorError {
+                    fault,
+                    cleanup_fault: None,
+                });
             }
             self.recovering_pep = Some(ready.pep);
         }
@@ -729,7 +791,12 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         if let Some(pep) = self.recovering_pep.take() {
             match self.driver.stop_pep(pep) {
                 Ok(mcp) => self.recovering_mcp = Some(mcp),
-                Err(fault) => return Err(OrchestratorError { fault, cleanup_fault: None }),
+                Err(fault) => {
+                    return Err(OrchestratorError {
+                        fault,
+                        cleanup_fault: None,
+                    });
+                }
             }
         }
         Self::check_recovery_permit(permit)?;
@@ -739,7 +806,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         if let Err(fault) = self.driver.confirm_mcp_ready_for_recovery(&mut mcp, permit) {
             self.recovering_mcp = Some(mcp);
             if fault == RuntimeFault::UserStopped {
-                return Err(OrchestratorError { fault, cleanup_fault: None });
+                return Err(OrchestratorError {
+                    fault,
+                    cleanup_fault: None,
+                });
             }
             return self.recover_full_runtime_cancellable(permit);
         }
@@ -750,7 +820,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         let pep = self
             .driver
             .start_pep(mcp)
-            .map_err(|fault| OrchestratorError { fault, cleanup_fault: None })?;
+            .map_err(|fault| OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            })?;
         if permit.is_cancelled() {
             return match self.driver.stop_pep(pep) {
                 Ok(mcp) => {
@@ -770,7 +843,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
             return match self.driver.stop_pep(pep) {
                 Ok(mcp) => {
                     self.recovering_mcp = Some(mcp);
-                    Err(OrchestratorError { fault, cleanup_fault: None })
+                    Err(OrchestratorError {
+                        fault,
+                        cleanup_fault: None,
+                    })
                 }
                 Err(cleanup_fault) => Err(OrchestratorError {
                     fault,
@@ -816,7 +892,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         let mut mcp = self
             .driver
             .start_mcp_for_recovery(permit)
-            .map_err(|fault| OrchestratorError { fault, cleanup_fault: None })?;
+            .map_err(|fault| OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            })?;
         if permit.is_cancelled() {
             let cleanup_fault = self.driver.stop_mcp(&mut mcp).err();
             return Err(OrchestratorError {
@@ -826,7 +905,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
         if let Err(fault) = self.driver.confirm_mcp_ready_for_recovery(&mut mcp, permit) {
             let cleanup_fault = self.driver.stop_mcp(&mut mcp).err();
-            return Err(OrchestratorError { fault, cleanup_fault });
+            return Err(OrchestratorError {
+                fault,
+                cleanup_fault,
+            });
         }
         if permit.is_cancelled() {
             let cleanup_fault = self.driver.stop_mcp(&mut mcp).err();
@@ -839,7 +921,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         let pep = self
             .driver
             .start_pep(mcp)
-            .map_err(|fault| OrchestratorError { fault, cleanup_fault: None })?;
+            .map_err(|fault| OrchestratorError {
+                fault,
+                cleanup_fault: None,
+            })?;
         if permit.is_cancelled() {
             let cleanup_fault = self.cleanup_pep(pep);
             return Err(OrchestratorError {
@@ -849,7 +934,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
         if let Err(fault) = self.driver.confirm_pep_ready_for_recovery(&pep, permit) {
             let cleanup_fault = self.cleanup_pep(pep);
-            return Err(OrchestratorError { fault, cleanup_fault });
+            return Err(OrchestratorError {
+                fault,
+                cleanup_fault,
+            });
         }
         if permit.is_cancelled() {
             let cleanup_fault = self.cleanup_pep(pep);
@@ -863,7 +951,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
             Ok(tunnel) => tunnel,
             Err(fault) => {
                 let cleanup_fault = self.cleanup_pep(pep);
-                return Err(OrchestratorError { fault, cleanup_fault });
+                return Err(OrchestratorError {
+                    fault,
+                    cleanup_fault,
+                });
             }
         };
         if permit.is_cancelled() {
@@ -880,7 +971,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         {
             let mut cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
             merge_cleanup_fault(&mut cleanup_fault, self.cleanup_pep(pep));
-            return Err(OrchestratorError { fault, cleanup_fault });
+            return Err(OrchestratorError {
+                fault,
+                cleanup_fault,
+            });
         }
         if permit.is_cancelled() {
             let mut cleanup_fault = self.driver.stop_tunnel(&mut tunnel).err();
@@ -905,14 +999,24 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
     }
 
-    fn rollback_workspace(&mut self, previous: Option<PathBuf>) -> Option<RuntimeFault> {
-        let _ = self.stop();
-        self.state = RuntimeState::Stopped;
-        let previous = previous?;
-        if let Err(fault) = self.driver.configure_workspace(previous) {
-            return Some(fault);
+    fn rollback_workspace(
+        &mut self,
+        previous: Option<PathBuf>,
+    ) -> (Option<RuntimeFault>, Option<RuntimeFault>) {
+        if let Err(error) = self.stop() {
+            return (Some(error.fault), error.cleanup_fault);
         }
-        self.start().err().map(|error| error.fault)
+        let Some(previous) = previous else {
+            return (None, None);
+        };
+        if let Err(fault) = self.driver.configure_workspace(previous) {
+            self.state = RuntimeState::Faulted(fault.clone());
+            return (Some(fault), None);
+        }
+        match self.start() {
+            Ok(()) => (None, None),
+            Err(error) => (Some(error.fault), error.cleanup_fault),
+        }
     }
 
     fn transition<F>(&mut self, state: RuntimeState, project: &mut F)
@@ -941,7 +1045,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
     {
         self.state = RuntimeState::Faulted(fault.clone());
         project(&self.state);
-        OrchestratorError { fault, cleanup_fault }
+        OrchestratorError {
+            fault,
+            cleanup_fault,
+        }
     }
 }
 
@@ -981,7 +1088,11 @@ pub struct OutageTracker {
 }
 
 impl OutageTracker {
-    pub fn begin(&mut self, component: RuntimeComponent, fault: RuntimeFault) -> OutageGenerationId {
+    pub fn begin(
+        &mut self,
+        component: RuntimeComponent,
+        fault: RuntimeFault,
+    ) -> OutageGenerationId {
         self.next_generation = self.next_generation.saturating_add(1).max(1);
         let id = OutageGenerationId(self.next_generation);
         self.active = Some(OutageGeneration {
@@ -994,7 +1105,11 @@ impl OutageTracker {
     }
 
     pub fn mark_user_attention_required(&mut self, generation: OutageGenerationId) -> bool {
-        let Some(active) = self.active.as_mut().filter(|active| active.id == generation) else {
+        let Some(active) = self
+            .active
+            .as_mut()
+            .filter(|active| active.id == generation)
+        else {
             return false;
         };
         if active.user_attention_emitted {
@@ -1011,7 +1126,11 @@ impl OutageTracker {
         component: RuntimeComponent,
         fault: RuntimeFault,
     ) -> bool {
-        let Some(active) = self.active.as_mut().filter(|active| active.id == generation) else {
+        let Some(active) = self
+            .active
+            .as_mut()
+            .filter(|active| active.id == generation)
+        else {
             return false;
         };
         active.component = component;
@@ -1020,7 +1139,11 @@ impl OutageTracker {
     }
 
     pub fn clear(&mut self, generation: OutageGenerationId) -> bool {
-        if self.active.as_ref().is_some_and(|active| active.id == generation) {
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.id == generation)
+        {
             self.active = None;
             true
         } else {
@@ -1094,7 +1217,11 @@ where
     C: CredentialStore,
     B: FnMut() -> Result<InternalBearer, RuntimeFault>,
 {
-    pub fn new(config: ProductionRuntimeConfig, credential_store: &'a C, bearer_factory: B) -> Self {
+    pub fn new(
+        config: ProductionRuntimeConfig,
+        credential_store: &'a C,
+        bearer_factory: B,
+    ) -> Self {
         Self {
             config,
             credential_store: CredentialStoreHandle::Borrowed(credential_store),
@@ -1158,7 +1285,10 @@ where
     }
 
     fn confirm_mcp_ready(&mut self, mcp: &mut Self::Mcp) -> Result<(), RuntimeFault> {
-        if !mcp.root_is_running().map_err(|error| error.runtime_fault())? {
+        if !mcp
+            .root_is_running()
+            .map_err(|error| error.runtime_fault())?
+        {
             return Err(RuntimeFault::McpExited);
         }
         Ok(())
@@ -1274,7 +1404,10 @@ where
     }
 
     fn stop_tunnel(&mut self, tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> {
-        tunnel.stop().map(|_| ()).map_err(|error| error.runtime_fault())
+        tunnel
+            .stop()
+            .map(|_| ())
+            .map_err(|error| error.runtime_fault())
     }
 
     fn stop_pep(&mut self, pep: Self::Pep) -> Result<Self::Mcp, RuntimeFault> {
@@ -1282,11 +1415,17 @@ where
     }
 
     fn stop_mcp(&mut self, mcp: &mut Self::Mcp) -> Result<(), RuntimeFault> {
-        mcp.stop().map(|_| ()).map_err(|error| error.runtime_fault())
+        mcp.stop()
+            .map(|_| ())
+            .map_err(|error| error.runtime_fault())
     }
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus {
         pep.current_task_projection().snapshot()
+    }
+
+    fn connector_endpoint(&self, tunnel: &Self::Tunnel) -> Option<ConnectorEndpoint> {
+        tunnel.connector_endpoint()
     }
 
     fn probe_mcp_health(&mut self, pep: &Self::Pep) -> Result<(), RuntimeFault> {
@@ -1342,7 +1481,8 @@ where
 }
 
 fn available_loopback_port() -> Result<u16, RuntimeFault> {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|_| RuntimeFault::PortUnavailable)?;
+    let listener =
+        TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|_| RuntimeFault::PortUnavailable)?;
     listener
         .local_addr()
         .map(|address| address.port())

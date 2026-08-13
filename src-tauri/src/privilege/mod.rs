@@ -12,18 +12,18 @@ pub use broker::{
 pub use control::{
     PrivilegeController, PrivilegedExecError, PrivilegedExecution, PrivilegedExecutionGateway,
 };
-pub use protocol::{
-    BROKER_PROTOCOL_VERSION, BrokerProtocolError, BrokerReady, BrokerRejectCode, BrokerRequest,
-    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, BrokerSession, ElevatedExecOutcome,
-    ElevatedExecResult, ElevatedExecSpec, MAX_BROKER_FRAME_BYTES, MAX_ELEVATED_ARGS,
-    MAX_ELEVATED_OUTPUT_BYTES, MAX_ELEVATED_REQUEST_ID_BYTES, MAX_ELEVATED_STRING_BYTES,
-    MAX_ELEVATED_TIMEOUT_MS, SESSION_NONCE_BYTES, ServerHello, SessionNonce, decode_frame,
-    encode_frame, valid_elevated_request_id,
-};
 #[cfg(windows)]
 pub(crate) use execution::{ExecutionCancel, run_elevated_exec};
+pub use protocol::{
+    BROKER_PROTOCOL_VERSION, BrokerProtocolError, BrokerReady, BrokerRejectCode, BrokerRequest,
+    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, BrokerSession,
+    ElevatedExecOutcome, ElevatedExecResult, ElevatedExecSpec, MAX_BROKER_FRAME_BYTES,
+    MAX_ELEVATED_ARGS, MAX_ELEVATED_OUTPUT_BYTES, MAX_ELEVATED_REQUEST_ID_BYTES,
+    MAX_ELEVATED_STRING_BYTES, MAX_ELEVATED_TIMEOUT_MS, SESSION_NONCE_BYTES, ServerHello,
+    SessionNonce, decode_frame, encode_frame, valid_elevated_request_id,
+};
 #[cfg(windows)]
 pub use windows::{
-    ElevatedBrokerProcess, NamedPipeClient, NamedPipeConnection, NamedPipeServer, PrivilegeIpcError,
-    UacLaunchError, launch_broker_with_explicit_uac, random_session_nonce,
+    ElevatedBrokerProcess, NamedPipeClient, NamedPipeConnection, NamedPipeServer,
+    PrivilegeIpcError, UacLaunchError, launch_broker_with_explicit_uac, random_session_nonce,
 };

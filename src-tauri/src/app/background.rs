@@ -20,6 +20,7 @@ use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver};
 use crate::state::{
     CurrentTaskStatus, PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState,
 };
+use crate::tunnel::ConnectorEndpoint;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +107,10 @@ pub trait ExitRuntime {
 
     fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
         DesktopRuntimeSnapshot::inactive()
+    }
+
+    fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
+        None
     }
 
     fn set_permission_mode(
@@ -216,6 +221,12 @@ impl ExitRuntime for ProductionRuntimeOwner {
             None => Ok(()),
         }
     }
+
+    fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
+        self.active
+            .as_deref()
+            .and_then(ExitRuntime::connector_endpoint)
+    }
 }
 
 impl<D> ExitRuntime for RuntimeOrchestrator<D>
@@ -244,6 +255,10 @@ where
                 user_attention_required: outage.user_attention_emitted(),
             }),
         }
+    }
+
+    fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
+        RuntimeOrchestrator::connector_endpoint(self)
     }
 
     fn set_permission_mode(
@@ -310,6 +325,10 @@ where
         }
     }
 
+    fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
+        self.runtime().connector_endpoint()
+    }
+
     fn set_permission_mode(
         &mut self,
         mode: PermissionMode,
@@ -323,8 +342,7 @@ where
         candidate: &Path,
         rollback: Option<&Path>,
     ) -> Result<(), DesktopRuntimeControlError> {
-        self.orchestrator_mut()
-            .switch_workspace_to(candidate, rollback)
+        self.switch_workspace_after_control_cancellation(candidate, rollback)
             .map_err(DesktopRuntimeControlError::Workspace)
     }
 
@@ -407,27 +425,29 @@ impl DesktopLifecycle {
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
         let watchdog_thread = thread::Builder::new()
             .name("localbridge-runtime-watchdog".into())
-            .spawn(move || loop {
-                match shutdown_rx.recv_timeout(RUNTIME_WATCHDOG_INTERVAL) {
-                    Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+            .spawn(move || {
+                loop {
+                    match shutdown_rx.recv_timeout(RUNTIME_WATCHDOG_INTERVAL) {
+                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                    let _operation = match monitor_operation.try_lock() {
+                        Ok(operation) => operation,
+                        Err(TryLockError::WouldBlock) => continue,
+                        Err(TryLockError::Poisoned(error)) => error.into_inner(),
+                    };
+                    let mut owner = monitor_runtime
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(runtime) = owner.active.as_deref_mut() {
+                        let _ = runtime.monitor_recovery();
+                    }
+                    let snapshot = owner.snapshot();
+                    drop(owner);
+                    *monitor_snapshot
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
                 }
-                let _operation = match monitor_operation.try_lock() {
-                    Ok(operation) => operation,
-                    Err(TryLockError::WouldBlock) => continue,
-                    Err(TryLockError::Poisoned(error)) => error.into_inner(),
-                };
-                let mut owner = monitor_runtime
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if let Some(runtime) = owner.active.as_deref_mut() {
-                    let _ = runtime.monitor_recovery();
-                }
-                let snapshot = owner.snapshot();
-                drop(owner);
-                *monitor_snapshot
-                    .write()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
             })
             .expect("runtime watchdog thread must start");
         Self {
@@ -471,15 +491,14 @@ impl DesktopLifecycle {
         )
         .with_privileged_execution(Arc::new(self.privilege.gateway()));
         let mut runtime = RuntimeOrchestrator::new(driver);
-        runtime
-            .start()
-            .map_err(DesktopRuntimeStartError::Runtime)?;
+        runtime.start().map_err(DesktopRuntimeStartError::Runtime)?;
         let runtime = AutoRecoveryRuntime::new_with_cancellation(
             runtime,
             SystemRecoveryClock::default(),
             self.recovery_cancellation.clone(),
         );
-        let mut owner = self.runtime
+        let mut owner = self
+            .runtime
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         owner.activate(runtime)?;
@@ -533,6 +552,13 @@ impl DesktopLifecycle {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    pub fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
+        self.runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .connector_endpoint()
     }
 
     pub fn set_runtime_permission_mode(
@@ -635,7 +661,8 @@ impl DesktopLifecycle {
             .runtime_operation
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut owner = self.runtime
+        let mut owner = self
+            .runtime
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         owner.activate(runtime)?;

@@ -3,14 +3,14 @@ use std::fmt;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
+use super::protocol::is_valid_broker_pipe_name;
 use super::{
     BROKER_PROTOCOL_VERSION, BrokerProtocolError, BrokerReady, BrokerRejectCode, BrokerRequest,
-    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, BrokerSession, ElevatedExecResult,
-    ElevatedExecSpec,
-    NamedPipeClient, NamedPipeConnection, PrivilegeIpcError, ServerHello, SessionNonce, decode_frame,
-    encode_frame, random_session_nonce, valid_elevated_request_id,
+    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, BrokerSession,
+    ElevatedExecResult, ElevatedExecSpec, NamedPipeClient, NamedPipeConnection, PrivilegeIpcError,
+    ServerHello, SessionNonce, decode_frame, encode_frame, random_session_nonce,
+    valid_elevated_request_id,
 };
-use super::protocol::is_valid_broker_pipe_name;
 use super::{ExecutionCancel, run_elevated_exec};
 
 struct ActiveExecution {
@@ -40,7 +40,9 @@ impl fmt::Display for BrokerRunError {
             Self::Ipc(error) => write!(f, "privileged broker IPC failed: {error}"),
             Self::Protocol(error) => write!(f, "privileged broker protocol failed: {error:?}"),
             Self::HandshakeMismatch => f.write_str("privileged broker handshake mismatch"),
-            Self::UnexpectedResponse => f.write_str("privileged broker returned unexpected response"),
+            Self::UnexpectedResponse => {
+                f.write_str("privileged broker returned unexpected response")
+            }
         }
     }
 }
@@ -48,10 +50,14 @@ impl fmt::Display for BrokerRunError {
 impl std::error::Error for BrokerRunError {}
 
 impl From<PrivilegeIpcError> for BrokerRunError {
-    fn from(value: PrivilegeIpcError) -> Self { Self::Ipc(value) }
+    fn from(value: PrivilegeIpcError) -> Self {
+        Self::Ipc(value)
+    }
 }
 impl From<BrokerProtocolError> for BrokerRunError {
-    fn from(value: BrokerProtocolError) -> Self { Self::Protocol(value) }
+    fn from(value: BrokerProtocolError) -> Self {
+        Self::Protocol(value)
+    }
 }
 
 pub fn parse_broker_args<I, S>(args: I) -> Result<BrokerProcessArgs, BrokerRunError>
@@ -71,10 +77,16 @@ where
             _ => return Err(BrokerRunError::InvalidArguments),
         }
     }
-    let pipe_name = pipe_name.filter(|value| is_valid_broker_pipe_name(value))
+    let pipe_name = pipe_name
+        .filter(|value| is_valid_broker_pipe_name(value))
         .ok_or(BrokerRunError::InvalidArguments)?;
-    let generation = generation.filter(|value| *value > 0).ok_or(BrokerRunError::InvalidArguments)?;
-    Ok(BrokerProcessArgs { pipe_name, generation })
+    let generation = generation
+        .filter(|value| *value > 0)
+        .ok_or(BrokerRunError::InvalidArguments)?;
+    Ok(BrokerProcessArgs {
+        pipe_name,
+        generation,
+    })
 }
 
 pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError> {
@@ -100,7 +112,9 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                 version: BROKER_PROTOCOL_VERSION,
                 generation: args.generation,
                 sequence: envelope.sequence,
-                response: BrokerResponse::Rejected { code: reject_code(error) },
+                response: BrokerResponse::Rejected {
+                    code: reject_code(error),
+                },
             };
             pipe.write_frame(&encode_frame(&response)?)?;
             continue;
@@ -115,7 +129,9 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
             }
             BrokerRequest::StartExec { request_id, spec } => {
                 if !valid_elevated_request_id(&request_id) || spec.validate().is_err() {
-                    BrokerResponse::Rejected { code: BrokerRejectCode::Malformed }
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::Malformed,
+                    }
                 } else {
                     match executions.entry(request_id) {
                         std::collections::hash_map::Entry::Vacant(entry) => {
@@ -132,38 +148,52 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                             BrokerResponse::ExecAccepted
                         }
                         std::collections::hash_map::Entry::Occupied(_) => {
-                            BrokerResponse::Rejected { code: BrokerRejectCode::DuplicateRequest }
+                            BrokerResponse::Rejected {
+                                code: BrokerRejectCode::DuplicateRequest,
+                            }
                         }
                     }
                 }
             }
             BrokerRequest::PollExec { request_id } => {
                 if !valid_elevated_request_id(&request_id) {
-                    BrokerResponse::Rejected { code: BrokerRejectCode::Malformed }
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::Malformed,
+                    }
                 } else if let Some(execution) = executions.get(&request_id) {
                     match execution.result.try_recv() {
                         Ok(Ok(execution_result)) => {
                             executions.remove(&request_id);
-                            BrokerResponse::ExecCompleted { execution: execution_result }
+                            BrokerResponse::ExecCompleted {
+                                execution: execution_result,
+                            }
                         }
                         Ok(Err(_)) | Err(TryRecvError::Disconnected) => {
                             executions.remove(&request_id);
-                            BrokerResponse::Rejected { code: BrokerRejectCode::ExecutionFailed }
+                            BrokerResponse::Rejected {
+                                code: BrokerRejectCode::ExecutionFailed,
+                            }
                         }
                         Err(TryRecvError::Empty) => BrokerResponse::ExecPending,
                     }
                 } else {
-                    BrokerResponse::Rejected { code: BrokerRejectCode::RequestNotFound }
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::RequestNotFound,
+                    }
                 }
             }
             BrokerRequest::CancelExec { request_id } => {
                 if !valid_elevated_request_id(&request_id) {
-                    BrokerResponse::Rejected { code: BrokerRejectCode::Malformed }
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::Malformed,
+                    }
                 } else if let Some(execution) = executions.get(&request_id) {
                     execution.cancel.cancel();
                     BrokerResponse::CancelAck
                 } else {
-                    BrokerResponse::Rejected { code: BrokerRejectCode::RequestNotFound }
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::RequestNotFound,
+                    }
                 }
             }
         };
@@ -174,7 +204,9 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
             sequence: envelope.sequence,
             response,
         })?)?;
-        if shutdown { return Ok(()); }
+        if shutdown {
+            return Ok(());
+        }
     }
 }
 
@@ -184,7 +216,9 @@ fn reject_code(error: BrokerProtocolError) -> BrokerRejectCode {
         BrokerProtocolError::StaleGeneration => BrokerRejectCode::StaleGeneration,
         BrokerProtocolError::SessionMismatch => BrokerRejectCode::SessionMismatch,
         BrokerProtocolError::Replay => BrokerRejectCode::Replay,
-        BrokerProtocolError::EmptyFrame | BrokerProtocolError::MalformedFrame => BrokerRejectCode::Malformed,
+        BrokerProtocolError::EmptyFrame | BrokerProtocolError::MalformedFrame => {
+            BrokerRejectCode::Malformed
+        }
         BrokerProtocolError::OversizedFrame => BrokerRejectCode::Oversized,
     }
 }
@@ -207,8 +241,13 @@ impl fmt::Debug for BrokerClientSession {
 }
 
 impl BrokerClientSession {
-    pub fn handshake(mut pipe: NamedPipeConnection, generation: u64) -> Result<Self, BrokerRunError> {
-        if generation == 0 { return Err(BrokerRunError::HandshakeMismatch); }
+    pub fn handshake(
+        mut pipe: NamedPipeConnection,
+        generation: u64,
+    ) -> Result<Self, BrokerRunError> {
+        if generation == 0 {
+            return Err(BrokerRunError::HandshakeMismatch);
+        }
         let session_nonce = random_session_nonce()?;
         pipe.write_frame(&encode_frame(&ServerHello {
             version: BROKER_PROTOCOL_VERSION,
@@ -222,10 +261,17 @@ impl BrokerClientSession {
         {
             return Err(BrokerRunError::HandshakeMismatch);
         }
-        Ok(Self { pipe, generation, session_nonce, next_sequence: 1 })
+        Ok(Self {
+            pipe,
+            generation,
+            session_nonce,
+            next_sequence: 1,
+        })
     }
 
-    pub const fn generation(&self) -> u64 { self.generation }
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
 
     pub fn ping(&mut self) -> Result<(), BrokerRunError> {
         match self.request(BrokerRequest::Ping)? {
@@ -272,14 +318,18 @@ impl BrokerClientSession {
 
     fn request(&mut self, request: BrokerRequest) -> Result<BrokerResponse, BrokerRunError> {
         let sequence = self.next_sequence;
-        self.next_sequence = self.next_sequence.checked_add(1).ok_or(BrokerRunError::UnexpectedResponse)?;
-        self.pipe.write_frame(&encode_frame(&BrokerRequestEnvelope {
-            version: BROKER_PROTOCOL_VERSION,
-            generation: self.generation,
-            session_nonce: self.session_nonce.clone(),
-            sequence,
-            request,
-        })?)?;
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(BrokerRunError::UnexpectedResponse)?;
+        self.pipe
+            .write_frame(&encode_frame(&BrokerRequestEnvelope {
+                version: BROKER_PROTOCOL_VERSION,
+                generation: self.generation,
+                session_nonce: self.session_nonce.clone(),
+                sequence,
+                request,
+            })?)?;
         let response: BrokerResponseEnvelope = decode_frame(&self.pipe.read_frame()?)?;
         if response.version != BROKER_PROTOCOL_VERSION
             || response.generation != self.generation
@@ -298,13 +348,34 @@ mod tests {
     #[test]
     fn broker_cli_contains_only_pipe_and_generation_and_never_session_nonce() {
         let parsed = parse_broker_args([
-            "--pipe", r"\\.\pipe\LocalBridge-Privileged-0123456789abcdef0123456789abcdef",
-            "--generation", "7",
-        ]).unwrap();
+            "--pipe",
+            r"\\.\pipe\LocalBridge-Privileged-0123456789abcdef0123456789abcdef",
+            "--generation",
+            "7",
+        ])
+        .unwrap();
         assert_eq!(parsed.generation, 7);
         assert!(parsed.pipe_name.contains("LocalBridge-Privileged"));
         assert!(parse_broker_args(["--pipe", "bad", "--generation", "1"]).is_err());
-        assert!(parse_broker_args(["--pipe", r"\\.\pipe\LocalBridge-Privileged-a", "--generation", "1"]).is_err());
-        assert!(parse_broker_args(["--pipe", r"\\.\pipe\LocalBridge-Privileged-0123456789abcdef0123456789abcdef", "--generation", "1", "--extra", "x"]).is_err());
+        assert!(
+            parse_broker_args([
+                "--pipe",
+                r"\\.\pipe\LocalBridge-Privileged-a",
+                "--generation",
+                "1"
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_broker_args([
+                "--pipe",
+                r"\\.\pipe\LocalBridge-Privileged-0123456789abcdef0123456789abcdef",
+                "--generation",
+                "1",
+                "--extra",
+                "x"
+            ])
+            .is_err()
+        );
     }
 }

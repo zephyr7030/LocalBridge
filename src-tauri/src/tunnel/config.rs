@@ -10,16 +10,22 @@ pub struct TunnelId(String);
 impl TunnelId {
     pub fn new(value: impl Into<String>) -> Result<Self, TunnelError> {
         let value = value.into();
-        let suffix = value.strip_prefix("tunnel_").ok_or(TunnelError::InvalidTunnelId)?;
+        let suffix = value
+            .strip_prefix("tunnel_")
+            .ok_or(TunnelError::InvalidTunnelId)?;
         if suffix.len() != 32
-            || !suffix.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || !suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         {
             return Err(TunnelError::InvalidTunnelId);
         }
         Ok(Self(value))
     }
 
-    pub(crate) fn expose(&self) -> &str { &self.0 }
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,10 +47,16 @@ impl TunnelRuntimeConfig {
         mcp_guard_port: u16,
     ) -> Result<Self, TunnelError> {
         let install_root = install_root.into();
-        if install_root.as_os_str().is_empty() { return Err(TunnelError::InvalidInstallRoot); }
-        if mcp_guard_port == 0 { return Err(TunnelError::InvalidMcpTarget); }
+        if install_root.as_os_str().is_empty() {
+            return Err(TunnelError::InvalidInstallRoot);
+        }
+        if mcp_guard_port == 0 {
+            return Err(TunnelError::InvalidMcpTarget);
+        }
         let health_state_dir = health_state_dir.into();
-        if health_state_dir.as_os_str().is_empty() { return Err(TunnelError::InvalidHealthStateDirectory); }
+        if health_state_dir.as_os_str().is_empty() {
+            return Err(TunnelError::InvalidHealthStateDirectory);
+        }
         Ok(Self {
             install_root,
             health_state_dir,
@@ -57,10 +69,15 @@ impl TunnelRuntimeConfig {
     }
 
     pub(crate) fn mcp_target(&self) -> String {
-        format!("url=http://127.0.0.1:{}/mcp,channel=main", self.mcp_guard_port)
+        format!(
+            "url=http://127.0.0.1:{}/mcp,channel=main",
+            self.mcp_guard_port
+        )
     }
 
-    pub(crate) fn control_plane_base_url(&self) -> &str { &self.control_plane_base_url }
+    pub(crate) fn control_plane_base_url(&self) -> &str {
+        &self.control_plane_base_url
+    }
 
     #[cfg(test)]
     pub(crate) fn with_test_embedded_mcp_stub(mut self) -> Self {
@@ -69,7 +86,9 @@ impl TunnelRuntimeConfig {
     }
 
     #[cfg(test)]
-    pub(crate) fn embedded_mcp_stub(&self) -> bool { self.embedded_mcp_stub }
+    pub(crate) fn embedded_mcp_stub(&self) -> bool {
+        self.embedded_mcp_stub
+    }
 
     #[cfg(debug_assertions)]
     #[doc(hidden)]
@@ -103,7 +122,10 @@ mod tests {
             "tunnel_0123456789abcdef0123456789abcdef00",
             "tunnel_0123456789abcdef0123456789abcdeg",
         ] {
-            assert!(matches!(TunnelId::new(invalid), Err(TunnelError::InvalidTunnelId)));
+            assert!(matches!(
+                TunnelId::new(invalid),
+                Err(TunnelError::InvalidTunnelId)
+            ));
         }
     }
 
@@ -119,10 +141,18 @@ mod tests {
         ));
         let config = TunnelRuntimeConfig::new("root", "health", valid_id(), 1234).unwrap();
         assert_eq!(config.control_plane_base_url(), OPENAI_CONTROL_PLANE);
-        assert_eq!(config.mcp_target(), "url=http://127.0.0.1:1234/mcp,channel=main");
+        assert_eq!(
+            config.mcp_target(),
+            "url=http://127.0.0.1:1234/mcp,channel=main"
+        );
         #[cfg(debug_assertions)]
         {
-            assert!(config.clone().with_test_control_plane_base_url("http://127.0.0.1:4321").is_ok());
+            assert!(
+                config
+                    .clone()
+                    .with_test_control_plane_base_url("http://127.0.0.1:4321")
+                    .is_ok()
+            );
             for invalid in [
                 "http://0.0.0.0:4321",
                 "http://localhost:4321",
