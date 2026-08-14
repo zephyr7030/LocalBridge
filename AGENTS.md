@@ -15,7 +15,7 @@
 12. listener 只允许 127.0.0.1/::1。
 13. recoverable 故障自动重连 5 次，1/2/5/10/30s；成功静默；5 次失败才一次错误窗口；禁止 restart storm。
 14. UI 中文、极简、Apple-inspired；视觉只用 React/Tauri + 原生 CSS/SVG/system fonts；不得新增 UI/动画/图标/CSS/字体依赖。
-15. 当前执行只显示单行状态；无 feed/history；摘要脱敏。活动/等待/阻止/失败状态必须绑定真实 backend MCP/Broker 工具执行生命周期，前端轮询不得成为可能漏掉短任务的唯一事实来源。执行中显示真实任务持续时间；无活动任务时该行必须可见并显示 `等待命令`，若已有上一条真实命令则同时显示其相对时间（秒级 `nS前`、分钟级 `n分钟前`、超过一小时显示 `大于1小时`、按天显示 `大于n天`），从未执行过命令时只显示 `等待命令`。只允许保留“当前任务 + 上一条任务时间元数据”，禁止 feed/history/list；前端不得伪造 task truth。
+15. 当前执行采用 backend 唤醒式投影，不得依赖周期轮询捕获短任务。每个真实 MCP/Broker 工具调用必须至少可见 500ms，但不得为了 UI 延迟工具真实返回；第一行显示当前执行/`等待命令`，第二行固定为 `上次执行工具：<脱敏工具标签或安全摘要>`，相对时间 `nS前/n分钟前/大于1小时/大于n天` 移到第二行最右侧。仅保留当前任务与单个上一工具元数据，禁止 feed/history/list/raw MCP tool id；前端不得伪造 task truth。
 16. `--background` 从入口不显示窗口；管理员偏好不自动 UAC。
 17. 捆绑 Python/coding-tools/tunnel-client；无系统 Python fallback；无独立 runtime/app updater v0.1。
 18. 普通 PR 使用 deterministic fake sidecars；真实 external test 只属于明确 Gate；安全边界必须 negative/adversarial。
@@ -31,8 +31,8 @@ PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRE
 24. G3→G4 人工 Gate 期间，审查智能体可质疑、复核、独立验证或拒绝采信用户与执行智能体提供的事实性材料；这些材料只作为待验证证据，不自动构成 PASS。
 25. 执行智能体可使用预授权，但每项实际使用的预授权必须记录 `authorization_id/scope/actions/evidence_ref/recorded_by/user_audit_status`；人工 Gate PASS 前，所有记录的预授权都必须经用户审核为 `PASS`。
 26. 第 4 屏标题固定为“创建自定义插件”，提示固定表达“在插件设置页面最底端，打开‘开发者模式’”。`打开 ChatGPT插件设置` 必须位于左侧操作流，只允许 Rust 固定 allowlist 通过系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Plugins`，前端不得传入、拼接或修改 URL，禁止 WebView。其下必须显示提示 `打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件`。信息区严格只有两行可复制信息：`名称：Local Bridge`、`Tunnel ID：<当前持久化保存值>`；禁止“本地服务”行。Tunnel ID 必须来自 Rust 当前已持久化 StartupProfile，而非 React/input 临时值。两行各有独立复制按钮，成功后按钮以绿色稳定显示“已复制”精确 3 秒再恢复“复制”，切换不得造成布局位移。`打开插件管理页` 同样必须位于左侧操作流，只允许 Rust 固定 allowlist 通过系统默认浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止任意 URL、WebView 或伪造 ChatGPT 连接状态。第 4 屏底部必须明确提供“返回”和“继续”。
-27. 第 3 屏项目选择以原生 Windows 文件夹选择器为主交互；三个权限模式按钮必须为标题与说明文字预留清晰、均衡的上下/左右内容边距，文字不得在 900×620 实际渲染中贴近或碰触按钮边框，且换行时按钮高度必须随内容安全增长；该项必须保留为 900×620 实机人工视觉验收项，自动化只能检查结构性防回退，禁止仅凭 CSS 存在 padding 等标记判定视觉 PASS。普通选中项使用统一蓝色强调色；管理员模式在 onboarding 与设置页使用黄色/琥珀逻辑色，禁止被全局蓝色 selected 规则覆盖。按钮必须一致且可辨识，禁止白底上的纯白/近不可见按钮；提示遵循最小必要原则，复制成功反馈不得引起布局位移。
-28. 主窗口固定为 900×620；minimum/maximum inner size 均为 900×620，`resizable=false`、`maximizable=false`。原生 Windows decorations 必须关闭；产品只能显示一层自定义风格化窗口 chrome，并以 `inset:0` / 100%×100% 精确贴合 native client area，禁止“原生边框 + 自定义边框”双层窗口。自定义 chrome 提供拖拽区、最小化和关闭，不提供最大化；Dashboard 与 onboarding 必须在固定 client area 内完整可操作。
+27. 第 3 屏项目选择以原生 Windows 文件夹选择器为主交互；权限模式按钮包含“标题+说明”两行文本块时，780×620 实际 computed/rendered 高度必须至少为普通单行控件实际高度的 2 倍，标题与说明 line box 均完整可见且留白均衡；静态 `min-height/padding` 标记本身不得自动 PASS，最终必须保留 780×620 实机人工视觉验收。普通选中项统一蓝色，管理员模式在 onboarding 与设置页使用黄色/琥珀色。
+28. 主窗口固定为 780×620；minimum/maximum inner size 均为 780×620，`resizable=false`、`maximizable=false`。原生 Windows decorations 必须关闭；产品只能显示一层自定义风格化窗口 chrome，并以 `inset:0` / 100%×100% 精确贴合 native client area，禁止“原生边框 + 自定义边框”双层窗口。自定义 chrome 提供拖拽区、最小化和关闭，不提供最大化；Dashboard 与 onboarding 必须在固定 client area 内完整可操作。
 29. 首次 onboarding 本身就是窗口内容页，必须直接占满自定义 chrome 的可用内容区；禁止在大面积空白背景中再居中放置作为整个向导外壳的 card/modal/dialog，也禁止用圆角、阴影或边框制造“窗口里的弹窗”。允许页面级 padding、字段分组和局部控件，但 5 屏共同外壳必须是整页布局。
 30. 第 4 屏是创建插件的真实可执行步骤，而不是提前展示的说明页：第 3 屏保存项目与权限后必须启动 selected project、本地 runtime / MCP / OpenAI Tunnel，并等待 `本地运行环境 + 编码服务 + OpenAI Tunnel` 全部真实就绪后才允许进入第 4 屏；不得把唯一 runtime 启动边沿延迟到第 5 屏。
 31. 除第 1 屏外，onboarding 第 2/3/4/5 屏都必须有明确“返回”路径；任何保存、启动或配置失败均不得锁死用户，最终启动检查页也必须能返回第 4 屏重新配置。
@@ -43,12 +43,14 @@ PR PASS 只推进状态，不自动开始下一 PR；组末停在 REVIEW_REQUIRE
 36. 设置页字段专有名词固定使用 `Tunnel ID` 与 `Runtime API Key`，这是中文优先规则的明确例外；禁止把 `Runtime API Key` 改写成“运行密钥”。完整 Runtime API Key 永不回显。连接区默认只显示持久化摘要与各自“更换”；点“更换”才进入编辑态，Tunnel ID 与 Runtime API Key 可独立更新，未修改字段不得被要求重输或被覆盖；保存执行基础格式校验→安全写入→若当前运行/连接且有效连接配置变化则受控重连；禁止“测试连接”按钮。
 37. 设置页固定为三组：`常规`（开机启动、关闭窗口后继续运行）、`连接`（Tunnel ID、Runtime API Key，各自更换）、`权限`（编辑模式、完整模式、管理员模式）；底部只保留 `打开欢迎页` / `完成`。`关闭窗口后继续运行=true` 时 X=hide、runtime/tray 保持；false 时 X=有序关闭受管 runtime/Broker 后退出；该偏好必须版本化持久化。
 38. 诊断页固定为最小三段：`运行状态`（本地运行环境、编码服务、OpenAI Tunnel、管理员权限）、`项目`（当前实际路径）、`日志`（最近、限量、脱敏用户日志）；底部动作只保留 `打开日志`、`导出诊断`、`完成`。普通诊断页禁止 Broker generation、reconnect generation/attempt 列表、刷新、重试连接、打开欢迎页等工程/重复动作；导出仍必须严格 secret-redacted。
-39. 第 3 屏三个权限按钮除 `height:auto`/换行安全外，在固定 900×620 下必须具备足以容纳“标题 + 两行说明 + 上下留白”的结构高度基线，自动化结构 Gate 以 `min-height >= 80px`（或等效可证明布局）防止压扁；最终仍必须由人工 900×620 视觉 Gate 验证均衡留白，自动规则不能替代人工 PASS。
+39. 第 3 屏权限按钮仍可保留 `min-height >= 80px` 作为最低结构保护，但验收必须测量真实 rendered geometry：含标题+说明的两行按钮高度至少为单行控件的 2 倍，且两行文本均完整可见；最终由人工 780×620 视觉 Gate 验证，CSS 标记不能替代人工 PASS。
 40. UI/backend 必须是独立执行边界：WebView 主线程只做 render/input；所有可能耗时的 Rust/Tauri command 必须投递到 backend worker/async task/`spawn_blocking` 等非 UI 执行上下文。onboarding 的 runtime start + readiness wait、foreground startup、workspace switch、UAC、recovery 等状态机属于 backend；React 只观察 typed projection。必须有“故意延迟 backend 工作时 UI 仍可响应/刷新状态”的回归测试。
 41. Dashboard “选择其他文件夹”与 onboarding 一致，必须调用原生 Windows 文件夹选择器；手填绝对路径不得作为主流程。
 42. Cloudflare/cloudflared 从 LocalBridge 最终发行路径退休：LB-018 必须确保最终 runtime bundle、`runtime-manifest.toml`、packaging inventory/installer、启动参数和 fallback 均不包含或调用 `cloudflared.exe` / Cloudflare managed tunnel。上游历史兼容快照可作为不可执行审计证据保留，但不得被复制进最终发行 bundle；release Gate 必须 fail-closed 防止重新引入。
 43. 主控界面/Dashboard 禁止显示 `权限模式` 行，也禁止显示或提供 `编辑模式 / 完整模式 / 管理员模式` 三档选择控件；Dashboard 不得修改 `PermissionMode`、不得通过权限模式触发 UAC。权限编辑允许存在于设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏；后者不是冲突或第二套非法入口。Dashboard 仅可保留**只读**的 `管理员权限` 实际运行状态，并且必须直接来自 backend `PrivilegeState`。
 44. `无法准备管理员权限`、保存/选择失败等一次性用户操作提示属于临时反馈：默认显示 3 秒后自动清除，新提示可替换旧提示；不得永久占据页面。持续存在的 runtime/reconnect Fault 必须继续由 typed 状态/故障窗口表达，不得因本规则被自动隐藏。
 45. `\\?\D:\project` 等 Win32 verbatim/extended-length 路径只允许存在于 WorkspaceValidator 的 handle-resolved filesystem identity、去重、reparse 防护与授权身份比较内部。它不得跨入 MCP/Broker/sidecar/process/command/tool invocation：所有实际工具路径参数以及 `cwd/workdir/current_dir` 在执行边界前必须转换为与同一 freshly validated filesystem identity 绑定的普通 Win32 路径（例如 `D:\project`），否则 fail-closed；禁止把 `\\?\` 工作目录传给命令执行工具。Dashboard/设置/诊断/onboarding 同样只显示普通路径。execution/display normalization 均不得授予新权限或削弱授权判断。
-46. 同一页面/分组中的同级按钮必须使用统一动作列和水平左基线；重复动作的按钮左边缘在固定 900×620 下应对齐（自动几何 Gate 容差 ≤1 CSS px）。设置页 `Tunnel ID` 与 `Runtime API Key` 两个“更换”按钮是强制验收样例。禁止通过随文案长度漂移、任意 margin/offset 或第二套按钮布局语言实现。
+46. 同一页面/分组中的同级按钮必须使用统一动作列和水平左基线；重复动作的按钮左边缘在固定 780×620 下应对齐（自动几何 Gate 容差 ≤1 CSS px）。设置页两个“更换”继续占同一最右动作列；Runtime API Key 已保存时其 `清除` 紧邻位于 Key `更换` 左侧且不得推移 `更换`。禁止任意 offset 或第二套布局语言。
 47. Dashboard 主界面必须提供 `重启服务` 与 `关闭服务` 两个真实服务控制按钮：`重启服务` 使用黄色/琥珀逻辑色，`关闭服务` 使用红色危险操作色；两者复用全产品按钮几何/字体/边界/对齐体系并与同级操作左基线对齐。动作只发送 typed intent，backend 异步执行真实受管 lifecycle；重启必须取消/收敛已有 Starting/Ready/Recovering/Fault runtime 后只启动一套当前持久化配置，不得 duplicate owner/restart storm，也不得因重启自身自动弹 UAC；关闭必须记录显式 manual-stop 语义并有序关闭 privileged gate/Broker/Tunnel/PEP/MCP，应用窗口本身保持可用并投影停止状态。
+48. Onboarding OpenAI 配置页已有持久化 Tunnel ID 时必须显示当前值；已有 Runtime API Key 时固定显示 `已安全保存至windows安全凭据`，点击/聚焦输入框只用 backend 提供的长度元数据生成同位数 `*` 掩码，绝不把 plaintext 返回前端，未改动掩码不得被保存为新 key。安全提示严格为 `Runtime API Key 仅保存在 Windows 安全凭据中。`
+49. 设置页 Runtime API Key 已保存时必须提供 `清除`，紧邻位于 `更换` 左侧；清除真实删除 Windows 安全凭据、绝不回显 secret，并按现有 active/connecting 连接配置变化 lifecycle 处理。任何可滚动 sheet/dialog/card 的圆角外壳必须保留四角圆角；scrollbar 必须被裁切或内缩在圆角内部，禁止切平右侧圆角。

@@ -80,23 +80,25 @@ UI 冻结补充：
 普通强调色     = 蓝色 #0071e3；黑色不得作为普通 primary/selected accent
 管理员逻辑色   = onboarding 与设置页均为黄色/琥珀色，不得被蓝色 selected 覆盖
 服务状态点     = Ready绿 / Starting琥珀 / Fault红 / Unknown灰；onboarding 与 Dashboard 使用同源状态
-窗口           = 固定 900×620；minimum=maximum=900×620；禁止缩放与最大化
+窗口           = 固定 780×620；minimum=maximum=780×620；禁止缩放与最大化
 窗口验收       = `resizable=false`、`maximizable=false`；拖拽边框/最大化均不能改变 client size
 窗口边框       = `decorations=false`；唯一自定义 chrome 必须贴满 client area；禁止原生+自定义双边框；保留拖拽/最小化/关闭
 引导页布局     = 整页；直接使用 custom chrome 内容区；禁止空白页面中居中再套 card/modal/dialog 式向导外壳
 管理员选择     = 仅设置页或 onboarding 第3屏可见选择；点击“管理员模式”即为显式 UAC 动作；无单独“启用管理员权限”按钮；后台恢复偏好仍不自动 UAC
 主页权限       = 不显示“权限模式”及编辑/完整/管理员三档选项；不得从主页修改 PermissionMode 或触发模式 UAC；只读显示管理员权限实际状态；权限编辑允许设置页与用户显式重新打开的 onboarding 第3屏
 前台启动       = onboarding 完成且配置有效时自动、异步启动 runtime/MCP/Tunnel；UI 不等待后端阻塞工作
-任务状态       = backend 真实执行绑定；短任务不得被 UI 轮询漏掉；执行中显示持续时间；待机显示“等待命令”，有上一条命令时追加 nS前/n分钟前/大于1小时/大于n天；无历史列表
+任务状态       = backend 唤醒式绑定真实工具调用；轮询不得作为短任务传输；每次工具调用至少可见500ms且不延迟真实返回；首行当前状态/等待命令，第二行“上次执行工具：…”且 nS前/n分钟前/大于1小时/大于n天 靠右；无历史列表
 临时提示       = “无法准备管理员权限”等一次性操作提示默认 3 秒自动消失；持续 runtime fault 仍由 typed 状态表达
 项目路径边界   = \\?\D:\project 仅限内部 filesystem identity 校验；UI 与 MCP/Broker/sidecar/process/command/tool 的 cwd/workdir/current_dir/路径参数必须使用同一 validated identity 对应的普通 D:\project；verbatim 工作目录不得传给命令工具，execution/display 转换不得参与授权
-按钮对齐       = 同级动作使用同一左基线/动作列；900×620 几何差≤1 CSS px；设置两项“更换”为强制样例
+按钮对齐       = 同级动作使用同一左基线/动作列；780×620 几何差≤1 CSS px；设置两项“更换”为强制样例，Key“清除”紧邻位于 Key“更换”左侧
 服务控制       = Dashboard 提供黄色/琥珀“重启服务”与红色“关闭服务”；backend 真实 lifecycle，统一按钮设计与对齐；重启不自动 UAC
-设置           = 常规/连接/权限三组；连接字段固定英文 `Tunnel ID` / `Runtime API Key`；独立“更换”；保存即验证并按需受控重连；无“测试连接”
+设置           = 常规/连接/权限三组；连接字段固定英文 `Tunnel ID` / `Runtime API Key`；Key 已保存时“清除”紧邻“更换”左侧并真实删除 Windows 安全凭据；保存/清除均按需受控重连；无“测试连接”
 诊断           = 运行状态/项目/最近脱敏日志；只保留“打开日志 / 导出诊断 / 完成”
 关闭窗口       = 设置项“关闭窗口后继续运行”；开=hide+后台继续，关=有序退出
 UI/backend     = frontend 纯投影；耗时 lifecycle/process/credential/UAC/recovery 工作必须离开 UI/WebView 线程
-权限按钮高度   = 900×620 下结构基线 min-height≥80px 或等效证明，且仍需人工视觉 Gate
+权限按钮高度   = 780×620 下两行按钮真实 rendered 高度≥单行控件2倍且两行均完整可见；min-height≥80px 仅作最低保护，仍需人工视觉 Gate
+OpenAI已保存项 = Tunnel ID 显示当前持久化值；Key 固定提示“已安全保存至windows安全凭据”，聚焦时按已存key位数显示同位数*掩码且不回传明文；安全提示仅“Runtime API Key 仅保存在 Windows 安全凭据中。”
+滚动圆角       = sheet/dialog/card 出现纵向滚动条时仍保留四角圆角，scrollbar 必须裁切或内缩于圆角外壳内部
 Cloudflare     = LB-018 从最终 bundle/manifest/installer/启动参数/fallback 移除 cloudflared；历史兼容证据可留但不可执行/打包
 ```
 

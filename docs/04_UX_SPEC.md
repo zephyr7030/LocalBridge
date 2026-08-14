@@ -39,11 +39,15 @@
 - `Tunnel ID`
 - `Runtime API Key`
 
-运行密钥保存后只显示：
+若已有 Tunnel ID，输入框必须预填当前持久化正在使用的 Tunnel ID。
 
-`已保存`
+Runtime API Key 已保存时固定显示：
 
-界面不得回显密钥，不提供显示完整密钥按钮，也不得把密钥放入前端持久化存储。
+`已安全保存至windows安全凭据`
+
+其下安全提示严格只保留：`Runtime API Key 仅保存在 Windows 安全凭据中。`
+
+界面不得回显密钥，不提供显示完整密钥按钮，也不得把密钥放入前端持久化存储。用户点击/聚焦已保存的 Runtime API Key 输入框时，只允许使用 backend 返回的已保存 key 长度元数据生成同位数 `*` 掩码；plaintext 不得返回前端。该掩码仅表示“已有值”：若用户没有真正输入新 key，`*****` 不得被提交或保存为替代密钥。
 
 ## 第 3 屏 — 项目与权限
 
@@ -75,7 +79,7 @@
 - 后台开机恢复管理员偏好不会自动弹出系统授权；
 - 只有管理员代理获得管理员令牌。
 
-三个权限模式按钮不得设置会挤压说明文字的固定高度；标题与说明之间使用明确间距，四周保留均衡内容留白，说明换行时按钮随内容自动增高，并以 `min-height >= 80px` 或等效结构证明保证“标题 + 两行说明 + 上下留白”。最终视觉质量必须在固定 900×620 实际运行窗口中人工确认；自动化可防止压扁/缺少换行等结构回退，但不得仅因 CSS 出现 `padding/min-height` 就判定视觉 PASS。普通选中项使用蓝色 `#0071e3`；管理员模式在 onboarding 与设置页均使用黄色/琥珀逻辑色，禁止普通蓝色 selected 规则覆盖管理员色。第 3 屏必须有明确 `返回`。
+三个权限模式按钮不得设置会挤压说明文字的固定高度；`min-height >= 80px` 只能作为最低结构保护，不能构成 PASS。固定 780×620 实机中，凡包含“标题 + 说明”两行文本块的权限按钮，其实际 computed/rendered 高度必须至少为普通单行控件实际高度的 2 倍，并且标题与说明两个 line box 都完整可见、无裁切或挤压。最终视觉质量必须人工确认；自动化应读取真实几何而不是仅检查 CSS marker。普通选中项使用蓝色 `#0071e3`；管理员模式在 onboarding 与设置页均使用黄色/琥珀逻辑色。第 3 屏必须有明确 `返回`。
 
 ## 第 4 屏 — 创建自定义插件
 
@@ -126,14 +130,14 @@ OpenAI Tunnel
 
 ## 固定窗口
 
-- 主窗口固定 900×620；
-- minimum inner size = 900×620；maximum inner size = 900×620；
+- 主窗口固定 780×620；
+- minimum inner size = 780×620；maximum inner size = 780×620；
 - `resizable=false`，用户不能拖拽边框改变窗口尺寸；
 - `maximizable=false`，最大化入口不可用；
 - native `decorations=false`，不得同时显示 Windows 原生标题栏/边框与产品风格化边框；
 - 自定义 chrome 必须是唯一窗口外框，`inset:0` 且覆盖 100% client area，不允许二次内缩形成“窗口里的窗口”；
 - 自定义 chrome 提供可用拖拽区、最小化按钮、关闭按钮，不提供最大化按钮；
-- Dashboard 与 onboarding 必须在固定 900×620 client area 内完整可操作，不再要求 resize/maximize 响应式布局或 resize E2E。
+- Dashboard 与 onboarding 必须在固定 780×620 client area 内完整可操作，不再要求 resize/maximize 响应式布局或 resize E2E。
 
 ## 按钮与提示
 
@@ -142,7 +146,8 @@ OpenAI Tunnel
 - 白色/近白背景上的次要按钮必须有清晰边界或足够对比，不得“白底白按钮”；
 - 不为自解释操作堆叠重复说明；
 - 成功/复制状态预留空间，不推动周围内容；
-- 同一页面/分组的同级动作按钮必须共享动作列和水平左基线；固定 900×620 自动几何 Gate 容差 `<= 1 CSS px`。设置连接区两个“更换”按钮是强制样例，不得随 Tunnel ID/“已保存”文本宽度漂移；
+- 同一页面/分组的同级动作按钮必须共享动作列和水平左基线；固定 780×620 自动几何 Gate 容差 `<= 1 CSS px`。设置连接区两个“更换”按钮必须占同一最右动作列；Runtime API Key 已保存时，`清除` 紧邻位于该行“更换”的左侧，且不得推动最右“更换”列；
+- 任意 sheet/dialog/card 等圆角表面出现纵向滚动时，四个外层圆角必须保持完整；scrollbar 必须被裁切或内缩在圆角壳内部，禁止滚动轨道切平右上/右下圆角；
 - `无法准备管理员权限`、一次性保存/选择失败等 one-shot 提示默认 3 秒自动清除；持续 runtime/reconnect fault 仍通过 typed 状态/故障窗口保持，不得错误套用临时提示规则。
 
 ## UI / Backend 执行边界
@@ -217,7 +222,7 @@ Dashboard 只读状态示例：
 
 ## 当前执行状态
 
-主控界面只保留一行，不显示标题和字段名。
+主控界面的执行区域固定为两行，不显示“当前任务/类型/任务/状态”等字段标题。第一行表示当前执行状态，第二行表示唯一一条上一工具信息。
 
 执行中：
 
@@ -234,7 +239,8 @@ Dashboard 只读状态示例：
 - 不做卡片式消息；
 - 不产生最近活动或历史列表；
 - 持续时间来自 backend 真实任务起始时间，前端不得伪造开始/结束；
-- 文件新建、删除、修改及普通命令即使短于 UI 刷新周期，也必须由 backend current/last timing projection 捕获，禁止把 frontend polling 当作唯一事件捕获机制。
+- 文件新建、删除、修改及普通命令等真实工具调用必须由 backend push/event 或等价唤醒机制即时触发 UI 呈现；周期 polling 只能作为一般 projection 刷新，禁止作为短任务的主要传输机制；
+- 每个真实工具调用必须至少保持 500ms 的可见 presentation interval，即使真实调用瞬时完成；500ms 只约束 UI 呈现，禁止为了视觉停留而延迟工具真实响应；
 
 其他执行示例：
 
@@ -252,7 +258,13 @@ Dashboard 只读状态示例：
 ○  等待命令
 ```
 
-已有上一条真实命令时显示 `○ 等待命令 · <相对时间>`；相对时间至少覆盖 `nS前`、`n分钟前`、`大于1小时`、`大于n天`。从未执行命令时只显示 `等待命令`。只允许保留上一条 timing metadata，不形成用户可浏览 history/feed/list。
+第一行不得再追加相对时间。已有上一条真实工具调用时，下面固定显示第二行：
+
+```text
+上次执行工具：修改文件                                      59S前
+```
+
+`上次执行工具：` 为固定前缀；工具名称/摘要必须经过安全 presentation mapper 脱敏，禁止 raw MCP tool identifier。相对时间固定靠第二行最右侧，至少覆盖 `nS前`、`n分钟前`、`大于1小时`、`大于n天`。从未执行过工具时第二行可以不存在或为空。只允许保留单个上一工具元数据，不形成用户可浏览 history/feed/list。
 
 `等待命令` 为必须可见的中性静态状态，无动画；禁止显示“空闲”或隐藏整行。该状态及活动状态均来自 backend `CurrentTaskStatus`，前端不得自行维护任务 truth。
 
@@ -367,11 +379,11 @@ LocalBridge
 默认固定态：
 
 ```text
-Tunnel ID          tunnel_6a7ae9...     更换
-Runtime API Key    已保存               更换
+Tunnel ID          tunnel_6a7ae9...             更换
+Runtime API Key    已保存               清除    更换
 ```
 
-两个“更换”占用同一固定动作列，在 900×620 下左边缘差 `<= 1 CSS px`，不受左侧摘要宽度影响。
+两个“更换”占用同一最右固定动作列，在 780×620 下几何差 `<= 1 CSS px`，不受左侧摘要宽度影响。Runtime API Key 已保存时，`清除` 紧邻位于 Key 行“更换”的左侧；`清除` 的出现不得改变两行“更换”的最右动作列位置。
 
 完整 `Runtime API Key` 永不显示。点击对应“更换”才进入连接编辑态：
 
@@ -388,6 +400,8 @@ Runtime API Key 仅保存在 Windows 安全凭据中。
 ```
 
 Tunnel ID 与 Runtime API Key 独立更新：只改 Tunnel ID 不要求重输/改动密钥；只改密钥不改 Tunnel ID。保存执行“基础格式校验 → 安全写入 → 若 runtime 正在运行/连接且有效连接配置变化则受控重连”。“正在连接”包括 `StartingMcp / WaitingMcpReady / StartingPolicyEnforcement / WaitingPolicyReady / StartingTunnel / WaitingTunnelReady` 等异步启动阶段；这些阶段配置变化不得因 `active=false` 直接返回并继续使用旧 captured config，最终运行实例必须使用最新持久化配置。禁止“测试连接”按钮。
+
+`清除` 必须真实删除 Windows 安全凭据中的 Runtime API Key，不得读取或显示 plaintext；成功后 typed projection 变为 `未保存`。若 runtime 当前 active/connecting，清除属于有效连接配置变化，必须复用相同的受控停止/重连或 fail-closed lifecycle，不允许旧 runtime 继续依赖已清除 credential。
 
 ## 权限
 

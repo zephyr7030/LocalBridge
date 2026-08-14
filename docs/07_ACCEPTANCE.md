@@ -126,13 +126,13 @@
 | A117 | runtime adapter | domain 不直接依赖上游私有结构 |
 | A118 | release rollback | migration/install failure 不破坏旧配置 |
 
-| A119 | 主控界面无活动任务 | 固定显示“等待命令”；若已有上一条真实命令则追加 backend 相对时间，无活动历史 |
+| A119 | 主控界面无活动任务 | 第一行固定显示“等待命令”，不得在该行追加相对时间；无活动历史 |
 | A120 | read_file tools/call | 类型显示“读取文件”，任务显示安全路径摘要 |
 | A121 | search tools/call | 类型显示“搜索代码”，显示安全搜索摘要 |
 | A122 | command tools/call | 类型显示“执行命令/运行测试/构建”等稳定分类 |
 | A123 | policy deny | 当前任务显示“已阻止”，不得先显示“执行中” |
 | A124 | 管理员调用等待 UAC | 当前任务显示“管理员操作 / 等待授权” |
-| A125 | task terminal | 最终回到“等待命令”并保留上一条完成时间元数据用于相对时间，不追加历史消息 |
+| A125 | task terminal | 最终回到第一行“等待命令”，并保留唯一上一工具安全标签/摘要与完成时间元数据供第二行展示，不追加历史消息 |
 | A126 | 主控界面 | 无最近活动、消息流、时间线 |
 | A127 | raw tool id | 不直接显示 MCP tool identifier |
 | A128 | secret-bearing args | 任务摘要不泄漏密钥/token/nonce |
@@ -144,7 +144,7 @@
 | A133 | Running | 绿色活动点使用轻量脉冲动效 |
 | A134 | reduced-motion | 活动点静态，不执行脉冲 |
 | A135 | 动效 | 不推动布局、不造成文字位移 |
-| A136 | Idle | 必须显示低存在感“○ 等待命令”；执行过命令后追加 nS前/n分钟前/大于1小时/大于n天；不得显示“空闲”或隐藏整行 |
+| A136 | Idle | 第一行必须显示低存在感“○ 等待命令”，不得显示“空闲”、隐藏整行或在第一行追加年龄；上一工具年龄属于第二行 |
 
 | A137 | 保存 Runtime API Key | settings/JSON/TOML 中不存在明文 |
 | A138 | 保存 Runtime API Key | Windows secure credential backend 可恢复 |
@@ -189,7 +189,7 @@
 | A175 | 2/5 | 字段为 `Tunnel ID` / `Runtime API Key`，并有明确“返回” |
 | A176 | 2/5 | 密钥下方仅一行安全保存说明；保存失败时仍可返回，不得锁死 |
 | A177 | 3/5 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器，并有明确“返回” |
-| A178 | 3/5 权限模式 | 三个权限按钮结构 `min-height >= 80px` 或等效证明，说明换行安全增高，900×620 实机文字与边框留白均衡；该项仍必须人工视觉验收，不能凭 CSS 自动 PASS；普通 selected 蓝色 `#0071e3`、管理员黄色/琥珀 |
+| A178 | 3/5 权限模式 | `min-height >= 80px` 仅作最低保护；含标题+说明的两行按钮在 780×620 实机真实 rendered 高度至少为普通单行控件 2 倍，两个 line box 均完整可见；必须人工视觉验收，不能凭 CSS marker 自动 PASS；普通 selected 蓝色 `#0071e3`、管理员黄色/琥珀 |
 | A179 | 4/5 ChatGPT 插件设置 | 标题为“创建自定义插件”，提示为“在插件设置页面最底端，打开‘开发者模式’”；`打开 ChatGPT插件设置` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Plugins` |
 | A180 | 4/5 信息与复制 | 插件设置按钮下显示“打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件”；信息严格只有“名称 / Tunnel ID”两行，禁止“本地服务”；Tunnel ID 来自当前持久化值；两行独立复制成功绿色 `已复制` 精确 3 秒且不位移 |
 | A181 | 4/5 插件管理 | `打开插件管理页` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView/任意前端 URL；底部有“返回 / 继续” |
@@ -210,28 +210,28 @@
 | A195 | UI 实现 | 不因品牌图标引入第三方 icon library |
 | A196 | 资产完整性 | PNG SHA256 = `710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a` |
 | A197 | 资产完整性 | ICO SHA256 = `c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78` |
-| A198 | 主窗口尺寸 | inner/minimum/maximum size 均为 900×620，窗口始终保持该尺寸 |
+| A198 | 主窗口尺寸 | inner/minimum/maximum size 均为 780×620，窗口始终保持该尺寸 |
 | A199 | 窗口缩放 | `resizable=false`；拖拽边框不能改变窗口尺寸 |
-| A200 | 窗口最大化 | `maximizable=false`；最大化入口不可用，Dashboard/onboarding 在固定 900×620 client area 内完整可操作 |
+| A200 | 窗口最大化 | `maximizable=false`；最大化入口不可用，Dashboard/onboarding 在固定 780×620 client area 内完整可操作 |
 | A201 | 窗口外框 | native `decorations=false`；仅存在一层 edge-to-edge 自定义 chrome，不出现原生标题栏/边框 + 自定义边框的双框 |
 | A202 | 自定义标题栏 | 可拖拽窗口；提供最小化与关闭；不提供最大化；chrome 从 client `(0,0)` 覆盖 100% 宽高 |
 | A203 | 首次引导整页布局 | onboarding 直接占用 custom chrome 内容区，不存在“大面积空白画布 + 居中 floating card/modal/dialog”整体向导外壳；页面级 padding 与局部分组允许 |
-| A204 | 3/5 权限模式按钮视觉 | 固定 900×620 下 `min-height >= 80px` 或等效结构，标题+两行说明+上下留白不拥挤；仍为人工视觉验收，CSS 标记本身不得构成 PASS |
+| A204 | 3/5 权限模式按钮视觉 | 固定 780×620 下真实 computed/rendered 高度证明：含标题+说明的两行按钮至少为单行控件 2 倍且两个 line box 完整；`min-height >= 80px` 只作最低保护，人工视觉验收仍必须 PASS |
 | A205 | 管理员模式选择 | 仅设置页或 onboarding 第3屏可见；点击/重新点击“管理员模式”时若 Broker 未 Active，立即发起 Windows UAC；不存在单独“启用管理员权限”按钮；后台偏好恢复不自动 UAC |
 | A206 | 离开管理员模式 | 在设置页或 onboarding 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker；Dashboard 无模式切换入口 |
 | A207 | 前台启动 | onboarding 已完成且配置有效时，打开 UI 自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作 |
 | A208 | 前台慢启动 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新 |
 | A209 | CurrentTask idle | 左下状态固定显示“等待命令”，不得显示“空闲”或隐藏 |
-| A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus/timing 并反映到 UI；短于 UI 刷新间隔的 create/delete/modify/command 也不得遗漏；活动显示持续时间，terminal 回到“等待命令+上次时间”；前端不伪造 |
+| A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus/timing 并通过唤醒式 delivery 反映到 UI；短 create/delete/modify/command 不依赖 polling；活动显示持续时间，terminal 回到第一行“等待命令”，第二行保留唯一上一工具+年龄；前端不伪造 |
 | A211 | Dashboard 新项目 | “选择其他文件夹”打开原生 Windows 文件夹选择器，手填路径不是主流程 |
 | A212 | 设置结构 | 仅常规/连接/权限三组；常规仅“开机启动/关闭窗口后继续运行”；底部“打开欢迎页/完成” |
-| A213 | 设置连接固定态 | 字段严格为 `Tunnel ID` / `Runtime API Key`；密钥只显示“已保存/未保存”，两项各有“更换”，完整密钥永不回显 |
+| A213 | 设置连接固定态 | 字段严格为 `Tunnel ID` / `Runtime API Key`；密钥只显示“已保存/未保存”，两项各有最右“更换”；Key 已保存时另有“清除”紧邻位于 Key“更换”左侧；完整密钥永不回显 |
 | A214 | 设置连接编辑 | 点“更换”才编辑；未改字段不要求重输、不被覆盖；保存密钥输入不得预填真实 secret |
 | A215 | 设置部分更新 | 只改 Tunnel ID 不改/不要求 Runtime API Key；只改 Runtime API Key 不改 Tunnel ID |
 | A216 | 设置保存 | 基础格式校验→安全写入→运行/连接中且有效连接配置变化时受控重连；Starting/connecting 且 active=false 也不得沿用旧 captured config；不存在“测试连接”按钮 |
 | A217 | 关闭窗口继续运行=开 | X 仅隐藏窗口，runtime/tray 继续 |
 | A218 | 关闭窗口继续运行=关 | X 有序关闭 privileged gate/Broker/Tunnel/PEP/MCP 后退出；偏好版本化持久化 |
-| A219 | 3/5 权限按钮结构 | `min-height >= 80px` 或等效结构证明，能容纳标题+两行说明+上下留白；900×620 人工视觉 Gate 仍必须 PASS |
+| A219 | 3/5 权限按钮结构 | `min-height >= 80px` 仅是最低保护；780×620 实际 rendered geometry 必须证明两行按钮高度至少为单行控件 2 倍且标题/说明均完整；人工视觉 Gate 仍必须 PASS |
 | A220 | Onboarding backend ownership | React 不拥有 runtime start/readiness polling 状态机；backend 持有并投影；慢 backend 时 UI 仍响应 |
 | A221 | 诊断结构 | 仅运行状态/项目/日志；运行状态四行=本地运行环境/编码服务/OpenAI Tunnel/管理员权限；项目显示实际路径 |
 | A222 | 诊断日志/动作 | 最近限量脱敏日志；页面动作仅“打开日志/导出诊断/完成”，无刷新/重试连接/打开欢迎页/工程 generation 字段 |
@@ -239,13 +239,23 @@
 | A224 | LB-018 Cloudflare retirement | 最终 bundle/runtime manifest/installer/launcher/fallback 不含 `cloudflared.exe`、Cloudflare managed tunnel 或 cloudflared manifest；历史 compatibility 证据不进入可执行发行物 |
 | A225 | Dashboard 权限边界 | 主页无“权限模式”及三档选项、不能修改 PermissionMode/UAC；只读管理员权限状态来自 PrivilegeState；设置页与显式重新打开的 onboarding 第3屏均可编辑权限 |
 | A226 | 临时操作提示 | `无法准备管理员权限`、一次性保存/选择失败等 one-shot 提示默认 3 秒自动清除；持续 runtime/reconnect Fault 不被临时规则隐藏 |
-| A227 | 短任务状态捕获 | 文件新建、删除、修改及普通命令即使在一次前端轮询周期内完成，也必须留下 backend current/last timing projection；不得只显示偶然被 polling 撞到的任务 |
+| A227 | 短任务状态捕获 | 文件新建、删除、修改及普通命令等真实工具调用必须由 backend 唤醒式 delivery 捕获；不得把周期 polling 当作短任务主要传输 |
 | A228 | 执行持续时间 | 活动任务单行显示 backend-grounded elapsed duration；不得由前端伪造任务开始/结束状态 |
-| A229 | 上次命令时间 | Idle 显示 `等待命令` + 上一条命令年龄，至少覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天`；从未执行则只显示 `等待命令` |
+| A229 | 上次工具时间 | 第一行 Idle 只显示 `等待命令`；第二行上一工具相对时间覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天` 并靠右；从未执行工具时无上一工具行 |
 | A230 | workspace identity / execution / display path 边界 | `\\?\D:\project` 仅允许用于内部 filesystem identity 校验/去重/reparse/授权比较；UI 以及 MCP/Broker/sidecar/process/command/tool 的路径参数和 `cwd/workdir/current_dir` 必须使用与同一 freshly validated identity 绑定的普通 `D:\project`；execution/display 转换不得授权，identity 不一致 fail-closed |
-| A231 | 设置“更换”按钮对齐 | Tunnel ID 与 Runtime API Key 两个“更换”在 900×620 下左边缘差 ≤1 CSS px，不随摘要宽度漂移 |
+| A231 | 设置“更换”按钮对齐 | Tunnel ID 与 Runtime API Key 两个“更换”在 780×620 下保持同一最右动作列、几何差 ≤1 CSS px；Key“清除”位于 Key“更换”左侧且不得推移最右列 |
 | A232 | 同级按钮对齐 | 同一页面/分组 peer actions 复用统一动作列/左基线和 shared button geometry，不允许任意 offset/第二套对齐语言 |
 | A233 | Dashboard 重启服务 | 显示黄色/琥珀 `重启服务`；真实服务 lifecycle 由 backend 执行，且必须满足机器合同的 single-owner/最新持久化配置语义 |
 | A234 | Dashboard 关闭服务 | 显示红色 `关闭服务`；真实服务 lifecycle 由 backend 执行并记录显式 manual-stop，Dashboard 窗口保持可用并显示停止状态 |
 | A235 | 服务按钮视觉 | `重启服务`/`关闭服务` 与现有按钮共享尺寸、字体、边界、圆角和水平对齐体系，仅逻辑色不同 |
 | A236 | verbatim workspace 命令回归 | 当内部 `GetFinalPathNameByHandleW` 得到 `\\?\D:\project` 时，coding-tools/`exec_command` 或等价普通命令实际收到 `D:\project` cwd/workdir 并成功执行；MCP/Broker/sidecar/ManagedProcessSpec/process/tool invocation 不得收到 `\\?\` cwd/workdir/current_dir/路径参数 |
+| A237 | 短工具调用唤醒 | 任意真实 MCP/Broker 工具调用开始/终止都通过 backend push/event 或等价唤醒路径使 Dashboard 更新；周期 polling 不得作为短任务的主要传输 |
+| A238 | 工具最低可见期 | 每个真实工具调用即使瞬时完成也至少有 500ms 可见 presentation interval；该停留只约束 UI，不得人为延迟真实工具返回/响应 |
+| A239 | 上次执行工具行 | 第一行 Idle 只显示“等待命令”；第二行固定前缀“上次执行工具：”+脱敏用户标签/安全摘要，禁止 raw MCP id；相对时间位于第二行最右并覆盖 nS前/n分钟前/大于1小时/大于n天；只保留一条上一工具元数据 |
+| A240 | 2/5 已保存连接显示 | 已有 Tunnel ID 时输入框预填当前持久化值；已有 Runtime API Key 时固定显示“已安全保存至windows安全凭据”；安全提示严格为“Runtime API Key 仅保存在 Windows 安全凭据中。” |
+| A241 | 2/5 已保存 Key 掩码 | 聚焦已保存 Runtime API Key 输入框时，只根据 backend 长度元数据显示与已存 key 字符数相同的 `*`；plaintext 永不返回前端，未真正输入新 key 时掩码不得被提交/保存为替代 key |
+| A242 | 两行权限按钮真实几何 | 780×620 下含标题+说明的权限按钮实际 rendered 高度至少为普通单行控件 2 倍，两个文本 line box 均完整可见；仅有 `min-height/padding` CSS 不构成 PASS，最终人工视觉 Gate 必须通过 |
+| A243 | 固定窗口 780×620 | 主窗口 default/minimum/maximum inner size 全部严格为 780×620；`resizable=false`、`maximizable=false`、`decorations=false`、唯一 edge-to-edge custom chrome 等其余窗口语义不变 |
+| A244 | 设置 Key 清除位置 | Runtime API Key 已保存时显示“清除”，紧邻位于该行“更换”的左侧；Tunnel ID/Runtime API Key 两个“更换”仍保持同一最右动作列 |
+| A245 | 设置 Key 清除语义 | 点击“清除”真实删除 Windows 安全凭据中的 Runtime API Key，不读取/回显 secret，投影更新为“未保存”；runtime active/connecting 时按现有有效连接配置变化 lifecycle 受控处理，不允许旧 runtime 继续依赖已清除 credential |
+| A246 | 滚动圆角保持 | 强制 Settings 或其他 rounded sheet/dialog/card 产生纵向 overflow 时四个外层圆角仍完整；scrollbar 被裁切或内缩在圆角壳内，不得像人工截图中那样切平/破坏右侧圆角 |

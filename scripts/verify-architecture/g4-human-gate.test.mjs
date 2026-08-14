@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualSupplement20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualSupplement20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,40 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema22Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema23Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactG3ManualReviewRound2_20260814(schema23Contracts), true);
+const schema22Contracts = normalizeG3ManualReviewRound2_20260814(schema23Contracts);
+assert.equal(schema22Contracts.schema_version, 22);
+assert.equal(schema22Contracts.rules.dashboard_current_task_status, "single_current_or_last_timing_projection");
+assert.deepEqual(schema22Contracts.rules.onboarding_window_default_inner_size, [900, 620]);
+assert.equal(Object.hasOwn(schema22Contracts.rules, "task_backend_wakeup_delivery_required"), false);
+assert.equal(Object.hasOwn(schema22Contracts.rules, "settings_runtime_api_key_clear_action_required"), false);
+assert.equal(Object.hasOwn(schema22Contracts.rules, "scrollable_rounded_surface_preserves_outer_corners"), false);
+assert.equal(schema22Contracts.prs["LB-015"].writable_paths.includes("src-tauri/src/tray/**"), false);
+assert.equal(schema22Contracts.prs["LB-016"].required_artifacts.includes("fixed 900x620 non-resizable non-maximizable main window"), true);
+
+const schema23WeakWakeup = structuredClone(schema23Contracts);
+schema23WeakWakeup.rules.task_backend_wakeup_delivery_required = false;
+assert.equal(hasExactG3ManualReviewRound2_20260814(schema23WeakWakeup), false);
+const schema23ShortVisibility = structuredClone(schema23Contracts);
+schema23ShortVisibility.rules.task_minimum_visible_duration_ms = 499;
+assert.equal(hasExactG3ManualReviewRound2_20260814(schema23ShortVisibility), false);
+const schema23OldWindow = structuredClone(schema23Contracts);
+schema23OldWindow.rules.onboarding_window_default_inner_size = [900, 620];
+assert.equal(hasExactG3ManualReviewRound2_20260814(schema23OldWindow), false);
+const schema23WeakButtonGeometry = structuredClone(schema23Contracts);
+schema23WeakButtonGeometry.rules.onboarding_two_line_button_min_rendered_height_multiplier = 1;
+assert.equal(hasExactG3ManualReviewRound2_20260814(schema23WeakButtonGeometry), false);
+const schema23RemovedSavedKeyMask = structuredClone(schema23Contracts);
+delete schema23RemovedSavedKeyMask.rules.onboarding_saved_runtime_key_mask_matches_saved_secret_length;
+assert.equal(hasExactG3ManualReviewRound2_20260814(schema23RemovedSavedKeyMask), false);
+const schema23RemovedKeyClear = structuredClone(schema23Contracts);
+delete schema23RemovedKeyClear.rules.settings_runtime_api_key_clear_action_required;
+assert.equal(hasExactG3ManualReviewRound2_20260814(schema23RemovedKeyClear), false);
+const schema23RemovedRoundedScroll = structuredClone(schema23Contracts);
+delete schema23RemovedRoundedScroll.rules.scrollable_rounded_surface_preserves_outer_corners;
+assert.equal(hasExactG3ManualReviewRound2_20260814(schema23RemovedRoundedScroll), false);
+
 assert.equal(hasExactG3ManualPathExecutionCorrection20260814(schema22Contracts), true);
 const schema21Contracts = normalizeG3ManualPathExecutionCorrection20260814(schema22Contracts);
 assert.equal(schema21Contracts.schema_version, 21);

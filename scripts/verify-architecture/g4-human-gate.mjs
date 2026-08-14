@@ -389,6 +389,88 @@ const G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14 = Object.freeze({
   },
 });
 
+const G3_MANUAL_REVIEW_ROUND2_2026_08_14 = Object.freeze({
+  schemaVersion: 23,
+  baselineCommit: "a9b7c20c6ee103ed8048bd2dd9764af1920fcc6e",
+  baselineSchemaVersion: 22,
+  replacedRules: {
+    dashboard_current_task_status: ["current_status_plus_single_last_tool_row", "single_current_or_last_timing_projection"],
+    onboarding_window_default_inner_size: [[780, 620], [900, 620]],
+    onboarding_window_min_inner_size: [[780, 620], [900, 620]],
+    onboarding_window_max_inner_size: [[780, 620], [900, 620]],
+  },
+  addedRules: {
+    task_backend_wakeup_delivery_required: true,
+    task_frontend_polling_as_short_task_transport_forbidden: true,
+    task_minimum_visible_duration_ms: 500,
+    task_minimum_visibility_must_not_delay_tool_response: true,
+    task_last_tool_row_required: true,
+    task_last_tool_row_label: "上次执行工具：",
+    task_last_tool_age_right_aligned: true,
+    task_idle_age_moved_to_last_tool_row: true,
+    task_last_tool_label_secret_redacted: true,
+    task_last_tool_raw_mcp_identifier_forbidden: true,
+    settings_runtime_api_key_clear_action_required: true,
+    settings_runtime_api_key_clear_label: "清除",
+    settings_runtime_api_key_clear_immediately_left_of_replace: true,
+    settings_runtime_api_key_clear_deletes_secure_credential: true,
+    settings_runtime_api_key_clear_never_reveals_secret: true,
+    settings_runtime_api_key_clear_reuses_controlled_connection_change_lifecycle: true,
+    scrollable_rounded_surface_preserves_outer_corners: true,
+    scrollbar_must_be_clipped_or_inset_inside_rounded_surface: true,
+    onboarding_two_line_button_min_rendered_height_multiplier: 2,
+    onboarding_two_line_button_computed_geometry_gate_required: true,
+    onboarding_two_line_button_css_marker_only_pass_forbidden: true,
+    onboarding_saved_runtime_key_status_text: "已安全保存至windows安全凭据",
+    onboarding_saved_runtime_key_mask_matches_saved_secret_length: true,
+    onboarding_saved_runtime_key_mask_is_display_only: true,
+    onboarding_saved_runtime_key_mask_must_never_be_submitted_as_secret: true,
+    onboarding_runtime_key_length_metadata_only_allowed: true,
+    onboarding_saved_tunnel_id_prefill_required: true,
+    onboarding_runtime_key_security_hint: "Runtime API Key 仅保存在 Windows 安全凭据中。",
+  },
+  lb015: {
+    addedWritablePaths: ["src-tauri/src/tray/**", "src-tauri/src/main.rs"],
+    artifactReplacements: [[
+      "backend wake-driven CurrentTask presentation with elapsed timing, minimum 500ms visibility, and one retained last-tool row so short real executions cannot be missed",
+      "backend-only CurrentTask truth with elapsed timing and retained last-command time metadata so short real executions cannot be missed",
+    ]],
+    addedArtifacts: [
+      "Settings Runtime API Key secure credential clear action immediately left of replace",
+      "rounded outer UI surfaces that preserve all corners while inner content scrolls",
+      "fixed 780x620 non-resizable non-maximizable main window shell",
+    ],
+    testReplacements: [
+      ["Dashboard no-task first row is always visible as 等待命令 and never 空闲; relative age is not appended to this first row", "Dashboard no-task state is always visible as 等待命令 and never 空闲; after at least one real task it also shows backend-grounded last-command relative age"],
+      ["real production MCP and Broker execution wakes the Dashboard through a backend push/event or equivalent wakeup path rather than waiting for the periodic projection poll", "real production MCP and Broker execution transitions backend CurrentTaskStatus to the Dashboard, including executions completing faster than the frontend refresh interval, and active projection includes elapsed duration"],
+      ["every real tool call including create modify delete and ordinary command remains visibly represented for at least 500ms even when execution completes faster, without delaying the actual tool response solely for UI visibility", "create modify delete and ordinary command tool calls each update backend current/last task timing truth rather than depending on frontend polling luck"],
+      ["task age formats on the last-tool row cover nS前, n分钟前, 大于1小时 and 大于n天 while retaining only single last-tool metadata and no history/feed/list", "task age formats cover nS前, n分钟前, 大于1小时 and 大于n天 while retaining no task history/feed/list"],
+      ["Settings Tunnel ID and Runtime API Key 更换 buttons remain on the same right-side action column within 1 CSS px at 780x620; when Runtime API Key is saved a 清除 button is immediately to the left of its 更换 button", "Settings Tunnel ID and Runtime API Key 更换 buttons share the same action-column left edge within 1 CSS px at 900x620 regardless of summary text width"],
+    ],
+    addedTests: [
+      "bursty short tool calls each receive the minimum visible presentation interval without creating a user-browsable history/feed/list",
+      "a second row displays 上次执行工具： followed by a secret-redacted user-facing tool label or safe summary and places the backend-grounded relative age at the far right",
+      "Settings Runtime API Key 清除 deletes the saved Windows secure credential without revealing it, updates the projection to 未保存, and applies the existing controlled connection-change lifecycle when services are active or connecting",
+      "main window default minimum and maximum inner size are all exactly 780x620 while resizable false maximizable false decorations false and the existing custom chrome semantics remain unchanged",
+      "forcing Settings or another rounded sheet/dialog to overflow vertically at 780x620 preserves all four outer rounded corners; the scrollbar is clipped or inset inside the rounded shell and never flattens or cuts the outer radius",
+    ],
+  },
+  lb016: {
+    artifactReplacements: [["fixed 780x620 non-resizable non-maximizable main window", "fixed 900x620 non-resizable non-maximizable main window"]],
+    testReplacements: [
+      ["screen 2 shows exactly the one-line hint Runtime API Key 仅保存在 Windows 安全凭据中。 with no trailing storage explanation", "screen 2 shows one-line secure Runtime API Key storage hint"],
+      ["screen 3 permission mode buttons that contain title plus description render at least twice the actual rendered height of the ordinary single-line control at 780x620; both text line boxes are fully visible and final visual PASS requires human inspection rather than CSS marker presence", "screen 3 permission mode buttons preserve clearly visible balanced content-to-border spacing in the real 900x620 render and grow safely for wrapped descriptive text; final visual PASS requires human inspection and cannot be inferred from CSS padding markers alone"],
+      ["main window is fixed to 780x620 with minimum and maximum 780x620 resizable false and maximizable false", "main window is fixed to 900x620 with minimum and maximum 900x620 resizable false and maximizable false"],
+      ["screen 3 two-line permission buttons pass a computed/rendered geometry Gate proving actual height at least 2x a single-line control and complete title/description line boxes; human 780x620 visual Gate remains required and static min-height CSS alone cannot PASS", "screen 3 permission buttons have structural min-height at least 80px or an equivalent provable layout for title plus two-line description and balanced vertical whitespace; human 900x620 visual Gate remains required"],
+    ],
+    addedTests: [
+      "screen 2 pre-fills the currently persisted Tunnel ID when one is already saved",
+      "screen 2 saved Runtime API Key state uses the exact text 已安全保存至windows安全凭据",
+      "when a saved Runtime API Key field is focused it shows a display-only asterisk mask with exactly the saved key character count using length metadata only; plaintext is never returned to the frontend and an untouched mask is never submitted or saved as a replacement key",
+    ],
+  },
+});
+
 const containsAll = (values, required) => Array.isArray(values) && (required ?? []).every((item) => values.includes(item));
 const containsNone = (values, forbidden) => Array.isArray(values) && (forbidden ?? []).every((item) => !values.includes(item));
 const removeItems = (values, removed) => (values ?? []).filter((item) => !(removed ?? []).includes(item));
@@ -570,6 +652,64 @@ export function normalizeG3ManualPathExecutionCorrection20260814(contractsDoc) {
   return normalized;
 }
 
+export function hasExactG3ManualReviewRound2_20260814(contractsDoc) {
+  if (contractsDoc?.schema_version !== G3_MANUAL_REVIEW_ROUND2_2026_08_14.schemaVersion) return false;
+  const rules = contractsDoc?.rules;
+  for (const [key, [current]] of Object.entries(G3_MANUAL_REVIEW_ROUND2_2026_08_14.replacedRules)) {
+    if (JSON.stringify(rules?.[key]) !== JSON.stringify(current)) return false;
+  }
+  for (const [key, expected] of Object.entries(G3_MANUAL_REVIEW_ROUND2_2026_08_14.addedRules)) {
+    if (JSON.stringify(rules?.[key]) !== JSON.stringify(expected)) return false;
+  }
+
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  const lb016 = contractsDoc?.prs?.["LB-016"];
+  if (!lb015 || !lb016) return false;
+  if (!containsAll(lb015.writable_paths, G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.addedWritablePaths)) return false;
+  if (!containsAll(lb015.required_artifacts, G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.addedArtifacts)) return false;
+  if (!containsAll(lb015.required_tests, G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.addedTests)) return false;
+  for (const [current, old] of G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.artifactReplacements) {
+    if (!lb015.required_artifacts?.includes(current) || lb015.required_artifacts?.includes(old)) return false;
+  }
+  for (const [current, old] of G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.testReplacements) {
+    if (!lb015.required_tests?.includes(current) || lb015.required_tests?.includes(old)) return false;
+  }
+  for (const [current, old] of G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb016.artifactReplacements) {
+    if (!lb016.required_artifacts?.includes(current) || lb016.required_artifacts?.includes(old)) return false;
+  }
+  if (!containsAll(lb016.required_tests, G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb016.addedTests)) return false;
+  for (const [current, old] of G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb016.testReplacements) {
+    if (!lb016.required_tests?.includes(current) || lb016.required_tests?.includes(old)) return false;
+  }
+  return true;
+}
+
+export function normalizeG3ManualReviewRound2_20260814(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = G3_MANUAL_REVIEW_ROUND2_2026_08_14.baselineSchemaVersion;
+  for (const [key, [, old]] of Object.entries(G3_MANUAL_REVIEW_ROUND2_2026_08_14.replacedRules)) normalized.rules[key] = old;
+  for (const key of Object.keys(G3_MANUAL_REVIEW_ROUND2_2026_08_14.addedRules)) delete normalized.rules[key];
+
+  const lb015 = normalized.prs?.["LB-015"];
+  if (lb015) {
+    lb015.writable_paths = removeItems(lb015.writable_paths, G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.addedWritablePaths);
+    lb015.required_artifacts = removeItems(lb015.required_artifacts, G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.addedArtifacts)
+      .map((item) => G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.artifactReplacements.find(([current]) => current === item)?.[1] ?? item);
+    lb015.required_tests = removeItems(lb015.required_tests, G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.addedTests)
+      .map((item) => G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb015.testReplacements.find(([current]) => current === item)?.[1] ?? item);
+  }
+
+  const lb016 = normalized.prs?.["LB-016"];
+  if (lb016) {
+    lb016.required_artifacts = lb016.required_artifacts
+      .map((item) => G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb016.artifactReplacements.find(([current]) => current === item)?.[1] ?? item);
+    lb016.required_tests = removeItems(lb016.required_tests, G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb016.addedTests)
+      .map((item) => G3_MANUAL_REVIEW_ROUND2_2026_08_14.lb016.testReplacements.find(([current]) => current === item)?.[1] ?? item);
+  }
+  return normalized;
+}
+
 export function hasExactG3HumanReviewAmendment(prs) {
   const lb015 = prs?.["LB-015"];
   const lb016 = prs?.["LB-016"];
@@ -676,6 +816,27 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= G3_MANUAL_REVIEW_ROUND2_2026_08_14.schemaVersion) {
+    if (!hasExactG3ManualReviewRound2_20260814(authorizationContracts)) {
+      findings.push(`${expected.id}:manual-review-round2-20260814-contract-amendment-drift`);
+    }
+    const round2BaselineCommit = G3_MANUAL_REVIEW_ROUND2_2026_08_14.baselineCommit;
+    const round2Baseline = git.commitExists(round2BaselineCommit) && git.isAncestor(round2BaselineCommit)
+      ? git.jsonAt(round2BaselineCommit, "PR_CONTRACTS.json")
+      : null;
+    const normalizedRound2 = normalizeG3ManualReviewRound2_20260814(authorizationContracts);
+    if (round2Baseline?.schema_version !== G3_MANUAL_REVIEW_ROUND2_2026_08_14.baselineSchemaVersion) {
+      findings.push(`${expected.id}:manual-review-round2-20260814-baseline`);
+    } else {
+      if (JSON.stringify(normalizedRound2?.prs) !== JSON.stringify(round2Baseline.prs)) {
+        findings.push(`${expected.id}:manual-review-round2-20260814-pr-drift`);
+      }
+      if (canonicalJson(normalizedRound2?.rules) !== canonicalJson(round2Baseline.rules)) {
+        findings.push(`${expected.id}:manual-review-round2-20260814-rule-drift`);
+      }
+    }
+    authorizationContracts = normalizedRound2;
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= G3_MANUAL_PATH_EXECUTION_CORRECTION_2026_08_14.schemaVersion) {
     if (!hasExactG3ManualPathExecutionCorrection20260814(authorizationContracts)) {
       findings.push(`${expected.id}:manual-path-execution-correction-20260814-contract-amendment-drift`);

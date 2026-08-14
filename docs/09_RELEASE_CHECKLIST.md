@@ -146,7 +146,7 @@
 - [ ] Dashboard has no 权限模式 row and no 编辑/完整/管理员 mode selection controls
 - [ ] Dashboard cannot change PermissionMode or trigger UAC through a permission-mode control
 - [ ] Requested shows read-only waiting authorization; mode activation is performed in Settings/onboarding, not Dashboard
-- [ ] Settings is the only post-onboarding permission-mode editing surface
+- [ ] Dashboard has no permission-mode editing; Settings and an explicitly reopened onboarding screen 3 remain the allowed permission-mode editing surfaces
 - [ ] Faulted is visible immediately
 - [ ] no Broker PID/nonce/SID/IPC internals exposed
 
@@ -175,8 +175,11 @@
 
 ## Current Task Status
 
+- [ ] backend push/event or equivalent wakeup is the primary delivery path for real tool-call state; periodic polling is not the short-task transport
+- [ ] every real tool call is visibly represented for at least 500ms without delaying the tool's real response
 - [ ] dashboard has one current-task status region
-- [ ] idle/no-task state is explicit `等待命令`, always visible, never `空闲`
+- [ ] first-row idle/no-task state is explicit `等待命令`, always visible, never `空闲`, and does not append relative age
+- [ ] second row uses exact prefix `上次执行工具：`, one secret-redacted user-facing tool label/summary, and far-right relative age
 - [ ] tool category uses stable domain classification
 - [ ] task summary is secret-redacted
 - [ ] raw MCP tool IDs are not shown
@@ -185,6 +188,7 @@
 - [ ] terminal task returns to `等待命令`
 - [ ] no recent activity list
 - [ ] no activity feed/timeline
+- [ ] only one last-tool metadata row is retained; it does not become history/feed/list
 - [ ] no model thought/chat-response projection
 
 ## Minimal Inline Activity UI
@@ -201,6 +205,11 @@
 ## Credentials & Projects
 
 - [ ] Runtime API Key stored only in secure credential backend
+- [ ] onboarding pre-fills the current persisted Tunnel ID when present
+- [ ] onboarding saved-key text is exactly `已安全保存至windows安全凭据`
+- [ ] focusing an already-saved Runtime API Key shows only a same-length `*` mask derived from backend length metadata; plaintext is never returned and an untouched mask is never submitted as a replacement key
+- [ ] onboarding Runtime API Key helper is exactly `Runtime API Key 仅保存在 Windows 安全凭据中。`
+- [ ] Settings saved Runtime API Key shows `清除` immediately left of `更换`; clear deletes the Windows secure credential without revealing it and follows the controlled active/connecting connection-change lifecycle
 - [ ] no plaintext credential fallback
 - [ ] no secret in settings/JSON/TOML/.env/browser storage
 - [ ] no secret in process command line
@@ -223,3 +232,6 @@
 - [ ] Dashboard folder add uses native Windows folder picker
 - [ ] Settings matches frozen 常规/连接/权限 layout and has no 测试连接
 - [ ] Diagnostics matches frozen 运行状态/项目/日志 layout and exact action set
+- [ ] main window default/minimum/maximum inner size are all exactly 780×620; resizable/maximizable/decorations/custom-chrome semantics remain frozen
+- [ ] title+description permission buttons render at least 2× the actual height of a single-line control at 780×620 with both line boxes complete; CSS marker presence alone does not PASS
+- [ ] a scrollable rounded sheet/dialog/card preserves all four outer corners and clips/insets the scrollbar inside the rounded shell

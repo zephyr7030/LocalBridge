@@ -88,7 +88,7 @@ icon package
 
 ## 当前执行状态
 
-执行中只有一行：
+当前执行区固定为两行结构。第一行是当前执行状态：
 
 ```text
 ●  运行测试  cargo test
@@ -101,13 +101,21 @@ icon package
 - 无消息流、最近活动、时间线、历史列表；
 - 摘要来自真实 MCP/Broker 执行并脱敏。
 
-活动任务必须同时显示从 backend 真实开始时刻计算的持续时间；短于前端刷新间隔的文件新建、删除、修改或普通命令也必须由 backend 捕获，不能因为完成太快而从 UI 完全消失。无活动任务时必须稳定显示：
+活动任务必须同时显示从 backend 真实开始时刻计算的持续时间。短任务的呈现必须由 backend push/event 或等价唤醒机制触发，周期 projection polling 可以继续用于一般状态刷新，但不得作为捕获工具调用的主要传输。每个真实 MCP/Broker 工具调用至少保持 500ms 的可见呈现；该最低可见期只能作用于 UI presentation，不得延迟工具真实执行结果或响应。
+
+无活动任务时第一行稳定显示：
 
 ```text
 ○  等待命令
 ```
 
-若至少执行过一条真实命令，待机行同时显示上一条命令的相对时间，但不显示历史列表：`59S前`、`59分钟前`、`大于1小时`、`大于n天`。从未执行过命令时仅显示 `等待命令`。只保留当前/上一条时间元数据，不增加 feed、timeline 或 recent activity。
+第一行不再追加“xx前”。若至少执行过一条真实工具调用，下面显示第二行：
+
+```text
+上次执行工具：修改文件                                      59S前
+```
+
+`上次执行工具：` 为固定前缀；中部只能显示脱敏后的用户可理解工具标签或安全摘要，禁止 raw MCP tool id；相对时间固定靠该行最右侧，格式覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天`。只保留一个上一工具元数据，不增加 feed、timeline 或 recent activity。
 
 该行不得隐藏，也不得由前端本地状态伪造；真实 MCP/Broker 调用的 Running/Waiting/Blocked/Failed/Cancelled 必须由 backend `CurrentTaskStatus` typed projection 驱动，terminal 后回到 `等待命令` 并保留上一条完成时间元数据。
 
@@ -186,13 +194,13 @@ Tunnel ID
 Runtime API Key
 [••••••••••••••••••••••••••••]
 
-运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志或命令行。
+Runtime API Key 仅保存在 Windows 安全凭据中。
 
 
 返回                                  继续
 ```
 
-`继续` 只做基础校验和安全保存；Runtime API Key 不进入 settings、日志、CLI 或 browser storage。第 2 屏必须提供明确 `返回` 到第 1 屏。
+`继续` 只做基础校验和安全保存；Runtime API Key 不进入 settings、日志、CLI 或 browser storage。若已有 Tunnel ID，输入框必须显示当前持久化正在使用的 Tunnel ID。若已有 Runtime API Key，固定显示 `已安全保存至windows安全凭据`；用户点击/聚焦该输入框时，只允许根据 backend 返回的“已保存 key 长度”元数据生成同位数 `*` 掩码，plaintext 永不返回前端。掩码只是显示态：用户未真正输入新 key 时不得把 `*****` 保存为替代密钥；首次真实输入应进入 replacement 状态。第 2 屏必须提供明确 `返回` 到第 1 屏。
 
 ### 第 3 屏
 
@@ -222,7 +230,7 @@ Runtime API Key
 
 项目与权限必须位于同一屏。新项目选择以原生 Windows 文件夹选择器为主交互，不以手填绝对路径作为主流程。可见用户点击/重新点击 `管理员模式` 本身就是显式提权动作；若 Broker 尚未 Active，必须立即发起 Windows UAC，仅提升 Privileged Broker，禁止额外“启用管理员权限”按钮。后台 `--background` 恢复管理员偏好仍不得自动 UAC。第 3 屏必须提供明确 `返回` 到第 2 屏。
 
-三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白；禁止固定高度压缩说明，说明换行时按钮必须安全自动增高，并提供 `min-height >= 80px` 或等效结构证明，确保“标题 + 两行说明 + 上下留白”不会被压扁。固定 900×620 实机渲染不得出现文字贴边。此项仍是人工视觉 Gate，不能仅凭 CSS 存在 `padding/min-height` 自动判 PASS。普通选中项使用统一蓝色 `#0071e3`；管理员模式在 onboarding 与设置页均使用黄色/琥珀逻辑色，不得被普通蓝色 selected 规则覆盖。
+三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白。`min-height >= 80px` 只能作为最低防回退，不能构成 PASS；任何包含“标题 + 说明”两行文本块的按钮，在固定 780×620 实机中真实 computed/rendered 高度必须至少为普通单行控件实际高度的 2 倍，并证明标题与说明两个 line box 均完整可见、无裁切/挤压。此项仍需人工视觉 Gate。普通选中项使用统一蓝色 `#0071e3`；管理员模式在 onboarding 与设置页均使用黄色/琥珀逻辑色，不得被普通蓝色 selected 规则覆盖。
 
 ### 第 4 屏
 
@@ -333,7 +341,7 @@ Tunnel start → ready
 
 失败时只显示一句最关键错误和一个必要动作。`无法准备管理员权限`、一次性保存/选择失败等操作反馈默认仅显示 3 秒并自动清除；持续存在的 runtime/reconnect 故障继续由 typed 状态或故障窗口表达，不适用临时提示自动清除。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。普通产品 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；管理员模式是黄色/琥珀逻辑色例外。所有提示遵循最小必要原则。
 
-主窗口固定为 900×620。minimum inner size 与 maximum inner size 均固定为 900×620，`resizable=false`、`maximizable=false`。原生 Windows 窗口 decorations 必须关闭；LocalBridge 只允许一层自定义风格化窗口 chrome，并且外框必须从 client area 的 `(0,0)` 开始、以 100% 宽高贴合整个窗口，不能在原生边框内部再绘制一个内缩“假窗口”。自定义 chrome 必须提供窗口拖拽区、最小化和关闭；不提供最大化。Dashboard 与 onboarding 必须在该固定 client area 内完整可操作。
+主窗口固定为 780×620。minimum inner size 与 maximum inner size 均固定为 780×620，`resizable=false`、`maximizable=false`。原生 Windows 窗口 decorations 必须关闭；LocalBridge 只允许一层自定义风格化窗口 chrome，并且外框必须从 client area 的 `(0,0)` 开始、以 100% 宽高贴合整个窗口，不能在原生边框内部再绘制一个内缩“假窗口”。自定义 chrome 必须提供窗口拖拽区、最小化和关闭；不提供最大化。Dashboard 与 onboarding 必须在该固定 client area 内完整可操作。
 ## UI / Backend 分离
 
 WebView/React 只负责展示 backend typed projection 与发送 typed user intent。runtime 启停、readiness、retry/recovery、workspace switch、credential 写入、UAC 与 CurrentTask truth 均由 Rust/backend 状态机负责；可能耗时的操作必须运行在独立 worker/async 执行上下文，禁止占用 UI/WebView 事件线程。正常前台启动在 onboarding 已完成且持久化配置有效时自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，窗口必须先保持可交互并实时反映 Starting/Ready/Fault。
@@ -352,8 +360,8 @@ WebView/React 只负责展示 backend typed projection 与发送 typed user inte
 
 连接
 ────────────────────────────────────────
-Tunnel ID          tunnel_6a7ae9...     更换
-Runtime API Key    已保存               更换
+Tunnel ID          tunnel_6a7ae9...             更换
+Runtime API Key    已保存               清除    更换
 
 权限
 ────────────────────────────────────────
@@ -361,7 +369,9 @@ Runtime API Key    已保存               更换
                             打开欢迎页    完成
 ```
 
-`Runtime API Key` 是冻结英文专有字段名，不翻译为“运行密钥”；完整值永不回显。默认连接区只显示持久化摘要和“更换”。点“更换”后才进入编辑态，Tunnel ID 与 Runtime API Key 独立修改；只改其中一个时另一个不得要求重输或被覆盖。Runtime API Key 输入不得用已保存 secret 预填，只显示密码输入控件与提示 `Runtime API Key 仅保存在 Windows 安全凭据中。`。Tunnel ID 与 Runtime API Key 两个固定态“更换”必须位于同一动作列，在固定 900×620 下左边缘几何差不超过 1 CSS px，不得因摘要文字长度不同而左右漂移；同一页面/分组的其他同级动作同样遵守该左基线。
+`Runtime API Key` 是冻结英文专有字段名，不翻译为“运行密钥”；完整值永不回显。默认连接区只显示持久化摘要和动作。点“更换”后才进入编辑态，Tunnel ID 与 Runtime API Key 独立修改；只改其中一个时另一个不得要求重输或被覆盖。Runtime API Key 输入不得用已保存 secret 预填，只显示密码输入控件与提示 `Runtime API Key 仅保存在 Windows 安全凭据中。`。Tunnel ID 与 Runtime API Key 两个固定态“更换”必须位于同一最右动作列，在固定 780×620 下几何差不超过 1 CSS px。Runtime API Key 已保存时，在其“更换”紧邻左侧显示 `清除`；`清除` 真实删除 Windows 安全凭据、不得读取或回显 secret，并在 active/connecting 时复用连接配置变化的受控 lifecycle，随后投影为 `未保存`。
+
+所有 sheet/dialog/card 等圆角表面如果内容需要纵向滚动，外层圆角必须仍完整保留四个角。scrollbar 必须通过“外层圆角壳 `overflow:hidden` + 内层 scroll container”或等效方式裁切/内缩在圆角内部，不得让滚动轨道切平右侧圆角或破坏顶部/底部圆角视觉。
 
 保存顺序固定：基础格式校验 → 安全写入 → 若当前正在运行/连接且有效连接配置发生变化则执行受控重连。“正在连接”明确包括 `StartingMcp / WaitingMcpReady / StartingPolicyEnforcement / WaitingPolicyReady / StartingTunnel / WaitingTunnelReady` 等异步启动阶段；这些阶段即使 snapshot `active=false` 也不得直接返回并继续使用旧 captured config，必须受控切换到最新持久化配置。禁止额外“测试连接”按钮。`开机启动` 只控制 Windows 登录启动；手动打开已配置应用仍自动启动 runtime。`关闭窗口后继续运行=true` 时 X 仅 hide 并保持 runtime/tray；false 时 X 有序停止受管 runtime/Broker 后退出。
 

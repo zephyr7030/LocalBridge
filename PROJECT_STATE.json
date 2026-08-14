@@ -28,7 +28,7 @@
     "Dashboard does not show PermissionMode or Edit Full Elevated selection controls; permission editing may occur in Settings or an explicitly reopened onboarding Screen 3",
     "Dashboard administrator privilege runtime status is read-only and sourced from PrivilegeState",
     "Onboarding and Dashboard service-status dots use the same typed status source and Ready green Starting amber Fault red Unknown gray semantics",
-    "Main window is fixed at 900x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
+    "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [],
@@ -63,7 +63,7 @@
     "G4 remains blocked after G3 adversarial PASS until a separate human manual/detail review is accepted as PASS",
     "Human review treats user/executor factual claims as untrusted evidence and requires user-audited concrete executor pre-authorizations"
   ],
-  "execution_plan_version": 17,
+  "execution_plan_version": 18,
   "total_prs": 20,
   "architecture_decisions_pending_lb000": [
     "Policy Enforcement implementation: upstream / adapter / Rust Guard",
@@ -162,16 +162,16 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G3 adversarial generation 5 failed with MAJOR findings in LB-015. Rework LB-015 first, then re-execute LB-016 and LB-017 in strict order, then run independent G3 adversarial generation 6. Keep G4/LB-018 and the separate human Gate blocked until a fresh adversarial PASS."
+    "next_action": "Manual review round 2 reopened G3 from LB-015. Rework LB-015 first, then LB-016 and LB-017 in strict order, then run independent G3 adversarial generation 6. G4/LB-018 and the separate human Gate remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
-    "presentation": "single_inline_status",
+    "presentation": "current_status_plus_single_last_tool_row",
     "history_feed": false,
     "recent_activity_list": false,
     "model_thoughts": false,
     "chat_response_mirroring": false,
-    "source": "actual_mcp_and_broker_execution_events",
+    "source": "actual_mcp_and_broker_execution_events_with_backend_wakeup",
     "redaction_required": true,
     "show_section_title": false,
     "show_field_labels": false,
@@ -187,11 +187,20 @@
       "大于1小时",
       "大于n天"
     ],
-    "short_task_capture": "backend_retains_current_or_last_timing_metadata_independent_of_frontend_poll_interval",
+    "short_task_capture": "backend_wakeup_event_with_minimum_500ms_visible_presentation",
     "last_task_history": false,
     "idle_row_visible": true,
     "frontend_synthesized_state": false,
-    "end_to_end_production_projection_required": true
+    "end_to_end_production_projection_required": true,
+    "event_driven": true,
+    "polling_primary_transport": false,
+    "minimum_visible_ms": 500,
+    "minimum_visibility_delays_tool_response": false,
+    "last_tool_row": true,
+    "last_tool_label": "上次执行工具：",
+    "last_tool_age_alignment": "right",
+    "idle_age_in_first_row": false,
+    "last_tool_raw_mcp_identifier": false
   },
   "credential_policy": {
     "runtime_api_key_plaintext_persistence": false,
@@ -245,7 +254,7 @@
       "Foreground UI startup currently suppresses runtime startup; configured foreground launch must auto-start services asynchronously.",
       "Settings currently uses 运行密钥; exact user-facing field label must be Runtime API Key.",
       "Dashboard current-task idle text is hard-coded 空闲; required text is 等待命令 and end-to-end production backend projection must be proven.",
-      "Onboarding permission buttons remain visually too short; structural min-height 80px or equivalent plus human 900x620 Gate is required.",
+      "Onboarding permission buttons remain visually too short; min-height 80px is only a floor and current acceptance requires actual two-line rendered height at least 2x a single-line control plus human 780x620 Gate.",
       "Frontend currently owns onboarding start/readiness polling and synchronous command boundaries can block; frontend must become projection-only and backend work must run off the UI/WebView thread.",
       "Settings must be rebuilt to the frozen 常规/连接/权限 layout with independent connection replacement and controlled reconnect.",
       "Diagnostics must be rebuilt to the frozen 运行状态/项目/日志 minimal layout and exact action set.",
@@ -300,7 +309,11 @@
       "Fault": "red",
       "Unknown": "gray"
     },
-    "service_status_dot_source": "shared_typed_projection_for_onboarding_and_dashboard"
+    "service_status_dot_source": "shared_typed_projection_for_onboarding_and_dashboard",
+    "scrollable_rounded_surface": {
+      "outer_corners_preserved": true,
+      "scrollbar": "clipped_or_inset_inside_rounded_shell"
+    }
   },
   "pr_group_policy": {
     "groups": [
@@ -340,22 +353,28 @@
         "Tunnel ID",
         "Runtime API Key"
       ],
-      "runtime_key_security_hint": "运行密钥仅保存在 Windows 安全凭据中，不会以明文写入配置文件、日志或命令行。",
-      "back_action": true
+      "runtime_key_security_hint": "Runtime API Key 仅保存在 Windows 安全凭据中。",
+      "back_action": true,
+      "saved_runtime_key_status_text": "已安全保存至windows安全凭据",
+      "saved_runtime_key_mask": "same_length_asterisks_from_length_metadata_only",
+      "saved_runtime_key_plaintext_to_frontend": false,
+      "saved_tunnel_id_prefill": true
     },
     "screen_3": {
       "workspace_and_permission_combined": true,
       "native_windows_folder_picker": true,
       "raw_path_entry_primary": false,
-      "permission_button_content_spacing": "clear_balanced_and_wrap_safe_at_900x620",
-      "permission_button_visual_acceptance": "PENDING_HUMAN_900x620",
+      "permission_button_content_spacing": "rendered_two_line_height_at_least_2x_single_line_at_780x620",
+      "permission_button_visual_acceptance": "PENDING_HUMAN_780x620",
       "permission_button_css_only_auto_pass_forbidden": true,
       "ordinary_selected_accent": "#0071e3",
       "administrator_selected_accent": "amber",
       "back_action": true,
       "permission_button_min_height_px": 80,
       "visible_admin_selection_requests_uac": true,
-      "separate_enable_admin_button": false
+      "separate_enable_admin_button": false,
+      "permission_button_rendered_height_multiplier": 2,
+      "permission_button_computed_geometry_gate": true
     },
     "screen_4": {
       "purpose": "create_custom_plugin",
@@ -421,15 +440,15 @@
     },
     "window": {
       "default_inner_size": [
-        900,
+        780,
         620
       ],
       "minimum_inner_size": [
-        900,
+        780,
         620
       ],
       "maximum_inner_size": [
-        900,
+        780,
         620
       ],
       "resizable": false,
@@ -506,7 +525,7 @@
     },
     "g4_unlocked": false,
     "next_required_adversarial_generation": 6,
-    "rework_status": "REOPENED_BY_G3_ADVERSARIAL_GENERATION_5",
+    "rework_status": "REOPENED_BY_MANUAL_SUPPLEMENT_ROUND2",
     "review_decision_commit": "e66a3b9a0d5a844fa35ed6f63b70acaeae4e4110"
   },
   "ui_backend_separation": {
@@ -559,7 +578,8 @@
       "Runtime API Key"
     ],
     "fixed_view_actions": [
-      "更换"
+      "更换",
+      "Runtime API Key 已保存时清除"
     ],
     "runtime_api_key_full_reveal": false,
     "runtime_api_key_display_states": [
@@ -588,8 +608,15 @@
       "自动启动服务",
       "开机后静默运行"
     ],
-    "peer_replace_button_alignment": "same_left_edge_within_1_css_px_at_900x620",
-    "transient_operation_notice_seconds": 3
+    "peer_replace_button_alignment": "same_rightmost_action_column_within_1_css_px_at_780x620",
+    "transient_operation_notice_seconds": 3,
+    "runtime_api_key_clear": {
+      "label": "清除",
+      "position": "immediately_left_of_runtime_key_replace",
+      "deletes_windows_secure_credential": true,
+      "reveals_secret": false,
+      "controlled_connection_change": true
+    }
   },
   "dashboard_ui": {
     "permission_mode_row": false,
@@ -670,9 +697,9 @@
       "1. Explicitly reopened onboarding Screen3 remaining a permission editor is user-ratified as non-conflicting and requires no product change; Dashboard itself remains forbidden from permission editing.",
       "2. RETAINED DEFECT: changing Tunnel ID or Runtime API Key while asynchronous runtime startup is Starting/connecting can bypass controlled reconnect and continue with captured old configuration.",
       "3. CONTRACT: one-shot notices such as 无法准备管理员权限 must be temporary, default 3 seconds, rather than permanent page content; persistent runtime faults remain typed persistent state.",
-      "4. CONTRACT: task display must bind every real MCP/Broker execution including short create/delete/modify/ordinary commands; active task shows elapsed duration; idle shows 等待命令 plus backend-grounded last-command age using nS前/n分钟前/大于1小时/大于n天; no history/feed/list.",
+      "4. SUPERSEDED_BY_ROUND2: the earlier polling-independent timing-only display contract was strengthened to backend wake-driven delivery, minimum 500ms UI visibility without response delay, and a separate last-tool row with right-aligned age.",
       "5. VERIFIED DEFECT/CONTRACT: Windows GetFinalPathNameByHandleW may return a verbatim resolved identity path such as \\\\?\\D:\\project. Current code can propagate that value through WorkspaceRef/runtime config into MCP/process current_dir and tool cwd/workdir, which can make command execution fail. Verbatim form is identity-validation-only; UI and every MCP/Broker/sidecar/process/command/tool execution path must use ordinary D:\\project tied to the same validated filesystem identity, and conversion must never widen authorization.",
-      "6. CONTRACT: peer buttons share a horizontal action column/left edge; Settings Tunnel ID and Runtime API Key 更换 buttons must align within 1 CSS px at 900x620 regardless of value width.",
+      "6. CONTRACT: peer buttons share a horizontal action column; at 780x620 the two Settings 更换 actions remain in the same rightmost column and the Runtime API Key 清除 action sits immediately to the left without shifting that column.",
       "7. CONTRACT: Dashboard adds real 重启服务 amber and 关闭服务 red buttons, aligned with the shared button system; backend owns controlled single-owner restart and orderly manual-stop lifecycle, with no second design language and no restart-triggered UAC."
     ],
     "reopen_from_pr": "LB-015",
@@ -700,5 +727,20 @@
     "execution_path_bound_to_validated_identity": true,
     "execution_normalization_is_authority": false,
     "display_normalization_is_authority": false
+  },
+  "g3_manual_supplement_round2_2026_08_14": {
+    "status": "CONTRACT_AMENDMENT_AND_REWORK_REQUIRED",
+    "items": [
+      "1. CONTRACT/DEFECT: short real tool calls must wake the UI through backend push/event or equivalent rather than relying on polling; every tool call is visibly represented for at least 500ms without delaying its real response; first row keeps current status/等待命令, second row is 上次执行工具：<redacted tool label or safe summary> with relative age right-aligned.",
+      "2. CONTRACT/DEFECT: onboarding Screen3 permission buttons containing title plus description must render at least 2x the actual height of a single-line control at 780x620; static min-height CSS alone cannot pass and human visual inspection remains required.",
+      "3. CONTRACT/DEFECT: onboarding OpenAI configuration must prefill persisted Tunnel ID; saved Runtime API Key uses exact text 已安全保存至windows安全凭据 and on focus displays only same-length asterisk mask derived from length metadata, never plaintext; hint is exactly Runtime API Key 仅保存在 Windows 安全凭据中。",
+      "4. CONTRACT: main window fixed width changes from 900 to 780 while height remains 620 and resizable/maximizable/decorations/custom-chrome semantics remain unchanged.",
+      "5. CONTRACT/DEFECT: Settings saved Runtime API Key row adds 清除 immediately left of 更换; clear deletes the Windows secure credential without revealing it and follows controlled connection-change lifecycle.",
+      "6. VERIFIED VISUAL DEFECT/CONTRACT: scrollable rounded surfaces must preserve all four outer rounded corners; scrollbar must be clipped or inset inside the rounded shell and may not flatten/cut the radius."
+    ],
+    "screenshot_evidence": "user supplied Settings screenshot showing vertical scrollbar cutting the right rounded edge",
+    "reopen_from_pr": "LB-015",
+    "g4_unlocked": false,
+    "next_required_adversarial_generation": 6
   }
 }

@@ -128,12 +128,14 @@ bounded recovery、two-phase workspace switch、rollback。
 
 - Dashboard “选择其他文件夹”统一使用原生 Windows 文件夹选择器，禁止手填绝对路径主流程。
 - Dashboard 删除 `权限模式` 行以及编辑/完整/管理员三种模式按钮，只保留只读的管理员权限实际运行状态；Dashboard 不得修改 PermissionMode 或触发模式 UAC。三种权限模式按钮允许出现在设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏；后者不是缺陷。可见点击/重新点击管理员模式若未 Active 立即发起 UAC；禁止单独“启用管理员权限”按钮；离开管理员模式关闭 Broker。
-- 左下 CurrentTask 单行由 backend 真实执行生命周期驱动：短于 UI polling interval 的文件新建/删除/修改/普通命令也不得遗漏；活动任务显示持续时间；无活动任务显示 `等待命令`，若有上一条真实命令则追加 `nS前/n分钟前/大于1小时/大于n天`。只保留当前+上一条 timing metadata，无历史/feed/list，frontend 不伪造。
-- 设置页严格为常规/连接/权限：常规=`开机启动`、`关闭窗口后继续运行`；连接=`Tunnel ID`、`Runtime API Key` 各自“更换”；权限=三模式；底部=`打开欢迎页`、`完成`。
+- CurrentTask 由 backend push/event 或等价唤醒机制驱动，周期 polling 不得作为短工具调用的主要传输；每个真实工具调用至少保持 500ms 可见 presentation interval，但不得延迟真实工具响应。首行显示当前执行/`等待命令`且不再追加年龄；第二行固定 `上次执行工具：<脱敏标签或安全摘要>`，`nS前/n分钟前/大于1小时/大于n天` 靠最右侧。只保留当前 + 单个上一工具元数据，无历史/feed/list/raw MCP id。
+- 设置页严格为常规/连接/权限：常规=`开机启动`、`关闭窗口后继续运行`；连接=`Tunnel ID`、`Runtime API Key` 各自“更换”，Runtime API Key 已保存时额外提供 `清除` 且紧邻位于 Key“更换”左侧，真实删除 Windows 安全凭据；权限=三模式；底部=`打开欢迎页`、`完成`。
 - `Runtime API Key` 为精确英文用户字段名，不翻译；完整 secret 永不回显/预填。Tunnel ID 与 Runtime API Key 独立更新，保存即校验→安全写入→按需受控重连；Starting/connecting 阶段即使 snapshot.active=false 也不得继续使用旧 captured config；禁止“测试连接”。
 - `无法准备管理员权限` 等 one-shot 操作提示默认 3 秒自动清除，持续 runtime Fault 仍保持 typed 状态。
 - 拆分 workspace identity path 与 execution/presentation path：`\\?\D:\project` 仅用于 WorkspaceValidator/filesystem identity、去重、reparse/授权比较；UI、WorkspaceRef/runtime、MCP/Broker/sidecar/process/command/tool 的实际路径参数和 `cwd/workdir/current_dir` 必须使用与同一 validated identity 绑定的普通 `D:\project`。禁止把 verbatim 工作目录传给命令工具；identity 不匹配时 fail-closed，execution/display 转换不得扩大授权。
-- 同级按钮使用统一动作列/左基线；900×620 几何差 ≤1 CSS px，设置两个“更换”为强制样例。
+- 同级按钮使用统一动作列/左基线；780×620 几何差 ≤1 CSS px，设置两个“更换”保持同一最右动作列，Key“清除”不得推移该列。
+- 主窗口固定改为 780×620，minimum/maximum 同为 780×620；不可缩放、不可最大化、无原生 decorations、自定义 chrome 等其余窗口语义不变。
+- sheet/dialog/card 需要纵向滚动时，外层四个圆角必须保持；scrollbar 必须裁切或内缩在圆角壳内部。
 - Dashboard 增加黄色/琥珀 `重启服务` 与红色 `关闭服务`，沿用 shared button design/alignment；真实服务 lifecycle 由 backend 执行。
 - React/WebView 只消费 typed backend projection + user intent；故意延迟 backend 操作时 UI 必须保持响应。
 
@@ -145,7 +147,8 @@ bounded recovery、two-phase workspace switch、rollback。
 
 - 保持严格 5 屏、Screen3 runtime ready-before-Screen4、Screen4 固定插件创建合同、Screen5 Gate 与全部返回路径。
 - Screen3 新项目仍用原生 Windows folder picker。
-- 三个权限按钮结构高度必须 `min-height >= 80px` 或等效证明，能够容纳标题+两行说明+上下留白；900×620 人工视觉 Gate 仍必须 PASS。
+- 三个权限按钮的 `min-height >= 80px` 仅作最低保护；固定 780×620 下，包含标题+说明的两行按钮实际 rendered 高度必须至少为单行控件实际高度 2 倍，两行 line box 完整可见；静态 CSS marker 不得自动 PASS，人工视觉 Gate 仍必须 PASS。
+- Screen 2 已保存 Tunnel ID 必须预填当前持久化值；Runtime API Key 已保存状态固定为 `已安全保存至windows安全凭据`，聚焦时只按 backend 长度元数据生成同位数 `*` 掩码，plaintext 不回传且未修改掩码不得保存；安全提示严格为 `Runtime API Key 仅保存在 Windows 安全凭据中。`
 - 可见选择/重新选择管理员模式即显式 UAC 动作；禁止单独 enable-admin 按钮，后台 preference restore 仍无 UAC。
 - runtime start + readiness wait 移到 backend 状态机；React 只观察 typed projection，不持有 60 秒 polling/start orchestration。慢 backend 时 onboarding UI 必须响应。
 
@@ -268,7 +271,7 @@ Rust Core 维护唯一 `CurrentTaskStatus`，负责 terminal → Idle 清理，�
 
 ## LB-015
 
-主控界面增加固定单行执行状态；活动时显示类型/安全摘要/真实持续时间，待机时显示 `等待命令` 与可选的上一条命令相对时间。backend 必须保留足够 current/last timing metadata，使短任务不会因 UI polling interval 被漏掉。
+主控界面执行区固定为“当前状态行 + 单个上一工具行”：活动时第一行显示类型/安全摘要/真实持续时间，待机时第一行仅显示 `等待命令`；第二行固定 `上次执行工具：<脱敏标签或安全摘要>`，相对时间靠右。backend 必须通过 push/event 或等价唤醒方式驱动短工具调用，并为每次调用提供至少 500ms 的 UI 可见期，但不得延迟工具真实响应。只保留当前任务与单个上一工具元数据，不形成历史/feed/list。
 
 禁止最近活动、消息流、时间线或历史列表。
 
