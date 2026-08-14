@@ -1,11 +1,19 @@
 mod bundle;
+mod facade;
 mod git_adapter;
 mod guard;
 mod http;
 mod policy;
 mod runtime;
 mod server;
+mod shell;
 
+pub use facade::{
+    AGENT_API_VERSION, AgentFacade, CodingToolsRuntimeAdapter, CommandControlAction,
+    FacadeCallError, FacadeDenied, FacadeError, FacadeErrorCode, GitWorkflowAction,
+    ShellCommandRequest, ToolRegistry, V1_CORE_TOOL_NAMES, WorkspaceRuntimeAdapter,
+    validate_runtime_capabilities,
+};
 pub use guard::{GuardError, GuardRuntime, McpGuard, PolicyDenied, ToolCallRequest};
 pub use policy::{
     CapabilityPolicy, DenyReason, PolicyDecision, PolicyError, ToolDescriptor,
@@ -17,4 +25,9 @@ pub use runtime::{
 };
 pub use server::{
     CurrentTaskProjection, CurrentTaskWake, PolicyEnforcementError, PolicyEnforcementRuntime,
+};
+pub use shell::{
+    DirectProcessExecutor, DirectProcessSpec, ResolvedShell, ResolvedShellKind, SemanticVersion,
+    ShellDiscovery, ShellExecutionError, ShellExecutionSpec, ShellExecutor, ShellResolveError,
+    ShellResolver, ShellSelector, ShellVersionProbe, SystemShellDiscovery, SystemShellVersionProbe,
 };

@@ -67,11 +67,6 @@ impl ToolCallRequest {
         self.indirect_capabilities = capabilities.into_iter().collect();
         self
     }
-
-    pub(crate) fn with_request_id(mut self, request_id: Value) -> Self {
-        self.request_id = Some(request_id);
-        self
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,7 +134,12 @@ impl<R: GuardRuntime> McpGuard<R> {
         F: FnMut(CurrentTaskStatus),
     {
         let indirect_capabilities = effective_indirect_capabilities(&request);
-        let decision = self.policy.decide_request(mode, &request.name, &indirect_capabilities, &request.arguments);
+        let decision = self.policy.decide_request(
+            mode,
+            &request.name,
+            &indirect_capabilities,
+            &request.arguments,
+        );
         let kind = refined_task_kind(decision.descriptor, &request.arguments);
         let summary = safe_summary(&request.name, &request.arguments);
         if decision.descriptor.capability == Capability::ElevatedExec {
@@ -225,10 +225,6 @@ impl<R: GuardRuntime> McpGuard<R> {
 
     pub fn runtime_root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
         self.runtime.root_is_running()
-    }
-
-    pub(crate) fn into_runtime(self) -> R {
-        self.runtime
     }
 }
 

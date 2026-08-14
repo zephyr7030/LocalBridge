@@ -17,7 +17,7 @@ use crate::state::{
     PrivilegeState, SafeTaskSummary, TaskExecutionState, TaskKind,
 };
 
-use super::guard::{GuardError, McpGuard, ToolCallRequest};
+use super::facade::{AgentFacade, CodingToolsRuntimeAdapter, FacadeCallError};
 use super::http::McpCancellationClient;
 use super::policy::CapabilityPolicy;
 use super::runtime::CodingToolsRuntime;
@@ -34,7 +34,7 @@ static SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct ConnectionContext<'a> {
-    guard: &'a Mutex<McpGuard<CodingToolsRuntime>>,
+    guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     cancellation: &'a McpCancellationClient,
     permission_mode: &'a RwLock<PermissionMode>,
     current_task: &'a CurrentTaskProjection,
@@ -46,7 +46,7 @@ struct ConnectionContext<'a> {
 }
 
 struct ElevatedCallContext<'a> {
-    guard: &'a Mutex<McpGuard<CodingToolsRuntime>>,
+    guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
     current_task: &'a CurrentTaskProjection,
     active_requests: &'a Mutex<Vec<Value>>,
@@ -146,14 +146,18 @@ impl CurrentTaskProjection {
         let mut schedule = None;
         {
             let mut state = self
-            .0
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                .0
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             match &status {
                 CurrentTaskStatus::Active(task) => {
                     let sequence = match state.active_sequence {
-                        Some(sequence) if matches!(state.actual_status, CurrentTaskStatus::Active(_)) => sequence,
+                        Some(sequence)
+                            if matches!(state.actual_status, CurrentTaskStatus::Active(_)) =>
+                        {
+                            sequence
+                        }
                         _ => {
                             let sequence = state.next_sequence;
                             state.next_sequence = state.next_sequence.saturating_add(1);
@@ -175,19 +179,35 @@ impl CurrentTaskProjection {
                             sequence
                         }
                     };
-                    if let Some(current) = state.current.as_mut().filter(|item| item.sequence == sequence) {
+                    if let Some(current) = state
+                        .current
+                        .as_mut()
+                        .filter(|item| item.sequence == sequence)
+                    {
                         current.task = task.clone();
-                    } else if let Some(queued) = state.queued.iter_mut().find(|item| item.sequence == sequence) {
+                    } else if let Some(queued) = state
+                        .queued
+                        .iter_mut()
+                        .find(|item| item.sequence == sequence)
+                    {
                         queued.task = task.clone();
                     }
                     state.actual_status = status;
                 }
                 CurrentTaskStatus::Idle => {
                     if let Some(sequence) = state.active_sequence.take() {
-                        if let Some(current) = state.current.as_mut().filter(|item| item.sequence == sequence) {
+                        if let Some(current) = state
+                            .current
+                            .as_mut()
+                            .filter(|item| item.sequence == sequence)
+                        {
                             current.completed_at = Some(now);
                             schedule = Some((sequence, current.visible_since));
-                        } else if let Some(queued) = state.queued.iter_mut().find(|item| item.sequence == sequence) {
+                        } else if let Some(queued) = state
+                            .queued
+                            .iter_mut()
+                            .find(|item| item.sequence == sequence)
+                        {
                             queued.completed_at = Some(now);
                         }
                     }
@@ -327,9 +347,9 @@ pub struct PolicyEnforcementRuntime {
     port: u16,
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
-    guard: Option<Arc<Mutex<McpGuard<CodingToolsRuntime>>>>,
+    guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
     shutdown: Option<mpsc::Sender<()>>,
-    thread: Option<JoinHandle<McpGuard<CodingToolsRuntime>>>,
+    thread: Option<JoinHandle<AgentFacade<CodingToolsRuntimeAdapter>>>,
 }
 
 impl fmt::Debug for PolicyEnforcementRuntime {
@@ -366,7 +386,13 @@ impl PolicyEnforcementRuntime {
         permission_mode: PermissionMode,
         privileged: Arc<dyn PrivilegedExecution>,
     ) -> Result<Self, PolicyEnforcementError> {
-        Self::start_inner(coding_runtime, policy, permission_mode, Some(privileged), None)
+        Self::start_inner(
+            coding_runtime,
+            policy,
+            permission_mode,
+            Some(privileged),
+            None,
+        )
     }
 
     pub fn start_with_privilege_and_wake(
@@ -392,6 +418,11 @@ impl PolicyEnforcementRuntime {
         privileged: Option<Arc<dyn PrivilegedExecution>>,
         wake: Option<CurrentTaskWake>,
     ) -> Result<Self, PolicyEnforcementError> {
+        let guard = AgentFacade::from_coding_runtime(coding_runtime, policy)
+            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
+        let cancellation = guard
+            .cancellation_client()
+            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| PolicyEnforcementError::BindFailed)?;
         listener
@@ -406,10 +437,7 @@ impl PolicyEnforcementRuntime {
         let thread_mode = Arc::clone(&permission_mode);
         let thread_task = current_task.clone();
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
-        let cancellation = coding_runtime
-            .cancellation_client()
-            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
-        let guard = Arc::new(Mutex::new(McpGuard::new(coding_runtime, policy)));
+        let guard = Arc::new(Mutex::new(guard));
         let thread_guard = Arc::clone(&guard);
         let thread = thread::Builder::new()
             .name("localbridge-mcp-policy".into())
@@ -505,13 +533,13 @@ impl Drop for PolicyEnforcementRuntime {
 
 fn serve(
     listener: TcpListener,
-    guard: Arc<Mutex<McpGuard<CodingToolsRuntime>>>,
+    guard: Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>,
     cancellation: McpCancellationClient,
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
     privileged: Option<Arc<dyn PrivilegedExecution>>,
     shutdown: mpsc::Receiver<()>,
-) -> McpGuard<CodingToolsRuntime> {
+) -> AgentFacade<CodingToolsRuntimeAdapter> {
     let sessions = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     let active_requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let privileged_requests = Arc::new(Mutex::new(Vec::<(Value, String)>::new()));
@@ -807,26 +835,16 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             let mode = *permission_mode
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let mut guard = guard
+            let guard = guard
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            match guard.filtered_tools(mode) {
-                Ok(mut result) => {
-                    if privileged.is_some_and(|gateway| gateway.state().accepts_privileged_calls())
-                        && guard.privileged_tool_visible(mode, "elevated_exec")
-                    {
-                        append_elevated_exec_tool(&mut result);
-                    }
-                    write_rpc_result(&mut stream, id, result, Some(session))
-                }
-                Err(_) => write_rpc_error(
-                    &mut stream,
-                    id,
-                    -32603,
-                    "Policy enforcement failed",
-                    Some(session),
-                ),
+            let mut result = guard.public_tools(mode);
+            if privileged.is_some_and(|gateway| gateway.state().accepts_privileged_calls())
+                && guard.privileged_tool_visible(mode, "elevated_exec")
+            {
+                append_elevated_exec_tool(&mut result);
             }
+            write_rpc_result(&mut stream, id, result, Some(session))
         }
         "tools/call" => {
             if !valid_downstream_request_id(&id) {
@@ -903,28 +921,17 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 remove_active_request(active_requests, &id);
                 return write_empty(&mut stream, 503, Some(session));
             }
-            let result = guard.call_tool(
-                mode,
-                ToolCallRequest::new(name, arguments).with_request_id(id.clone()),
-                |status| {
-                    current_task.project(status);
-                },
-            );
+            let result = guard.call_tool(mode, name, arguments, Some(&id), |status| {
+                current_task.project(status);
+            });
             remove_active_request(active_requests, &id);
             match result {
                 Ok(result) => write_rpc_result(&mut stream, id, result, Some(session)),
-                Err(GuardError::Denied(_)) => write_rpc_error(
+                Err(FacadeCallError::Denied(_)) => write_rpc_error(
                     &mut stream,
                     id,
                     -32001,
                     "Tool call denied by LocalBridge policy",
-                    Some(session),
-                ),
-                Err(_) => write_rpc_error(
-                    &mut stream,
-                    id,
-                    -32603,
-                    "MCP runtime call failed",
                     Some(session),
                 ),
             }
@@ -1025,10 +1032,7 @@ fn handle_elevated_exec(
     let execution_guard = guard
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let decision = execution_guard.decision(
-        mode,
-        &ToolCallRequest::new("elevated_exec", arguments.clone()),
-    );
+    let decision = execution_guard.elevated_decision(mode, &arguments);
     if !decision.allowed || decision.descriptor.capability != Capability::ElevatedExec {
         finish_elevated_task(current_task, Some(TaskExecutionState::Blocked));
         return write_rpc_error(
@@ -1395,7 +1399,10 @@ mod tests {
         let finished = projection.timing_snapshot();
         assert_eq!(finished.status, CurrentTaskStatus::Idle);
         assert_eq!(finished.elapsed_ms, None);
-        assert_eq!(finished.last_tool.as_ref().map(|tool| tool.kind), Some(TaskKind::ModifyFile));
+        assert_eq!(
+            finished.last_tool.as_ref().map(|tool| tool.kind),
+            Some(TaskKind::ModifyFile)
+        );
     }
 
     #[test]
@@ -1403,16 +1410,45 @@ mod tests {
         let projection = CurrentTaskProjection::default();
         projection.project(CurrentTaskStatus::start(TaskKind::ReadFile, "read a"));
         projection.project(CurrentTaskStatus::Idle);
-        projection.project(CurrentTaskStatus::start(TaskKind::ExecuteCommand, "echo ok"));
+        projection.project(CurrentTaskStatus::start(
+            TaskKind::ExecuteCommand,
+            "echo ok",
+        ));
         projection.project(CurrentTaskStatus::Idle);
 
-        assert!(matches!(projection.snapshot(), CurrentTaskStatus::Active(CurrentTask { kind: TaskKind::ReadFile, .. })));
+        assert!(matches!(
+            projection.snapshot(),
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ReadFile,
+                ..
+            })
+        ));
         thread::sleep(Duration::from_millis(540));
-        assert!(matches!(projection.snapshot(), CurrentTaskStatus::Active(CurrentTask { kind: TaskKind::ExecuteCommand, .. })));
-        assert_eq!(projection.timing_snapshot().last_tool.as_ref().map(|tool| tool.kind), Some(TaskKind::ReadFile));
+        assert!(matches!(
+            projection.snapshot(),
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ExecuteCommand,
+                ..
+            })
+        ));
+        assert_eq!(
+            projection
+                .timing_snapshot()
+                .last_tool
+                .as_ref()
+                .map(|tool| tool.kind),
+            Some(TaskKind::ReadFile)
+        );
         thread::sleep(Duration::from_millis(540));
         assert_eq!(projection.snapshot(), CurrentTaskStatus::Idle);
-        assert_eq!(projection.timing_snapshot().last_tool.as_ref().map(|tool| tool.kind), Some(TaskKind::ExecuteCommand));
+        assert_eq!(
+            projection
+                .timing_snapshot()
+                .last_tool
+                .as_ref()
+                .map(|tool| tool.kind),
+            Some(TaskKind::ExecuteCommand)
+        );
     }
 
     #[derive(Debug)]
@@ -1685,12 +1721,33 @@ mod tests {
             &json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
         );
         let full_catalog = full_tools.body["result"]["tools"].as_array().unwrap();
-        assert_eq!(full_catalog.len(), 19);
+        assert_eq!(full_catalog.len(), 8);
         assert!(
             full_catalog
                 .iter()
                 .any(|tool| tool["name"] == "exec_command")
         );
+        for private in [
+            "read_file",
+            "apply_patch",
+            "git_status",
+            "write_stdin",
+            "server_info",
+        ] {
+            assert!(
+                !full_catalog.iter().any(|tool| tool["name"] == private),
+                "private upstream tool leaked into public registry: {private}"
+            );
+        }
+        let raw_private = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":"raw-private","method":"tools/call",
+                "params":{"name":"read_file","arguments":{"path":"probe.txt"}}
+            }),
+        );
+        assert_eq!(raw_private.body["error"]["code"], -32001);
 
         pep.set_permission_mode(PermissionMode::Edit);
         let denied = post(
@@ -1698,7 +1755,7 @@ mod tests {
             Some(&session),
             &json!({
                 "jsonrpc":"2.0","id":3,"method":"tools/call",
-                "params":{"name":"exec_command","arguments":{"cmd":"echo must-not-run"}}
+                "params":{"name":"exec_command","arguments":{"command":"echo must-not-run"}}
             }),
         );
         assert_eq!(denied.body["error"]["code"], -32001);
@@ -1725,7 +1782,7 @@ mod tests {
         );
         assert_eq!(
             edit_tools.body["result"]["tools"].as_array().unwrap().len(),
-            15
+            4
         );
 
         let read_started = Instant::now();
@@ -1734,13 +1791,13 @@ mod tests {
             Some(&session),
             &json!({
                 "jsonrpc":"2.0","id":5,"method":"tools/call",
-                "params":{"name":"read_file","arguments":{"path":"probe.txt"}}
+                "params":{"name":"document_workflow","arguments":{"action":"inspect","path":"probe.txt"}}
             }),
         );
         let read_round_trip = read_started.elapsed();
         assert!(
             read.body.get("result").is_some(),
-            "allowed read_file must forward: {}",
+            "allowed document_workflow inspect must forward: {}",
             read.body
         );
         assert!(
@@ -1826,7 +1883,8 @@ mod tests {
                     "params":{
                         "name":"exec_command",
                         "arguments":{
-                            "cmd":"powershell.exe -NoProfile -Command \"Start-Sleep -Seconds 10\"",
+                            "command":"Start-Sleep -Seconds 10",
+                            "shell":"windows_powershell",
                             "yield_time_ms":10000,
                             "timeout_ms":20000,
                             "max_output_bytes":4096,
@@ -2085,7 +2143,10 @@ mod tests {
             })
         ));
         thread::sleep(Duration::from_millis(540));
-        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         pep.set_permission_mode(PermissionMode::Elevated);
         fake.set_state(PrivilegeState::AwaitingUac);
@@ -2127,7 +2188,10 @@ mod tests {
         );
         assert_eq!(control_plane.body["error"]["code"], -32001);
         thread::sleep(Duration::from_millis(540));
-        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         fake.set_state(PrivilegeState::Active {
             broker_generation: crate::state::GenerationId::new(78),
