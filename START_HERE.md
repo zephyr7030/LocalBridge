@@ -151,6 +151,28 @@ v0.1 非目标      = WSL/container/remote shell、custom shell registry、envir
 当前返工入口     = G2 / LB-006；G2 adversarial generation 9 已 FAIL；LB-006→LB-012 严格重验，之后 fresh G2 adversarial generation 10；旧 G2 gen8/G3 gen6 仅保留历史证据
 ```
 
+Schema28 测试编排与 Public Runtime 语义补充：
+
+```text
+PR Fast Gate     = 当前 PR 的廉价 deterministic unit/fake/static；开发内循环优先 targeted tests
+PR Runtime Gate  = 真实 bundled runtime/PEP/process 重测试；同一拓扑按类压缩为共享 lifecycle，除非 isolation 本身就是被测行为
+Group/Release    = 完整 cargo/npm/build/clippy/architecture/release Gate；不得每个小修改后反复全跑
+静态合同测试     = 只证明固定文案/schema/allowlist/forbidden dependency/governance 等静态事实；不得替代真实行为执行，也不得仅因函数/测试名存在就宣告行为 PASS
+Session E2E      = 一个真实 lifecycle 覆盖 exec → incremental poll → write → read → kill → terminal convergence；bounded timeout/cancel；lost 必须终态失败
+开发命令窗口     = 允许出现；其存在本身不判产品失败
+打包 GUI         = LocalBridge 自己启动的 runtime/Tunnel/Broker/后台 helper/shell/direct command 不得意外弹可见 console；只以 release-style/packaged launcher 实测判定
+Shell quoting    = 只允许一次预期 shell parse；双引号中的 | / & 不得被 LocalBridge 额外重解析
+poll             = live incremental delta；不丢中间输出、不重放旧 delta
+write            = running public session 在 exec 返回后仍可写入 stdin
+kill             = healthy runtime 下不得 RuntimeUnavailable；成功后稳定收敛 cancelled，后续 poll 不退化 SessionUnavailable
+view_image       = auto_resize 必须真实缩放并保持比例
+PowerShell output= UTF-8；中文输出不得乱码
+Git blame range  = 1-based inclusive；5..5 只返回第5行；start>end = InvalidArgument
+document range   = 1-based inclusive；start>end = InvalidArgument
+result probe     = adapter 消费且 upstream outputSchema 未保证的 private result 字段全部在 serving 前做确定性语义兼容验证或等价 fail-closed 证明
+当前返工入口     = G2 / LB-006；schema27 acceptance 仅保留历史 provenance；generation 10 未消费
+```
+
 Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订，**不改变当前执行入口**：当前仍为 `G2 / LB-006`，必须继续严格顺序推进，不能因本合同提前跳到 G3。
 
 ```text

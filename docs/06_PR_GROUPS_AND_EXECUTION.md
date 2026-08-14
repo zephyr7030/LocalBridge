@@ -70,6 +70,32 @@ LB-006 REWORK_REQUIRED
 
 在此之前 G3/G4 全部保持 BLOCKED。
 
+### Schema28 — LB-006 再次回开 + 测试 Gate 分层
+
+Schema27 implementation acceptance `e717a0f8d69a93c17faa426694e009ad03a80d9e` 保留为历史 provenance，但 public plugin 实测继续发现 LB-006 facade/runtime 行为缺陷，因此该 acceptance 不能继续解锁 LB-007。Schema28 当前指针重新固定：
+
+```text
+current_group = G2
+current_pr    = LB-006
+LB-006        = REWORK_REQUIRED
+LB-007..012   = BLOCKED
+G2 review     = generation 9 FAIL
+generation 10 = NOT CONSUMED
+```
+
+LB-006 必须关闭：shell quoting extra-reparse、incremental poll loss/replay、live write SessionUnavailable、kill RuntimeUnavailable→SessionUnavailable、真实 image resize、PowerShell UTF-8 中文输出、Git blame inclusive range、document invalid range，以及所有 adapter-consumed/unmodeled private result semantics 的 serving 前 fail-closed probe。
+
+执行/验收采用：
+
+```text
+PR Fast Gate    → 当前 PR targeted unit/fake/static
+PR Runtime Gate → 按共享 runtime/PEP/process topology 压缩的真实行为 lifecycle
+Formal accept   → 当前 PR 完整 required Gate
+Group/Release   → 全组/发布完整 regression
+```
+
+重型 fixture 不得为独立 assertion 无理由重复启动；cheap unit 保持独立。source-string marker 不得替代行为测试。每个 runner 有 bounded timeout/cancel，lost session 必须终态结束。开发/测试 console window 不影响本 PR 判定；最终 packaged GUI managed-child no-visible-console 由 LB-018/LB-019 release-style/clean-machine Gate 证明。
+
 ### Schema26 管理员模式安全确认修订
 
 Schema26 是对后续 **LB-015 / LB-016** 的 UI/安全合同追加，不改变当前执行入口，也不允许跳过 G2：

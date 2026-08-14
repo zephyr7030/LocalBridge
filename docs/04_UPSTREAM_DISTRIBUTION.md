@@ -87,6 +87,12 @@ installed 90–150 MiB
 
 Stable release 产出 exact manifest、lockfiles、SBOM、THIRD_PARTY_NOTICES、provenance、checksums。
 
+### Packaged GUI managed-child console contract
+
+开发/测试时，测试 runner、shell 或调试命令出现后台进程/命令窗口是允许的，不能据此判断最终产品是否合规，也不得建立“开发环境必须完全无 console window”的要求。
+
+最终 packaged/normal GUI LocalBridge 必须通过 release-style launcher 实测确认：由 LocalBridge 拥有并启动的 bundled coding runtime、Tunnel、Broker/background helper、PEP-adjacent managed command path 与 shell/direct command child 不会意外弹出可见 console window。若未来需要真正交互式 terminal，必须另立显式产品合同。隐藏 console 不得破坏 Job Object/process ownership、取消/超时或 clean shutdown；可直接 structured process execution 的路径不得无理由增加 shell wrapper。
+
 ## LB-000 实证基线（2026-08-11）
 
 已对公开固定版本执行 Windows 实证：

@@ -644,6 +644,70 @@ const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14 = Object.freeze({
+  schemaVersion: 28,
+  baselineSchemaVersion: 27,
+  addedRules: {
+    test_orchestration_tiers: ["pr_fast", "pr_runtime", "group_release"],
+    test_heavy_shared_fixture_lifecycle_compression_required: true,
+    test_heavy_repeated_runtime_start_requires_isolation_rationale: true,
+    test_cheap_unit_tests_forced_merge_forbidden: true,
+    test_static_contract_behavioral_substitution_forbidden: true,
+    test_duplicate_static_and_behavior_check_requires_distinct_contract_rationale: true,
+    test_inner_loop_repeated_full_repo_gate_forbidden: true,
+    test_command_session_lifecycle_real_e2e_required: true,
+    test_command_bounded_timeout_cancel_required: true,
+    test_lost_session_must_terminal_fail: true,
+    development_console_window_presence_not_product_failure: true,
+    development_console_window_free_required: false,
+    packaged_gui_managed_child_visible_console_forbidden: true,
+    packaged_console_requirement_must_be_release_style_verified: true,
+    shell_command_exact_single_parse_semantics_required: true,
+    command_poll_incremental_output_no_loss_no_replay_required: true,
+    command_write_running_session_required: true,
+    command_kill_cancel_terminal_convergence_required: true,
+    command_kill_runtime_unavailable_on_healthy_runtime_forbidden: true,
+    view_image_real_auto_resize_required: true,
+    public_command_output_utf8_required: true,
+    git_blame_line_range_one_based_inclusive: true,
+    document_line_range_one_based_inclusive: true,
+    invalid_line_range_typed_invalid_argument_required: true,
+    runtime_result_semantic_probe_all_adapter_consumed_unmodeled_fields_required: true,
+  },
+  lb006: {
+    addedArtifacts: [
+      "schema28 public command lifecycle delta/cursor state for incremental poll and stable kill terminal convergence",
+      "single-parse shell invocation and UTF-8 public output normalization across trusted Windows shell selectors",
+      "real image resize adapter plus inclusive line-range validation for Git blame and documents",
+    ],
+    addedTests: [
+      "LB-006 PR Fast Gate runs cheap deterministic unit fake and static contract checks without repeatedly invoking the complete repository Gate after each small edit",
+      "LB-006 PR Runtime Gate groups heavy tests that share the bundled runtime PEP and process topology into a shared lifecycle unless isolation itself is under test; repeated runtime startup for independent assertions has an explicit isolation rationale and cheap isolated unit tests remain separate",
+      "one real public command session lifecycle E2E uses a single bundled runtime and PEP lifecycle to cover exec then incremental poll then write then read then kill then terminal convergence with bounded timeout cancellation and explicit lost-session terminal handling",
+      "static source-marker checks do not substitute for executable shell session image Git or document behavior and duplicate static plus behavior checks exist only for a distinct static contract",
+      "PowerShell Write-Output \"a|b\" and Write-Output \"a&b\" plus their single-quoted equivalents preserve literal output with exactly one intended shell parse and no extra LocalBridge reparse",
+      "a command emitting poll-1 poll-2 poll-3 over time exposes every chunk in order exactly once across command_control.poll calls and a later poll with no new output returns an empty delta plus state or terminal metadata rather than replaying poll-3",
+      "a running public command session that waits for stdin accepts command_control.write after exec has returned and the written chars reach the process without SessionUnavailable",
+      "command_control.kill on a valid running public session with a healthy runtime does not return RuntimeUnavailable and converges to a stable cancelled terminal snapshot that later poll calls keep instead of degrading to SessionUnavailable",
+      "view_image auto_resize on a 1024x1024 source succeeds for maximum 512x512 and 64x64 with bounded dimensions and preserved aspect ratio while the no-resize path remains valid",
+      "Windows PowerShell Write-Output 中文输出测试 round-trips exact UTF-8 under windows_powershell and under auto when auto resolves to PowerShell without mojibake or replacement characters",
+      "git_workflow blame uses one-based inclusive start_line and end_line so 5 through 5 returns exactly line 5 and 1 through 3 returns exactly three lines; start_line greater than end_line is InvalidArgument and max_lines remains bounded",
+      "document_workflow line ranges are one-based inclusive and start_line greater than end_line returns LocalBridge InvalidArgument rather than a successful empty result",
+      "every adapter-consumed private result field not guaranteed by upstream outputSchema has a deterministic non-destructive semantic compatibility probe or equivalent fail-closed evidence before public facade serving",
+    ],
+  },
+  lb018: {
+    addedTests: [
+      "release-style packaged GUI launch proves LocalBridge-owned managed background children do not create unintended visible console windows while preserving Job/process ownership; development test-harness console windows are not used as evidence for this packaged behavior",
+    ],
+  },
+  lb019: {
+    addedTests: [
+      "clean-machine packaged GUI execution shows no unintended visible console windows from LocalBridge-owned bundled runtime Tunnel Broker/background helpers or managed shell/direct command children unless an explicit future interactive-terminal contract opts in",
+    ],
+  },
+});
+
 const PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14 = Object.freeze({
   schemaVersion: 27,
   baselineSchemaVersion: 26,
@@ -1037,6 +1101,38 @@ export function normalizeAdminModeSafetyWarningAmendment20260814(contractsDoc) {
   return normalized;
 }
 
+export function hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(contractsDoc) {
+  if (contractsDoc?.schema_version !== TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb006 = contractsDoc?.prs?.["LB-006"];
+  const lb018 = contractsDoc?.prs?.["LB-018"];
+  const lb019 = contractsDoc?.prs?.["LB-019"];
+  if (!lb006 || !lb018 || !lb019) return false;
+  return containsAll(lb006.required_artifacts, TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.lb006.addedArtifacts)
+    && containsAll(lb006.required_tests, TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.lb006.addedTests)
+    && containsAll(lb018.required_tests, TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.lb018.addedTests)
+    && containsAll(lb019.required_tests, TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.lb019.addedTests);
+}
+
+export function normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.baselineSchemaVersion;
+  for (const key of Object.keys(TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.addedRules)) delete normalized.rules[key];
+  const lb006 = normalized.prs?.["LB-006"];
+  const lb018 = normalized.prs?.["LB-018"];
+  const lb019 = normalized.prs?.["LB-019"];
+  if (lb006) {
+    lb006.required_artifacts = removeItems(lb006.required_artifacts, TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.lb006.addedArtifacts);
+    lb006.required_tests = removeItems(lb006.required_tests, TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.lb006.addedTests);
+  }
+  if (lb018) lb018.required_tests = removeItems(lb018.required_tests, TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.lb018.addedTests);
+  if (lb019) lb019.required_tests = removeItems(lb019.required_tests, TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.lb019.addedTests);
+  return normalized;
+}
+
 export function hasExactPublicFacadeRuntimeSemanticsAmendment20260814(contractsDoc) {
   if (contractsDoc?.schema_version !== PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.schemaVersion) return false;
   for (const [key, expected] of Object.entries(PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.addedRules)) {
@@ -1248,6 +1344,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.schemaVersion) {
+    if (!hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(authorizationContracts)) {
+      findings.push(`${expected.id}:test-orchestration-public-runtime-corrections-20260814-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.schemaVersion) {
     if (!hasExactPublicFacadeRuntimeSemanticsAmendment20260814(authorizationContracts)) {
       findings.push(`${expected.id}:public-facade-runtime-semantics-20260814-contract-amendment-drift`);

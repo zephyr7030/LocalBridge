@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -32,6 +32,14 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
+    "LB-006/schema28: public shell quoting must preserve exactly one intended shell parse; double-quoted pipe/ampersand PowerShell literals currently reparse incorrectly",
+    "LB-006/schema28: command_control.poll must expose ordered incremental output exactly once; current plugin behavior loses intermediate chunks and replays the latest chunk",
+    "LB-006/schema28: command_control.write must work on a valid live public session after exec returns; current plugin behavior returns SessionUnavailable",
+    "LB-006/schema28: command_control.kill must converge to stable cancelled without RuntimeUnavailable on a healthy runtime or later SessionUnavailable degradation",
+    "LB-006/schema28: view_image auto_resize must perform real bounded resize; current plugin behavior fails whenever resize is actually required",
+    "LB-006/schema28: Windows PowerShell public output must be UTF-8; current plugin behavior mojibakes Chinese output",
+    "LB-006/schema28: git_workflow.blame end_line must be one-based inclusive without off-by-one",
+    "LB-006/schema28: document_workflow start_line > end_line must return InvalidArgument instead of empty success",
     "LB-007: docker/podman/wsl privileged-external-runtime review is bypassable through shell-time executable-name construction/indirection"
   ],
   "known_risks": [
@@ -174,7 +182,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-006 schema27 public facade/runtime semantics rework is accepted at implementation commit e717a0f8d69a93c17faa426694e009ad03a80d9e. Execute LB-007 next to close the remaining generation-9 privileged-external-runtime shell-indirection bypass, then reaccept LB-008 through LB-012 sequentially and run fresh G2 adversarial generation 10. Historical G2 generation 9 remains FAIL provenance; LB-013/G3/G4 remain blocked."
+    "next_action": "Schema28 supersedes the schema27 LB-006 acceptance after fresh public-plugin behavior findings. Rework LB-006 first against A276-A288 and the strengthened runtime semantic contracts; LB-007 through LB-012 remain blocked. Generation 10 is not consumed. After LB-006 and the remaining G2 PRs pass sequentially, run fresh G2 adversarial generation 10; G3/G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1033,6 +1041,8 @@
     "ratified": true,
     "implementation_status": "ACCEPTED",
     "implementation_commit": "e717a0f8d69a93c17faa426694e009ad03a80d9e",
+    "historical_acceptance_superseded_by_schema28": true,
+    "superseded_reason": "fresh public plugin runtime behavior exposed quoting, incremental poll, live write, kill convergence, image resize, UTF-8 output and inclusive range defects plus incomplete result semantic probing",
     "acceptance_verification": {
       "cargo_test_locked": "PASS",
       "cargo_clippy_all_targets_deny_warnings": "PASS",
@@ -1074,6 +1084,44 @@
       "current_pr": "LB-006"
     },
     "g3_must_be_reexecuted_after_g2_pass": true,
+    "g4_unlocked": false
+  },
+  "schema28_test_orchestration_and_public_runtime_corrections_2026_08_14": {
+    "status": "CONTRACT_AMENDMENT_AND_REWORK_REQUIRED",
+    "ratified": true,
+    "owner_pr": "LB-006",
+    "source": "public plugin runtime testing plus independent test-orchestration review",
+    "test_orchestration": {
+      "tiers": ["pr_fast", "pr_runtime", "group_release"],
+      "heavy_shared_fixture_lifecycle_compression_required": true,
+      "repeated_heavy_runtime_start_requires_isolation_rationale": true,
+      "cheap_unit_tests_forced_merge": false,
+      "static_contract_may_substitute_behavioral_execution": false,
+      "inner_loop_repeated_full_repo_gate": false,
+      "bounded_timeout_cancel_required": true,
+      "lost_session_is_terminal": true
+    },
+    "development_vs_packaged_console": {
+      "development_console_windows_allowed": true,
+      "development_console_window_presence_is_product_failure": false,
+      "packaged_gui_owned_managed_child_visible_console_forbidden": true,
+      "verification": "release_style_or_packaged_launcher_behavior"
+    },
+    "plugin_findings": [
+      "shell quoting extra reparse breaks double-quoted pipe and ampersand literals",
+      "command_control.poll loses intermediate incremental output and replays latest output",
+      "command_control.write returns SessionUnavailable for a just-created running session",
+      "command_control.kill returns RuntimeUnavailable then degrades to SessionUnavailable rather than stable cancelled",
+      "view_image actual auto-resize fails for 1024 to 512/64",
+      "Windows PowerShell Chinese output is mojibake",
+      "git_workflow.blame end_line is off by one",
+      "document_workflow invalid start_line greater than end_line returns empty success"
+    ],
+    "acceptance": ["A276", "A277", "A278", "A279", "A280", "A281", "A282", "A283", "A284", "A285", "A286", "A287", "A288"],
+    "reopen_from_pr": "LB-006",
+    "next_required_g2_adversarial_generation": 10,
+    "g2_generation_10_consumed": false,
+    "g3_unlocked": false,
     "g4_unlocked": false
   }
 }

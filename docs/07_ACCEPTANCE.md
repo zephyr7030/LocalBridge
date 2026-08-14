@@ -277,3 +277,16 @@
 | A273 | mandatory private result semantic probe | adapter 读取的 private result 字段若未被 upstream `outputSchema` 精确保证，public facade 启动前必须执行 deterministic、non-destructive compatibility/result probe；至少 `get_default_cwd` 必须证明 `workspace:string(non-empty)` + `default_cwd:string`，否则 `RuntimeCapabilityMismatch` fail-closed，而不是运行后才产生错误投影 |
 | A274 | nested Git repository consistency | active workspace=`D:\project` 且 `D:\project\LocalBridge` 为 nested repo 时，`git_status/git_log/git_show/git_diff(path="LocalBridge")` 必须解析到同一 repository；`git_blame(path="LocalBridge/package.json")` 必须从文件 parent 找到同一 enclosing repo；repo discovery 不得越过 active workspace root |
 | A275 | Git resolver / diff fallback | `git_workflow` 五 action 共享一个 LocalBridge repo resolver；directory action 的 `path` 选择 repo context，action-specific `paths` 才是 path filter；resolver 已确认 Git repo 时 `git_diff` 必须使用 native Git semantics，禁止 silent `non-git diff fallback` |
+| A276 | 测试 Gate 分层 | 固定 `PR Fast / PR Runtime / Group-Release` 三层；开发内循环优先当前 PR targeted cheap checks，完整全仓 Gate 只在正式 PR/group/release acceptance 时执行，不得每个小改后重复全跑 |
+| A277 | 重型 fixture 压缩 | 共享同一 bundled runtime/PEP/process topology 且 isolation 不是被测行为的重测试必须共享 lifecycle；重复 startup 需明确 isolation 理由；廉价 isolated unit tests 不得被强制合成巨型测试 |
+| A278 | static vs behavior | source-string/static contract test 只证明静态事实，不能因函数/测试名/marker 存在替代真实 unit/integration/E2E 行为 PASS；重复 static + executable check 必须保护不同合同 |
+| A279 | bounded test/session lifecycle | 测试 runner 有 bounded timeout/cancel；command/session lost、控制句柄不可寻址或 Runtime Gate 失败必须进入明确 terminal failed/lost，不得无限等待 running |
+| A280 | development console / packaged GUI | 开发/测试命令窗口或后台命令进程允许存在且本身不是产品缺陷；release-style/packaged GUI 中 LocalBridge-owned runtime/Tunnel/Broker/helper/shell/direct-command child 不得意外显示 console window，并保持 Job/process ownership |
+| A281 | shell quoting fidelity | PowerShell `Write-Output "a|b"` / `Write-Output "a&b"` 以及单引号等价形式输出精确字面值；LocalBridge 只允许一次预期 shell parse，不得额外 reparse/quote-loss |
+| A282 | incremental poll | 依次输出 `poll-1/poll-2/poll-3` 的 running command 在连续 public poll 中按顺序各交付一次且不丢 chunk；无新输出的后续 poll 返回空 delta + state/terminal metadata，不重放 `poll-3` |
+| A283 | live command write | exec 已返回 running public session 后，`command_control.write(session_id, chars)` 仍有效；真实 stdin-waiting command 收到 post-start chars，不得立即 `SessionUnavailable` |
+| A284 | kill terminal convergence | valid running session + healthy runtime 下 kill 不得 `RuntimeUnavailable`；成功 TERM/KILL/INT（按支持范围）收敛稳定 `cancelled` terminal，后续 poll 维持 cancelled snapshot，不退化 `SessionUnavailable` |
+| A285 | view_image actual resize | 1024×1024 图像 `auto_resize=true` 在 max=512×512 与 64×64 时均成功得到比例保持且 dimensions 不超上限的 public image；无需 resize 路径仍成功；不能因实际 resize 需求返回 `ProcessFailed` |
+| A286 | PowerShell UTF-8 | `Write-Output '中文输出测试'` 在 `windows_powershell` 及 `auto`→PowerShell 时 public output 精确为 UTF-8 原文，无 `�`/mojibake |
+| A287 | Git blame inclusive range | `start_line/end_line` 为 1-based inclusive：5..5 只返回第5行，1..3 精确3行；start>end=`InvalidArgument`；`max_lines` 保持一致 bounded semantics |
+| A288 | document inclusive range | document inspect/read line range 为 1-based inclusive；同时提供 start/end 且 start>end 必须返回 LocalBridge `InvalidArgument`，不得成功返回空文本 |

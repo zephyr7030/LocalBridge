@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizePublicFacadeRuntimeSemanticsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,10 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema27Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema28Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28Contracts), true);
+const schema27Contracts = normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28Contracts);
+assert.equal(schema27Contracts.schema_version, 27);
 assert.equal(hasExactPublicFacadeRuntimeSemanticsAmendment20260814(schema27Contracts), true);
 const schema26Contracts = normalizePublicFacadeRuntimeSemanticsAmendment20260814(schema27Contracts);
 assert.equal(schema26Contracts.schema_version, 26);
@@ -271,6 +274,15 @@ assert.deepEqual(schema26Ratification.current_execution_pointer_unchanged, { cur
 assert.equal(schema26ProjectState.permission_architecture.user_controls_enable_disable, false);
 assert.equal(schema26ProjectState.permission_architecture.user_controls_permission_mode_selection, true);
 assert.equal(schema26ProjectState.permission_architecture.user_controls_broker_directly, false);
+const schema28Progress = JSON.parse(readFileSync(new URL("../../PR_INDEX.json", import.meta.url), "utf8"));
+assert.equal(schema28Progress.execution.current_group, "G2");
+assert.equal(schema28Progress.execution.current_pr, "LB-006");
+assert.equal(schema28Progress.current_pr, "LB-006");
+assert.equal(schema28Progress.prs.find((pr) => pr.id === "LB-006")?.status, "REWORK_REQUIRED");
+assert.equal(schema28Progress.prs.find((pr) => pr.id === "LB-007")?.status, "BLOCKED");
+assert.equal(schema28Progress.groups.find((group) => group.id === "G2")?.review_generation, 9);
+assert.equal(schema28Progress.groups.find((group) => group.id === "G2")?.review_status, "FAIL");
+assert.equal(schema28Progress.groups.find((group) => group.id === "G2")?.reopen_from_pr, "LB-006");
 const schema25Contracts = normalizeAdminModeSafetyWarningAmendment20260814(schema26Contracts);
 assert.equal(schema25Contracts.schema_version, 25);
 assert.equal(schema25Contracts.rules.ui_admin_mode_logic_accent, "amber");
@@ -304,6 +316,49 @@ assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26BackgroundW
 const schema26DuplicateUac = structuredClone(schema26Contracts);
 schema26DuplicateUac.rules.admin_mode_active_broker_reselection_duplicate_uac_forbidden = false;
 assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26DuplicateUac), false);
+
+const schema28NoFixtureCompression = structuredClone(schema28Contracts);
+schema28NoFixtureCompression.rules.test_heavy_shared_fixture_lifecycle_compression_required = false;
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28NoFixtureCompression), false);
+const schema28ForcesUnitMerge = structuredClone(schema28Contracts);
+schema28ForcesUnitMerge.rules.test_cheap_unit_tests_forced_merge_forbidden = false;
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28ForcesUnitMerge), false);
+const schema28StaticCanSubstitute = structuredClone(schema28Contracts);
+schema28StaticCanSubstitute.rules.test_static_contract_behavioral_substitution_forbidden = false;
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28StaticCanSubstitute), false);
+const schema28UnboundedLostSession = structuredClone(schema28Contracts);
+schema28UnboundedLostSession.rules.test_lost_session_must_terminal_fail = false;
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28UnboundedLostSession), false);
+const schema28DevMustBeConsoleFree = structuredClone(schema28Contracts);
+schema28DevMustBeConsoleFree.rules.development_console_window_free_required = true;
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28DevMustBeConsoleFree), false);
+const schema28PackagedConsoleAllowed = structuredClone(schema28Contracts);
+schema28PackagedConsoleAllowed.rules.packaged_gui_managed_child_visible_console_forbidden = false;
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28PackagedConsoleAllowed), false);
+for (const rule of [
+  "shell_command_exact_single_parse_semantics_required",
+  "command_poll_incremental_output_no_loss_no_replay_required",
+  "command_write_running_session_required",
+  "command_kill_cancel_terminal_convergence_required",
+  "view_image_real_auto_resize_required",
+  "public_command_output_utf8_required",
+  "git_blame_line_range_one_based_inclusive",
+  "document_line_range_one_based_inclusive",
+  "runtime_result_semantic_probe_all_adapter_consumed_unmodeled_fields_required",
+]) {
+  const weakened = structuredClone(schema28Contracts);
+  weakened.rules[rule] = false;
+  assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(weakened), false, rule);
+}
+const schema28MissingLifecycleE2e = structuredClone(schema28Contracts);
+schema28MissingLifecycleE2e.prs["LB-006"].required_tests = schema28MissingLifecycleE2e.prs["LB-006"].required_tests.filter((item) => !item.startsWith("one real public command session lifecycle E2E"));
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28MissingLifecycleE2e), false);
+const schema28MissingKillProof = structuredClone(schema28Contracts);
+schema28MissingKillProof.prs["LB-006"].required_tests = schema28MissingKillProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("command_control.kill on a valid running public session"));
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28MissingKillProof), false);
+const schema28MissingPackagedProof = structuredClone(schema28Contracts);
+schema28MissingPackagedProof.prs["LB-018"].required_tests = schema28MissingPackagedProof.prs["LB-018"].required_tests.filter((item) => !item.startsWith("release-style packaged GUI launch"));
+assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28MissingPackagedProof), false);
 
 const schema27LeakedPrivateSession = structuredClone(schema27Contracts);
 schema27LeakedPrivateSession.rules.upstream_private_session_handles_public_forbidden = false;

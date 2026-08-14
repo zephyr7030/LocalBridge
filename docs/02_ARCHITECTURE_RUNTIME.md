@@ -146,6 +146,31 @@ blame:
 
 `path` 用于选择 repository context；action-specific `paths` 才作为 path filter/pathspec。`git_status(path="LocalBridge")` 能识别的 nested repo，`git_log/git_show/git_diff` 必须识别同一 repo，`git_blame(path="LocalBridge/package.json")` 必须识别其 enclosing repo。若 resolver 已确认 repository，`git_diff` 禁止静默降级成 `non-git diff fallback`。repository discovery 永远不能越过 active workspace root。
 
+### Schema28 — Public Runtime Fidelity / Testable Session Semantics
+
+Schema27 的稳定 facade 只在真实 public 行为满足以下语义后才可重新 PASS：
+
+- Shell command text 只经过**一次预期的 shell parse**。LocalBridge 可以选择可信 shell executable 并添加固定启动 flags，但不得把用户 command 再拼接进第二层 shell string。`Write-Output "a|b"`、`Write-Output "a&b"` 以及单引号等价形式都必须输出原字面值。
+- public command session 维护 LocalBridge-owned incremental cursor/delta。`poll` 每次只返回自上次 public poll/cursor 后新增的输出；中间 chunk 不丢失，已经交付的 chunk 不重复。无新输出时返回空 delta + 当前状态/terminal metadata。
+- `write` 对 exec 已返回但仍为 running 的 public session 保持有效；post-start stdin 必须真正到达进程。
+- `kill` 在 valid running session + healthy runtime 下不得误报 `RuntimeUnavailable`。成功 kill 必须收敛到稳定 `cancelled` terminal snapshot；后续 `poll` 返回同一 terminal truth，不能退化成 `SessionUnavailable`。
+- `view_image(auto_resize=true)` 在请求上限小于源图时必须执行真实 resize，保持比例并使结果 dimensions 不超过 max；需要 resize 本身不能映射为 `ProcessFailed`。
+- public command output 统一为有效 UTF-8。Windows PowerShell/`auto` 解析到 PowerShell 时，中文 `中文输出测试` 必须精确保真，不允许 mojibake/replacement characters。
+- `git_workflow.blame start_line/end_line` 和 document line range 都是 **1-based inclusive**。`5..5` 精确一行，`1..3` 精确三行；`start_line > end_line` 在 LocalBridge boundary 返回 `InvalidArgument`，不能成功返回空结果。
+- capability negotiation 不只验证 input schema。任何 adapter 实际消费、但 upstream `outputSchema` 未精确保证的 private result field，都必须在 facade serving 前通过 deterministic、non-destructive semantic compatibility probe 或等价 fail-closed 证据验证。
+
+真实 command/session Runtime Gate 必须用一个共享 bundled runtime + PEP 生命周期覆盖：
+
+```text
+exec → incremental poll → write → read → kill → stable terminal convergence
+```
+
+failure/timeout/private-session-lost 可在 isolation 本身为被测行为时独立 fixture；不得为了独立 assertion 无理由反复启动同一套 Python/MCP/PEP 拓扑。
+
+### Development console 与 packaged GUI
+
+开发/测试 harness 可以出现后台命令进程或可见 console window；这不是产品行为证据，也不构成产品缺陷。正式打包/正常 GUI 运行时，LocalBridge-owned managed children（bundled coding runtime、PEP-adjacent managed command route、Tunnel、Broker/background helper、shell/direct command）不得意外创建可见 console window，除非未来显式 interactive-terminal 合同允许。该要求必须由 release-style/packaged launcher 实测，同时保留 Job/process ownership 与最小必要进程拓扑。
+
 ### Schema26 — Administrator Mode Safety Consent Gate
 
 管理员模式可见入口的视觉与授权状态机由 LocalBridge 自己拥有，不能由 frontend 直接跳到 UAC：

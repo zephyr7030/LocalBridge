@@ -1,5 +1,5 @@
 {
-  "schema_version": 27,
+  "schema_version": 28,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -505,7 +505,36 @@
     "admin_mode_active_broker_reselection_duplicate_uac_forbidden": true,
     "admin_mode_warning_is_narrow_safety_dialog_not_wizard_shell": true,
     "admin_mode_warning_ai_mcp_approval_forbidden": true,
-    "admin_mode_warning_separate_from_high_critical_operation_confirmation": true
+    "admin_mode_warning_separate_from_high_critical_operation_confirmation": true,
+    "test_orchestration_tiers": [
+      "pr_fast",
+      "pr_runtime",
+      "group_release"
+    ],
+    "test_heavy_shared_fixture_lifecycle_compression_required": true,
+    "test_heavy_repeated_runtime_start_requires_isolation_rationale": true,
+    "test_cheap_unit_tests_forced_merge_forbidden": true,
+    "test_static_contract_behavioral_substitution_forbidden": true,
+    "test_duplicate_static_and_behavior_check_requires_distinct_contract_rationale": true,
+    "test_inner_loop_repeated_full_repo_gate_forbidden": true,
+    "test_command_session_lifecycle_real_e2e_required": true,
+    "test_command_bounded_timeout_cancel_required": true,
+    "test_lost_session_must_terminal_fail": true,
+    "development_console_window_presence_not_product_failure": true,
+    "development_console_window_free_required": false,
+    "packaged_gui_managed_child_visible_console_forbidden": true,
+    "packaged_console_requirement_must_be_release_style_verified": true,
+    "shell_command_exact_single_parse_semantics_required": true,
+    "command_poll_incremental_output_no_loss_no_replay_required": true,
+    "command_write_running_session_required": true,
+    "command_kill_cancel_terminal_convergence_required": true,
+    "command_kill_runtime_unavailable_on_healthy_runtime_forbidden": true,
+    "view_image_real_auto_resize_required": true,
+    "public_command_output_utf8_required": true,
+    "git_blame_line_range_one_based_inclusive": true,
+    "document_line_range_one_based_inclusive": true,
+    "invalid_line_range_typed_invalid_argument_required": true,
+    "runtime_result_semantic_probe_all_adapter_consumed_unmodeled_fields_required": true
   },
   "prs": {
     "LB-000": {
@@ -756,7 +785,10 @@
         "stable process outcome normalizer that maps every nonzero ordinary exit to ProcessFailed",
         "complete executable implementations for every advertised v1 agent_workflow task_control and document_workflow action",
         "active-workspace-relative public path/workdir validator with stable LocalBridge typed errors",
-        "shared workspace-bounded nested Git repository resolver for status diff log show and blame"
+        "shared workspace-bounded nested Git repository resolver for status diff log show and blame",
+        "schema28 public command lifecycle delta/cursor state for incremental poll and stable kill terminal convergence",
+        "single-parse shell invocation and UTF-8 public output normalization across trusted Windows shell selectors",
+        "real image resize adapter plus inclusive line-range validation for Git blame and documents"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -785,7 +817,20 @@
         "every advertised agent_workflow task_control and document_workflow action executes its stable contract and none returns a permanent currently-unavailable response",
         "document image Git and exec workdir workspace-bound public inputs accept active-workspace-relative paths and reject drive UNC verbatim POSIX absolute or parent traversal at the LocalBridge boundary without leaking upstream ABSOLUTE_PATH_DENIED",
         "with active workspace D:\\project and nested repo D:\\project\\LocalBridge, git status log show and diff resolve the same repository and blame of LocalBridge/package.json resolves its enclosing repository",
-        "Git repository discovery never escapes the active workspace and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository"
+        "Git repository discovery never escapes the active workspace and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository",
+        "LB-006 PR Fast Gate runs cheap deterministic unit fake and static contract checks without repeatedly invoking the complete repository Gate after each small edit",
+        "LB-006 PR Runtime Gate groups heavy tests that share the bundled runtime PEP and process topology into a shared lifecycle unless isolation itself is under test; repeated runtime startup for independent assertions has an explicit isolation rationale and cheap isolated unit tests remain separate",
+        "one real public command session lifecycle E2E uses a single bundled runtime and PEP lifecycle to cover exec then incremental poll then write then read then kill then terminal convergence with bounded timeout cancellation and explicit lost-session terminal handling",
+        "static source-marker checks do not substitute for executable shell session image Git or document behavior and duplicate static plus behavior checks exist only for a distinct static contract",
+        "PowerShell Write-Output \"a|b\" and Write-Output \"a&b\" plus their single-quoted equivalents preserve literal output with exactly one intended shell parse and no extra LocalBridge reparse",
+        "a command emitting poll-1 poll-2 poll-3 over time exposes every chunk in order exactly once across command_control.poll calls and a later poll with no new output returns an empty delta plus state or terminal metadata rather than replaying poll-3",
+        "a running public command session that waits for stdin accepts command_control.write after exec has returned and the written chars reach the process without SessionUnavailable",
+        "command_control.kill on a valid running public session with a healthy runtime does not return RuntimeUnavailable and converges to a stable cancelled terminal snapshot that later poll calls keep instead of degrading to SessionUnavailable",
+        "view_image auto_resize on a 1024x1024 source succeeds for maximum 512x512 and 64x64 with bounded dimensions and preserved aspect ratio while the no-resize path remains valid",
+        "Windows PowerShell Write-Output 中文输出测试 round-trips exact UTF-8 under windows_powershell and under auto when auto resolves to PowerShell without mojibake or replacement characters",
+        "git_workflow blame uses one-based inclusive start_line and end_line so 5 through 5 returns exactly line 5 and 1 through 3 returns exactly three lines; start_line greater than end_line is InvalidArgument and max_lines remains bounded",
+        "document_workflow line ranges are one-based inclusive and start_line greater than end_line returns LocalBridge InvalidArgument rather than a successful empty result",
+        "every adapter-consumed private result field not guaranteed by upstream outputSchema has a deterministic non-destructive semantic compatibility probe or equivalent fail-closed evidence before public facade serving"
       ],
       "non_goals": [
         "policy enforcement",
@@ -1345,7 +1390,8 @@
         "runtime-manifest and packaging inventory contain no Cloudflare/cloudflared runtime entry",
         "LocalBridge launch arguments environment and fallback paths do not activate cloudflared or Cloudflare managed tunnel",
         "historical upstream compatibility evidence may mention cloudflared but is not copied into executable final runtime bundle",
-        "packaging gate fails closed if cloudflared is reintroduced"
+        "packaging gate fails closed if cloudflared is reintroduced",
+        "release-style packaged GUI launch proves LocalBridge-owned managed background children do not create unintended visible console windows while preserving Job/process ownership; development test-harness console windows are not used as evidence for this packaged behavior"
       ],
       "non_goals": [
         "first-time runtime feasibility",
@@ -1397,7 +1443,8 @@
         "live recoverable disconnect succeeds silently when reconnect succeeds within five attempts",
         "five failed reconnects produce exactly one error window",
         "error-window Retry starts a new reconnect cycle",
-        "release dependency audit confirms no styling-only UI/animation/icon/font framework was added"
+        "release dependency audit confirms no styling-only UI/animation/icon/font framework was added",
+        "clean-machine packaged GUI execution shows no unintended visible console windows from LocalBridge-owned bundled runtime Tunnel Broker/background helpers or managed shell/direct command children unless an explicit future interactive-terminal contract opts in"
       ],
       "non_goals": [
         "feature implementation",

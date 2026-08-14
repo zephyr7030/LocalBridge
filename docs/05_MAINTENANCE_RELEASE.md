@@ -77,6 +77,32 @@ v1 single-workspace preferences
 - Windows 写入先写同目录临时文件并 `sync_all`，已有文件通过原子 replace 替换；旧目标保留为 `.bak` 回滚点；
 - migration/validation/future-schema 任一失败均不覆盖原文件，也不自动 reset。
 
+## Schema28 测试编排
+
+测试按成本和目的固定分三层：
+
+```text
+PR Fast Gate
+  当前 PR 的廉价 deterministic unit / fake / static checks
+  开发内循环优先 targeted execution
+
+PR Runtime Gate
+  真实 bundled runtime / PEP / process 行为
+  每次正式 PR acceptance attempt 至多按所需拓扑启动一次共享 lifecycle
+
+Group / Release Gate
+  完整 cargo/npm/build/clippy/architecture/release 链
+  组末、发布 Gate，以及合同明确要求的最终 PR acceptance 才执行
+```
+
+相同 external/bundled runtime、PEP、process topology 的重型 assertion 必须按类压缩进共享 fixture/lifecycle；若必须多次启动，测试必须说明 isolation 本身为何是被测行为。该规则不要求把快速、隔离性好的 unit tests 合成一个巨型测试。
+
+Public command/session 的真实 Runtime Gate 至少在同一 lifecycle 连续覆盖 `exec → incremental poll → write → read → kill → terminal convergence`，避免分散测试造成 action 漏测。所有测试 runner 必须有 bounded timeout/cancel；session 丢失或控制通道不可寻址是 terminal failed/lost，不得继续等待为 running。
+
+static/source-string contract test 只适合固定文案、schema、allowlist、禁止依赖、governance marker 等静态事实。能够通过 unit/integration/E2E 实际执行证明的行为，不得因为源码包含某函数名、测试名或 marker 就判 PASS；同一行为同时存在 static + executable check 时必须保护两个不同合同目的。
+
+开发内循环不得在每个小修改后重复运行完整 `cargo test --locked` + all-target Clippy + frontend build + 历史 architecture/governance 链；先 targeted Fast Gate，准备正式接受时执行一次对应 Runtime Gate，最终 acceptance/group/release 再执行完整必需 Gate。测试优化不得删掉最终 required coverage。
+
 ## Release
 
 ```text

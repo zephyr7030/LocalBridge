@@ -1,11 +1,16 @@
 {
   "schema_version": 11,
   "review_date": "2026-08-14",
-  "baseline": "schema27-G2-REWORK",
+  "baseline": "schema28-G2-LB006-REWORK",
   "status": "REWORK_REQUIRED",
   "phase": "PRE_CODE",
   "current_pr": "LB-006",
   "blocking_findings": [
+    "LB-006/schema28: shell invocation adds an extra reparse that breaks double-quoted PowerShell pipe/ampersand literals",
+    "LB-006/schema28: command_control poll/write/kill does not satisfy live incremental and stable-session semantics; poll loses/replays output, write becomes SessionUnavailable, and kill can RuntimeUnavailable then lose the session",
+    "LB-006/schema28: view_image actual auto-resize fails and Windows PowerShell Chinese output is not preserved as UTF-8",
+    "LB-006/schema28: git blame inclusive line ranges and document invalid-range validation are incorrect",
+    "LB-006/schema28: result semantic negotiation must cover every adapter-consumed private field not guaranteed by upstream outputSchema",
     "LB-006: public command/session lifecycle is not LocalBridge-owned; command_control poll is miswired to retained-output read and private session pruning can leave stale Running truth",
     "LB-006: workspace_context can project workspace=\"\" because adapter reads the wrong private result fields and lacks a deterministic semantic result probe",
     "LB-006: agent_workflow/task_control and advertised document_workflow actions are present in public schema while remaining unavailable",
@@ -34,7 +39,11 @@
     "nonzero process exit normalization to ProcessFailed",
     "complete implementation of every advertised v1 facade action",
     "active-workspace-relative public path input validation",
-    "shared workspace-bounded nested Git repository resolver"
+    "shared workspace-bounded nested Git repository resolver",
+    "single-parse shell quoting plus UTF-8 public output normalization",
+    "incremental public poll cursor, live write and stable kill/cancel convergence",
+    "real bounded image resize and inclusive Git/document range validation",
+    "tiered PR Fast / PR Runtime / Group-Release verification with compressed heavy runtime fixtures"
   ],
   "current_task_status_ui": {
     "status_only": true,
@@ -92,6 +101,7 @@
     "executor_pre_authorization_requires_user_audited_concrete_record": true,
     "schema25_reopens_g2_from_lb006": true,
     "schema27_extends_lb006_rework": true,
+    "schema28_reopens_lb006_after_plugin_runtime_findings": true,
     "g2_generation_9_consumed_fail": true,
     "next_required_g2_adversarial_generation": 10,
     "g2_generation_8_historical_invalidated_by_schema25": true,
@@ -172,5 +182,5 @@
     "slow_backend_responsiveness_gate": true
   },
   "cloudflare_final_distribution": "forbidden_from_LB-018_bundle_manifest_launcher_and_fallback",
-  "recommended_next_step": "Apply the schema27 LB-006 correction set only after this contract baseline is committed; reaccept LB-007 through LB-012 sequentially, then run fresh G2 adversarial generation 10. G3 and G4 remain blocked."
+  "recommended_next_step": "Commit the schema28 contract baseline, then rework LB-006 only. Use PR Fast Gate during edits, one compressed PR Runtime Gate for the shared public command/runtime lifecycle, and the complete required Gate only for formal acceptance. LB-007 through LB-012 remain blocked; generation 10 is not consumed; G3/G4 remain blocked."
 }
