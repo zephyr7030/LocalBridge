@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { existsSync, readFileSync } from "node:fs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,64 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema25Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema26Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26Contracts), true);
+const schema26ProjectState = JSON.parse(readFileSync(new URL("../../PROJECT_STATE.json", import.meta.url), "utf8"));
+const schema26Ratification = schema26ProjectState.schema26_admin_mode_safety_warning_2026_08_14;
+assert.equal(schema26Ratification.contract_review_status, "PASS");
+assert.deepEqual(schema26Ratification.owner_prs, ["LB-015", "LB-016"]);
+assert.deepEqual(schema26Ratification.current_execution_pointer_unchanged, { current_group: "G2", current_pr: "LB-006" });
+assert.equal(schema26ProjectState.permission_architecture.user_controls_enable_disable, false);
+assert.equal(schema26ProjectState.permission_architecture.user_controls_permission_mode_selection, true);
+assert.equal(schema26ProjectState.permission_architecture.user_controls_broker_directly, false);
+const schema25Contracts = normalizeAdminModeSafetyWarningAmendment20260814(schema26Contracts);
+assert.equal(schema25Contracts.schema_version, 25);
+assert.equal(schema25Contracts.rules.ui_admin_mode_logic_accent, "amber");
+assert.equal(schema25Contracts.rules.visible_admin_mode_selection_requests_uac, true);
+assert.equal(Object.hasOwn(schema25Contracts.rules, "admin_mode_warning_countdown_ms"), false);
+
+const schema26WrongOrange = structuredClone(schema26Contracts);
+schema26WrongOrange.rules.ui_admin_mode_logic_accent = "amber";
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26WrongOrange), false);
+const schema26OnlyNumberRed = structuredClone(schema26Contracts);
+schema26OnlyNumberRed.rules.admin_mode_warning_confirm_entire_button_red = false;
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26OnlyNumberRed), false);
+const schema26ShortCountdown = structuredClone(schema26Contracts);
+schema26ShortCountdown.rules.admin_mode_warning_countdown_ms = 8000;
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26ShortCountdown), false);
+const schema26CopyDrift = structuredClone(schema26Contracts);
+schema26CopyDrift.rules.admin_mode_warning_consequences[7] = "系统可能需要修复";
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26CopyDrift), false);
+const schema26CountdownEnabledEarly = structuredClone(schema26Contracts);
+schema26CountdownEnabledEarly.rules.admin_mode_warning_confirm_disabled_during_countdown = false;
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26CountdownEnabledEarly), false);
+const schema26CancelSideEffect = structuredClone(schema26Contracts);
+schema26CancelSideEffect.rules.admin_mode_warning_cancel_escape_dismiss_no_side_effect = false;
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26CancelSideEffect), false);
+const schema26DirectUac = structuredClone(schema26Contracts);
+schema26DirectUac.rules.admin_mode_uac_before_enabled_confirm_forbidden = false;
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26DirectUac), false);
+const schema26BackgroundWarning = structuredClone(schema26Contracts);
+schema26BackgroundWarning.rules.admin_mode_background_restore_warning_forbidden = false;
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26BackgroundWarning), false);
+const schema26DuplicateUac = structuredClone(schema26Contracts);
+schema26DuplicateUac.rules.admin_mode_active_broker_reselection_duplicate_uac_forbidden = false;
+assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26DuplicateUac), false);
+
+for (const staleDocument of [
+  "../../docs/01_PRODUCT_SCOPE.md",
+  "../../docs/02_ARCHITECTURE.md",
+  "../../docs/03_SECURITY_MODEL.md",
+  "../../docs/04_UX_SPEC.md",
+  "../../docs/05_RUNTIME_CONTRACT.md",
+  "../../docs/06_PR_PLAN.md",
+  "../../docs/07_ACCEPTANCE_MATRIX.md",
+  "../../docs/08_UPSTREAM_POLICY.md",
+  "../../docs/LOCALBRIDGE_FINAL_AGENT_RUNTIME_DESIGN.md",
+]) {
+  assert.equal(existsSync(new URL(staleDocument, import.meta.url)), false, `superseded document must stay removed: ${staleDocument}`);
+}
+
 assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25Contracts), true);
 const schema24Contracts = normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25Contracts);
 assert.equal(schema24Contracts.schema_version, 24);

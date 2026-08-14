@@ -1,4 +1,3 @@
-
 # 03 — Security
 
 ## 安全边界
@@ -33,7 +32,7 @@ control-plane
 
 编辑模式：reviewed read/write。  
 完整模式：+ ordinary process execution。  
-管理员模式：+ Broker-routed elevated operations。
+管理员模式：+ 用户完成安全确认与 UAC 后，由 Broker 路由 reviewed elevated operations。
 
 `control-plane` 所有模式永久 deny。
 
@@ -41,6 +40,9 @@ MCP 永远不能修改：
 
 - 权限模式；
 - 管理员设置；
+- 管理员安全确认状态；
+- 批准 Windows UAC；
+- 启用/关闭 Broker；
 - 项目列表/active workspace；
 - Runtime API Key；
 - Tunnel ID；
@@ -141,9 +143,48 @@ LocalBridge (普通用户)
 
 Pipe 名使用 CSPRNG 随机 suffix，并使用 first-pipe-instance 防止同名 server 抢占；pipe 名与 generation 可以出现在 Broker CLI，session nonce 不进入 CLI/日志/Debug。帧采用有上限的长度前缀协议，未知/畸形/超限消息在 dispatch 前拒绝。
 
-LB-011 Broker 基础协议仅包含 `Ping` / `Shutdown`，不包含管理员执行操作；管理员能力由后续权限 PR 在同一认证边界内单独接入。Broker 不开放 TCP/UDP listener；LocalBridge pipe 会话断开后 Broker 退出。UAC 路径只提供给 Rust 内部显式用户操作调用，普通启动与 `--background` 不调用该路径。
+LB-011 Broker 基础协议仅包含 `Ping` / `Shutdown`，不包含管理员执行操作；管理员能力由后续权限 PR 在同一认证边界内单独接入。Broker 不开放 TCP/UDP listener；LocalBridge pipe 会话断开后 Broker 退出。UAC 路径只提供给 Rust 内部显式用户授权流程调用，普通启动与 `--background` 不调用该路径。
 
 `elevated_exec` 必须 structured program/args/workdir，no shell default，timeout/cancel/output limit/redaction。
+
+### Schema26 管理员模式安全确认
+
+所有用户可见 `管理员模式` 入口统一使用橙色 `#ff9500` 警告语义。Broker 未 Active 时，用户点击/重新点击管理员模式不能直接触发 UAC，必须先显示以下固定内容：
+
+```text
+启用管理员权限后，错误或恶意操作可能导致：
+
+* 删除或覆盖重要文件
+* 修改系统关键配置
+* 软件或系统无法正常启动
+* 数据永久丢失
+* 安全机制被绕过或关闭
+* 凭据、密钥等敏感信息泄露
+* 恶意程序获得更高权限
+* 系统被破坏，严重时可能需要重装 Windows
+
+仅在你明确理解操作后果时授权。
+
+[取消] [确认9]
+```
+
+安全合同：
+
+- 确认按钮**整个按钮为红色**；
+- fresh open 从 `确认9` 开始，依次到 `确认1`；
+- 完整 9000ms 内按钮 disabled；
+- 9000ms 后同一红色按钮才可 enabled，标签精确为 `确认`；
+- only enabled `确认` 才允许继续 backend security validation，然后才可发起 Windows `runas` / UAC；
+- React/frontend 的 setTimeout/setInterval 只能用于显示，不能成为授权依据；backend 或等价可信单调计时必须维护 not-before/eligibility；
+- pointer、keyboard、synthetic/repeated click、rerender、focus change、stale frontend state、旧 challenge replay 均不能提前授权；
+- 取消、Esc、close/dismiss 无 PermissionMode/Broker/UAC 副作用；
+- fresh open 重新计满 9000ms，不允许 remember/skip/don't-show-again；
+- `--background` preference restore 不显示 warning、不 UAC；
+- Broker 已 Active 时，单纯重选当前已激活管理员模式不得重复 UAC；
+- AI/MCP 不能批准该弹窗、批准 UAC、修改 PermissionMode、启用 Broker 或修改授权 policy；
+- High/Critical 单操作确认与本模式进入警告是两个独立 Gate，后者不能替代前者。
+
+该 9 秒是**进入管理员授权流程前的安全等待期**，不是管理员模式 TTL；Broker Active 后仍按 capability/risk policy 工作。
 
 ## 网络
 

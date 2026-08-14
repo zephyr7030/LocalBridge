@@ -551,6 +551,99 @@ const LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
+  schemaVersion: 26,
+  baselineSchemaVersion: 25,
+  replacedRules: {
+    ui_admin_mode_logic_accent: ["#ff9500", "amber"],
+  },
+  removedBaselineRules: {
+    visible_admin_mode_selection_requests_uac: true,
+  },
+  addedRules: {
+    ui_admin_mode_logic_color_name: "orange",
+    admin_mode_warning_surfaces: ["settings", "onboarding_screen_3"],
+    visible_admin_mode_selection_opens_warning_gate: true,
+    admin_mode_warning_required_before_uac: true,
+    admin_mode_warning_intro: "启用管理员权限后，错误或恶意操作可能导致：",
+    admin_mode_warning_consequences: [
+      "删除或覆盖重要文件",
+      "修改系统关键配置",
+      "软件或系统无法正常启动",
+      "数据永久丢失",
+      "安全机制被绕过或关闭",
+      "凭据、密钥等敏感信息泄露",
+      "恶意程序获得更高权限",
+      "系统被破坏，严重时可能需要重装 Windows",
+    ],
+    admin_mode_warning_footer: "仅在你明确理解操作后果时授权。",
+    admin_mode_warning_cancel_label: "取消",
+    admin_mode_warning_confirm_button_color: "red",
+    admin_mode_warning_confirm_entire_button_red: true,
+    admin_mode_warning_countdown_ms: 9000,
+    admin_mode_warning_countdown_labels: ["确认9", "确认8", "确认7", "确认6", "确认5", "确认4", "确认3", "确认2", "确认1"],
+    admin_mode_warning_confirm_ready_label: "确认",
+    admin_mode_warning_confirm_disabled_during_countdown: true,
+    admin_mode_warning_countdown_monotonic_elapsed_required: true,
+    admin_mode_warning_countdown_bypass_forbidden: true,
+    admin_mode_warning_cancel_escape_dismiss_no_side_effect: true,
+    admin_mode_warning_fresh_open_restarts_countdown: true,
+    admin_mode_warning_remember_or_skip_forbidden: true,
+    admin_mode_uac_before_enabled_confirm_forbidden: true,
+    admin_mode_background_restore_warning_forbidden: true,
+    admin_mode_active_broker_reselection_duplicate_uac_forbidden: true,
+    admin_mode_warning_is_narrow_safety_dialog_not_wizard_shell: true,
+    admin_mode_warning_ai_mcp_approval_forbidden: true,
+    admin_mode_warning_separate_from_high_critical_operation_confirmation: true,
+  },
+  lb015: {
+    artifactReplacements: [[
+      "blue #0071e3 standard product accent with orange #ff9500 administrator-mode warning exception",
+      "blue #0071e3 standard product accent with amber administrator-mode exception",
+    ]],
+    testReplacements: [
+      [
+        "administrator mode controls in onboarding and Settings use orange #ff9500 warning styling and are not overridden by ordinary blue selected styling",
+        "administrator mode uses amber logical selection styling and is not overridden by ordinary blue selected styling",
+      ],
+      [
+        "Settings has no separate 启用管理员权限 button; when Broker is not Active, visible 管理员模式 selection or reselection opens the safety warning gate and cannot request UAC before the enabled red 确认 action after the full 9000ms countdown",
+        "Settings has no separate 启用管理员权限 button; visible 管理员模式 selection or reselection in Settings requests UAC when privilege is not Active",
+      ],
+    ],
+    addedTests: [
+      "administrator warning uses exact intro, eight ordered consequence bullets, and footer from schema26 with actions 取消 and one whole-red confirmation button",
+      "administrator warning red confirmation button is disabled for the full monotonic 9000ms interval, labels 确认9 through 确认1, then becomes enabled with exact label 确认; pointer keyboard synthetic repeated click rerender focus change or stale frontend state cannot bypass the gate",
+      "administrator warning cancel Escape close or dismiss causes no PermissionMode Broker or UAC side effect; every fresh open restarts the full nine-second countdown and no remember skip or do-not-show-again bypass exists",
+      "background administrator preference restore shows no safety dialog and requests no UAC; reselecting an already-active administrator mode causes no duplicate UAC",
+      "mode-entry warning does not approve any separate High or Critical per-operation confirmation and AI/MCP cannot approve the warning or mutate PermissionMode Broker or other control-plane authority",
+    ],
+  },
+  lb016: {
+    artifactReplacements: [[
+      "administrator-mode orange #ff9500 warning plus whole-red nine-second confirmation gate before UAC activation",
+      "administrator-mode selection UAC activation",
+    ]],
+    testReplacements: [
+      [
+        "ordinary selected permission modes use the standard blue accent while administrator mode uses orange #ff9500 warning styling in onboarding and Settings",
+        "ordinary selected permission modes use the standard blue accent while administrator mode uses amber logical styling in onboarding and Settings",
+      ],
+      [
+        "screen 3 visible selection or reselection of 管理员模式 opens the fixed safety warning when Broker is not Active; no UAC or permission activation may occur until the whole-red confirmation button completes its full 9000ms disabled countdown and the user clicks enabled 确认; no separate enable-admin button exists",
+        "screen 3 visible selection or reselection of 管理员模式 is the explicit user action that requests UAC when broker is not Active; no separate enable-admin button exists",
+      ],
+      [
+        "background preference restore shows neither the administrator warning nor UAC; a fresh visible warning always restarts the full nine-second countdown",
+        "background preference restore remains non-UAC even though visible administrator-mode selection requests UAC",
+      ],
+    ],
+    addedTests: [
+      "administrator warning is a narrow safety consent dialog and does not permit the five-screen onboarding shell to regress into a centered card modal or dialog layout",
+    ],
+  },
+});
+
 const G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14 = Object.freeze({
   schemaVersion: 24,
   baselineCommit: "369b84d59d98a2ce2d2aa06ccd27d7b403a27806",
@@ -834,6 +927,59 @@ export function normalizeG3ManualReviewRound2_20260814(contractsDoc) {
   return normalized;
 }
 
+export function hasExactAdminModeSafetyWarningAmendment20260814(contractsDoc) {
+  if (contractsDoc?.schema_version !== ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.schemaVersion) return false;
+  const rules = contractsDoc?.rules;
+  for (const key of Object.keys(ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.removedBaselineRules)) {
+    if (Object.hasOwn(rules ?? {}, key)) return false;
+  }
+  for (const [key, [current]] of Object.entries(ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.replacedRules)) {
+    if (canonicalJson(rules?.[key]) !== canonicalJson(current)) return false;
+  }
+  for (const [key, expected] of Object.entries(ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.addedRules)) {
+    if (canonicalJson(rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  const lb016 = contractsDoc?.prs?.["LB-016"];
+  if (!lb015 || !lb016) return false;
+  for (const [current, old] of ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb015.artifactReplacements) {
+    if (!lb015.required_artifacts?.includes(current) || lb015.required_artifacts.includes(old)) return false;
+  }
+  for (const [current, old] of ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb015.testReplacements) {
+    if (!lb015.required_tests?.includes(current) || lb015.required_tests.includes(old)) return false;
+  }
+  if (!containsAll(lb015.required_tests, ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb015.addedTests)) return false;
+  for (const [current, old] of ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb016.artifactReplacements) {
+    if (!lb016.required_artifacts?.includes(current) || lb016.required_artifacts.includes(old)) return false;
+  }
+  for (const [current, old] of ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb016.testReplacements) {
+    if (!lb016.required_tests?.includes(current) || lb016.required_tests.includes(old)) return false;
+  }
+  return containsAll(lb016.required_tests, ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb016.addedTests);
+}
+
+export function normalizeAdminModeSafetyWarningAmendment20260814(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.baselineSchemaVersion;
+  for (const [key, [, old]] of Object.entries(ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.replacedRules)) normalized.rules[key] = old;
+  for (const [key, old] of Object.entries(ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.removedBaselineRules)) normalized.rules[key] = old;
+  for (const key of Object.keys(ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.addedRules)) delete normalized.rules[key];
+  const lb015 = normalized.prs?.["LB-015"];
+  const lb016 = normalized.prs?.["LB-016"];
+  if (lb015) {
+    lb015.required_artifacts = lb015.required_artifacts.map((item) => ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb015.artifactReplacements.find(([current]) => current === item)?.[1] ?? item);
+    lb015.required_tests = removeItems(lb015.required_tests, ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb015.addedTests)
+      .map((item) => ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb015.testReplacements.find(([current]) => current === item)?.[1] ?? item);
+  }
+  if (lb016) {
+    lb016.required_artifacts = lb016.required_artifacts.map((item) => ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb016.artifactReplacements.find(([current]) => current === item)?.[1] ?? item);
+    lb016.required_tests = removeItems(lb016.required_tests, ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb016.addedTests)
+      .map((item) => ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.lb016.testReplacements.find(([current]) => current === item)?.[1] ?? item);
+  }
+  return normalized;
+}
+
 export function hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(contractsDoc) {
   if (contractsDoc?.schema_version !== LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.schemaVersion) return false;
   for (const [key, expected] of Object.entries(LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.addedRules)) {
@@ -1021,6 +1167,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.schemaVersion) {
+    if (!hasExactAdminModeSafetyWarningAmendment20260814(authorizationContracts)) {
+      findings.push(`${expected.id}:admin-mode-safety-warning-20260814-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeAdminModeSafetyWarningAmendment20260814(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.schemaVersion) {
     if (!hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(authorizationContracts)) {
       findings.push(`${expected.id}:agent-runtime-facade-20260814-contract-amendment-drift`);

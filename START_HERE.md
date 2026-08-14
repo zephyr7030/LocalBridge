@@ -1,4 +1,3 @@
-
 # LocalBridge v15 FINAL — Start Here
 
 > 本文件是开发前 **冻结启动快照（historical bootstrap snapshot）**，用于说明读取顺序与冻结约束，不承载推进中的实时 PR/Gate 状态。
@@ -31,6 +30,12 @@ predevelopment_review  = PASS
 16. `FINAL_REVIEW.json`
 17. `runtime-manifest.toml`
 18. `runtime-policy.toml`
+
+## 当前文档权威边界
+
+上述 2–9 共 **8 份编号文档**是当前 human design authority。`docs/**` 中未列入该 8 份清单的文件只可作为 supplemental / ADR / compatibility / governance / historical evidence 使用，**不得覆盖**这 8 份当前人类权威、机器合同或当前磁盘代码。若未列入清单的旧稿与当前权威冲突，执行/审查智能体必须忽略旧稿中的冲突语义，除非当前权威文件与机器合同显式将其重新提升为 authoritative。
+
+`docs/LOCALBRIDGE_TOOL_WRAPPER_AND_SHELL_RESOLVER.md` 是 Agent Runtime、ShellResolver 与系统维护能力的**最终设计指导 / 未来能力基线**，但它不是第 9 份当前 human authority。只有其中被当前机器合同（例如 schema25/schema26）以及上述 8 份 numbered authority 显式提升/吸收的部分，才构成当前硬合同；其余未来 `system_inspect/system_manage` 等设计不得自行越过 PR 顺序、writable paths 或提前声称已实现。已废弃的 `docs/LOCALBRIDGE_FINAL_AGENT_RUNTIME_DESIGN.md` 不得被恢复为当前事实源。
 
 机器合同与文档冲突：立即停止并报告。冻结/历史快照中的旧状态字段不属于实时状态冲突。
 
@@ -78,13 +83,13 @@ UI 冻结补充：
 项目选择       = 原生 Windows 文件夹选择器为主交互
 按钮           = 统一且可辨识；禁止白底白按钮
 普通强调色     = 蓝色 #0071e3；黑色不得作为普通 primary/selected accent
-管理员逻辑色   = onboarding 与设置页均为黄色/琥珀色，不得被蓝色 selected 覆盖
+管理员逻辑色   = onboarding 与设置页所有“管理员模式”控件统一橙色 #ff9500；不得被普通蓝色 selected 覆盖
+管理员安全确认 = Broker 未 Active 时，点击/重新点击“管理员模式”先显示固定后果警告；红色“确认9→…→确认1”按钮在完整 9000ms 内 disabled，倒计时结束后仍为红色并显示“确认”才可点击；确认后才允许安全校验→Windows UAC；取消/Esc/关闭无 PermissionMode/Broker/UAC 副作用；每次重新打开重新计时；后台恢复无警告/无 UAC；Broker 已 Active 时重选不得重复 UAC
 服务状态点     = Ready绿 / Starting琥珀 / Fault红 / Unknown灰；onboarding 与 Dashboard 使用同源状态
 窗口           = 固定 780×620；minimum=maximum=780×620；禁止缩放与最大化
 窗口验收       = `resizable=false`、`maximizable=false`；拖拽边框/最大化均不能改变 client size
 窗口边框       = `decorations=false`；唯一自定义 chrome 必须贴满 client area；禁止原生+自定义双边框；保留拖拽/最小化/关闭
-引导页布局     = 整页；直接使用 custom chrome 内容区；禁止空白页面中居中再套 card/modal/dialog 式向导外壳
-管理员选择     = 仅设置页或 onboarding 第3屏可见选择；点击“管理员模式”即为显式 UAC 动作；无单独“启用管理员权限”按钮；后台恢复偏好仍不自动 UAC
+引导页布局     = 整页；直接使用 custom chrome 内容区；禁止空白页面中居中再套 card/modal/dialog 式向导外壳；管理员安全确认弹窗仅作为局部安全 consent dialog 例外，不得成为向导外壳
 主页权限       = 不显示“权限模式”及编辑/完整/管理员三档选项；不得从主页修改 PermissionMode 或触发模式 UAC；只读显示管理员权限实际状态；权限编辑允许设置页与用户显式重新打开的 onboarding 第3屏
 前台启动       = UI-first：先创建/显示并达到可交互 UI → 单次 typed UI-ready → backend 再异步启动 runtime/MCP/Tunnel；UI-ready 前禁止启动原本停止的服务；--background 例外
 任务状态       = backend 唤醒式绑定真实工具调用；轮询不得作为短任务传输；每次工具调用至少可见500ms且不延迟真实返回；首行当前状态/等待命令，第二行“上次执行工具：…”且 nS前/n分钟前/大于1小时/大于n天 靠右；无历史列表
@@ -102,6 +107,27 @@ OpenAI已保存项 = Tunnel ID 显示当前持久化值；Key 固定提示“已
 Cloudflare     = LB-018 从最终 bundle/manifest/installer/启动参数/fallback 移除 cloudflared；历史兼容证据可留但不可执行/打包
 ```
 
+管理员模式警告固定文案（schema26）：
+
+```text
+启用管理员权限后，错误或恶意操作可能导致：
+
+* 删除或覆盖重要文件
+* 修改系统关键配置
+* 软件或系统无法正常启动
+* 数据永久丢失
+* 安全机制被绕过或关闭
+* 凭据、密钥等敏感信息泄露
+* 恶意程序获得更高权限
+* 系统被破坏，严重时可能需要重装 Windows
+
+仅在你明确理解操作后果时授权。
+
+[取消] [确认9]
+```
+
+确认按钮**整个按钮为红色**，不是只有数字为红色。`确认9 → 确认8 → … → 确认1` 的完整 9 秒内必须 disabled；达到 9000ms 后同一红色按钮变为 enabled 且标签精确为 `确认`。前端显示计时不能成为授权真相源；backend/等价可信单调计时必须拒绝提前确认。只有 enabled `确认` 的显式用户动作才能进入既有安全校验并随后请求 UAC。
+
 Agent Runtime / ShellResolver 冻结补充（schema25）：
 
 ```text
@@ -118,6 +144,8 @@ PATH             = 仅发现线索，不是信任依据；version probe/执行�
 v0.1 非目标      = WSL/container/remote shell、custom shell registry、environment manager、固定内部目录布局
 当前返工入口     = G2 / LB-006；LB-006→LB-012 严格重验，之后 fresh G2 adversarial generation 9；旧 G2 gen8/G3 gen6 仅保留历史证据
 ```
+
+Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订，**不改变当前执行入口**：当前仍为 `G2 / LB-006`，必须继续严格顺序推进，不能因本合同提前跳到 G3。
 
 ```text
 品牌图标       = assets/icons/localbridge.ico

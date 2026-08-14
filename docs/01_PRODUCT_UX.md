@@ -1,4 +1,3 @@
-
 # 01 — Product & UX
 
 ## 产品基线
@@ -153,7 +152,7 @@ icon package
 
 首次启动固定为 **严格 5 屏**，不得增加第 6 屏、说明卡片或冗余步骤。旧 `Local Bridge 使用确认` 整页已经废弃并删除。
 
-首次引导本身就是当前窗口的唯一主要内容，视觉上必须采用**整页布局**：5 屏共同页面直接使用自定义 window chrome 下的完整内容区。禁止先铺一块大面积空白背景，再在中央放置一个带圆角、阴影或边框的“向导卡片/弹窗/对话框”作为整个页面；不得形成“窗口里又套一个窗口”的观感。页面级 padding、字段分组、状态行和局部控件可以保留，但不得重新构造一个浮动的整体向导外壳。
+首次引导本身就是当前窗口的唯一主要内容，视觉上必须采用**整页布局**：5 屏共同页面直接使用自定义 window chrome 下的完整内容区。禁止先铺一块大面积空白背景，再在中央放置一个带圆角、阴影或边框的“向导卡片/弹窗/对话框”作为整个页面；不得形成“窗口里又套一个窗口”的观感。页面级 padding、字段分组、状态行和局部控件可以保留，但不得重新构造一个浮动的整体向导外壳。管理员模式安全确认属于局部 safety-consent dialog，可在用户主动选择管理员模式时覆盖当前页面，但不得作为向导共同外壳或重新引入第 6 屏。
 
 顺序：
 
@@ -228,9 +227,34 @@ Runtime API Key 仅保存在 Windows 安全凭据中。
 返回                                  继续
 ```
 
-项目与权限必须位于同一屏。新项目选择以原生 Windows 文件夹选择器为主交互，不以手填绝对路径作为主流程。可见用户点击/重新点击 `管理员模式` 本身就是显式提权动作；若 Broker 尚未 Active，必须立即发起 Windows UAC，仅提升 Privileged Broker，禁止额外“启用管理员权限”按钮。后台 `--background` 恢复管理员偏好仍不得自动 UAC。第 3 屏必须提供明确 `返回` 到第 2 屏。
+项目与权限必须位于同一屏。新项目选择以原生 Windows 文件夹选择器为主交互，不以手填绝对路径作为主流程。所有可见 `管理员模式` 按钮/控件在 onboarding 第 3 屏和设置页统一使用橙色 `#ff9500` 警告语义；普通选中项继续使用蓝色 `#0071e3`。
 
-三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白。`min-height >= 80px` 只能作为最低防回退，不能构成 PASS；任何包含“标题 + 说明”两行文本块的按钮，在固定 780×620 实机中真实 computed/rendered 高度必须至少为普通单行控件实际高度的 2 倍，并证明标题与说明两个 line box 均完整可见、无裁切/挤压。此项仍需人工视觉 Gate。普通选中项使用统一蓝色 `#0071e3`；管理员模式在 onboarding 与设置页均使用黄色/琥珀逻辑色，不得被普通蓝色 selected 规则覆盖。
+若 Broker 尚未 Active，用户点击/重新点击 `管理员模式` **不得立即 UAC**，必须先显示固定安全确认：
+
+```text
+启用管理员权限后，错误或恶意操作可能导致：
+
+* 删除或覆盖重要文件
+* 修改系统关键配置
+* 软件或系统无法正常启动
+* 数据永久丢失
+* 安全机制被绕过或关闭
+* 凭据、密钥等敏感信息泄露
+* 恶意程序获得更高权限
+* 系统被破坏，严重时可能需要重装 Windows
+
+仅在你明确理解操作后果时授权。
+
+[取消] [确认9]
+```
+
+确认按钮的**整个按钮**必须为红色。弹窗首次可见时红色按钮标签为 `确认9`，随后 `确认8`、`确认7`、`确认6`、`确认5`、`确认4`、`确认3`、`确认2`、`确认1`；完整 9000ms 内按钮始终 disabled，不能通过鼠标、键盘、重复/合成 click、rerender、focus 变化或 stale frontend state 提前授权。达到完整 9000ms 后，同一红色按钮才变为 enabled，标签精确为 `确认`。只有用户点击 enabled `确认` 后，backend 才允许进入既有安全校验并随后发起 Windows UAC / `runas`，且只提升 Privileged Broker。
+
+取消、Esc、关闭/dismiss 都等同取消，不得修改 PermissionMode、不得启动 Broker、不得触发 UAC；每次重新打开弹窗都重新计满 9 秒，不提供“记住/跳过/不再提示”。计时授权资格必须由 backend/等价可信单调计时约束，React 计时器仅用于显示。Broker 已 Active 时仅因重新选择当前已激活管理员模式不得重复 UAC。后台 `--background` 恢复管理员偏好不得显示该弹窗、不得自动 UAC。禁止额外“启用管理员权限”按钮。High/Critical 系统操作的逐操作确认属于另一层安全 Gate，不因本模式警告被自动满足。
+
+第 3 屏必须提供明确 `返回` 到第 2 屏。
+
+三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白。`min-height >= 80px` 只能作为最低防回退，不能构成 PASS；任何包含“标题 + 说明”两行文本块的按钮，在固定 780×620 实机中真实 computed/rendered 高度必须至少为普通单行控件实际高度的 2 倍，并证明标题与说明两个 line box 均完整可见、无裁切/挤压。此项仍需人工视觉 Gate。
 
 ### 第 4 屏
 
@@ -339,12 +363,15 @@ Tunnel start → ready
 
 除第 1 屏外，第 2/3/4/5 屏都必须有明确 `返回`。任何保存、启动或配置失败都不能把用户锁死，最终启动检查页必须能返回第 4 屏重新配置。
 
-失败时只显示一句最关键错误和一个必要动作。`无法准备管理员权限`、一次性保存/选择失败等操作反馈默认仅显示 3 秒并自动清除；持续存在的 runtime/reconnect 故障继续由 typed 状态或故障窗口表达，不适用临时提示自动清除。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。普通产品 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；管理员模式是黄色/琥珀逻辑色例外。所有提示遵循最小必要原则。
+失败时只显示一句最关键错误和一个必要动作。`无法准备管理员权限`、一次性保存/选择失败等操作反馈默认仅显示 3 秒并自动清除；持续存在的 runtime/reconnect 故障继续由 typed 状态或故障窗口表达，不适用临时提示自动清除。所有按钮共享一致、可辨识的视觉规则；白色或近白背景上不得出现难以识别的纯白/近白按钮。普通产品 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；`管理员模式` 使用橙色 `#ff9500` 警告语义。所有提示遵循最小必要原则。
 
 主窗口固定为 780×620。minimum inner size 与 maximum inner size 均固定为 780×620，`resizable=false`、`maximizable=false`。原生 Windows 窗口 decorations 必须关闭；LocalBridge 只允许一层自定义风格化窗口 chrome，并且外框必须从 client area 的 `(0,0)` 开始、以 100% 宽高贴合整个窗口，不能在原生边框内部再绘制一个内缩“假窗口”。自定义 chrome 必须提供窗口拖拽区、最小化和关闭；不提供最大化。Dashboard 与 onboarding 必须在该固定 client area 内完整可操作。
+
 ## UI / Backend 分离
 
 WebView/React 只负责展示 backend typed projection 与发送 typed user intent。runtime 启停、readiness、retry/recovery、workspace switch、credential 写入、UAC 与 CurrentTask truth 均由 Rust/backend 状态机负责；可能耗时的操作必须运行在独立 worker/async 执行上下文，禁止占用 UI/WebView 事件线程。正常 configured 前台启动严格采用 UI-first 顺序：先创建/显示窗口并达到可交互 milestone，前端仅发送一次 typed `UI-ready` intent，之后 backend 才异步启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel，并实时投影 Starting/Ready/Fault。UI-ready 之前不得提前启动这些服务；重复 ready 必须 backend 幂等且不能生成第二 runtime owner。`--background` 不等待 UI-ready；唤醒已经健康运行的后台实例不得仅为重放 UI-ready 而重启服务。
+
+管理员安全确认同样遵循 UI/backend 分离：frontend 可以显示 `确认9…确认1`，但不可仅凭本地 interval/setTimeout 认定已经满足授权等待期。backend 必须为每次 fresh open 建立 challenge/not-before 或等价可信状态，使用单调 elapsed time 判定 `>=9000ms` 后才接受 confirm intent；提前、过期、错误 challenge 或 stale UI confirmation 必须 fail-closed。
 
 必须有故意延迟 backend 工作时 UI 仍可响应并持续读取 typed projection 的回归 Gate。
 
@@ -368,6 +395,8 @@ Runtime API Key    已保存               清除    更换
 编辑模式       完整模式       管理员模式
                             打开欢迎页    完成
 ```
+
+设置页 `管理员模式` 与 onboarding 第 3 屏使用完全相同的橙色 `#ff9500` 入口和固定 9 秒红色确认安全流程；不得另做直接 UAC 快捷路径。
 
 `Runtime API Key` 是冻结英文专有字段名，不翻译为“运行密钥”；完整值永不回显。默认连接区只显示持久化摘要和动作。点“更换”后才进入编辑态，Tunnel ID 与 Runtime API Key 独立修改；只改其中一个时另一个不得要求重输或被覆盖。Runtime API Key 输入不得用已保存 secret 预填，只显示密码输入控件与提示 `Runtime API Key 仅保存在 Windows 安全凭据中。`。Tunnel ID 与 Runtime API Key 两个固定态“更换”必须位于同一最右动作列，在固定 780×620 下几何差不超过 1 CSS px。Runtime API Key 已保存时，在其“更换”紧邻左侧显示 `清除`；`清除` 真实删除 Windows 安全凭据、不得读取或回显 secret，并在 active/connecting 时复用连接配置变化的受控 lifecycle，随后投影为 `未保存`。
 
@@ -405,10 +434,10 @@ D:\project\LocalBridge
 ```text
 编辑模式   → reviewed read/write；无 process exec
 完整模式   → + 当前 Windows 用户权限的普通命令
-管理员模式 → + 独立 Privileged Broker
+管理员模式 → + 用户完成固定安全确认与 UAC 后激活的独立 Privileged Broker
 ```
 
-管理员模式无 TTL。
+管理员模式无 TTL；9 秒只属于**每次进入管理员授权流程前的安全确认等待期**，不是管理员模式失效时长。
 
 管理员实际状态独立于用户偏好：
 
@@ -446,7 +475,6 @@ D:\project\LocalBridge
 不增加独立“项目管理中心”。
 
 Windows `GetFinalPathNameByHandleW` 返回的 `\\?\D:\project` verbatim/resolved 路径只用于 WorkspaceValidator 的 filesystem identity、去重、reparse 防护和授权身份比较；它不是 runtime/tool 的执行路径。进入 MCP、Broker、sidecar/process launch、command/tool invocation 前，必须得到与同一 freshly validated filesystem identity 绑定的普通 Win32 execution path，例如 `D:\project`。所有实际工具路径参数及 `cwd/workdir/current_dir` 禁止带 `\\?\`；尤其不得把 verbatim 工作目录传给命令执行工具，因为该形式可导致实际命令失败。Dashboard/设置/诊断/onboarding 也只显示普通路径。execution/display 转换都只是投影，不得替代 identity 校验、扩大根目录或授予权限；identity 不一致时 fail-closed。
-
 
 ## 品牌图标
 

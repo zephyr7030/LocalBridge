@@ -54,16 +54,15 @@
 | A50 | PEP unknown upstream tool | fail-closed |
 | A51 | manual app launch while background instance exists | 唤醒旧实例，不启动第二套 runtime |
 | A52 | diagnostics auto-repair | 不修改 credential/permission/workspace policy |
-
 | A53 | LocalBridge normal launch | 主进程不是 Administrator |
 | A54 | Full mode | MCP/Tunnel/commands 使用当前普通用户 token |
-| A55 | Elevated enable | 只有 Broker 触发 UAC |
+| A55 | Elevated enable | 只有 Broker 在完成用户安全确认后触发 UAC |
 | A56 | Elevated active | 主 LocalBridge/Tunnel/MCP 不因 Broker 提权 |
-| A57 | Elevated | 无 15/30/60 分钟或 expires_at |
+| A57 | Elevated | 无 15/30/60 分钟或 expires_at；schema26 的 9 秒只是每次激活前的确认等待期 |
 | A58 | Elevated disable | privileged call gate 立即关闭，Broker 停止 |
-| A59 | Broker inactive + privileged call | typed `ElevationRequired` |
-| A60 | reboot/background startup + Elevated preference | 不自动弹 UAC |
-| A61 | user opens UI after reboot | 可显式重新激活 Broker |
+| A59 | Broker inactive + privileged call | typed `ElevationRequired` / 用户授权所需状态 |
+| A60 | reboot/background startup + Elevated preference | 不显示管理员安全确认，不自动弹 UAC |
+| A61 | user opens UI after reboot | 可显式重新进入完整管理员安全确认流程后激活 Broker |
 | A62 | low-integrity/unauthorized local IPC | Broker 拒绝 |
 | A63 | stale broker nonce/generation | 拒绝 |
 | A64 | replayed privileged request | 拒绝 |
@@ -73,7 +72,6 @@
 | A68 | Full control-plane | 拒绝 |
 | A69 | Elevated control-plane | 仍拒绝 |
 | A70 | Docker/WSL/Podman capability | 标记 `privileged-external-runtime` 并进入 review |
-
 | A71 | clean Windows 11 x64 无 Python | LocalBridge 正常运行 |
 | A72 | 系统 PATH 含其他 Python | LocalBridge 仍只使用 bundled Python |
 | A73 | bundled Python 缺失 | typed RuntimeMissing，不 fallback |
@@ -92,7 +90,6 @@
 | A86 | elevated_exec | timeout/cancellation/output limit 生效 |
 | A87 | installer >100 MiB | 必须生成体积归因 |
 | A88 | installed >250 MiB | 必须生成体积归因 |
-
 | A89 | Dashboard 任意 PermissionMode | 不显示“权限模式”行，不显示编辑/完整/管理员三档选择控件；只读管理员权限状态仍可见 |
 | A90 | Dashboard 权限交互 | 不能修改 PermissionMode，不能通过权限模式控件触发 UAC；权限编辑允许设置页“权限”或用户显式重新打开的 onboarding 第3屏 |
 | A91 | Dashboard + PrivilegeState::Requested | 只读显示“管理员权限：等待授权”，无模式选择器、无独立启用按钮 |
@@ -101,7 +98,6 @@
 | A94 | Broker Active→Faulted | Dashboard 立即显示“故障” |
 | A95 | Dashboard privilege status | 由 PrivilegeState 驱动，不由 PermissionMode 猜测 |
 | A96 | Dashboard | 不显示 PID/nonce/SID/IPC 等内部字段 |
-
 | A97 | 主控界面 | 不出现 Dashboard/Settings/Diagnostics 等普通英文 |
 | A98 | 设置/首次引导权限模式 | 仅设置页与 onboarding 第3屏显示“编辑模式 / 完整模式 / 管理员模式”；主控界面不得显示 |
 | A99 | 状态 | 不直接显示 Ready/Active/Faulted/Requested 等内部英文 |
@@ -109,7 +105,6 @@
 | A101 | 错误提示 | 中文、简短、可行动，不暴露内部 fault enum |
 | A102 | React UI | 不直接渲染 domain enum 字符串 |
 | A103 | 主控界面 | 不做中英双语标签堆叠 |
-
 | A104 | architecture verifier | 可检测已知违规 fixture |
 | A105 | frontend/runtime boundary | 前端无法拥有 sidecar 生命周期 |
 | A106 | system Python fallback | 架构检查阻止 |
@@ -125,7 +120,6 @@
 | A116 | stable release | artifact 可追溯到 exact source/runtime |
 | A117 | runtime adapter | domain 不直接依赖上游私有结构 |
 | A118 | release rollback | migration/install failure 不破坏旧配置 |
-
 | A119 | 主控界面无活动任务 | 第一行固定显示“等待命令”，不得在该行追加相对时间；无活动历史 |
 | A120 | LocalBridge 稳定读取类 public action/tool | 类型显示“读取文件”，任务显示安全路径摘要；不得依赖 raw upstream tool id 作为 UI/安全身份 |
 | A121 | LocalBridge 稳定搜索类 public action/tool | 类型显示“搜索代码”，显示安全搜索摘要；不得直接暴露 upstream private tool name |
@@ -137,7 +131,6 @@
 | A127 | raw tool id | 不直接显示 MCP tool identifier |
 | A128 | secret-bearing args | 任务摘要不泄漏密钥/token/nonce |
 | A129 | model prose only | 未发生 MCP/Broker 调用时不得伪造当前任务 |
-
 | A130 | 运行测试中 | 单行显示“● 运行测试 cargo test” |
 | A131 | 当前执行状态 | 无“当前任务/类型/任务/状态”标题 |
 | A132 | Running | 不额外显示“执行中”文字 |
@@ -145,7 +138,6 @@
 | A134 | reduced-motion | 活动点静态，不执行脉冲 |
 | A135 | 动效 | 不推动布局、不造成文字位移 |
 | A136 | Idle | 第一行必须显示低存在感“○ 等待命令”，不得显示“空闲”、隐藏整行或在第一行追加年龄；上一工具年龄属于第二行 |
-
 | A137 | 保存 Runtime API Key | settings/JSON/TOML 中不存在明文 |
 | A138 | 保存 Runtime API Key | Windows secure credential backend 可恢复 |
 | A139 | 启动安全隧道 | process command line 不包含 Runtime API Key |
@@ -162,7 +154,6 @@
 | A150 | NoActiveWorkspace | 可以选择新项目，runtime 之前保持停止 |
 | A151 | MCP tool call | 不能新增/选择/移除项目 |
 | A152 | 当前项目启动时不存在 | 不静默切换其他项目 |
-
 | A153 | recoverable disconnect | 自动重连，无 toast/banner/重试计数 UI |
 | A154 | retry attempt 1..5 | backoff 为 1/2/5/10/30s |
 | A155 | reconnect succeeds before 5 | Ready，用户无额外成功提示 |
@@ -181,7 +172,6 @@
 | A168 | group review FAIL | 下一组仍 BLOCKED，按 reopen_from_pr 回滚执行 |
 | A169 | review governance write | 只能改 PR_INDEX/PROJECT_STATE 状态字段 |
 | A170 | execution | 组内仍严格按 LB 编号顺序 |
-
 | A171 | 首次启动 | 总屏数严格为 5，不存在第 6 屏；顺序为欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → 启动检查 |
 | A172 | 1/5 | 标题为“简单设置 即可开始” |
 | A173 | 1/5 | 说明为“LocalBridge是链接ChatGPT与本地代码的工具” |
@@ -189,7 +179,7 @@
 | A175 | 2/5 | 字段为 `Tunnel ID` / `Runtime API Key`，并有明确“返回” |
 | A176 | 2/5 | 密钥下方仅一行安全保存说明；保存失败时仍可返回，不得锁死 |
 | A177 | 3/5 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器，并有明确“返回” |
-| A178 | 3/5 权限模式 | `min-height >= 80px` 仅作最低保护；含标题+说明的两行按钮在 780×620 实机真实 rendered 高度至少为普通单行控件 2 倍，两个 line box 均完整可见；必须人工视觉验收，不能凭 CSS marker 自动 PASS；普通 selected 蓝色 `#0071e3`、管理员黄色/琥珀 |
+| A178 | 3/5 权限模式 | `min-height >= 80px` 仅作最低保护；含标题+说明的两行按钮在 780×620 实机真实 rendered 高度至少为普通单行控件 2 倍，两个 line box 均完整可见；必须人工视觉验收，不能凭 CSS marker 自动 PASS；普通 selected 蓝色 `#0071e3`、管理员模式入口橙色 `#ff9500` |
 | A179 | 4/5 ChatGPT 插件设置 | 标题为“创建自定义插件”，提示为“在插件设置页面最底端，打开‘开发者模式’”；`打开 ChatGPT插件设置` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Plugins` |
 | A180 | 4/5 信息与复制 | 插件设置按钮下显示“打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件”；信息严格只有“名称 / Tunnel ID”两行，禁止“本地服务”；Tunnel ID 来自当前持久化值；两行独立复制成功绿色 `已复制` 精确 3 秒且不位移 |
 | A181 | 4/5 插件管理 | `打开插件管理页` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView/任意前端 URL；底部有“返回 / 继续” |
@@ -199,10 +189,9 @@
 | A185 | 5/5 全部 Ready | 显示“配置完成，在插件中选择刚刚添加的Local Bridge试试吧”；“确定”启用但不自动跳转，点击后标记 onboarding_complete 并进入主界面 |
 | A186 | onboarding 返回路径 | 除第 1 屏外，第 2/3/4/5 屏均有明确“返回”；任何保存、启动、配置失败都不能锁死用户 |
 | A187 | G3 普通强调色 | primary、普通 selected、主要交互统一使用原方案蓝色 `#0071e3`；黑色不得作为普通产品 accent |
-| A188 | G3 管理员逻辑色 | onboarding 与设置页管理员模式统一使用黄色/琥珀色，不得被普通蓝色 selected 规则覆盖；Dashboard 无管理员模式选择控件 |
+| A188 | G3 管理员逻辑色 | onboarding 与设置页所有管理员模式入口统一使用橙色 `#ff9500` 警告色，不得被普通蓝色 selected 规则覆盖；Dashboard 无管理员模式选择控件；Starting 状态点和 Dashboard 重启按钮的黄色/琥珀语义不变 |
 | A189 | Dashboard 服务状态点 | 主要服务状态旁显示状态圆点，与 onboarding 使用同一 typed 状态来源和 Ready/Starting/Fault/Unknown 颜色语义；不得维护冲突状态 |
 | A190 | G3 UI 按钮与提示 | 主/次/ghost 一致且可辨识，白色表面无难识别白色按钮；自解释操作只保留最小必要提示，复制/状态反馈不得造成布局位移 |
-
 | A191 | 品牌资源 | PNG 为 1024×1024 RGBA |
 | A192 | Windows 图标 | ICO 包含 16/24/32/48/64/128/256 px |
 | A193 | 应用/安装包 | 使用冻结的 LocalBridge 图标 |
@@ -215,9 +204,9 @@
 | A200 | 窗口最大化 | `maximizable=false`；最大化入口不可用，Dashboard/onboarding 在固定 780×620 client area 内完整可操作 |
 | A201 | 窗口外框 | native `decorations=false`；仅存在一层 edge-to-edge 自定义 chrome，不出现原生标题栏/边框 + 自定义边框的双框 |
 | A202 | 自定义标题栏 | 可拖拽窗口；提供最小化与关闭；不提供最大化；chrome 从 client `(0,0)` 覆盖 100% 宽高 |
-| A203 | 首次引导整页布局 | onboarding 直接占用 custom chrome 内容区，不存在“大面积空白画布 + 居中 floating card/modal/dialog”整体向导外壳；页面级 padding 与局部分组允许 |
+| A203 | 首次引导整页布局 | onboarding 直接占用 custom chrome 内容区，不存在“大面积空白画布 + 居中 floating card/modal/dialog”整体向导外壳；页面级 padding 与局部分组允许；schema26 管理员安全确认只作为局部 consent dialog 例外 |
 | A204 | 3/5 权限模式按钮视觉 | 固定 780×620 下真实 computed/rendered 高度证明：含标题+说明的两行按钮至少为单行控件 2 倍且两个 line box 完整；`min-height >= 80px` 只作最低保护；该视觉项已由用户于 2026-08-14 PASS，后续若 Screen3 布局变化必须重新人工验收 |
-| A205 | 管理员模式选择 | 仅设置页或 onboarding 第3屏可见；点击/重新点击“管理员模式”时若 Broker 未 Active，立即发起 Windows UAC；不存在单独“启用管理员权限”按钮；后台偏好恢复不自动 UAC |
+| A205 | 管理员模式选择 | 仅设置页或 onboarding 第3屏可见；Broker 未 Active 时点击/重新点击管理员模式先进入 schema26 固定安全警告，禁止直接 UAC；只有完整 9000ms 后 enabled 红色 `确认` 被用户点击，backend 安全校验通过后才可请求 UAC；无单独“启用管理员权限”按钮；后台偏好恢复无 warning/UAC |
 | A206 | 离开管理员模式 | 在设置页或 onboarding 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker；Dashboard 无模式切换入口 |
 | A207 | 前台启动顺序 | onboarding 已完成且配置有效时，先创建/显示并达到可交互 UI；前端只发送一次 typed `UI-ready`，backend 收到后才异步启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作；UI-ready 前不得提前启动服务 |
 | A208 | 前台慢启动 / ready 幂等 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新；重复 UI-ready 不产生第二 runtime owner；`--background` 不等待 UI-ready，唤醒已有健康后台 runtime 不仅因 ready gate 重启 |
@@ -269,3 +258,12 @@
 | A254 | Shell selector 安全 | public shell selector 仅 `auto / powershell / pwsh / windows_powershell / cmd`；禁止根据 command text 猜 shell、禁止 MCP 提供任意 shell executable path、禁止 LocalBridge 自动安装/更新 shell |
 | A255 | direct process / shell 分离 | DirectProcessExecutor 与 ShellExecutor 使用不同 structured spec/执行边界；直接或 privileged process execution 不得退化成 shell string canonical representation |
 | A256 | stable adapter / execution envelope | upstream result/error 在 adapter 边界归一化为稳定 LocalBridge contract；CurrentTask/执行 envelope 使用稳定 LocalBridge public tool/capability identity + secret-redacted safe summary，禁止 raw upstream tool id/private schema 泄漏 |
+| A257 | schema26 管理员警告固定文案 | Intro 精确为 `启用管理员权限后，错误或恶意操作可能导致：`；八条 bullet 顺序/文字严格匹配机器合同；footer 精确为 `仅在你明确理解操作后果时授权。`；不得增删、改写或用旧三条后果版本 |
+| A258 | schema26 确认按钮视觉 | 确认按钮整个按钮为红色，不是仅倒计时数字红色；管理员模式入口本身为橙色 `#ff9500`，二者语义不得混淆 |
+| A259 | schema26 9 秒倒计时 | fresh dialog 初始 `确认9`，依次显示 `确认8…确认1`；完整 9000ms 内红色按钮始终 disabled；达到 trustworthy not-before 后同一红色按钮才 enabled 且标签精确为 `确认` |
+| A260 | schema26 倒计时不可绕过 | pointer、keyboard、synthetic/repeated click、rerender、focus change、stale frontend state、旧 challenge replay 均不能在 9000ms 前获得授权；frontend interval 不是授权真相，backend/等价可信 monotonic eligibility fail-closed |
+| A261 | schema26 取消/重开 | `取消`、Esc、close/dismiss 无 PermissionMode/Broker/UAC 副作用；每次 fresh open 都重新开始完整 9 秒；无 remember/skip/don't-show-again bypass |
+| A262 | schema26 UAC 顺序 | Broker 未 Active 时，UAC/runas 与 PermissionMode/Broker 激活副作用只能发生在用户点击 enabled `确认` 之后，并且仍需通过既有 backend 安全校验；UAC cancel/failure 后 Broker 不得 Active |
+| A263 | schema26 background / active broker | background preference restore 不显示 warning、不 UAC；Broker 已 Active 时仅因重新选择当前管理员模式不得重复 UAC |
+| A264 | schema26 control-plane | AI/MCP 不能批准 warning、UAC、PermissionMode 或 Broker activation；模式警告不等价于 High/Critical 单操作确认，后者仍独立要求 |
+| A265 | schema26 onboarding shell | 管理员 warning 可以作为局部安全 consent dialog，但不能被用来证明或允许 onboarding 重新出现“大面积空白 + 居中 card/modal/dialog”整体外壳 |

@@ -1,5 +1,5 @@
 {
-  "schema_version": 10,
+  "schema_version": 11,
   "review_date": "2026-08-10",
   "baseline": "v15-FINAL",
   "status": "REWORK_REQUIRED",
@@ -97,15 +97,34 @@
     "ico_sha256": "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78"
   },
   "admin_ui": {
-    "visible_admin_mode_selection_requests_uac": true,
+    "visible_admin_mode_selection_opens_warning_gate": true,
     "separate_enable_admin_button": false,
+    "admin_mode_control_accent": "#ff9500",
+    "warning_before_uac": true,
+    "warning_countdown_ms": 9000,
+    "warning_confirmation_button_color": "red",
+    "warning_confirmation_button_entirely_red": true,
+    "warning_countdown_labels": [
+      "确认9",
+      "确认8",
+      "确认7",
+      "确认6",
+      "确认5",
+      "确认4",
+      "确认3",
+      "确认2",
+      "确认1"
+    ],
+    "warning_confirm_ready_label": "确认",
     "background_auto_uac": false,
+    "background_warning": false,
     "selection_surfaces": [
       "onboarding_screen_3",
       "settings"
     ],
     "dashboard_permission_controls": false,
-    "dashboard_admin_privilege_status_read_only": true
+    "dashboard_admin_privilege_status_read_only": true,
+    "ai_mcp_can_approve_warning": false
   },
   "settings_ui": {
     "sections": [

@@ -1,4 +1,3 @@
-
 # 08 — Final Predevelopment Review
 
 Review date: 2026-08-10  
@@ -39,21 +38,25 @@ LB-000 仍实证决定：
 - reparse/junction；
 - real Tunnel compatibility。
 
-开发入口：
+开发入口（历史 predevelopment snapshot）：
 
 ```text
 current_group = G0
 current_pr    = LB-000
 ```
 
-G0 审查 PASS 前 G1 不得开始。
+实时执行入口不得从本文件上述历史快照读取，只能读取 `PR_INDEX.json` + `PROJECT_STATE.json`。当前 schema25/schema26 返工入口保持 `G2 / LB-006`。
 
-Current UI freeze (explicit user contract amendment on 2026-08-13; supersedes all earlier onboarding/UI freezes):
+## Current UI freeze
+
+以下为当前有效 UI 合同；其中 schema26 管理员模式安全确认明确覆盖任何历史 amber/yellow admin-mode 或 direct-UAC 语义：
 
 - onboarding = exactly 5 screens: 欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → 启动检查; there is no screen 6 and the former `Local Bridge 使用确认` page is removed;
 - 1/5 = `简单设置 即可开始`; screen 1 is the only screen without a back action;
 - OpenAI = screen 2 with `Tunnel ID` and `Runtime API Key` labels and an explicit back action; persisted Tunnel ID is prefilled; a saved key displays exact `已安全保存至windows安全凭据`, focus uses only same-length `*` generated from backend length metadata, plaintext is never returned, and the only helper sentence is `Runtime API Key 仅保存在 Windows 安全凭据中。`;
-- workspace + permission = screen 3 and uses the native Windows folder picker as the primary new-project interaction; any title+description two-line permission button must have actual rendered height at least 2× the ordinary single-line control at 780×620, with both line boxes complete; static CSS markers do not constitute PASS and human 780×620 visual acceptance remains required; ordinary selected state uses blue `#0071e3`, administrator mode uses amber/yellow in onboarding and Settings; screen 3 has an explicit back action;
+- workspace + permission = screen 3 and uses the native Windows folder picker as the primary new-project interaction; any title+description two-line permission button must have actual rendered height at least 2× the ordinary single-line control at 780×620, with both line boxes complete; static CSS markers do not constitute PASS and human 780×620 visual acceptance remains required; ordinary selected state uses blue `#0071e3`, all administrator-mode controls use orange `#ff9500` warning semantics in onboarding and Settings; screen 3 has an explicit back action;
+- when Broker is not Active, visible administrator-mode selection/reselection opens the fixed schema26 safety warning before any UAC/runas or mode/Broker activation side effect; the whole confirmation button is red, disabled from `确认9` through `确认1` for a full trustworthy/monotonic 9000ms, then remains red and becomes enabled with exact label `确认`; only enabled confirmation may proceed to backend security validation and then Windows UAC;
+- cancel/Escape/close/dismiss causes no PermissionMode/Broker/UAC side effect; each fresh warning opens with a fresh 9000ms countdown; no remember/skip bypass; background preference restore shows no warning/UAC; Broker-Active reselection causes no duplicate UAC; High/Critical per-operation confirmation remains separate;
 - after screen 3 saves project and permission, it starts selected project/runtime/MCP/OpenAI Tunnel and reaches real all-ready before screen 4; the unique runtime startup edge must not be deferred until screen 5;
 - screen 4 = `创建自定义插件`; exact developer-mode hint; `打开 ChatGPT插件设置` is in the left-side action flow and is an argument-free frontend action backed by a Rust fixed allowlist + system browser for `https://chatgpt.com/plugins#settings/Plugins`; directly beneath it display `打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件`;
 - screen 4 has exactly two information rows `名称 = Local Bridge` / `Tunnel ID = current persisted saved value`, no `本地服务`; each row has independent stable green `已复制` feedback for exactly 3 seconds with no layout shift;
@@ -61,16 +64,38 @@ Current UI freeze (explicit user contract amendment on 2026-08-13; supersedes al
 - screen 5 is `启动检查`, containing only 本地运行环境 / 编码服务 / OpenAI Tunnel; status dots consume the same typed status source as Dashboard and map Ready=green, Starting=amber/yellow, Fault=red, Unknown=gray;
 - screen 5 confirm is disabled and completion hint hidden until all three checks are green; completion hint is exactly `配置完成，在插件中选择刚刚添加的Local Bridge试试吧`; no auto-advance; screen 5 has an explicit back action to screen 4;
 - screens 2/3/4/5 all have explicit back paths; save/start/configuration failures must never trap the user;
-- ordinary primary/selected/product-accent UI uses original blue `#0071e3`; black is not the ordinary product accent; administrator mode is the amber/yellow logical-color exception;
+- ordinary primary/selected/product-accent UI uses original blue `#0071e3`; black is not the ordinary product accent; administrator mode is the orange `#ff9500` warning exception; Starting status dots and Dashboard restart-service retain their separate amber/yellow semantic;
 - Dashboard primary service status dots use the same typed source and Ready/Starting/Fault/Unknown color semantics as onboarding; independent conflicting state is forbidden;
 - main window is fixed at 780×620; minimum and maximum inner size are both 780×620;
 - `resizable=false` and `maximizable=false`; ordinary user interaction cannot change the main-window size;
 - native Windows decorations are disabled; exactly one custom edge-to-edge chrome fills the client area and provides drag/minimize/close without maximize or a double frame;
 - Dashboard/onboarding must remain complete and operable inside that fixed 780×620 client area; no resize/maximize responsive E2E is required;
-- onboarding itself is a full-page single-content layout inside the custom chrome content area; a centered floating wizard card/modal/dialog surrounded by a large empty canvas is forbidden;
+- onboarding itself is a full-page single-content layout inside the custom chrome content area; a centered floating wizard card/modal/dialog surrounded by a large empty canvas is forbidden; the administrator warning is only a narrowly-scoped safety-consent dialog and does not permit the wizard shell itself to regress;
 - user clicks screen-5 confirm to enter main UI;
 - buttons use one coherent visible affordance system; white-on-white ambiguous controls and layout-shifting copy feedback are forbidden.
 
+## Schema26 fixed administrator warning
+
+The visible warning copy is exact and must not be expanded/reworded by implementation agents:
+
+```text
+启用管理员权限后，错误或恶意操作可能导致：
+
+* 删除或覆盖重要文件
+* 修改系统关键配置
+* 软件或系统无法正常启动
+* 数据永久丢失
+* 安全机制被绕过或关闭
+* 凭据、密钥等敏感信息泄露
+* 恶意程序获得更高权限
+* 系统被破坏，严重时可能需要重装 Windows
+
+仅在你明确理解操作后果时授权。
+
+[取消] [确认9]
+```
+
+The entire confirmation button is red. It remains disabled for the complete 9000ms interval while labels progress `确认9` → … → `确认1`; after the not-before condition is satisfied it remains red, becomes enabled, and displays exactly `确认`. Frontend timers are presentation-only; backend/equivalent trustworthy monotonic eligibility must reject early/stale/replayed confirmation. AI/MCP cannot approve the dialog, UAC, PermissionMode or Broker activation.
 
 Frozen brand icon:
 
@@ -79,15 +104,15 @@ Frozen brand icon:
 - Windows app, installer and tray use this asset;
 - no icon-library dependency or placeholder replacement is permitted.
 
-## G3 human-review amendment — generation 2 (2026-08-13)
+## G3 human-review amendment — generation 2 (historical provenance, superseded where schema26 conflicts)
 
-This section supersedes conflicting older G3 UI/lifecycle wording while preserving the already-correct five-screen and Screen3→4 readiness contract above.
+This section preserves prior G3 provenance but schema26 above supersedes any conflicting administrator-mode color/direct-UAC wording.
 
-- effective rework entry is `LB-014`; G4/LB-018 remains blocked until LB-014→LB-017 are re-executed, G3 adversarial generation 6 passes, and a fresh G3→G4 human Gate passes;
+- effective rework entry is `LB-014`; G4/LB-018 remains blocked until required re-execution/review under current authority is complete;
 - `关闭窗口后继续运行` is a persisted setting: enabled = close hides and keeps runtime/tray, disabled = orderly runtime/Broker cleanup then exit;
 - configured normal foreground launch is UI-first: create/show an interactive UI, emit one typed `UI-ready`, then backend asynchronously starts any stopped selected project/runtime/MCP/OpenAI Tunnel. Service startup before UI-ready is forbidden; duplicate ready is backend-idempotent/single-owner; `--background` does not wait for UI-ready and waking a healthy background runtime does not restart it merely for this gate; `开机启动` controls Windows login launch only;
 - frontend/WebView is presentation-only: typed projection + typed user intent. Runtime/readiness/retry/workspace/UAC/current-task state machines belong to backend workers/async tasks; intentionally slow backend operations must not make the UI unresponsive;
-- visible selection/reselection of `管理员模式` in Settings or onboarding screen 3 itself is the explicit UAC action when Broker is not Active; the separate `启用管理员权限` button is forbidden; selecting Edit/Full closes the privileged gate/Broker;
+- administrator-mode selection is no longer a direct-UAC action under current authority: schema26 warning + full red 9-second confirmation gate applies first; selecting Edit/Full still closes the privileged gate/Broker;
 - Dashboard/home contains no `权限模式` row and no Edit/Full/Admin selection controls, cannot change PermissionMode or trigger mode UAC, and retains only read-only administrator privilege runtime status from `PrivilegeState`; permission editing is allowed in Settings and an explicitly reopened onboarding screen 3;
 - production MCP/Broker execution must wake Dashboard through backend push/event or equivalent rather than relying on periodic polling for short calls; every real tool call receives at least 500ms visible presentation without delaying its real response. The first row is current execution/`等待命令`; a second `上次执行工具：...` row retains only one secret-redacted last-tool label/summary with relative age aligned to the far right;
 - Dashboard add-project uses the native Windows folder picker, not a raw path-entry primary flow;
@@ -99,10 +124,10 @@ This section supersedes conflicting older G3 UI/lifecycle wording while preservi
 
 ## Schema25 — LocalBridge Agent Runtime facade ratification（2026-08-14）
 
-`docs/LOCALBRIDGE_TOOL_WRAPPER_AND_SHELL_RESOLVER.md` 已作为设计输入完成独立审核；其合理方向被消化进 schema25，但原文不是逐字权威合同。冻结结论：LocalBridge 自己拥有版本化 public Tool Registry/API；coding-tools-mcp 退为可替换内部 workspace runtime；upstream tools/list/schema/name/error/new tool 不得自动穿透；v1 非特权 Registry 固定八个 core，实际 `tools/list` 仍按当前 policy 返回允许子集，`elevated_exec` 保留为 Broker-governed conditional privileged extension；runtime adapter 必须做 mandatory capability negotiation 并归一化 result/error；PEP 以稳定 LocalBridge capability/action 与 workflow transitive capability 为依据。
+`docs/LOCALBRIDGE_TOOL_WRAPPER_AND_SHELL_RESOLVER.md` is the retained final Agent Runtime/System Maintenance design guidance. LocalBridge owns its versioned public Tool Registry/API; coding-tools-mcp is a replaceable internal workspace runtime; upstream tools/list/schema/name/error/new tool cannot automatically pass through; the currently frozen v1 non-privileged Registry has eight core tools, actual `tools/list` remains policy-filtered, and `elevated_exec` remains a Broker-governed conditional privileged extension; runtime adapter must perform mandatory capability negotiation and normalize result/error; PEP uses stable LocalBridge capability/action and workflow transitive capability.
 
-ShellResolver 只接受逻辑 selector `auto/powershell/pwsh/windows_powershell/cmd`。`auto` 仅在已经建立信任的候选中按 semantic version 选择最高兼容 PowerShell Core，再 Windows PowerShell 5.1，再 `cmd.exe`。PATH 不是信任来源，任何候选在执行或版本 probe 前必须先通过可信安装位置或显式注册 executable identity 的重新验证。禁止 command-text guessing、任意 shell executable、自动安装/更新；DirectProcessExecutor 与 ShellExecutor 保持结构化分离。
+ShellResolver accepts only logical selector `auto/powershell/pwsh/windows_powershell/cmd`. `auto` only considers trusted candidates and selects highest compatible PowerShell Core by semantic version, then Windows PowerShell 5.1, then `cmd.exe`. PATH is not authority; candidate identity/trusted installation must be validated before version probe or execution. Command-text guessing, arbitrary shell executable and automatic installation/update are forbidden; DirectProcessExecutor and ShellExecutor remain structurally separate.
 
-未冻结为 v0.1 必交付：WSL/container/remote shell、custom shell registry、environment-manager abstraction、原设计文档的精确内部目录布局。
+Unfrozen v0.1 non-goals remain WSL/container/remote shell, custom shell registry, environment-manager abstraction and exact internal directory layout. The final design guidance also defines the longer-term System Maintenance domain (`system_inspect` / `system_manage`, structured privileged operations and user authorization), but those future capabilities do not override current PR sequencing or claim implementation before their contracts are reached.
 
-该基础架构修订使执行入口回到 `G2 / LB-006`：LB-006→LB-012 必须严格重新验收，随后执行 fresh G2 adversarial generation 9；历史 G2 generation 8 与 G3 generation 6 仅保留 provenance，不能继续作为当前解锁依据。G3 必须在新 G2 基线通过后重新执行，G3→G4 human Gate 当前不可执行，G4/LB-018 保持 BLOCKED。
+The Agent Runtime foundation currently reopens execution at `G2 / LB-006`: LB-006→LB-012 must be strictly revalidated, followed by fresh G2 adversarial generation 9; historical G2 generation 8 and G3 generation 6 are provenance only. G3 must be re-executed on the new G2 baseline, and G3→G4 human Gate is not currently actionable. Schema26 administrator safety confirmation is queued for LB-015/LB-016 when strict sequencing reaches them; it does not move the current pointer.

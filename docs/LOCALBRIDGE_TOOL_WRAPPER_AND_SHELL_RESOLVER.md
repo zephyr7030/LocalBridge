@@ -1,94 +1,105 @@
-# LocalBridge Agent Runtime 最终设计指导
+# LocalBridge Agent Runtime 最终设计合同
 
-> 本文是 LocalBridge 后续 Agent 工具能力开发的最终设计指导。仅保留目标架构、稳定接口、安全边界、Shell/PowerShell 方案、上游 runtime 包装方式、迁移顺序与验收标准；不保留方案比较、讨论过程或临时设计。
+> 本文是 LocalBridge 后续 **Coding/Workspace Agent、Windows 系统维护、命令环境、权限边界与第三方 runtime 包装**的长期最终设计指导。只保留目标架构、稳定接口、安全合同、迁移顺序与验收标准；讨论稿、被否决方案和旧 duplicate design 不再构成事实源。
+>
+> 本文是未来能力设计基线，但任何实现仍必须服从 `START_HERE.md`、当前 8 份 numbered human authority、机器合同、`PR_INDEX.json` / `PROJECT_STATE.json` 的严格 PR 顺序与 writable paths。
 
 ---
 
 ## 1. 产品定位
 
-LocalBridge 的目标不是成为 `coding-tools-mcp 0.2.2` 的 GUI、启动器或工具透传层，而应定义为：
+LocalBridge 最终定义为：
 
 ```text
 LocalBridge = Windows Local Agent Runtime
             + Stable LocalBridge Agent API
+            + Coding/Workspace Capabilities
+            + Windows System Maintenance Capabilities
             + Capability/Permission Enforcement
+            + User-controlled Privileged Execution
             + Windows Runtime Integration
 ```
 
-`coding-tools-mcp 0.2.2` 在当前阶段仅作为一个**内部可替换执行后端**存在。
+LocalBridge **不是** `coding-tools-mcp 0.2.2` 的 GUI、启动器或直接透传层。
 
-LocalBridge 对 ChatGPT 暴露自己的稳定 MCP 工具协议；ChatGPT 不依赖、也不需要知道底层当前使用 `coding-tools-mcp`、Native Rust 或其他 runtime。
+`coding-tools-mcp 0.2.2` 当前只作为一个成熟、可替换的 **Coding/Workspace primitive runtime**。LocalBridge 对 ChatGPT 暴露自己的稳定 API；第三方 runtime 的 tool name、JSON Schema、private error、session id 或 future tool 都不得自动成为产品 API。
 
-核心原则：
+永久原则：
 
 ```text
 冻结 LocalBridge Public API + Capability Contract
-不冻结第三方 runtime 的工具名、JSON Schema 或内部实现
+不冻结第三方 runtime 的工具名和内部实现
 ```
+
+系统权限原则：
+
+> **LocalBridge 可以代表用户执行系统级操作，但不能代表用户决定是否授予系统级权限。**
+
+AI 可以判断“完成任务需要某项管理员操作”；是否授权由用户明确决定。AI/MCP 永远不能修改 LocalBridge control-plane 或自行提权。
 
 ---
 
 ## 2. 最终总体架构
 
 ```text
-                           ChatGPT
-                              │
-                              │ MCP
-                              ▼
-┌─────────────────────────────────────────────────────┐
-│              LocalBridge Agent API                  │
-│                                                     │
-│ workspace_context     agent_workflow                │
-│ exec_command          command_control               │
-│ task_control          git_workflow                  │
-│ document_workflow     view_image                    │
-└──────────────────────────┬──────────────────────────┘
-                           │
-                    Tool Intent Parser
-                           │
-                    Capability Classifier
-                           │
-                           ▼
-┌─────────────────────────────────────────────────────┐
-│                 LocalBridge Core                    │
-│                                                     │
-│ Workspace Guard      Capability / PEP               │
-│ CurrentTask          Session Manager                │
-│ Shell Resolver       Process Supervisor             │
-│ Credential Store     Runtime Orchestrator           │
-└─────────────┬─────────────────────────────┬─────────┘
-              │                             │
-      ordinary capability             privileged capability
-              │                             │
-              ▼                             ▼
-┌─────────────────────────────┐   ┌─────────────────────────┐
-│ Workspace Runtime Adapter   │   │ Privileged Broker       │
-│                             │   │                         │
-│ coding-tools adapter        │   │ UAC                     │
-│ native Rust adapter         │   │ reviewed operations     │
-│ future adapters             │   │ no arbitrary admin shell│
-└──────────────┬──────────────┘   └─────────────────────────┘
-               │
-       ┌───────┴─────────┐
-       ▼                 ▼
-coding-tools-mcp     Native Rust
-0.2.2 primitives    implementations
+                              ChatGPT
+                                 │ MCP
+                                 ▼
+┌────────────────────────────────────────────────────────────┐
+│                  LocalBridge Agent API                     │
+│                                                            │
+│ workspace_context     agent_workflow                       │
+│ exec_command          command_control                      │
+│ task_control          git_workflow                         │
+│ document_workflow     view_image                           │
+│ system_inspect        system_manage      (target extension)│
+└────────────────────────────┬───────────────────────────────┘
+                             │
+                      Tool Registry / Facade
+                             │
+                      Capability Classifier
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────────┐
+│                    LocalBridge Core                        │
+│ Workspace Guard        PEP                                 │
+│ CurrentTask            Session Manager                     │
+│ ShellResolver          Process Supervisor                  │
+│ Credential Store       Runtime Orchestrator                │
+│ Risk Classifier        User Authorization Coordinator      │
+└──────────────┬──────────────────┬──────────────────────────┘
+               │                  │
+      ordinary capabilities   privileged capabilities
+               │                  │
+        ┌──────┴──────┐           ▼
+        ▼             ▼    ┌──────────────────────────────┐
+ WorkspaceRuntime   System  │ Privileged Broker           │
+     Adapter        Runtime │ reviewed structured ops     │
+        │             │     │ no unrestricted admin shell│
+   ┌────┴────┐        │     └──────────────────────────────┘
+   ▼         ▼        ▼
+coding-   Native   Windows Native APIs /
+tools-mcp Rust     reviewed system adapters
 ```
 
-设计要求：
+强制要求：
 
-1. Tunnel 只能连接 LocalBridge MCP/PEP，不允许直接连接上游 runtime。
-2. LocalBridge 自己维护公开 `tools/list`。
-3. 所有公开工具调用都必须经过 capability 分类和 PEP。
-4. 普通执行走 `WorkspaceRuntimeAdapter`。
-5. 管理员能力只能走独立 `Privileged Broker`。
-6. UI、Domain、公开 MCP Schema 不依赖第三方 runtime 私有结构。
+1. Tunnel 只连接 LocalBridge MCP/PEP，不能直接连接 upstream runtime。
+2. LocalBridge 自己维护 public `tools/list`。
+3. 每个公开 `tools/call` 都经过 LocalBridge capability 分类和 PEP；`tools/list` 过滤不是安全边界。
+4. Workspace/Coding 普通执行经过 `WorkspaceRuntimeAdapter`。
+5. Windows 系统只读和普通用户修改优先经过 `SystemRuntime`。
+6. 真正需要管理员 token 的操作只能进入 `Privileged Broker`。
+7. Broker 只接受 reviewed structured operation 或严格 reviewed structured program/args，不提供 unrestricted administrator shell。
+8. UI/Domain/public MCP Schema 不依赖 upstream private structures。
 
 ---
 
-## 3. LocalBridge Agent API v1
+## 3. Public API：当前基线与最终目标
 
-公开工具数量应保持少而稳定，推荐固定为 8 个：
+### 3.1 当前 schema25 v1 core
+
+当前已机器冻结的非特权 core Registry 为 8 个：
 
 ```text
 workspace_context
@@ -101,649 +112,26 @@ document_workflow
 view_image
 ```
 
-原则：
+当前 `elevated_exec` 仅是既有 Broker-governed conditional privileged extension，不属于普通八工具 core。
 
-- 公开工具提供高语义密度能力。
-- 原子工具继续存在于内部，但不直接暴露给 ChatGPT。
-- 工具名和 Schema 由 LocalBridge 自己版本化。
-- PermissionMode 切换不应导致整套 API 形态剧烈变化；权限差异主要由 `tools/call` 强制执行。
+### 3.2 最终系统维护扩展
+
+长期目标在上述稳定 core 上增加：
+
+```text
+system_inspect
+system_manage
+```
+
+因此最终推荐 public surface 约 10 个高语义工具，而不是把几十个 primitive tools 暴露给模型。
+
+系统维护扩展必须先有独立 machine contract / capability policy / adversarial tests，不能仅凭本文提前宣布当前 runtime 已实现。
 
 ---
 
-## 4. `workspace_context`
+## 4. `coding-tools-mcp 0.2.2` 的最终角色
 
-### 4.1 目标
-
-一次返回进入项目所需的核心上下文，减少模型反复调用低层工具。
-
-推荐聚合：
-
-```text
-workspace identity
-project metadata
-root entries summary
-Git summary
-Agent/Instructions
-CurrentTask summary
-command environment
-resolved default shell
-available shells
-LocalBridge capabilities
-```
-
-概念输出：
-
-```json
-{
-  "workspace": "D:\\project\\LocalBridge",
-  "project": {
-    "name": "localbridge",
-    "type": "node",
-    "version": "0.1.0"
-  },
-  "git": {
-    "branch": "main",
-    "changed_count": 4
-  },
-  "task": {
-    "status": "idle"
-  },
-  "command_environment": {
-    "default_shell": {
-      "kind": "powershell",
-      "version": "7.x.x"
-    },
-    "available_shells": [
-      "powershell",
-      "windows_powershell",
-      "cmd"
-    ]
-  }
-}
-```
-
-### 4.2 内部实现
-
-当前可组合：
-
-```text
-server_info
-get_default_cwd
-list_dir
-git_status
-CurrentTaskState
-ShellResolver
-ProjectContextLoader
-```
-
-返回结果必须转换为 LocalBridge 自有 Schema，不得直接透传上游响应。
-
----
-
-## 5. `agent_workflow`
-
-### 5.1 定位
-
-`agent_workflow` 是 LocalBridge 的核心高层编排工具，用于减少 MCP round-trip，并将常见开发流程变成一个稳定工作流。
-
-推荐工作流类型：
-
-```text
-diagnose
-bugfix
-feature
-refactor
-test_failure
-build_release
-document
-resume
-custom
-```
-
-推荐阶段：
-
-```text
-prepare
-execute
-run
-resume
-```
-
-概念调用：
-
-```json
-{
-  "workflow": "bugfix",
-  "phase": "run",
-  "objective": "修复启动时继续使用旧连接配置的问题",
-  "queries": ["startup", "connection config"],
-  "verification": "all"
-}
-```
-
-### 5.2 内部流程
-
-```text
-agent_workflow
-      │
-      ▼
-Workspace Context
-      │
-      ▼
-读取项目 Agent/Instruction
-      │
-      ▼
-Search / Read
-      │
-      ▼
-Change Plan
-      │
-      ▼
-逐原子动作 Capability Classification + PEP
-      │
-      ▼
-Patch
-      │
-      ▼
-Command / Tests / Build
-      │
-      ▼
-Git Diff / Verification
-      │
-      ▼
-LocalBridge typed result
-```
-
-### 5.3 安全规则
-
-`agent_workflow` 不是超级权限工具。
-
-它内部执行的每一个原子动作都必须重新分类和授权：
-
-```text
-read/search      → capability check
-patch            → capability check
-process exec     → capability check
-session control  → capability check
-privileged op    → Broker route only
-```
-
-因此编辑模式下，即使 `agent_workflow` 可见，也不得通过 workflow 间接执行命令。
-
----
-
-## 6. `exec_command` 与命令执行模型
-
-LocalBridge 内部应区分两类执行：
-
-```text
-ProcessExecutor
-ShellExecutor
-```
-
-### 6.1 直接进程执行
-
-概念形式：
-
-```json
-{
-  "program": "git",
-  "args": ["status"]
-}
-```
-
-直接通过 Windows CreateProcess / Rust process API 启动，不经过 Shell。
-
-适用：
-
-```text
-git
-node
-npm
-cargo
-dotnet
-java
-python（若属于明确受控 runtime）
-```
-
-优势：
-
-- 参数边界明确。
-- 无 Shell expansion。
-- quoting 更稳定。
-- 更容易 capability 分类。
-- 更容易做审计和安全策略。
-
-`exec_process` 可以仅作为内部 primitive，不必暴露为公开 MCP 工具。
-
-### 6.2 Shell 命令执行
-
-只有需要 Shell 语义时才使用 `exec_command`，例如：
-
-```powershell
-Get-Process | Sort-Object CPU
-```
-
-此时通过 `ShellResolver` 选中的 Shell 执行。
-
----
-
-## 7. 默认 Shell / PowerShell 最终方案
-
-### 7.1 默认策略
-
-```text
-DefaultShell = Auto
-
-Auto resolution:
-1. 用户显式配置且已注册、已验证的 Shell
-2. 当前机器已安装的最高版本 PowerShell Core / pwsh.exe
-3. Windows PowerShell 5.1 / powershell.exe
-4. cmd.exe
-5. 均不可用则返回 typed NoShellAvailable
-```
-
-“最高版本 PowerShell”只指**当前机器已经安装版本中的最高版本**。
-
-LocalBridge 不自动下载安装或升级 PowerShell。
-
-### 7.2 ShellResolver 架构
-
-```text
-CommandExecutor
-      │
-      ▼
-ShellResolver
-      │
- ┌────┼──────────┬──────────┐
- ▼    ▼          ▼          ▼
-pwsh powershell  cmd       custom
-```
-
-推荐数据结构：
-
-```rust
-struct ResolvedShell {
-    kind: ShellKind,
-    executable: PathBuf,
-    version: Option<Version>,
-    source: ShellSource,
-}
-```
-
-`ShellResolver` 只负责：
-
-- 枚举候选 Shell。
-- 验证 executable。
-- 获取版本。
-- 比较版本。
-- 选择默认 Shell。
-- 将逻辑 Shell ID 映射到已验证 executable。
-
-它不负责 PEP、UAC、Workspace 授权或进程所有权。
-
-### 7.3 PowerShell 探测
-
-Windows 至少探测：
-
-```text
-PATH 中的 pwsh.exe
-C:\Program Files\PowerShell\*\pwsh.exe
-PATH 中的 powershell.exe
-Windows PowerShell 系统路径
-cmd.exe
-```
-
-不要只依赖 `where pwsh`，因为机器可能存在多个 PowerShell Core 版本。
-
-对候选 `pwsh.exe` 运行等价命令：
-
-```text
-pwsh.exe -NoLogo -NoProfile -NonInteractive -Command "$PSVersionTable.PSVersion.ToString()"
-```
-
-然后进行语义版本比较，选择最高版本。
-
-### 7.4 缓存与重新探测
-
-可缓存探测结果，但以下情况必须重新检测：
-
-- LocalBridge 重启。
-- 用户点击重新检测命令环境。
-- 用户修改默认 Shell。
-- 缓存 executable 已不存在。
-
-### 7.5 `exec_command` 默认行为
-
-```json
-{
-  "cmd": "Get-Process"
-}
-```
-
-等价于：
-
-```text
-shell = auto
-```
-
-`auto` 的唯一语义：
-
-> 使用 LocalBridge 当前已经解析出的默认 Shell。
-
-禁止根据命令文本猜测 Shell。
-
-### 7.6 显式 Shell 选择
-
-公开枚举：
-
-```text
-auto
-powershell
-windows_powershell
-cmd
-```
-
-未来可扩展：
-
-```text
-bash
-wsl
-nushell
-custom:<registered-id>
-```
-
-Windows 默认顺序始终保持：
-
-```text
-PowerShell Core → Windows PowerShell 5.1 → cmd.exe
-```
-
-### 7.7 禁止任意 executable 注入
-
-禁止 MCP 直接传入：
-
-```json
-{
-  "shell": "C:\\arbitrary\\something.exe"
-}
-```
-
-MCP 只允许引用逻辑 Shell ID。
-
-如果支持自定义 Shell：
-
-```text
-用户 UI
-   ↓
-Shell Registry
-   ↓
-路径/executable identity 验证
-   ↓
-注册 Shell ID
-```
-
-MCP 只能使用已注册 ID，不得创建、修改或删除 Shell Registry 项。
-
----
-
-## 8. `command_control`
-
-公开工具：
-
-```text
-command_control
-```
-
-推荐动作：
-
-```text
-poll
-write
-read
-kill
-```
-
-概念输入：
-
-```json
-{
-  "action": "poll",
-  "session_id": "..."
-}
-```
-
-当前内部可映射：
-
-```text
-poll  → session state / upstream poll primitive
-write → write_stdin
-read  → read_output
-kill  → kill_session
-```
-
-ChatGPT 不再需要感知多个底层 session 工具。
-
-Session ID 由 LocalBridge 管理并形成稳定类型，不应直接依赖上游 session identifier 的格式。
-
----
-
-## 9. `task_control`
-
-任务系统分成两层。
-
-### 9.1 Agent 内部任务
-
-可以支持：
-
-```text
-get
-start
-update
-pause
-resume
-stop
-operation
-```
-
-用于长工作流恢复、执行操作状态和 Agent continuity。
-
-### 9.2 Dashboard 用户界面
-
-继续遵守 LocalBridge 极简状态合同，只展示：
-
-```text
-Current Task
-+
-Single Last Tool Metadata
-```
-
-示例：
-
-```text
-● 运行测试  cargo test · 8.2s
-
-上次执行工具：运行测试                 12S前
-```
-
-Idle：
-
-```text
-○ 等待命令
-
-上次执行工具：修改文件                 3分钟前
-```
-
-禁止用户界面出现：
-
-```text
-任务历史
-activity feed
-timeline
-model thoughts
-raw MCP tool id
-```
-
-内部 task continuity 可以存在，但不得直接变成 Dashboard 历史 UI。
-
----
-
-## 10. CurrentTask Execution Envelope
-
-所有公开工具调用都应进入统一执行包络：
-
-```text
-LocalBridge tool invocation
-       │
-       ▼
-TaskExecution::begin()
-       │
-       ▼
-Capability Classification
-       │
-       ▼
-PEP
-       │
-   allow / deny
-       │
-       ▼
-Runtime Adapter / Broker
-       │
-       ▼
-TaskExecution::finish()
-```
-
-收益：
-
-- CurrentTask truth 始终由 LocalBridge backend 维护。
-- 不依赖上游 runtime 是否提供 trace。
-- deny 可直接投影为 Blocked，而不是先伪装 Running。
-- 所有工具共享一致的 timing、redaction 和 error semantics。
-
-### 10.1 短工具调用
-
-真实工具执行与 UI 可见期解耦：
-
-```text
-真实调用：50ms 完成并返回 ChatGPT
-UI presentation：至少保持 500ms 可见
-```
-
-实现要求：
-
-```text
-MCP/Broker execution event
-↓
-backend wakeup/push
-↓
-UI typed projection
-```
-
-不得依赖周期 polling 捕获短任务。
-
-UI 为满足 500ms 可见期延迟自身状态清理即可，不得延迟真实 MCP 响应。
-
----
-
-## 11. `git_workflow`
-
-公开工具：
-
-```text
-git_workflow
-```
-
-推荐动作：
-
-```text
-status
-diff
-log
-show
-blame
-```
-
-当前可映射：
-
-```text
-status → git_status
-diff   → git_diff
-log    → git_log
-show   → git_show
-blame  → git_blame
-```
-
-未来可替换为：
-
-```text
-git.exe adapter
-git2-rs/libgit2 adapter
-```
-
-公开 API 不变。
-
-LocalBridge 应在自己的 adapter 层负责 workspace/sub-repository/path normalization 等修正，而不是让上游 Git 行为直接成为产品合同。
-
----
-
-## 12. `document_workflow`
-
-公开工具：
-
-```text
-document_workflow
-```
-
-推荐动作：
-
-```text
-inspect
-create
-convert
-rebuild
-```
-
-目标格式至少覆盖：
-
-```text
-PDF
-DOCX
-Markdown
-TXT
-```
-
-原则：
-
-- 文档操作是高层产品能力。
-- 不要求 Agent 临时组合 Python、PowerShell、LibreOffice、pandoc 等外部链路。
-- 底层实现可以替换，但公开 Schema 不变。
-- 文件读写仍受 Workspace Guard 和 capability policy 约束。
-
----
-
-## 13. `view_image`
-
-保持单一高层图片读取能力：
-
-```text
-view_image
-```
-
-应由 LocalBridge 校验：
-
-- workspace authorization。
-- 路径 identity。
-- 文件大小上限。
-- 支持格式。
-- 必要的缩放/输出限制。
-
-底层可以暂时使用上游实现，也可后续迁移到 Native Rust。
-
----
-
-## 14. `coding-tools-mcp 0.2.2` 的最终角色
-
-当前上游约 20 个原子工具继续作为内部 runtime 使用，例如：
+内部可继续使用的 primitive 能力包括：
 
 ```text
 server_info
@@ -767,571 +155,668 @@ git_blame
 view_image
 ```
 
-这些工具的问题不是能力不足，而是抽象层级偏低，不应成为 LocalBridge 的稳定公开产品 API。
-
-禁止结构：
-
-```text
-ChatGPT
-   ↓
-coding-tools tools/list
-   ↓
-直接 tools/call
-```
-
-目标结构：
-
-```text
-ChatGPT
-   ↓
-LocalBridge MCP Server
-   ↓
-LocalBridge Tool Registry / Facade
-   ↓
-PEP
-   ↓
-Stable Runtime Adapter
-   ↓
-coding-tools-mcp primitives
-```
-
----
-
-## 15. Stable Runtime Adapter
-
-LocalBridge Facade 不应直接依赖上游工具 JSON Schema。
-
-推荐抽象：
-
-```rust
-#[async_trait]
-pub trait WorkspaceRuntime {
-    async fn inspect_workspace(...);
-    async fn read_file(...);
-    async fn enumerate_files(...);
-    async fn search_text(...);
-    async fn apply_patch(...);
-
-    async fn execute_process(...);
-    async fn execute_shell(...);
-    async fn control_session(...);
-
-    async fn git(...);
-    async fn inspect_image(...);
-}
-```
-
-当前实现：
-
-```text
-CodingToolsRuntimeAdapter
-```
-
-未来实现：
-
-```text
-NativeRustRuntimeAdapter
-```
-
-潜在扩展：
-
-```text
-WSLRuntimeAdapter
-ContainerRuntimeAdapter
-RemoteRuntimeAdapter
-```
-
-Facade 永远只处理 LocalBridge 自有 request/result/error 类型。
-
----
-
-## 16. Capability Contract
-
-LocalBridge 的永久兼容基线必须以 capability 为核心，而不是上游工具名称。
-
-建议至少冻结：
-
-```text
-workspace.inspect
-
-file.read
-file.enumerate
-file.search
-file.patch
-
-process.exec
-process.shell_exec
-process.session_control
-
-git.status
-git.diff
-git.history
-git.inspect
-
-image.inspect
-
-document.inspect
-document.create
-```
-
-当前 `coding-tools-mcp 0.2.2` 可映射：
-
-```text
-read_file       → file.read
-list_files      → file.enumerate
-search_text     → file.search
-apply_patch     → file.patch
-exec_command    → process.shell_exec
-write_stdin     → process.session_control
-kill_session    → process.session_control
-read_output     → process.session_control
-git_status      → git.status
-git_diff        → git.diff
-git_log         → git.history
-git_show/blame  → git.inspect
-view_image      → image.inspect
-```
-
-当上游版本升级时，允许工具名或 Schema 改变，只要 Adapter 能继续满足 LocalBridge capability contract。
-
----
-
-## 17. Runtime Capability Negotiation
-
-启动 bundled coding runtime 后执行：
-
-```text
-initialize
-↓
-tools/list
-↓
-Schema/structural validation
-↓
-Adapter capability probe
-↓
-与 LocalBridge required capability baseline 比较
-```
-
-缺少必需能力时：
-
-```text
-RuntimeCapabilityMismatch
-```
-
-必须 fail-closed，不得等到业务调用时随机出现 unknown tool。
-
-上游出现新工具或新 capability：
-
-```text
-默认 deny
-↓
-compatibility review
-↓
-capability map 更新
-↓
-LocalBridge release
-```
-
-不得运行时自动扩大权限。
-
----
-
-## 18. LocalBridge 自有 `tools/list`
-
-外部调用：
-
-```text
-ChatGPT tools/list
-      │
-      ▼
-LocalBridge TOOL_REGISTRY
-```
+这些 primitive **保留能力、隐藏接口**。
 
 禁止：
 
 ```text
-ChatGPT tools/list
-      │
-      ▼
-coding-tools-mcp tools/list
+ChatGPT
+  ↓
+LocalBridge
+  ↓
+upstream tools/list passthrough
+  ↓
+raw upstream tool call
 ```
 
-上游 `tools/list` 仅用于：
-
-- 启动时 compatibility check。
-- capability negotiation。
-- upgrade structural/capability diff。
-- 内部 diagnostics。
-
-公开工具目录始终由 LocalBridge 自己维护。
-
----
-
-## 19. Error Adapter
-
-禁止把第三方错误对象直接返回 ChatGPT。
-
-路径：
+目标：
 
 ```text
-UpstreamError
-      ↓
-RuntimeAdapter
-      ↓
-LocalBridgeToolError
+ChatGPT
+  ↓
+LocalBridge Tool Registry / Facade
+  ↓
+LocalBridge Capability + PEP
+  ↓
+Stable Runtime Adapter
+  ↓
+coding-tools-mcp primitives / Native implementation
 ```
 
-推荐统一错误分类：
+### 4.1 Capability，不以 upstream tool name 为合同
+
+示例：
 
 ```text
-InvalidArgument
-NotFound
+read_file      → file.read
+list_files     → file.enumerate
+search_text    → file.search
+apply_patch    → file.patch
+exec_command   → process.shell_exec
+write_stdin    ┐
+read_output    ├→ process.session_control
+kill_session   ┘
+git_*          → git.*
+view_image     → image.inspect
+```
 
-WorkspaceDenied
-WorkspaceChanged
-WorkspaceIdentityMismatch
+upstream 升级允许 tool name/schema 变化，只要 adapter 仍能满足 LocalBridge capability contract。
 
-CapabilityDenied
+### 4.2 Stable Runtime Adapter
 
-ProcessFailed
-ProcessTimedOut
-ProcessCancelled
-OutputTruncated
+逻辑接口应类似：
 
-RuntimeUnavailable
-RuntimeProtocolMismatch
+```rust
+trait WorkspaceRuntime {
+    inspect_workspace(...)
+    read_file(...)
+    enumerate_files(...)
+    search_text(...)
+    apply_patch(...)
+    execute_process(...)
+    execute_shell(...)
+    control_session(...)
+    git(...)
+    inspect_image(...)
+}
+```
+
+当前实现：`CodingToolsRuntimeAdapter`。未来可逐项替换成 `NativeRustRuntimeAdapter`，public API 不变。
+
+### 4.3 Capability Negotiation
+
+bundled runtime 启动时：
+
+```text
+initialize
+→ upstream tools/list
+→ structural/schema validation
+→ capability mapping/probe
+→ required LocalBridge capability baseline
+```
+
+缺失必需能力：
+
+```text
 RuntimeCapabilityMismatch
-
-ElevationRequired
-PrivilegeDenied
-
-Internal
+→ fail-closed
 ```
 
-错误类型应稳定、可版本化，并尽可能包含：
-
-```text
-retryable
-safe user summary
-safe diagnostic code
-```
-
-不得透传 secret、raw Authorization、nonce 或上游敏感 payload。
+upstream 新增 tool/capability 默认 deny，不得自动扩大公开 API 或权限。
 
 ---
 
-## 20. 权限模型
+## 5. 高语义 Facade
 
-保持 LocalBridge 的三模式模型：
+### 5.1 `workspace_context`
+
+一次聚合模型进入项目真正需要的上下文：
 
 ```text
-编辑模式
-完整模式
+workspace identity
+project metadata
+root summary
+Git summary
+Agent/Instructions
+CurrentTask summary
+command environment
+default/available shells
+LocalBridge capability summary
+privilege state summary
+```
+
+其内部可组合多个 primitive，但返回必须是 LocalBridge 自有 typed schema。
+
+### 5.2 `agent_workflow`
+
+负责常见工程编排：
+
+```text
+diagnose
+bugfix
+feature
+refactor
+test_failure
+build_release
+document
+resume
+custom
+```
+
+`agent_workflow` **不是超级权限**。内部 read/search/patch/process/session/system/privileged 子动作必须分别经过 capability + PEP；Edit 模式不能借 workflow 间接 process exec，任何 privileged route 都不能借 workflow 绕过 Broker/user authorization。
+
+### 5.3 `command_control`
+
+对外统一：
+
+```text
+poll
+read
+write
+kill
+```
+
+内部可映射 upstream `write_stdin/read_output/kill_session`，public session id 由 LocalBridge 自己定义。
+
+### 5.4 `git_workflow`
+
+对外统一：
+
+```text
+status
+diff
+log
+show
+blame
+```
+
+底层可从 coding-tools adapter 逐步替换为 `git.exe` / git2-rs；workspace/subrepository/path 修正在 LocalBridge adapter 层完成。
+
+### 5.5 `document_workflow`
+
+高层支持至少：
+
+```text
+inspect
+create
+convert
+rebuild
+```
+
+覆盖 PDF/DOCX/Markdown/TXT 等产品级文档工作流，避免模型临时拼接 Python/PowerShell/LibreOffice/pandoc。文件仍受 Workspace Guard / capability policy。
+
+---
+
+## 6. 命令执行模型
+
+LocalBridge 内部必须区分：
+
+```text
+DirectProcessExecutor
+ShellExecutor
+```
+
+### 6.1 Direct process
+
+结构化：
+
+```json
+{
+  "program": "git",
+  "args": ["status"]
+}
+```
+
+优点：无 shell expansion、quoting 更确定、参数可审计、容易 capability 分类。
+
+典型：`git/node/npm/cargo/dotnet/java/python(受控 runtime)`。
+
+### 6.2 Shell execution
+
+只有真正需要 shell 语义时才使用，例如 PowerShell pipeline。
+
+普通 `exec_command` 即使在管理员模式，也默认使用普通用户 token。禁止：
+
+```text
 管理员模式
+→ exec_command 自动升级成 Administrator PowerShell
 ```
 
-### 20.1 编辑模式
+需要管理员权限的系统操作走 `system_manage → capability/risk → user authorization → Broker`。
+
+---
+
+## 7. ShellResolver / PowerShell 最终合同
+
+### 7.1 默认策略
 
 ```text
-workspace.inspect      allow
-file.read              allow
-file.enumerate         allow
-file.search            allow
-file.patch             allow
+DefaultShell = Auto
 
-process.exec            deny
-process.shell_exec      deny
-process.session_control deny
-
-privileged.*            deny
-control-plane           deny_always
+Auto:
+1. 用户显式注册且重新验证的默认 Shell（未来扩展）
+2. 当前机器已安装、可信候选中的最高兼容 PowerShell Core / pwsh.exe
+3. Windows PowerShell 5.1 / powershell.exe
+4. cmd.exe
+5. typed NoShellAvailable
 ```
 
-### 20.2 完整模式
+“最高版本”只指机器**已经安装**的版本；LocalBridge 不自动下载、安装或更新 PowerShell。
+
+### 7.2 Trust before probe
+
+PATH 只能用于发现候选，不能赋予信任。
+
+候选必须先通过可信系统/安装位置或显式注册 executable identity 的重新验证，**之后**才允许执行 version probe。恶意 PATH 前置 `pwsh.exe` 在未建立信任前不能执行，甚至不能为了版本比较被 probe。
+
+PowerShell 版本探测可使用等价结构化调用：
 
 ```text
-workspace/file/git/image/document coding capabilities
-    allow / reviewed allow
-
-process.exec
-process.shell_exec
-process.session_control
-    allow_if_reviewed
-
-privileged.*
-    deny
-
-control-plane
-    deny_always
+pwsh.exe -NoLogo -NoProfile -NonInteractive -Command "$PSVersionTable.PSVersion.ToString()"
 ```
 
-### 20.3 管理员模式
+版本比较使用 semantic version，而不是字符串排序。
 
-管理员模式定义为：
+### 7.3 Public shell selector
+
+当前只接受逻辑值：
+
+```text
+auto
+powershell
+pwsh
+windows_powershell
+cmd
+```
+
+禁止：
+
+- 根据 command text 猜 Shell；
+- MCP 直接传任意 executable path；
+- 自动下载安装 Shell。
+
+若未来支持 custom shell，必须先由 LocalBridge UI/控制面注册并验证，MCP 只能引用 `custom:<id>`，不能修改 registry。
+
+---
+
+## 8. CurrentTask / Process Lifecycle
+
+所有公开工具都进入统一 execution envelope：
+
+```text
+LocalBridge tool invocation
+→ TaskExecution::begin
+→ capability classification
+→ PEP
+→ runtime/system/Broker route
+→ TaskExecution::finish
+```
+
+Dashboard 只显示：
+
+```text
+Current Task
++
+Single Last Tool Metadata
+```
+
+禁止 task history/feed/timeline/model thoughts/raw MCP tool id。
+
+短调用必须 backend wake-driven：真实工具可 50ms 返回，但 UI presentation 至少可见 500ms；UI 最低可见期绝不能拖慢真实 MCP 返回。
+
+长进程必须有 timeout/cancel/bounded output/session control，并受 Process Supervisor / Windows Job Object 管理；PID-only 不能作为最终 ownership。
+
+---
+
+## 9. System Maintenance 最终能力域
+
+`system_inspect` 与 `system_manage` 是 LocalBridge 长期一等能力，不依赖 coding-tools 是否有对应 tool。
+
+### 9.1 `system_inspect`
+
+优先结构化只读：
+
+```text
+system/process/service/network/disk/hardware
+event_log/package/startup/driver/environment/windows_update
+security_status (safe read-only)
+```
+
+普通用户可读信息不要为了“系统工具”概念而不必要 UAC。
+
+实现优先：
+
+```text
+Windows Native API / controlled WMI/CIM equivalent
+→ reviewed direct process
+→ normal-user shell fallback
+```
+
+### 9.2 `system_manage`
+
+推荐领域：
+
+```text
+service
+package
+registry
+firewall
+scheduled_task
+startup
+environment
+windows_update
+driver
+power
+filesystem_maintenance
+network_configuration
+```
+
+系统修改优先使用结构化 request：
+
+```text
+target
+action
+resource identity
+validated arguments
+precondition
+capability
+risk class
+```
+
+核心系统维护不依赖 arbitrary PowerShell string。
+
+### 9.3 Capability 应细分
+
+禁止单一 `system.admin` 万能能力。示例：
+
+```text
+system.service.inspect
+system.service.manage
+system.registry.read
+system.registry.write
+system.firewall.inspect
+system.firewall.manage
+system.task.inspect
+system.task.manage
+system.driver.inspect
+system.driver.manage
+system.update.inspect
+system.update.manage
+system.power.manage
+...
+```
+
+---
+
+## 10. Risk Class
+
+系统修改至少区分：
+
+```text
+Low
+Medium
+High
+Critical
+```
+
+- **Low**：只读状态/诊断，通常不额外确认。
+- **Medium**：可恢复的普通修改，如 reviewed service restart、用户级配置。
+- **High**：HKLM、Firewall、系统计划任务、系统网络配置、系统级安装等；必须 structured review，按合同要求用户确认。
+- **Critical**：驱动、引导配置、核心 ACL、安全策略、显著降低防护的操作；默认 deny，只有独立机器合同和 adversarial tests 后逐项开放，并要求逐操作确认。
+
+风险等级由 LocalBridge policy/classifier 决定，不能信任模型自报风险。
+
+---
+
+## 11. 权限模型
+
+### Edit
+
+```text
+workspace/file reviewed read/write    allow
+system read-only reviewed inspect     allow as contracted
+process exec                           deny
+system mutation                        deny
+privileged                             deny
+control-plane                          deny_always
+```
+
+### Full
+
+```text
+Edit + reviewed current-user process/session/git/document
+reviewed normal-user system_manage
+privileged requires explicit Broker route
+control-plane deny_always
+```
+
+### Elevated / 管理员模式
 
 ```text
 Elevated = Full + Active Privileged Broker
 ```
 
-绝不是：
+它只表示用户已经激活一个可接受 reviewed privileged operation 的通道，**不表示 AI 获得 unrestricted Administrator**。
+
+即使 Broker Active，仍然必须通过：
 
 ```text
-整个 LocalBridge 以 Administrator 启动
+capability classification
+risk classification
+structured request validation
+policy review
+per-operation confirmation when required
 ```
 
-普通 MCP capability ceiling 与 Full 保持一致；需要管理员权限的操作单独路由到 Broker。
+整个 LocalBridge、Tauri/WebView、Tunnel、coding runtime 和普通 `exec_command` 不整体提权。
 
 ---
 
-## 21. PEP 位置
+## 12. Schema26 管理员模式安全确认合同
 
-强制调用链：
+所有 Settings 与 onboarding Screen3 的 `管理员模式` 入口按钮统一使用**橙色 `#ff9500`**。该颜色只表示管理员权限警告；Starting 状态点、Dashboard `重启服务` 的既有 amber/yellow 语义不受影响。
 
-```text
-ChatGPT
-   │
-   ▼
-LocalBridge Tool
-   │
-   ▼
-Intent / Capability Classification
-   │
-   ▼
-PEP
-   │
-   ├── deny → LocalBridge typed denial
-   │
-   ▼
-Runtime Adapter / Broker
-```
-
-禁止事后授权：
+当 Broker **未 Active**，用户点击/重新点击管理员模式不能直接请求 UAC，必须先显示以下固定内容，禁止增删改写：
 
 ```text
-先执行上游工具
-↓
-再判断是否允许
+启用管理员权限后，错误或恶意操作可能导致：
+
+* 删除或覆盖重要文件
+* 修改系统关键配置
+* 软件或系统无法正常启动
+* 数据永久丢失
+* 安全机制被绕过或关闭
+* 凭据、密钥等敏感信息泄露
+* 恶意程序获得更高权限
+* 系统被破坏，严重时可能需要重装 Windows
+
+仅在你明确理解操作后果时授权。
+
+[取消] [确认9]
 ```
 
-`tools/list` 过滤只属于 UX，永远不是安全边界。
+### 12.1 红色确认按钮
 
-每一个 `tools/call` 都必须重新授权，防止客户端缓存旧工具目录后绕过模式切换。
+确认按钮的**整个按钮为红色**，不是仅倒计时数字红色。
+
+固定状态：
+
+```text
+确认9 → 确认8 → 确认7 → 确认6 → 确认5
+→ 确认4 → 确认3 → 确认2 → 确认1
+→ 确认
+```
+
+前 9 个状态覆盖完整 **9000ms** 且始终 disabled。只有达到完整 9000ms 后，同一红色按钮才 enabled，标签精确为 `确认`。
+
+### 12.2 倒计时不能只信任 frontend
+
+推荐 backend/等价可信状态：
+
+```text
+AdminConsentChallenge
+- challenge_id
+- created_at_monotonic
+- not_before = created_at_monotonic + 9000ms
+- state = pending / cancelled / consumed
+```
+
+frontend interval/setTimeout 只负责显示 `确认9…确认1`，不是授权来源。backend 在处理 confirm intent 时重新检查：
+
+```text
+challenge 正确
+未取消
+未消费
+当前 monotonic elapsed >= not_before
+```
+
+以下均不得绕过：
+
+```text
+pointer click
+keyboard submit
+synthetic/repeated click
+rerender
+focus change
+stale frontend state
+old challenge replay
+```
+
+### 12.3 UAC 顺序
+
+```text
+User selects 管理员模式
+→ Broker Active? yes: no duplicate UAC merely due to reselection
+→ no: create fresh challenge
+→ show fixed warning
+→ whole-red button disabled for full 9000ms
+→ user clicks enabled 确认
+→ backend Broker source/path/ACL/security validation
+→ Windows runas / UAC
+→ Broker handshake
+→ Active
+```
+
+`取消`、Esc、close/dismiss：challenge 取消，无 PermissionMode/Broker/UAC 副作用。每次 fresh open 重计完整 9 秒；无 remember/skip/don't-show-again。
+
+`--background` 恢复管理员偏好：不创建 warning challenge、不显示 dialog、不 UAC，只进入 Requested/等价未授权状态。
+
+该 dialog 是窄安全 consent dialog，不允许 onboarding 本身重新变成“窗口里的居中 card/modal shell”。
+
+High/Critical **per-operation confirmation** 与模式进入警告是不同 Gate；模式警告不能自动批准后续高风险具体操作。
+
+AI/MCP 不能批准该 dialog、UAC、PermissionMode 或 Broker activation。
 
 ---
 
-## 22. Control Plane 永久不可委托
+## 13. Privileged Broker / Operation Ticket
 
-以下能力不得成为可由 MCP 修改的 LocalBridge control plane：
+Privileged Broker 不提供 unrestricted shell。
+
+普通优先级：
 
 ```text
-选择/新增/移除授权项目
-切换 active workspace
+1. Native structured Windows API
+2. Reviewed direct process with structured argv
+3. Normal-user shell fallback
+4. Privileged Broker structured operation
+```
+
+管理员 operation 应使用 bounded authorization，例如：
+
+```text
+PrivilegedOperationTicket
+- operation_id
+- capability
+- action
+- target identity
+- canonical arguments digest
+- risk class
+- authorization scope
+- broker generation/session binding
+- nonce/anti-replay
+- one-shot/bounded use
+```
+
+Ticket 由 LocalBridge backend 在用户授权后生成，不能由 ChatGPT/MCP 伪造；默认一次性消费、防重放、不向 UI/Agent 暴露 raw secret payload。
+
+Broker 执行 exact authorized structured operation，而不是“管理员已经开了，所以运行任意字符串”。
+
+---
+
+## 14. Control Plane 永久不可委托
+
+MCP/AI 永远不得：
+
+```text
+新增/删除/授权 workspace
+切换 active workspace control-plane
 修改 PermissionMode
-触发或批准 UAC
-修改 Tunnel ID
-修改 Runtime API Key
-注册/修改 Shell
-修改 LocalBridge policy
-修改 runtime 配置或授权根
+批准 schema26 warning
+批准 UAC
+直接启用/关闭 Broker
+修改 Tunnel ID / Runtime API Key
+注册/修改 Shell Registry
+修改 LocalBridge policy/runtime authorization root
+签发/伪造 privileged operation ticket
 ```
 
-`agent_workflow` 等高层工具也不得通过间接调用绕过此规则。
-
-```text
-control-plane = deny_always
-```
+AI 可以请求一个**具体操作**，系统可以返回 `UserAuthorizationRequired` / `ElevationRequired`；但 AI 不能请求“把我升级为管理员”。
 
 ---
 
-## 23. 管理员能力与 Privileged Broker
+## 15. Stable Error Contract
 
-管理员执行必须完全绕开普通 Workspace Runtime Adapter：
-
-```text
-                    PEP
-                     │
-          ┌──────────┴──────────┐
-          │                     │
-     normal capability      privileged
-          │                     │
-          ▼                     ▼
- WorkspaceRuntime       Privileged Broker
-          │                     │
- coding-tools/native           UAC
-```
-
-`elevated_exec` 必须保持：
+upstream/System/Broker private errors 必须映射成 LocalBridge typed errors，例如：
 
 ```text
-structured program
-structured args
-reviewed executable
-reviewed workdir
-timeout
-cancellation
-output limit
-redaction
-Broker Active required
+InvalidArgument
+NotFound
+WorkspaceDenied
+WorkspaceChanged
+WorkspaceIdentityMismatch
+CapabilityDenied
+UserAuthorizationRequired
+ProcessFailed
+ProcessTimedOut
+ProcessCancelled
+OutputTruncated
+RuntimeUnavailable
+RuntimeProtocolMismatch
+RuntimeCapabilityMismatch
+ElevationRequired
+BrokerInactive
+PrivilegeDenied
+OperationRiskDenied
+OperationAuthorizationExpired
+OperationAuthorizationReplayRejected
+SystemResourceNotFound
+SystemOperationFailed
+SystemStateChanged
+Internal
 ```
 
-禁止：
-
-```text
-arbitrary elevated program
-arbitrary elevated shell
-powershell -Command <arbitrary string> as generic admin gateway
-control-plane mutation
-```
-
-MCP 无权自行提升权限。
-
-管理员模式的激活仍必须来自用户明确 UI 操作和 Windows UAC。
+公开错误可包含 `retryable / safe user summary / safe diagnostic code / required_user_action`，但不得泄露 secret、raw Authorization、nonce、ticket payload 或 upstream private schema。
 
 ---
 
-## 24. Workspace Path / Identity 边界
+## 16. Workspace Path / Identity
 
-LocalBridge 必须区分：
-
-```text
-filesystem identity path
-execution path
-display path
-```
-
-例如：
+必须区分：
 
 ```text
-内部 identity validation:
-\\?\D:\project
-
-实际 command/MCP/process execution:
-D:\project
-
-UI display:
-D:\project
+internal filesystem identity: \\?\D:\project
+execution path:              D:\project
+UI display path:             D:\project
 ```
 
-`\\?\` 形式仅允许用于：
+`\\?\` 只允许用于 filesystem identity、reparse/junction/symlink 防护、去重和授权身份比较；不得进入 MCP/Broker/sidecar/process/tool 的 path/cwd/workdir/current_dir，也不得显示给 UI。
 
-- filesystem identity validation。
-- reparse/junction/symlink 防护。
-- de-dup。
-- 授权身份比较。
-
-禁止把 verbatim path 传入：
-
-```text
-MCP tool args
-cwd/workdir/current_dir
-Broker
-sidecar process
-command execution
-UI
-```
-
-普通 execution path 必须重新绑定并验证为同一个已授权 filesystem identity；路径格式转换本身不得扩大授权。
+system tools 作用于 workspace 外的 Windows 系统资源时必须走独立 system capability，workspace 授权不能自动扩大为系统级文件权限。
 
 ---
 
-## 25. Process 与生命周期
+## 17. Secrets
 
-所有由 LocalBridge 启动的普通 runtime/command child process 应纳入既有 Process Supervisor / Windows Job Object 所有权模型。
-
-不得以 PID-only 作为最终所有权判断。
-
-公开工具只返回稳定 session/task ID，不直接暴露内部 PID ownership 细节。
-
-长任务应具备：
+以下不得进入 model/UI/normal logs/diagnostics：
 
 ```text
-timeout
-cancellation
-bounded output
-session read/poll/write/kill
-child-tree ownership
-cleanup on LocalBridge stop/crash policy
+Runtime API Key plaintext
+Authorization/bearer
+Broker session nonce/secret
+Privileged Operation Ticket raw payload
+secret-bearing stdin/patch body summary
 ```
+
+Runtime API Key 不进入 CLI、browser storage、plaintext settings。
 
 ---
 
-## 26. Secrets
+## 18. 迁移顺序
 
-以下规则对所有新工具和 workflow 同样生效：
+不要 Big Bang rewrite。
 
-```text
-Runtime API Key 不进入 settings plaintext
-Runtime API Key 不进入 browser storage
-Runtime API Key 不进入 process CLI
-Authorization/bearer 不进入用户日志
-Broker nonce/session secret 不进入任务摘要
-stdin/patch body 默认不进入 CurrentTask summary
-```
-
-所有公开结果、错误、CurrentTask、diagnostics 均先经过 redaction。
-
----
-
-## 27. 推荐模块边界
-
-逻辑模块建议：
-
-```text
-src-tauri/src/mcp/
-├── server.rs
-├── registry.rs
-├── facade/
-│   ├── workspace_context.rs
-│   ├── agent_workflow.rs
-│   ├── exec_command.rs
-│   ├── command_control.rs
-│   ├── task_control.rs
-│   ├── git_workflow.rs
-│   ├── document_workflow.rs
-│   └── view_image.rs
-│
-├── capability/
-│   ├── classification.rs
-│   ├── policy.rs
-│   └── negotiation.rs
-│
-├── adapter/
-│   ├── mod.rs
-│   ├── workspace_runtime.rs
-│   ├── coding_tools.rs
-│   └── native.rs
-│
-├── execution/
-│   ├── envelope.rs
-│   ├── task.rs
-│   └── session.rs
-│
-└── errors.rs
-```
-
-命令层：
-
-```text
-src-tauri/src/command/
-├── shell_resolver.rs
-├── shell_registry.rs
-├── environment.rs
-├── executor.rs
-├── shell_executor.rs
-└── process_executor.rs
-```
-
-实际磁盘目录需服从项目现有 PR/architecture contract；这里表示最终逻辑边界，不授权越过当前 PR writable paths。
-
----
-
-## 28. 迁移顺序
-
-不应一次重写所有 `coding-tools-mcp` 原子能力。
-
-### Phase 1 — LocalBridge Facade 基础
-
-实现：
+### Phase 1 — Facade foundation
 
 ```text
 LocalBridge Tool Registry
@@ -1341,204 +826,160 @@ command_control
 LocalBridge typed errors
 ```
 
-底层继续使用现有 coding-tools runtime。
-
-### Phase 2 — Stable Runtime Adapter
-
-实现：
+### Phase 2 — Stable runtime boundary
 
 ```text
-WorkspaceRuntime trait
+WorkspaceRuntime Adapter
 CodingToolsRuntimeAdapter
 Capability Contract
 Capability Negotiation
-禁止公开透传 upstream tools/list
+no upstream public passthrough
 ```
 
-### Phase 3 — Agent Workflow
-
-实现：
+### Phase 3 — Workflow
 
 ```text
 agent_workflow
 task_control
-CurrentTask Execution Envelope
-workflow transitive capability classification
+CurrentTask execution envelope
+transitive capability enforcement
 ```
 
-这是 Agent 使用效率提升最大的阶段。
-
-### Phase 4 — Specialized Workflows
-
-实现：
+### Phase 4 — Specialized coding workflows
 
 ```text
 git_workflow
 document_workflow
-view_image adapter stabilization
+view_image stabilization
 ```
 
-### Phase 5 — Native Replacement
+### Phase 5 — System inspect
 
-按收益逐步替换：
+优先 Low-risk structured read-only capability。
+
+### Phase 6 — System manage / authorization
 
 ```text
-Shell/process execution → Native Rust
-Git                     → git.exe / git2-rs
-File read/list/search   → Native Rust
-Patch                   → Native Rust
-Image/document          → 视维护收益决定
+system_manage
+RiskClass
+UserAuthorizationRequired
+Authorization Coordinator
+Privileged Operation Ticket
+structured Broker operations
 ```
 
-每替换一项只更换 adapter backend，不改变 LocalBridge Public API。
+### Phase 7 — High/Critical system capability
 
-最终可以完全移除 `coding-tools-mcp`，但这不是近期前置条件。
+逐项机器合同 + adversarial review 后加入 registry write / firewall / scheduled tasks / driver / network / power 等；Critical 默认 deny。
+
+### Phase 8 — Native replacement
+
+按收益逐步把 Shell/process、Git、filesystem、patch、image/document primitive 替换为 Native Rust 或专用 adapter。每替换一项只改变内部 backend，不改变 public API。
 
 ---
 
-## 29. 不做的事情
-
-本设计明确不采用：
+## 19. 明确禁止的退化方案
 
 ```text
-直接把 coding-tools-mcp 20 个工具全部暴露给 ChatGPT
-直接把 upstream tools/list 作为 LocalBridge tools/list
-根据命令文本猜测 Bash/PowerShell/cmd
-允许 MCP 传任意 Shell executable
-允许 AI 修改 LocalBridge control-plane
-允许 agent_workflow 绕过 PEP
-允许管理员能力进入普通 runtime adapter
-一次性重写所有 coding-tools 原子实现
-使用工具数量作为主要能力指标
+直接暴露 coding-tools 20 个 primitive tools
+直接转发 upstream tools/list/schema/error
+AI 自己 request_permissions 获得管理员权限
+管理员模式 = entire LocalBridge elevated
+管理员模式 = unrestricted Administrator PowerShell
+管理员模式使普通 exec_command 自动提权
+Broker Active 绕过 capability/risk policy
+前端倒计时自己决定 UAC eligibility
+黄色/琥珀管理员按钮恢复为当前 UI 语义
+点击管理员模式直接 UAC 而跳过 schema26 warning
+MCP 指定任意 shell executable
+根据命令文本猜 shell
+自动下载安装 PowerShell
+一次性重写整个 coding-tools runtime
+一次性开放全部 Critical system capabilities
 ```
 
 ---
 
-## 30. Capability Parity 验收矩阵
-
-LocalBridge 的目标指标应是能力覆盖，而不是工具名覆盖。
-
-| Capability | LocalBridge 目标 |
-|---|---|
-| Workspace inspect | 必须 |
-| File read | 必须 |
-| File enumerate | 必须 |
-| Search | 必须 |
-| Atomic patch | 必须 |
-| Command execution | 必须 |
-| Long command session | 必须 |
-| Git | 必须 |
-| Image inspect | 必须 |
-| Agent workflow | 必须 |
-| Task resume/control | 必须 |
-| Document workflow | 必须 |
-| Shell discovery | 必须 |
-| Highest installed PowerShell selection | 必须 |
-| Windows Job Object ownership | 必须 |
-| Secure Credential Store | 必须 |
-| Workspace filesystem identity confinement | 必须 |
-| Edit/Full/Elevated PEP | 必须 |
-| UAC Privileged Broker | 必须 |
-| Tunnel/runtime lifecycle | 必须 |
-| Typed CurrentTask projection | 必须 |
-| Short-call wake-driven UI projection | 必须 |
-| Stable runtime adapter | 必须 |
-| Runtime capability negotiation | 必须 |
-| Upstream replacement without public API change | 必须 |
-
----
-
-## 31. 最终验收标准
+## 20. 最终验收标准
 
 ### Public API
 
-- ChatGPT 只看到 LocalBridge 自有工具。
-- 上游 primitive tool 名称不出现在公开 `tools/list`。
-- Public API 具备明确 schema version / compatibility policy。
-
-### Runtime Adapter
-
-- Domain/UI 不依赖上游私有结构。
-- coding-tools 升级只影响 adapter/compatibility 层。
-- 必需 capability 缺失时启动 fail-closed。
+- public `tools/list` 只来自 LocalBridge Tool Registry。
+- upstream private tool name/schema/error 不穿透。
+- public actions 以 stable LocalBridge capability 分类。
 
 ### Shell
 
-- `exec_command` 默认 `shell=auto`。
-- Auto 选择机器已安装的最高 PowerShell Core。
-- 无 PowerShell Core 时 fallback Windows PowerShell 5.1，再 fallback cmd。
-- MCP 不能传任意 Shell executable。
-- `workspace_context` 返回已解析命令环境。
+- `shell=auto` 只选择可信已安装候选。
+- highest compatible installed PowerShell Core → Windows PowerShell 5.1 → cmd。
+- PATH 不是 trust authority；probe 前先验证 identity。
+- no arbitrary shell path / no text guessing / no auto-install。
+- direct process 与 shell structurally separate。
 
 ### Workflow
 
-- `agent_workflow` 可完成 diagnose/bugfix/feature/refactor/test/build 等常见任务。
-- workflow 每个原子动作独立经过 PEP。
-- Edit 模式无法通过 workflow 间接 process exec。
+- workflow 原子动作逐项 PEP。
+- Edit 无 process exec bypass。
+- privileged/system mutation 无 indirect bypass。
 
-### Permissions
+### System maintenance
 
-- unknown capability 默认 deny。
-- control-plane 永久 deny。
-- Full 只运行 reviewed current-user capability。
-- Elevated 只通过 Broker 增加 reviewed privileged capability。
-- 整个 LocalBridge 永不因管理员模式整体提权。
+- `system_inspect` 普通可读能力不要求无意义 UAC。
+- `system_manage` 结构化，capability + risk first。
+- 需要管理员 token 只路由 Broker。
+- High/Critical 按独立合同逐操作确认。
+- unrestricted administrator shell 永久禁止。
 
-### Process / Task
+### Administrator mode UX/security
 
-- 普通进程受 Process Supervisor / Job Object 管理。
-- 长命令具备 timeout/cancel/output/session control。
-- CurrentTask 来自真实 MCP/Broker execution event。
-- 短工具调用由 backend wake-driven delivery 捕获。
-- 500ms UI 可见期不延迟真实工具响应。
+- Settings/onboarding admin entry = orange `#ff9500`。
+- 固定八条风险 warning 文案无漂移。
+- confirmation entire button = red。
+- full 9000ms `确认9…确认1` disabled。
+- trustworthy monotonic/backend not-before；frontend-only timer 不能授权。
+- after 9000ms red enabled label exact `确认`。
+- UAC only after enabled explicit confirm + backend security validation。
+- cancel/Esc/close no side effects；fresh open resets 9s；no skip/remember。
+- background no warning/UAC；Active reselection no duplicate UAC。
+- AI/MCP cannot approve warning/UAC/control-plane。
+- High/Critical confirmation remains separate。
 
-### Workspace
+### Process / Task / Workspace / Secrets
 
-- 同时最多一个 active authorized root。
-- remembered project 不等于授权根。
-- identity path 与 execution/display path 分离。
-- `\\?\` 路径不得进入实际 tool/command/process workdir。
-
-### Security
-
-- Runtime API Key 等 secret 不进入 plaintext persistence、CLI、CurrentTask、normal logs 或 diagnostics。
-- 管理员操作结构化、reviewed、Broker-only。
-- MCP 不得修改 PermissionMode、workspace registry、credentials、Tunnel 配置或 Shell Registry。
+- process ownership uses Job Object/equivalent, not PID-only。
+- CurrentTask is backend-grounded and wake-driven；short tool presentation ≥500ms without delaying response。
+- only one active authorized workspace；identity/execution/display paths separated。
+- no secret plaintext in CLI/settings/browser/log/task/diagnostics。
 
 ---
 
-## 32. 最终技术决策
-
-LocalBridge 后续所有工具能力开发应遵守以下固定方向：
+## 21. 最终技术决策
 
 ```text
-LocalBridge Agent API
-        ↓
-LocalBridge Facade
-        ↓
+ChatGPT
+  ↓
+LocalBridge stable high-level Agent API
+  ↓
+Tool Registry / Facade
+  ↓
 Capability Classification
-        ↓
-PEP
-        ↓
-TaskExecution Envelope
-        ↓
-Runtime Adapter / Privileged Broker
-        ↓
-coding-tools-mcp / Native Rust
-```
-
-近期最优先实现顺序：
-
-```text
-1. LocalBridge Tool Registry + Stable Runtime Adapter
-2. workspace_context
-3. ShellResolver + exec_command / command_control
-4. Capability Negotiation + LocalBridge typed errors
-5. agent_workflow + task_control
-6. git_workflow + document_workflow
-7. 按收益逐步 Native Rust 化
+  ↓
+PEP + Risk Classification
+  ↓
+┌───────────────────────┬────────────────────────┐
+│ ordinary route        │ privileged route       │
+│ Workspace/System      │ explicit user consent  │
+│ Runtime               │ + UAC                  │
+│                       │ + bounded Broker op    │
+└───────────────────────┴────────────────────────┘
+  ↓
+coding-tools-mcp / Native Rust / Windows Native APIs
 ```
 
 最终目标：
 
-> LocalBridge 保留成熟原子 runtime 的执行效率，但拥有自己的稳定 Agent API、安全边界、Windows 命令环境、权限模型和可替换执行内核；第三方 runtime 只作为实现细节存在。
+> **LocalBridge 保留成熟 Coding primitive runtime 的执行效率，但拥有自己的稳定 Agent API、Windows 系统维护能力、安全边界、可信 Shell 环境、用户手动授权模型和可替换执行内核；第三方 runtime 只作为内部实现细节存在。**
+
+管理员能力最终合同：
+
+> **AI 可以提出并执行经过结构化、分类和审查的管理员系统操作；是否授予管理员执行权始终由用户明确决定。进入管理员模式必须先通过橙色入口触发的固定风险警告与 whole-red 9 秒确认门，再由用户显式确认后请求 Windows UAC；管理员模式只激活受控 Broker，不授予 unrestricted Administrator shell，AI 永远不能修改 LocalBridge 自身控制面或自行提权。**

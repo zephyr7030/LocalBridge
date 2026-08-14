@@ -1,5 +1,5 @@
 {
-  "schema_version": 25,
+  "schema_version": 26,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -196,7 +196,7 @@
     "copy_feedback_layout_shift_forbidden": true,
     "ui_primary_accent_hex": "#0071e3",
     "ui_black_as_standard_accent_forbidden": true,
-    "ui_admin_mode_logic_accent": "amber",
+    "ui_admin_mode_logic_accent": "#ff9500",
     "ui_admin_mode_blue_selected_override_forbidden": true,
     "service_status_dot_semantics": {
       "Ready": "green",
@@ -260,7 +260,6 @@
       5
     ],
     "onboarding_failure_backtracking_required": true,
-    "visible_admin_mode_selection_requests_uac": true,
     "separate_enable_admin_button_forbidden": true,
     "leaving_admin_mode_disables_broker": true,
     "background_admin_preference_auto_uac_forbidden": true,
@@ -414,7 +413,54 @@
     "custom_shell_registry_v0_1_required": false,
     "wsl_container_remote_shell_v0_1_required": false,
     "environment_manager_abstraction_v0_1_required": false,
-    "public_tools_list_policy_filtered_subset_of_registry_required": true
+    "public_tools_list_policy_filtered_subset_of_registry_required": true,
+    "ui_admin_mode_logic_color_name": "orange",
+    "admin_mode_warning_surfaces": [
+      "settings",
+      "onboarding_screen_3"
+    ],
+    "visible_admin_mode_selection_opens_warning_gate": true,
+    "admin_mode_warning_required_before_uac": true,
+    "admin_mode_warning_intro": "启用管理员权限后，错误或恶意操作可能导致：",
+    "admin_mode_warning_consequences": [
+      "删除或覆盖重要文件",
+      "修改系统关键配置",
+      "软件或系统无法正常启动",
+      "数据永久丢失",
+      "安全机制被绕过或关闭",
+      "凭据、密钥等敏感信息泄露",
+      "恶意程序获得更高权限",
+      "系统被破坏，严重时可能需要重装 Windows"
+    ],
+    "admin_mode_warning_footer": "仅在你明确理解操作后果时授权。",
+    "admin_mode_warning_cancel_label": "取消",
+    "admin_mode_warning_confirm_button_color": "red",
+    "admin_mode_warning_confirm_entire_button_red": true,
+    "admin_mode_warning_countdown_ms": 9000,
+    "admin_mode_warning_countdown_labels": [
+      "确认9",
+      "确认8",
+      "确认7",
+      "确认6",
+      "确认5",
+      "确认4",
+      "确认3",
+      "确认2",
+      "确认1"
+    ],
+    "admin_mode_warning_confirm_ready_label": "确认",
+    "admin_mode_warning_confirm_disabled_during_countdown": true,
+    "admin_mode_warning_countdown_monotonic_elapsed_required": true,
+    "admin_mode_warning_countdown_bypass_forbidden": true,
+    "admin_mode_warning_cancel_escape_dismiss_no_side_effect": true,
+    "admin_mode_warning_fresh_open_restarts_countdown": true,
+    "admin_mode_warning_remember_or_skip_forbidden": true,
+    "admin_mode_uac_before_enabled_confirm_forbidden": true,
+    "admin_mode_background_restore_warning_forbidden": true,
+    "admin_mode_active_broker_reselection_duplicate_uac_forbidden": true,
+    "admin_mode_warning_is_narrow_safety_dialog_not_wizard_shell": true,
+    "admin_mode_warning_ai_mcp_approval_forbidden": true,
+    "admin_mode_warning_separate_from_high_critical_operation_confirmation": true
   },
   "prs": {
     "LB-000": {
@@ -952,7 +998,7 @@
         "reconnect exhaustion minimal error window",
         "coherent visible button token system shared across product UI",
         "minimum-necessary prompt and helper-copy rules",
-        "blue #0071e3 standard product accent with amber administrator-mode exception",
+        "blue #0071e3 standard product accent with orange #ff9500 administrator-mode warning exception",
         "shared typed service-status dot presentation for Dashboard and onboarding",
         "settings page with exact 常规 连接 权限 groups",
         "independent Tunnel ID and Runtime API Key replace/edit flow",
@@ -1017,10 +1063,10 @@
         "secondary and ghost buttons remain visually distinguishable from white or near-white surfaces",
         "UI does not add redundant instructional prompts when the action is self-evident",
         "primary and ordinary selected controls use the blue #0071e3 accent rather than black",
-        "administrator mode uses amber logical selection styling and is not overridden by ordinary blue selected styling",
+        "administrator mode controls in onboarding and Settings use orange #ff9500 warning styling and are not overridden by ordinary blue selected styling",
         "Dashboard tunnel and coding service states render status dots using Ready green Starting amber Fault red Unknown gray semantics from the same typed status source used by onboarding",
         "Dashboard does not maintain an independent conflicting service-status color state",
-        "Settings has no separate 启用管理员权限 button; visible 管理员模式 selection or reselection in Settings requests UAC when privilege is not Active",
+        "Settings has no separate 启用管理员权限 button; when Broker is not Active, visible 管理员模式 selection or reselection opens the safety warning gate and cannot request UAC before the enabled red 确认 action after the full 9000ms countdown",
         "leaving 管理员模式 closes the privileged call gate and disables the broker",
         "Dashboard read-only administrator privilege status plus Settings and onboarding privilege runtime state are sourced from PrivilegeState rather than permission preference alone",
         "Dashboard renders no 权限模式 row and no 编辑模式 完整模式 管理员模式 selection controls",
@@ -1059,7 +1105,12 @@
         "forcing Settings or another rounded sheet/dialog to overflow vertically at 780x620 preserves all four outer rounded corners; the scrollbar is clipped or inset inside the rounded shell and never flattens or cuts the outer radius",
         "vertical scrollbars on Settings and other scrollable rounded surfaces expose no top or bottom arrow button or triangle affordance at 780x620",
         "removing scrollbar arrow affordances preserves wheel track and thumb scrolling and does not flatten or cut any outer rounded corner",
-        "intentionally slow backend lifecycle operation does not freeze frontend interaction or typed projection refresh"
+        "intentionally slow backend lifecycle operation does not freeze frontend interaction or typed projection refresh",
+        "administrator warning uses exact intro, eight ordered consequence bullets, and footer from schema26 with actions 取消 and one whole-red confirmation button",
+        "administrator warning red confirmation button is disabled for the full monotonic 9000ms interval, labels 确认9 through 确认1, then becomes enabled with exact label 确认; pointer keyboard synthetic repeated click rerender focus change or stale frontend state cannot bypass the gate",
+        "administrator warning cancel Escape close or dismiss causes no PermissionMode Broker or UAC side effect; every fresh open restarts the full nine-second countdown and no remember skip or do-not-show-again bypass exists",
+        "background administrator preference restore shows no safety dialog and requests no UAC; reselecting an already-active administrator mode causes no duplicate UAC",
+        "mode-entry warning does not approve any separate High or Critical per-operation confirmation and AI/MCP cannot approve the warning or mutate PermissionMode Broker or other control-plane authority"
       ],
       "non_goals": [
         "wizard",
@@ -1086,7 +1137,7 @@
         "single edge-to-edge custom window chrome with native decorations disabled",
         "full-page onboarding layout using the fixed custom-chrome content area",
         "backend-owned onboarding start/readiness state machine",
-        "administrator-mode selection UAC activation"
+        "administrator-mode orange #ff9500 warning plus whole-red nine-second confirmation gate before UAC activation"
       ],
       "required_tests": [
         "screen 4 title is 创建自定义插件",
@@ -1118,7 +1169,7 @@
         "screen 4 plugin management action opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser through a fixed Rust allowlist",
         "screen 4 developer-mode guidance is 在插件设置页面最底端，打开“开发者模式”",
         "screen 3 permission mode buttons that contain title plus description render at least twice the actual rendered height of the ordinary single-line control at 780x620; both text line boxes are fully visible and final visual PASS requires human inspection rather than CSS marker presence",
-        "ordinary selected permission modes use the standard blue accent while administrator mode uses amber logical styling in onboarding and Settings",
+        "ordinary selected permission modes use the standard blue accent while administrator mode uses orange #ff9500 warning styling in onboarding and Settings",
         "the selected project runtime MCP and OpenAI Tunnel are all ready before screen 4 becomes reachable so plugin creation is executable rather than premature guidance",
         "onboarding never defers its only runtime startup edge until screen 5",
         "screen 4 provides an explicit back action to screen 3 and a continue action to screen 5",
@@ -1139,11 +1190,12 @@
         "main window is fixed to 780x620 with minimum and maximum 780x620 resizable false and maximizable false",
         "native window decorations are disabled and exactly one edge-to-edge custom chrome provides drag minimize and close without maximize or double frame",
         "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
-        "screen 3 visible selection or reselection of 管理员模式 is the explicit user action that requests UAC when broker is not Active; no separate enable-admin button exists",
-        "background preference restore remains non-UAC even though visible administrator-mode selection requests UAC",
+        "screen 3 visible selection or reselection of 管理员模式 opens the fixed safety warning when Broker is not Active; no UAC or permission activation may occur until the whole-red confirmation button completes its full 9000ms disabled countdown and the user clicks enabled 确认; no separate enable-admin button exists",
+        "background preference restore shows neither the administrator warning nor UAC; a fresh visible warning always restarts the full nine-second countdown",
         "screen 3 two-line permission buttons pass a computed/rendered geometry Gate proving actual height at least 2x a single-line control and complete title/description line boxes; human 780x620 visual Gate remains required and static min-height CSS alone cannot PASS",
         "React does not own runtime start readiness polling loop; backend owns start/readiness state and frontend only observes typed projection",
-        "backend start/readiness delay does not make the onboarding UI unresponsive"
+        "backend start/readiness delay does not make the onboarding UI unresponsive",
+        "administrator warning is a narrow safety consent dialog and does not permit the five-screen onboarding shell to regress into a centered card modal or dialog layout"
       ],
       "non_goals": [
         "new dashboard pages",

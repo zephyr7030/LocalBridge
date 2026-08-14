@@ -24,7 +24,7 @@
     "Task summary is grounded in actual MCP/Broker execution and secret-redacted",
     "Onboarding screen 4 uses Local Bridge as the user-facing connector term",
     "Ordinary primary and selected UI uses blue #0071e3; black is not the standard product accent",
-    "Administrator mode uses amber logical styling in onboarding and Settings and is not overridden by ordinary blue selected styling",
+    "Administrator mode controls use orange #ff9500 warning styling in onboarding and Settings; when Broker is inactive they open the fixed nine-second whole-red-confirm safety gate before any UAC",
     "Dashboard does not show PermissionMode or Edit Full Elevated selection controls; permission editing may occur in Settings or an explicitly reopened onboarding Screen 3",
     "Dashboard administrator privilege runtime status is read-only and sourced from PrivilegeState",
     "Onboarding and Dashboard service-status dots use the same typed status source and Ready green Starting amber Fault red Unknown gray semantics",
@@ -85,12 +85,13 @@
     "whole_app_elevation": false,
     "admin_ttl": null,
     "user_controls_enable_disable": false,
+    "user_controls_permission_mode_selection": true,
+    "user_controls_broker_directly": false,
     "background_auto_uac": false,
     "generic_elevated_exec": true,
     "generic_elevated_exec_semantics": "reviewed_structured_gateway_only",
     "arbitrary_elevated_program_execution": false,
     "elevated_exec_indirect_control_plane_mutation": "deny_always",
-    "visible_admin_mode_selection_requests_uac": true,
     "separate_enable_admin_button": false,
     "leaving_admin_mode_disables_broker": true,
     "visible_selection_surfaces": [
@@ -102,7 +103,16 @@
       "explicitly_reopened_onboarding_screen_3"
     ],
     "dashboard_permission_mode_controls": false,
-    "dashboard_admin_privilege_status_read_only": true
+    "dashboard_admin_privilege_status_read_only": true,
+    "visible_admin_mode_selection_opens_warning_gate": true,
+    "warning_required_before_uac": true,
+    "warning_countdown_ms": 9000,
+    "warning_confirmation_button_color": "red",
+    "warning_confirmation_button_entirely_red": true,
+    "warning_confirm_ready_label": "确认",
+    "warning_cancel_label": "取消",
+    "background_warning": false,
+    "ai_can_approve_warning": false
   },
   "distribution_architecture": {
     "target": "Windows 11 x64",
@@ -165,7 +175,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Schema25 LocalBridge Agent Runtime facade redesign is ratified. Rework LB-006 first, then LB-007 through LB-012 in strict order, then run fresh G2 adversarial generation 9. G3 generation 6 is historical and must be rerun after the foundational G2 redesign is accepted. G4/LB-018 remains blocked."
+    "next_action": "Schema25 LocalBridge Agent Runtime facade redesign is ratified. Schema26 administrator safety consent is queued for LB-015/LB-016 and does not move the execution pointer. Rework LB-006 first, then LB-007 through LB-012 in strict order, then run fresh G2 adversarial generation 9. G3 generation 6 is historical and must be rerun after the foundational G2 redesign is accepted; when strict sequencing later reaches LB-015/LB-016, schema26 must be implemented there. G4/LB-018 remains blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -300,7 +310,7 @@
     "copy_feedback_layout_shift": false,
     "standard_primary_accent": "#0071e3",
     "black_as_standard_accent": false,
-    "administrator_mode_logic_accent": "amber",
+    "administrator_mode_logic_accent": "#ff9500",
     "administrator_mode_blue_override": false,
     "administrator_mode_selection_surfaces": [
       "onboarding_screen_3",
@@ -372,14 +382,17 @@
       "permission_button_visual_acceptance": "PASS_HUMAN_780x620_2026-08-14",
       "permission_button_css_only_auto_pass_forbidden": true,
       "ordinary_selected_accent": "#0071e3",
-      "administrator_selected_accent": "amber",
+      "administrator_selected_accent": "#ff9500",
       "back_action": true,
       "permission_button_min_height_px": 80,
-      "visible_admin_selection_requests_uac": true,
       "separate_enable_admin_button": false,
       "permission_button_rendered_height_multiplier": 2,
       "permission_button_computed_geometry_gate": true,
-      "permission_button_visual_acceptance_evidence": "user manual visual approval on 2026-08-14; scoped visual acceptance only, not the separate G3-to-G4 human Gate"
+      "permission_button_visual_acceptance_evidence": "user manual visual approval on 2026-08-14; scoped visual acceptance only, not the separate G3-to-G4 human Gate",
+      "visible_admin_selection_opens_warning_gate": true,
+      "warning_before_uac": true,
+      "warning_countdown_ms": 9000,
+      "warning_confirmation_button_color": "red"
     },
     "screen_4": {
       "purpose": "create_custom_plugin",
@@ -628,7 +641,11 @@
       "deletes_windows_secure_credential": true,
       "reveals_secret": false,
       "controlled_connection_change": true
-    }
+    },
+    "administrator_mode_accent": "#ff9500",
+    "administrator_mode_warning_before_uac": true,
+    "administrator_mode_warning_countdown_ms": 9000,
+    "administrator_mode_warning_confirmation_button_color": "red"
   },
   "dashboard_ui": {
     "permission_mode_row": false,
@@ -825,5 +842,68 @@
     "g3_must_be_reexecuted_after_g2_pass": true,
     "g3_human_gate_actionable": false,
     "g4_unlocked": false
+  },
+  "schema26_admin_mode_safety_warning_2026_08_14": {
+    "status": "CONTRACT_AMENDMENT_QUEUED_FOR_LB015_LB016",
+    "contract_review_status": "PASS",
+    "contract_review_scope": "schema26 semantics, authority consolidation, owner PR placement, and strict-sequence impact; not a G2/G3 group adversarial generation",
+    "contract_review_findings": [
+      "schema26 correctly queues implementation for LB-015/LB-016 without moving the live G2/LB-006 execution pointer",
+      "backend-trusted monotonic consent eligibility is required and LB-015 writable backend paths are sufficient; no earlier PR reopen is required solely for this UI consent gate",
+      "eight numbered human authority documents safely supersede the removed duplicate numbered drafts; historical commit/authorization references remain provenance only",
+      "LOCALBRIDGE_TOOL_WRAPPER_AND_SHELL_RESOLVER.md remains future design guidance except for portions explicitly ratified into current machine contracts and numbered authority"
+    ],
+    "contract_review_corrections": [
+      "clarified that the tool-wrapper/system-maintenance design document is not a ninth current human authority",
+      "restored direct Broker enable/disable control to false while preserving user PermissionMode selection"
+    ],
+    "supersedes": [
+      "administrator-mode amber/yellow active UI semantics",
+      "visible administrator-mode selection directly requesting UAC without an in-app warning gate"
+    ],
+    "current_execution_pointer_unchanged": {
+      "current_group": "G2",
+      "current_pr": "LB-006"
+    },
+    "owner_prs": [
+      "LB-015",
+      "LB-016"
+    ],
+    "admin_mode_control_accent": "#ff9500",
+    "warning_intro": "启用管理员权限后，错误或恶意操作可能导致：",
+    "warning_consequences": [
+      "删除或覆盖重要文件",
+      "修改系统关键配置",
+      "软件或系统无法正常启动",
+      "数据永久丢失",
+      "安全机制被绕过或关闭",
+      "凭据、密钥等敏感信息泄露",
+      "恶意程序获得更高权限",
+      "系统被破坏，严重时可能需要重装 Windows"
+    ],
+    "warning_footer": "仅在你明确理解操作后果时授权。",
+    "countdown_ms": 9000,
+    "confirmation_button": "whole_red",
+    "countdown_labels": [
+      "确认9",
+      "确认8",
+      "确认7",
+      "确认6",
+      "确认5",
+      "确认4",
+      "确认3",
+      "确认2",
+      "确认1"
+    ],
+    "ready_label": "确认",
+    "uac_only_after_enabled_confirm": true,
+    "background_no_warning_or_uac": true,
+    "ai_mcp_cannot_approve_or_self_elevate": true,
+    "high_critical_confirmation_separate": true
+  },
+  "schema26_historical_semantics_policy": {
+    "pre_schema26_admin_color_or_direct_uac_text_in_historical_review_evidence_is_non_authoritative": true,
+    "current_admin_mode_authority": "schema26 orange #ff9500 entry -> fixed warning -> whole-red 9000ms disabled countdown -> enabled 确认 -> backend validation -> Windows UAC -> Privileged Broker",
+    "historical_evidence_must_not_override_current_contract": true
   }
 }

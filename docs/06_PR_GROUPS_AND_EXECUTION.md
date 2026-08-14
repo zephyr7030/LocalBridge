@@ -1,4 +1,3 @@
-
 # 06 — PR Groups & Execution
 
 20 个 PR 不变，严格按编号顺序执行，并增加组级对抗审查 Gate。
@@ -59,6 +58,28 @@ LB-006 REWORK_REQUIRED
 
 在此之前 G3/G4 全部保持 BLOCKED。
 
+### Schema26 管理员模式安全确认修订
+
+Schema26 是对后续 **LB-015 / LB-016** 的 UI/安全合同追加，不改变当前执行入口，也不允许跳过 G2：
+
+```text
+current_group = G2
+current_pr    = LB-006
+```
+
+到达 LB-015/LB-016 时必须实现并验收：
+
+- 所有 Settings / onboarding Screen3 的 `管理员模式` 入口统一橙色 `#ff9500`；
+- Broker 未 Active 时，选择/重选管理员模式先打开固定安全警告，而不是直接 UAC；
+- 固定警告正文严格使用 schema26 八条后果和 footer；
+- 确认按钮整个为红色，从 `确认9` 倒计时到 `确认1`，完整 9000ms 内 disabled，之后仍为红色并显示 enabled `确认`；
+- frontend 仅显示倒计时，backend/等价可信单调计时负责 not-before/eligibility，提前/重放/stale confirmation fail-closed；
+- only enabled `确认` 后才允许既有安全校验与 Windows UAC；取消/Esc/关闭无副作用，fresh open 重新计时，无 remember/skip；
+- background restore 无 warning/UAC；Broker Active 重新选择不得重复 UAC；
+- High/Critical 单操作确认仍是独立 Gate；AI/MCP 不能批准模式警告/UAC或改变 control-plane。
+
+Schema26 合同变更本身不构成 LB-015/LB-016 实现 PASS；必须等严格顺序实际到达对应 PR 后修改产品代码与测试。
+
 自动重连职责：
 
 - LB-008：Tunnel reconnect primitive；
@@ -82,7 +103,14 @@ LB-015：
 - 不新增 UI/动画/图标/CSS/字体依赖；
 - 单行绿色脉冲当前执行；
 - 重连前 5 次无新增 UI；
-- 5 次失败后一次极简错误窗口。
+- 5 次失败后一次极简错误窗口；
+- schema26 管理员模式橙色入口 + whole-red 9 秒安全确认门。
+
+LB-016：
+
+- 5 屏 onboarding 合同保持；
+- Screen3 管理员模式使用与 Settings 相同 schema26 安全确认；
+- safety-consent dialog 仅为局部安全层，不得使 onboarding 重新变成居中 modal/card shell。
 
 ## G4 — 打包与发布
 

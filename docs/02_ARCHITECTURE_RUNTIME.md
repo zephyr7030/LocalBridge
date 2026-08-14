@@ -1,4 +1,3 @@
-
 # 02 — Architecture & Runtime
 
 ## Rust 唯一真相源
@@ -60,6 +59,52 @@ runtime adapter 初始化必须协商 facade mandatory capabilities；缺失能�
 ShellResolver 只接受 `auto/powershell/pwsh/windows_powershell/cmd`。`auto` 在已验证可信候选中按 semantic version 选择最高兼容 PowerShell Core，再 Windows PowerShell 5.1，再 `cmd.exe`。PATH 只能发现候选，不能赋予信任；任何候选在 version probe/执行前必须先通过可信安装位置或显式注册 executable identity 的重新验证。禁止 command-text guessing、MCP 任意 shell executable、shell auto-install/update。
 
 DirectProcessExecutor 与 ShellExecutor 是两个结构化边界；direct/privileged process 不以 shell string 为 canonical。WSL/container/remote、custom shell registry、environment-manager abstraction 与精确目录结构延后，不属于 v0.1 Gate。
+
+### Schema26 — Administrator Mode Safety Consent Gate
+
+管理员模式可见入口的视觉与授权状态机由 LocalBridge 自己拥有，不能由 frontend 直接跳到 UAC：
+
+```text
+User selects 管理员模式
+  ↓
+Broker Active?
+  ├─ yes → keep current active state; no duplicate UAC merely due to reselection
+  └─ no
+      ↓
+create AdminConsentChallenge / equivalent typed backend state
+      ↓
+show fixed warning dialog
+      ↓
+whole-red confirm disabled for full 9000ms
+      ↓
+backend monotonic elapsed >= 9000ms ?
+  ├─ no → reject confirmation fail-closed
+  └─ yes
+      ↓
+user clicks enabled 确认
+      ↓
+backend security validation
+      ↓
+Windows runas / UAC
+      ↓
+Privileged Broker activation
+```
+
+固定可见警告内容由 schema26 机器合同提供；UI 不得自行增删或改写八条后果。管理员模式入口控件统一橙色 `#ff9500`，确认弹窗的**整个确认按钮**统一红色。首次显示标签 `确认9`，依次到 `确认1`；9000ms 前 disabled，9000ms 后仍为红色、标签精确为 `确认` 并才可点击。
+
+前端倒计时只负责 presentation，不是授权真相。推荐 backend 持有等价结构：
+
+```text
+AdminConsentChallenge
+- challenge_id
+- created_at_monotonic
+- not_before = created_at_monotonic + 9000ms
+- consumed / cancelled
+```
+
+confirm typed intent 必须携带当前 challenge identity 或等价不可混淆关联，backend 在处理 intent 时重新检查 challenge 仍有效、未取消、未消费、达到 not-before，任何 stale frontend state、rerender、重复/合成 click、键盘提前提交或旧 challenge 重放均 fail-closed。challenge fresh open 必须重新开始完整 9 秒；取消、Esc、close/dismiss 使 challenge 失效且不得改变 PermissionMode/Broker/UAC。
+
+`--background` 恢复管理员偏好不得创建 challenge、不得显示 warning、不得 UAC，只能保持 Requested/等价未授权状态。High/Critical 单操作授权是独立后续 Gate，不能复用“已看过管理员模式警告”作为单操作批准。
 
 ## 启动/停止
 
@@ -201,4 +246,4 @@ LocalBridge.exe --background
 
 `--background` 从入口不创建/显示主窗口。
 
-开机启动使用 `--background`；管理员偏好不自动 UAC。
+开机启动使用 `--background`；管理员偏好不自动显示安全确认、不自动 UAC。
