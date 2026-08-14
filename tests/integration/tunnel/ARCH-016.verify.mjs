@@ -17,8 +17,6 @@ for (const required of [
   'const TUNNEL_ID_ENV: &str = "CONTROL_PLANE_TUNNEL_ID"',
   '"--control-plane.api-key"',
   "API_KEY_REFERENCE.into()",
-  "spec.env(API_KEY_ENV, self.secret.expose_secret())",
-  "spec.env(TUNNEL_ID_ENV, self.config.tunnel_id.expose())",
   "spec.env_remove(key)",
   '"CLOUDFLARED_TUNNEL_TOKEN"',
   '"HEALTH_UNIX_SOCKET"',
@@ -65,7 +63,9 @@ if (/LOCALBRIDGE_RUNTIME_API_KEY_ONE|LB008_SYNTHETIC_RUNTIME_KEY/.test(argvBuild
 
 const exposeUses = [...runtime.matchAll(/\.expose_secret\s*\(\s*\)/g)].length;
 if (exposeUses !== 1) throw new Error(`ARCH-016 unexpected secret exposure call count: ${exposeUses}`);
-const envInjection = /spec\s*=\s*spec\.env\(API_KEY_ENV,\s*self\.secret\.expose_secret\(\)\)/s;
+const envInjection = /spec\s*=\s*spec\s*\.env\(API_KEY_ENV,\s*self\.secret\.expose_secret\(\)\)\s*\.map_err\(classify_supervisor\)\?/s;
 if (!envInjection.test(runtime)) throw new Error("ARCH-016 secret exposure is not confined to child env injection");
+const tunnelIdInjection = /spec\s*=\s*spec\s*\.env\(TUNNEL_ID_ENV,\s*self\.config\.tunnel_id\.expose\(\)\)\s*\.map_err\(classify_supervisor\)\?/s;
+if (!tunnelIdInjection.test(runtime)) throw new Error("ARCH-016 Tunnel ID is not confined to child env injection");
 
 console.log("ARCH-016_VERIFY=PASS env_only_secret=true os_command_line_regression=true tunnel_id_env_only=true inherited_override_removal=true ordinary_tunnel_no_managed_cloudflare=true");
