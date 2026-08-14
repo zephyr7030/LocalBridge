@@ -203,12 +203,7 @@ impl<R: GuardRuntime> McpGuard<R> {
 
     pub fn decision(&self, mode: PermissionMode, request: &ToolCallRequest) -> PolicyDecision {
         let indirect_capabilities = effective_indirect_capabilities(request);
-        let decision = self.policy.decide_request(
-            mode,
-            &request.name,
-            &indirect_capabilities,
-            &request.arguments,
-        );
+        let decision = decide_actual_request(&self.policy, mode, request, indirect_capabilities);
         if decision.allowed && has_verbatim_execution_path(request) {
             return PolicyDecision {
                 descriptor: decision.descriptor,
@@ -226,6 +221,17 @@ impl<R: GuardRuntime> McpGuard<R> {
     pub fn runtime_root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
         self.runtime.root_is_running()
     }
+}
+
+// ARCH-026 audits this exact actual-arguments call as a stable machine-readable seam.
+#[rustfmt::skip]
+fn decide_actual_request(
+    policy: &CapabilityPolicy,
+    mode: PermissionMode,
+    request: &ToolCallRequest,
+    indirect_capabilities: Vec<Capability>,
+) -> PolicyDecision {
+    policy.decide_request(mode, &request.name, &indirect_capabilities, &request.arguments)
 }
 
 fn effective_indirect_capabilities(request: &ToolCallRequest) -> Vec<Capability> {

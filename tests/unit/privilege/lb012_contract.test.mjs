@@ -66,9 +66,10 @@ const handlerStart = server.indexOf("fn handle_elevated_exec");
 const handlerEnd = server.indexOf("fn request_id", handlerStart);
 if (handlerStart < 0 || handlerEnd <= handlerStart) throw new Error("LB-012 elevated_exec PEP handler missing");
 const handler = server.slice(handlerStart, handlerEnd);
-const realArgumentDecision = handler.indexOf("execution_guard.elevated_decision(mode, &arguments)");
+const reviewSnapshot = handler.indexOf("let reviewed_arguments = arguments.clone()");
+const realArgumentDecision = handler.indexOf("execution_guard.elevated_decision(mode, &reviewed_arguments)");
 const structuredParse = handler.indexOf("elevated_exec_spec(arguments)");
-if (!(realArgumentDecision >= 0 && structuredParse > realArgumentDecision) || handler.includes('ToolCallRequest::new("elevated_exec", json!({}))')) {
+if (!(reviewSnapshot >= 0 && realArgumentDecision > reviewSnapshot && structuredParse > realArgumentDecision) || handler.includes('ToolCallRequest::new("elevated_exec", json!({}))')) {
   throw new Error("LB-012 policy decision does not consume real elevated_exec arguments before structured dispatch");
 }
 if (!handler.includes("let execution_guard = guard") || !handler.includes("drop(execution_guard)")) throw new Error("LB-012 elevated execution is not serialized by the Guard execution mutex");

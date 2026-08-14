@@ -1043,7 +1043,8 @@ fn handle_elevated_exec(
     let execution_guard = guard
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let decision = execution_guard.elevated_decision(mode, &arguments);
+    let reviewed_arguments = arguments.clone();
+    let decision = execution_guard.elevated_decision(mode, &reviewed_arguments);
     if !decision.allowed || decision.descriptor.capability != Capability::ElevatedExec {
         finish_elevated_task(current_task, Some(TaskExecutionState::Blocked));
         return write_rpc_error(
