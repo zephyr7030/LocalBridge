@@ -6,7 +6,9 @@ use crate::state::{
     Capability, CurrentTaskStatus, PermissionMode, SafeTaskSummary, TaskExecutionState, TaskKind,
 };
 
-use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision, ToolDescriptor};
+use super::policy::{
+    CapabilityPolicy, DenyReason, PolicyDecision, ToolDescriptor, shell_invocation_requires_review,
+};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 
 pub trait GuardRuntime {
@@ -142,6 +144,16 @@ impl<R: GuardRuntime> McpGuard<R> {
         );
         let kind = refined_task_kind(decision.descriptor, &request.arguments);
         let summary = safe_summary(&request.name, &request.arguments);
+        if has_verbatim_execution_path(&request) {
+            let blocked = CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
+                .expect("Blocked is a valid active task state");
+            project(blocked);
+            project(CurrentTaskStatus::Idle);
+            return Err(GuardError::Denied(PolicyDenied {
+                reason: DenyReason::VerbatimExecutionPath,
+                capability: decision.descriptor.capability,
+            }));
+        }
         if decision.descriptor.capability == Capability::ElevatedExec {
             let blocked = CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
                 .expect("Blocked is a valid active task state");
@@ -162,17 +174,6 @@ impl<R: GuardRuntime> McpGuard<R> {
                 capability: decision.descriptor.capability,
             }));
         }
-        if has_verbatim_execution_path(&request) {
-            let blocked = CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
-                .expect("Blocked is a valid active task state");
-            project(blocked);
-            project(CurrentTaskStatus::Idle);
-            return Err(GuardError::Denied(PolicyDenied {
-                reason: DenyReason::VerbatimExecutionPath,
-                capability: decision.descriptor.capability,
-            }));
-        }
-
         project(
             CurrentTaskStatus::project(kind, summary, TaskExecutionState::Running)
                 .expect("Running is a valid active task state"),
@@ -204,7 +205,7 @@ impl<R: GuardRuntime> McpGuard<R> {
     pub fn decision(&self, mode: PermissionMode, request: &ToolCallRequest) -> PolicyDecision {
         let indirect_capabilities = effective_indirect_capabilities(request);
         let decision = decide_actual_request(&self.policy, mode, request, indirect_capabilities);
-        if decision.allowed && has_verbatim_execution_path(request) {
+        if has_verbatim_execution_path(request) {
             return PolicyDecision {
                 descriptor: decision.descriptor,
                 allowed: false,
@@ -236,12 +237,14 @@ fn decide_actual_request(
 
 fn effective_indirect_capabilities(request: &ToolCallRequest) -> Vec<Capability> {
     let mut capabilities = request.indirect_capabilities.clone();
-    if request.name == "exec_command"
-        && string_argument(&request.arguments, &["cmd", "command"])
-            .as_deref()
-            .is_some_and(contains_privileged_external_runtime)
-    {
-        capabilities.push(Capability::PrivilegedExternalRuntime);
+    if request.name == "exec_command" {
+        if let Some(command) = string_argument(&request.arguments, &["cmd", "command"]) {
+            let shell = string_argument(&request.arguments, &["shell"])
+                .unwrap_or_else(|| "auto".to_string());
+            if shell_invocation_requires_review(&shell, &command) {
+                capabilities.push(Capability::PrivilegedExternalRuntime);
+            }
+        }
     }
     capabilities
 }
@@ -361,15 +364,4 @@ fn refined_task_kind(descriptor: ToolDescriptor, arguments: &Value) -> TaskKind 
     } else {
         TaskKind::ExecuteCommand
     }
-}
-
-fn contains_privileged_external_runtime(command: &str) -> bool {
-    command
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
-        .any(|word| {
-            matches!(
-                word.to_ascii_lowercase().as_str(),
-                "docker" | "docker.exe" | "podman" | "podman.exe" | "wsl" | "wsl.exe"
-            )
-        })
 }

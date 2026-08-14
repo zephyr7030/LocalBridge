@@ -137,6 +137,11 @@ fn malformed_or_semantically_widened_policy_is_rejected() {
         "arbitrary_programs = \"allow\"",
     );
     assert!(CapabilityPolicy::from_toml(&arbitrary_elevated).is_err());
+    let no_shell_review = include_str!("../../../runtime-policy.toml").replace(
+        "unreviewable_shell_indirection = \"review_required\"",
+        "unreviewable_shell_indirection = \"allow\"",
+    );
+    assert!(CapabilityPolicy::from_toml(&no_shell_review).is_err());
 }
 
 #[test]
@@ -200,6 +205,47 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
     assert!(!external.allowed);
     assert_eq!(
         external.deny_reason,
+        Some(DenyReason::PrivilegedRouteNotAvailable)
+    );
+
+    for arguments in [
+        json!({"command":"$x=('do'+'cker'); & $x ps","shell":"windows_powershell"}),
+        json!({"command":"$x='docker'; Start-Process $x","shell":"powershell"}),
+        json!({"command":"Set-Alias d docker; d ps","shell":"pwsh"}),
+        json!({"command":"cmd /c echo safe","shell":"windows_powershell"}),
+        json!({"command":"set x=docker & %x% ps","shell":"cmd"}),
+    ] {
+        let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
+        assert!(!decision.allowed, "shell indirection unexpectedly allowed: {arguments}");
+        assert_eq!(
+            decision.deny_reason,
+            Some(DenyReason::PrivilegedRouteNotAvailable)
+        );
+    }
+
+    for arguments in [
+        json!({"command":"Write-Output \"a|b\"; Write-Output \"a&b\"; Write-Output 'docker is text'","shell":"windows_powershell"}),
+        json!({"command":"Start-Sleep -Milliseconds 10; $line=[Console]::In.ReadLine(); Write-Output ('write:'+ $line)","shell":"auto"}),
+    ] {
+        assert!(
+            policy
+                .decide_public(PermissionMode::Full, "exec_command", &arguments)
+                .allowed,
+            "review rejected ordinary schema28 shell semantics: {arguments}"
+        );
+    }
+
+    let workflow_indirection = policy.decide_public(
+        PermissionMode::Full,
+        "agent_workflow",
+        &json!({
+            "action":"bugfix",
+            "commands":[{"command":"$x=('do'+'cker'); & $x ps","shell":"windows_powershell"}]
+        }),
+    );
+    assert!(!workflow_indirection.allowed);
+    assert_eq!(
+        workflow_indirection.deny_reason,
         Some(DenyReason::PrivilegedRouteNotAvailable)
     );
 }

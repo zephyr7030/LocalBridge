@@ -338,6 +338,8 @@ struct EnforcementSection {
     unknown_tool: String,
     request_permissions: String,
     transitive_exec_classification: String,
+    shell_invocation_review: String,
+    unreviewable_shell_indirection: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -584,17 +586,13 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             PublicCapabilityDeclaration::READ,
         )),
         "exec_command" if action.is_none() => {
-            let command = arguments
-                .get("command")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
             Some(public_descriptor(
                 "exec_command",
                 "execute",
                 Capability::ProcessExec,
                 TaskKind::ExecuteCommand,
                 PublicCapabilityDeclaration {
-                    privilege: contains_privileged_external_runtime(command),
+                    privilege: shell_request_requires_review(arguments),
                     ..PublicCapabilityDeclaration::PROCESS
                 },
             ))
@@ -724,6 +722,7 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             PublicCapabilityDeclaration::READ,
         )),
         "agent_workflow" => {
+            let shell_review_required = workflow_commands_require_review(arguments);
             let (name, declaration) = match action? {
                 "diagnose" => (
                     "diagnose",
@@ -763,6 +762,10 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                 ),
                 _ => return None,
             };
+            let declaration = PublicCapabilityDeclaration {
+                privilege: declaration.privilege || shell_review_required,
+                ..declaration
+            };
             Some(public_descriptor(
                 "agent_workflow",
                 name,
@@ -775,15 +778,225 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
     }
 }
 
-fn contains_privileged_external_runtime(command: &str) -> bool {
-    command
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
-        .any(|word| {
-            matches!(
-                word.to_ascii_lowercase().as_str(),
-                "docker" | "docker.exe" | "podman" | "podman.exe" | "wsl" | "wsl.exe"
-            )
-        })
+fn workflow_commands_require_review(arguments: &Value) -> bool {
+    let Some(commands) = arguments.get("commands") else {
+        return false;
+    };
+    let Some(commands) = commands.as_array() else {
+        return true;
+    };
+    commands.iter().any(shell_request_requires_review)
+}
+
+fn shell_request_requires_review(arguments: &Value) -> bool {
+    let Some(command) = arguments.get("command").and_then(Value::as_str) else {
+        return false;
+    };
+    let shell = arguments
+        .get("shell")
+        .and_then(Value::as_str)
+        .unwrap_or("auto");
+    shell_invocation_requires_review(shell, command)
+}
+
+pub(crate) fn shell_invocation_requires_review(shell: &str, command: &str) -> bool {
+    match shell {
+        "powershell" | "pwsh" | "windows_powershell" => {
+            powershell_invocation_requires_review(command)
+        }
+        "cmd" => cmd_invocation_requires_review(command),
+        // `auto` may legitimately fall back to cmd when no trusted PowerShell exists,
+        // so its review is the conservative union of both supported grammars.
+        "auto" => {
+            powershell_invocation_requires_review(command)
+                || cmd_invocation_requires_review(command)
+        }
+        // Invalid/unknown selectors are rejected by the public schema/Facade, but policy
+        // must never turn an unknown execution grammar into an allow decision.
+        _ => true,
+    }
+}
+
+fn review_word(word: &str) -> bool {
+    let lower = word.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "docker"
+            | "docker.exe"
+            | "podman"
+            | "podman.exe"
+            | "wsl"
+            | "wsl.exe"
+            | "powershell"
+            | "powershell.exe"
+            | "pwsh"
+            | "pwsh.exe"
+            | "cmd"
+            | "cmd.exe"
+            | "invoke-expression"
+            | "iex"
+            | "start-process"
+            | "saps"
+            | "invoke-command"
+            | "icm"
+            | "start-job"
+            | "start-threadjob"
+            | "enter-pssession"
+            | "new-pssession"
+            | "set-alias"
+            | "new-alias"
+            | "import-module"
+            | "ipmo"
+            | "invoke-cimmethod"
+            | "invoke-wmimethod"
+            | "wmic"
+            | "rundll32"
+            | "rundll32.exe"
+            | "regsvr32"
+            | "regsvr32.exe"
+            | "mshta"
+            | "mshta.exe"
+            | "wscript"
+            | "wscript.exe"
+            | "cscript"
+            | "cscript.exe"
+            | "scriptblock"
+            | "createprocess"
+            | "win32_process"
+            | "function"
+            | "call"
+    ) || matches!(
+        lower.rsplit('.').next(),
+        Some("ps1" | "bat" | "cmd" | "vbs" | "wsf")
+    )
+}
+
+fn flush_review_word(word: &mut String) -> bool {
+    if word.is_empty() {
+        return false;
+    }
+    let requires_review = review_word(word);
+    word.clear();
+    requires_review
+}
+
+fn powershell_invocation_requires_review(command: &str) -> bool {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut quote = Quote::None;
+    let mut chars = command.chars().peekable();
+    let mut word = String::new();
+    let mut command_boundary = true;
+    while let Some(ch) = chars.next() {
+        match quote {
+            Quote::Single => {
+                if ch == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        chars.next();
+                    } else {
+                        quote = Quote::None;
+                    }
+                }
+                continue;
+            }
+            Quote::Double => {
+                if ch == '`' {
+                    chars.next();
+                } else if ch == '"' {
+                    quote = Quote::None;
+                }
+                continue;
+            }
+            Quote::None => {}
+        }
+
+        if ch == '\'' {
+            if flush_review_word(&mut word) {
+                return true;
+            }
+            quote = Quote::Single;
+            continue;
+        }
+        if ch == '"' {
+            if flush_review_word(&mut word) {
+                return true;
+            }
+            quote = Quote::Double;
+            continue;
+        }
+        if ch == '`' {
+            if let Some(escaped) = chars.next() {
+                if escaped.is_ascii_alphanumeric() || matches!(escaped, '_' | '-' | '.') {
+                    word.push(escaped);
+                    command_boundary = false;
+                } else if flush_review_word(&mut word) {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if ch == '&' {
+            if flush_review_word(&mut word) {
+                return true;
+            }
+            if chars.peek() == Some(&'&') {
+                chars.next();
+                command_boundary = true;
+                continue;
+            }
+            // A single PowerShell call operator can execute a target assembled at runtime.
+            return true;
+        }
+        if ch == '.' && command_boundary {
+            // Dot-sourcing/script-path invocation is an execution indirection surface and is
+            // intentionally review-required rather than guessed from the eventual target.
+            return true;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            word.push(ch);
+            command_boundary = false;
+            continue;
+        }
+        if flush_review_word(&mut word) {
+            return true;
+        }
+        if matches!(ch, ';' | '|' | '\n' | '\r' | '{' | '}') {
+            command_boundary = true;
+        }
+    }
+    flush_review_word(&mut word)
+}
+
+fn cmd_invocation_requires_review(command: &str) -> bool {
+    let mut chars = command.chars().peekable();
+    let mut word = String::new();
+    while let Some(ch) = chars.next() {
+        if matches!(ch, '%' | '!') {
+            // cmd variable/argument/delayed expansion can assemble a command name at runtime.
+            return true;
+        }
+        if ch == '^' {
+            if let Some(escaped) = chars.next() {
+                if escaped.is_ascii_alphanumeric() || matches!(escaped, '_' | '-' | '.') {
+                    word.push(escaped);
+                } else if flush_review_word(&mut word) {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            word.push(ch);
+        } else if flush_review_word(&mut word) {
+            return true;
+        }
+    }
+    flush_review_word(&mut word)
 }
 
 fn is_control_plane_name(name: &str) -> bool {
@@ -947,6 +1160,8 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
         || document.enforcement.unknown_tool != "deny"
         || document.enforcement.request_permissions != "deny_always"
         || document.enforcement.transitive_exec_classification != "required"
+        || document.enforcement.shell_invocation_review != "static_target_fail_closed"
+        || document.enforcement.unreviewable_shell_indirection != "review_required"
     {
         return Err(PolicyError::ContractMismatch("enforcement"));
     }

@@ -36,6 +36,8 @@ upstream_direct_tunnel_target = "forbidden"
 unknown_tool = "deny"
 request_permissions = "deny_always"
 transitive_exec_classification = "required"
+shell_invocation_review = "static_target_fail_closed"
+unreviewable_shell_indirection = "review_required"
 
 [upstream_coding_tools]
 permission_mode = "trusted_behind_guard"

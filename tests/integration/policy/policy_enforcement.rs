@@ -143,14 +143,21 @@ fn win32_verbatim_execution_paths_are_blocked_before_upstream_without_scanning_p
 #[test]
 fn privileged_external_runtime_commands_require_review_and_never_forward() {
     for mode in [PermissionMode::Full, PermissionMode::Elevated] {
-        for command in [
-            "docker ps",
-            "podman.exe run image",
-            "powershell -Command wsl.exe --status",
+        for (command, shell) in [
+            ("docker ps", "auto"),
+            ("podman.exe run image", "auto"),
+            ("powershell -Command wsl.exe --status", "auto"),
+            ("$x=('do'+'cker'); & $x ps", "windows_powershell"),
+            ("$x='docker'; Start-Process $x", "powershell"),
+            ("Set-Alias d docker; d ps", "pwsh"),
+            ("set x=docker & %x% ps", "cmd"),
         ] {
             let calls = Rc::new(RefCell::new(Vec::new()));
             let mut guard = McpGuard::new(FakeRuntime::new(calls.clone()), policy());
-            let request = ToolCallRequest::new("exec_command", json!({"cmd":command}));
+            let request = ToolCallRequest::new(
+                "exec_command",
+                json!({"cmd":command,"shell":shell}),
+            );
             assert!(!guard.decision(mode, &request).allowed);
             let mut states = Vec::new();
             let result = guard.call_tool(mode, request, |status| states.push(status));
