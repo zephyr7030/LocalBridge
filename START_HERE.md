@@ -137,12 +137,18 @@ v1 core registry = workspace_context / agent_workflow / exec_command / command_c
 特权扩展         = elevated_exec；仅既有 Elevated + Broker policy 条件式开放，不属于普通 core
 安全路由         = LocalBridge Tool Registry → stable capability/action → PEP → adapter/executor
 Runtime adapter  = coding-tools-mcp 为内部可替换 backend；启动必须做 mandatory capability negotiation，缺失/不兼容 fail-closed
+Public session    = LocalBridge-owned opaque session/output handles；禁止 raw upstream session/output handle；poll/read/write/kill 必须闭环且 terminal lifecycle 后台收敛
+workspace_context = active workspace 时返回非空 ordinary absolute workspace + workspace-relative default_cwd；不得静默 workspace=""
+Public path input = exec workdir / git / document / image 等 workspace-bound 参数统一 active-workspace-relative；absolute/traversal typed deny
+Process outcome   = exit_code=0 才是普通 success；任何非零 exit（包括无 stdout/stderr）= ProcessFailed / Failed task
+Facade completeness = public schema 已广告 action 必须真实可执行；禁止“先暴露、调用时 unavailable”
+Git nested repo   = 五个 git_workflow action 共用 workspace-bounded repo resolver；已发现 repo 时 diff 禁止 non-git fallback
 Shell selector   = auto / powershell / pwsh / windows_powershell / cmd；禁止 command-text guessing、任意 executable selector、自动安装/更新
 auto shell       = 在已验证可信候选中按 semantic version 选最高兼容 PowerShell Core → Windows PowerShell 5.1 → cmd
 PATH             = 仅发现线索，不是信任依据；version probe/执行前先验证可信安装位置或显式注册 executable identity
 执行模型         = DirectProcessExecutor 与 ShellExecutor 分离，均使用 structured spec
 v0.1 非目标      = WSL/container/remote shell、custom shell registry、environment manager、固定内部目录布局
-当前返工入口     = G2 / LB-006；LB-006→LB-012 严格重验，之后 fresh G2 adversarial generation 9；旧 G2 gen8/G3 gen6 仅保留历史证据
+当前返工入口     = G2 / LB-006；G2 adversarial generation 9 已 FAIL；LB-006→LB-012 严格重验，之后 fresh G2 adversarial generation 10；旧 G2 gen8/G3 gen6 仅保留历史证据
 ```
 
 Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订，**不改变当前执行入口**：当前仍为 `G2 / LB-006`，必须继续严格顺序推进，不能因本合同提前跳到 G3。

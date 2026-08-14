@@ -644,6 +644,63 @@ const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14 = Object.freeze({
+  schemaVersion: 27,
+  baselineSchemaVersion: 26,
+  addedRules: {
+    public_session_ids_localbridge_owned: true,
+    public_output_refs_localbridge_owned: true,
+    upstream_private_session_handles_public_forbidden: true,
+    upstream_private_output_handles_public_forbidden: true,
+    command_control_poll_live_session_by_public_session_id_required: true,
+    command_control_poll_retained_output_mapping_forbidden: true,
+    command_control_read_uses_public_output_ref: true,
+    public_session_terminal_convergence_without_client_poll_required: true,
+    public_session_permanent_running_after_private_prune_forbidden: true,
+    public_session_lost_error_code: "SessionUnavailable",
+    nonzero_process_exit_public_success_forbidden: true,
+    nonzero_process_exit_error_code: "ProcessFailed",
+    workspace_context_workspace_non_empty_ordinary_absolute_required: true,
+    workspace_context_default_cwd_workspace_relative_required: true,
+    workspace_bound_public_path_inputs_relative_only: true,
+    workspace_public_absolute_path_input_forbidden: true,
+    workspace_public_parent_traversal_input_forbidden: true,
+    runtime_result_semantic_probe_required_when_output_schema_insufficient: true,
+    public_facade_advertised_action_must_be_implemented: true,
+    agent_workflow_actions: ["diagnose", "bugfix", "feature", "refactor", "test_failure", "build_release", "document", "resume", "custom"],
+    task_control_actions: ["get", "cancel"],
+    document_workflow_actions: ["inspect", "create", "convert", "rebuild"],
+    git_nested_repository_resolution_consistent: true,
+    git_repository_discovery_stops_at_active_workspace_root: true,
+    git_directory_path_selects_repo_context: true,
+    git_paths_are_path_filters: true,
+    git_diff_non_git_fallback_after_repo_discovery_forbidden: true,
+  },
+  lb006: {
+    addedArtifacts: [
+      "LocalBridge-owned public command Session Manager with opaque public session/output handles and terminal snapshots",
+      "stable command_control live-session versus retained-output adapter for poll/read/write/kill",
+      "workspace_context stable projection plus deterministic private-result semantic compatibility probe",
+      "stable process outcome normalizer that maps every nonzero ordinary exit to ProcessFailed",
+      "complete executable implementations for every advertised v1 agent_workflow task_control and document_workflow action",
+      "active-workspace-relative public path/workdir validator with stable LocalBridge typed errors",
+      "shared workspace-bounded nested Git repository resolver for status diff log show and blame",
+    ],
+    addedTests: [
+      "active workspace D:\\project yields non-empty ordinary workspace_context.workspace D:\\project plus workspace-relative default_cwd and never a Win32 verbatim projection",
+      "if private get_default_cwd result semantics do not provide non-empty workspace:string plus default_cwd:string the facade fails closed with RuntimeCapabilityMismatch before serving public tools",
+      "a long-running exec returns LocalBridge-owned public session/output handles; command_control poll write and kill use the public session handle while retained output read uses the public output handle",
+      "public session_id and output_ref do not equal or expose upstream private session/output handles",
+      "a running public session converges to completed failed timed_out cancelled or lost without requiring continued client poll; private pruning runtime restart or handle loss cannot leave permanent Running and unobserved terminal loss returns SessionUnavailable",
+      "cmd /c exit 7 with empty stdout and stderr returns public ProcessFailed with ok=false isError=true and Failed CurrentTask; exit_code zero remains completed success",
+      "every advertised agent_workflow task_control and document_workflow action executes its stable contract and none returns a permanent currently-unavailable response",
+      "document image Git and exec workdir workspace-bound public inputs accept active-workspace-relative paths and reject drive UNC verbatim POSIX absolute or parent traversal at the LocalBridge boundary without leaking upstream ABSOLUTE_PATH_DENIED",
+      "with active workspace D:\\project and nested repo D:\\project\\LocalBridge, git status log show and diff resolve the same repository and blame of LocalBridge/package.json resolves its enclosing repository",
+      "Git repository discovery never escapes the active workspace and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository",
+    ],
+  },
+});
+
 const G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14 = Object.freeze({
   schemaVersion: 24,
   baselineCommit: "369b84d59d98a2ce2d2aa06ccd27d7b403a27806",
@@ -980,6 +1037,30 @@ export function normalizeAdminModeSafetyWarningAmendment20260814(contractsDoc) {
   return normalized;
 }
 
+export function hasExactPublicFacadeRuntimeSemanticsAmendment20260814(contractsDoc) {
+  if (contractsDoc?.schema_version !== PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb006 = contractsDoc?.prs?.["LB-006"];
+  if (!lb006) return false;
+  return containsAll(lb006.required_artifacts, PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.lb006.addedArtifacts)
+    && containsAll(lb006.required_tests, PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.lb006.addedTests);
+}
+
+export function normalizePublicFacadeRuntimeSemanticsAmendment20260814(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.baselineSchemaVersion;
+  for (const key of Object.keys(PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.addedRules)) delete normalized.rules[key];
+  const lb006 = normalized.prs?.["LB-006"];
+  if (lb006) {
+    lb006.required_artifacts = removeItems(lb006.required_artifacts, PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.lb006.addedArtifacts);
+    lb006.required_tests = removeItems(lb006.required_tests, PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.lb006.addedTests);
+  }
+  return normalized;
+}
+
 export function hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(contractsDoc) {
   if (contractsDoc?.schema_version !== LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.schemaVersion) return false;
   for (const [key, expected] of Object.entries(LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.addedRules)) {
@@ -1167,6 +1248,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= PUBLIC_FACADE_RUNTIME_SEMANTICS_AMENDMENT_2026_08_14.schemaVersion) {
+    if (!hasExactPublicFacadeRuntimeSemanticsAmendment20260814(authorizationContracts)) {
+      findings.push(`${expected.id}:public-facade-runtime-semantics-20260814-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizePublicFacadeRuntimeSemanticsAmendment20260814(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14.schemaVersion) {
     if (!hasExactAdminModeSafetyWarningAmendment20260814(authorizationContracts)) {
       findings.push(`${expected.id}:admin-mode-safety-warning-20260814-contract-amendment-drift`);

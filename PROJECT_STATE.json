@@ -32,8 +32,13 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "Current public MCP tools/list and tools/call semantics still depend on upstream coding-tools-mcp private tool catalog/schema instead of a LocalBridge-owned stable Agent API",
-    "LocalBridge has no trusted ShellResolver/runtime facade capability-negotiation boundary required by schema25"
+    "LB-006: public command/session lifecycle is not LocalBridge-owned; command_control live poll/read/write/kill and terminal convergence are incomplete",
+    "LB-006: workspace_context can return an empty workspace because the adapter consumes the wrong private result fields and lacks required semantic result probing",
+    "LB-006: advertised agent_workflow/task_control/document_workflow actions remain unavailable",
+    "LB-006: silent nonzero ordinary process exit is incorrectly normalized as public success rather than ProcessFailed",
+    "LB-006: nested Git repository discovery is inconsistent across status/diff/log/show/blame and diff may silently fall back to non-git behavior",
+    "LB-006: trusted ShellResolver can still trust or probe a non-system PowerShell candidate when executable identity trust is not established",
+    "LB-007: docker/podman/wsl privileged-external-runtime review is bypassable through shell-time executable-name construction/indirection"
   ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
@@ -66,7 +71,7 @@
     "G4 remains blocked after G3 adversarial PASS until a separate human manual/detail review is accepted as PASS",
     "Human review treats user/executor factual claims as untrusted evidence and requires user-audited concrete executor pre-authorizations"
   ],
-  "execution_plan_version": 20,
+  "execution_plan_version": 21,
   "total_prs": 20,
   "architecture_decisions_pending_lb000": [
     "Policy Enforcement implementation: upstream / adapter / Rust Guard",
@@ -175,7 +180,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 independent adversarial review generation 9 FAIL. Rework LB-006 first: own the public command/session lifecycle instead of exposing upstream session/output references; make command_control poll/read/write/kill semantically correct and resilient when private sessions finish or are pruned; implement every advertised v1 core/public action or remove it from the advertised contract; classify silent nonzero process exits into an explicit stable process outcome/failed task state. Then rework LB-007 so privileged-external-runtime review cannot be bypassed by shell-time command construction/indirection. Reaccept LB-008 through LB-012 sequentially only after their dependencies pass, then run fresh G2 adversarial generation 10. LB-013/G3/G4 remain blocked."
+    "next_action": "G2 independent adversarial review generation 9 FAIL. First complete schema27 LB-006 rework: LocalBridge-owned public Session Manager and opaque handles; correct command_control poll/read/write/kill semantics with backend terminal convergence and SessionUnavailable on unrecoverable handle loss; non-empty ordinary workspace_context plus deterministic private-result semantic probe; nonzero exit -> ProcessFailed/Failed CurrentTask; all advertised agent_workflow/task_control/document_workflow actions genuinely executable; active-workspace-relative public path validation; one workspace-bounded nested Git repo resolver with no diff fallback after repo discovery; and retain the generation-9 trusted ShellResolver trust-before-probe correction. Then rework LB-007 so privileged-external-runtime review cannot be bypassed by shell-time command construction/indirection. Reaccept LB-008 through LB-012 sequentially only after their dependencies pass, then run fresh G2 adversarial generation 10. LB-013/G3/G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1027,6 +1032,44 @@
     "next_required_g2_adversarial_generation": 10,
     "g2_generation_9_consumed": true,
     "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "schema27_lb006_public_facade_runtime_semantics_amendment_2026_08_14": {
+    "status": "CONTRACT_AMENDMENT_AND_REWORK_REQUIRED",
+    "ratified": true,
+    "source_review_generation": 9,
+    "post_review_plugin_supplement": true,
+    "owner_pr": "LB-006",
+    "requirements": [
+      "LocalBridge owns public session_id/output_ref and maps them to private runtime handles without leakage",
+      "command_control poll uses live-session semantics; read uses retained public output_ref; write and kill use public session_id",
+      "public sessions converge in backend to completed/failed/timed_out/cancelled/lost without client polling; unrecoverable pre-terminal handle loss is SessionUnavailable",
+      "workspace_context.workspace is a non-empty ordinary absolute path bound to the active validated workspace and default_cwd is independently workspace-relative",
+      "adapter-consumed private result semantics not guaranteed by upstream outputSchema are deterministically probed before facade serving",
+      "ordinary nonzero process exit is ProcessFailed and Failed CurrentTask even with empty stdout/stderr",
+      "all actions advertised by the v1 agent_workflow task_control and document_workflow public schemas are genuinely executable",
+      "workspace-bound public path/workdir inputs are active-workspace-relative and absolute/traversal inputs fail closed at the LocalBridge boundary",
+      "all five Git workflow actions use one workspace-bounded nested-repository resolver and diff cannot silently fall back after repo discovery",
+      "generation-9 ShellResolver trust-before-probe finding remains an LB-006 blocker"
+    ],
+    "acceptance": [
+      "A266",
+      "A267",
+      "A268",
+      "A269",
+      "A270",
+      "A271",
+      "A272",
+      "A273",
+      "A274",
+      "A275"
+    ],
+    "next_required_g2_adversarial_generation": 10,
+    "current_execution_pointer_unchanged": {
+      "current_group": "G2",
+      "current_pr": "LB-006"
+    },
+    "g3_must_be_reexecuted_after_g2_pass": true,
     "g4_unlocked": false
   }
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": 26,
+  "schema_version": 27,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -414,6 +414,51 @@
     "wsl_container_remote_shell_v0_1_required": false,
     "environment_manager_abstraction_v0_1_required": false,
     "public_tools_list_policy_filtered_subset_of_registry_required": true,
+    "public_session_ids_localbridge_owned": true,
+    "public_output_refs_localbridge_owned": true,
+    "upstream_private_session_handles_public_forbidden": true,
+    "upstream_private_output_handles_public_forbidden": true,
+    "command_control_poll_live_session_by_public_session_id_required": true,
+    "command_control_poll_retained_output_mapping_forbidden": true,
+    "command_control_read_uses_public_output_ref": true,
+    "public_session_terminal_convergence_without_client_poll_required": true,
+    "public_session_permanent_running_after_private_prune_forbidden": true,
+    "public_session_lost_error_code": "SessionUnavailable",
+    "nonzero_process_exit_public_success_forbidden": true,
+    "nonzero_process_exit_error_code": "ProcessFailed",
+    "workspace_context_workspace_non_empty_ordinary_absolute_required": true,
+    "workspace_context_default_cwd_workspace_relative_required": true,
+    "workspace_bound_public_path_inputs_relative_only": true,
+    "workspace_public_absolute_path_input_forbidden": true,
+    "workspace_public_parent_traversal_input_forbidden": true,
+    "runtime_result_semantic_probe_required_when_output_schema_insufficient": true,
+    "public_facade_advertised_action_must_be_implemented": true,
+    "agent_workflow_actions": [
+      "diagnose",
+      "bugfix",
+      "feature",
+      "refactor",
+      "test_failure",
+      "build_release",
+      "document",
+      "resume",
+      "custom"
+    ],
+    "task_control_actions": [
+      "get",
+      "cancel"
+    ],
+    "document_workflow_actions": [
+      "inspect",
+      "create",
+      "convert",
+      "rebuild"
+    ],
+    "git_nested_repository_resolution_consistent": true,
+    "git_repository_discovery_stops_at_active_workspace_root": true,
+    "git_directory_path_selects_repo_context": true,
+    "git_paths_are_path_filters": true,
+    "git_diff_non_git_fallback_after_repo_discovery_forbidden": true,
     "ui_admin_mode_logic_color_name": "orange",
     "admin_mode_warning_surfaces": [
       "settings",
@@ -704,7 +749,14 @@
         "runtime capability negotiator for mandatory LocalBridge facade capabilities",
         "LocalBridge ShellResolver using structured logical shell selectors",
         "separate DirectProcessExecutor and ShellExecutor execution paths",
-        "stable LocalBridge result and typed-error normalization adapter"
+        "stable LocalBridge result and typed-error normalization adapter",
+        "LocalBridge-owned public command Session Manager with opaque public session/output handles and terminal snapshots",
+        "stable command_control live-session versus retained-output adapter for poll/read/write/kill",
+        "workspace_context stable projection plus deterministic private-result semantic compatibility probe",
+        "stable process outcome normalizer that maps every nonzero ordinary exit to ProcessFailed",
+        "complete executable implementations for every advertised v1 agent_workflow task_control and document_workflow action",
+        "active-workspace-relative public path/workdir validator with stable LocalBridge typed errors",
+        "shared workspace-bounded nested Git repository resolver for status diff log show and blame"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -723,7 +775,17 @@
         "a malicious earlier PATH pwsh.exe is rejected without execution or version probing unless its executable identity independently satisfies the trusted candidate policy",
         "logical selectors auto powershell pwsh windows_powershell cmd resolve without command-text guessing and MCP cannot supply an arbitrary shell executable path",
         "ShellResolver never automatically installs or updates a shell",
-        "direct process execution and shell execution remain structurally separate and use structured specifications"
+        "direct process execution and shell execution remain structurally separate and use structured specifications",
+        "active workspace D:\\project yields non-empty ordinary workspace_context.workspace D:\\project plus workspace-relative default_cwd and never a Win32 verbatim projection",
+        "if private get_default_cwd result semantics do not provide non-empty workspace:string plus default_cwd:string the facade fails closed with RuntimeCapabilityMismatch before serving public tools",
+        "a long-running exec returns LocalBridge-owned public session/output handles; command_control poll write and kill use the public session handle while retained output read uses the public output handle",
+        "public session_id and output_ref do not equal or expose upstream private session/output handles",
+        "a running public session converges to completed failed timed_out cancelled or lost without requiring continued client poll; private pruning runtime restart or handle loss cannot leave permanent Running and unobserved terminal loss returns SessionUnavailable",
+        "cmd /c exit 7 with empty stdout and stderr returns public ProcessFailed with ok=false isError=true and Failed CurrentTask; exit_code zero remains completed success",
+        "every advertised agent_workflow task_control and document_workflow action executes its stable contract and none returns a permanent currently-unavailable response",
+        "document image Git and exec workdir workspace-bound public inputs accept active-workspace-relative paths and reject drive UNC verbatim POSIX absolute or parent traversal at the LocalBridge boundary without leaking upstream ABSOLUTE_PATH_DENIED",
+        "with active workspace D:\\project and nested repo D:\\project\\LocalBridge, git status log show and diff resolve the same repository and blame of LocalBridge/package.json resolves its enclosing repository",
+        "Git repository discovery never escapes the active workspace and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository"
       ],
       "non_goals": [
         "policy enforcement",

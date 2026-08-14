@@ -67,6 +67,12 @@ case/separator normalization
 
 不能只做 lexical prefix/lowercase。
 
+Schema27 进一步冻结 public path 语义：LocalBridge workspace-bound MCP 参数默认都是 active-workspace-relative，而不是“任意绝对路径，只要最终看起来在 workspace 内”。`exec_command.workdir`、`git_workflow.path/paths`、`document_workflow.path`、`view_image.path` 等入口必须在 public boundary 拒绝 drive-letter absolute、UNC absolute、Win32 verbatim、POSIX-leading-slash 与 `..` traversal，并统一映射成 LocalBridge typed error；upstream `ABSOLUTE_PATH_DENIED`、private canonical path 或 private resolver 细节不得穿透。
+
+唯一明确例外是 `workspace_context.workspace` 的只读信息投影：它可以显示/返回当前 active workspace 的普通 Win32 **绝对**路径，例如 `D:\project`，但必须与 freshly validated filesystem identity 绑定、非空且不得包含 `\\?\`。该绝对路径是上下文信息，不改变其他工具“输入必须相对 active workspace”的授权合同。
+
+Git nested-repository discovery 必须限制在 active workspace 内：从请求目录/文件 parent 向上找最近 repo root 时最多走到 active workspace root，不允许借 Git discovery 跨出授权根。对已发现的 repo，任何 Git action 不得再静默切换到非 Git fallback。
+
 ## Runtime API Key
 
 secret 只进入 Windows Credential Manager 或等价 DPAPI-backed secure store。

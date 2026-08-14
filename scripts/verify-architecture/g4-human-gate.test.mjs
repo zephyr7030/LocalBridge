@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizePublicFacadeRuntimeSemanticsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,10 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema26Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema27Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactPublicFacadeRuntimeSemanticsAmendment20260814(schema27Contracts), true);
+const schema26Contracts = normalizePublicFacadeRuntimeSemanticsAmendment20260814(schema27Contracts);
+assert.equal(schema26Contracts.schema_version, 26);
 assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26Contracts), true);
 const schema26ProjectState = JSON.parse(readFileSync(new URL("../../PROJECT_STATE.json", import.meta.url), "utf8"));
 const schema26Ratification = schema26ProjectState.schema26_admin_mode_safety_warning_2026_08_14;
@@ -301,6 +304,19 @@ assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26BackgroundW
 const schema26DuplicateUac = structuredClone(schema26Contracts);
 schema26DuplicateUac.rules.admin_mode_active_broker_reselection_duplicate_uac_forbidden = false;
 assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26DuplicateUac), false);
+
+const schema27LeakedPrivateSession = structuredClone(schema27Contracts);
+schema27LeakedPrivateSession.rules.upstream_private_session_handles_public_forbidden = false;
+assert.equal(hasExactPublicFacadeRuntimeSemanticsAmendment20260814(schema27LeakedPrivateSession), false);
+const schema27PollMiswired = structuredClone(schema27Contracts);
+schema27PollMiswired.rules.command_control_poll_retained_output_mapping_forbidden = false;
+assert.equal(hasExactPublicFacadeRuntimeSemanticsAmendment20260814(schema27PollMiswired), false);
+const schema27MissingWorkspaceProbe = structuredClone(schema27Contracts);
+schema27MissingWorkspaceProbe.prs["LB-006"].required_tests = schema27MissingWorkspaceProbe.prs["LB-006"].required_tests.filter((item) => !item.startsWith("if private get_default_cwd result semantics"));
+assert.equal(hasExactPublicFacadeRuntimeSemanticsAmendment20260814(schema27MissingWorkspaceProbe), false);
+const schema27MissingNestedGit = structuredClone(schema27Contracts);
+schema27MissingNestedGit.prs["LB-006"].required_artifacts = schema27MissingNestedGit.prs["LB-006"].required_artifacts.filter((item) => !item.startsWith("shared workspace-bounded nested Git repository resolver"));
+assert.equal(hasExactPublicFacadeRuntimeSemanticsAmendment20260814(schema27MissingNestedGit), false);
 
 for (const staleDocument of [
   "../../docs/01_PRODUCT_SCOPE.md",

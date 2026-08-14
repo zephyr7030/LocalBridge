@@ -60,6 +60,92 @@ ShellResolver 只接受 `auto/powershell/pwsh/windows_powershell/cmd`。`auto` �
 
 DirectProcessExecutor 与 ShellExecutor 是两个结构化边界；direct/privileged process 不以 shell string 为 canonical。WSL/container/remote、custom shell registry、environment-manager abstraction 与精确目录结构延后，不属于 v0.1 Gate。
 
+### Schema27 — Public Facade Session / Workspace / Git Semantics
+
+G2 generation 9 与随后 public plugin 实测进一步冻结 LB-006 的 stable facade 边界。第三方 runtime 的 session/output handle、结果字段命名、Git repository discovery 语义都只能是 adapter 私有实现细节。
+
+#### `workspace_context`
+
+存在 active workspace 时，public `workspace_context` 必须返回 LocalBridge 自己的 typed projection：
+
+```text
+workspace   = 非空、普通 Win32 绝对路径，例如 D:\project
+default_cwd = active workspace 内的相对路径，例如 . 或 LocalBridge
+```
+
+`workspace` 必须来自与当前 freshly validated filesystem identity 绑定的 ordinary execution/display path，不得为空，不得返回 `\\?\`。adapter 不能因上游字段名变化而静默 `.unwrap_or_default()` 成空字符串；其读取的 private result 字段若未被 upstream `outputSchema` 精确保证，必须在 public facade 启动前通过确定性的 compatibility/result semantic probe 验证，不兼容则 `RuntimeCapabilityMismatch` fail-closed。
+
+#### Public command session ownership
+
+LocalBridge 必须拥有 public Session Manager：
+
+```text
+public session_id != upstream private session_id
+public output_ref  != upstream private output_ref
+```
+
+public opaque handle 只由 LocalBridge 发行并映射到当前 adapter/private runtime。private session id/output ref 不得直接进入 public result、CurrentTask、日志或长期状态。
+
+`command_control` 固定语义：
+
+```text
+poll  → public session_id，读取 live-session 最新状态/增量输出；不得误用只接受 output_ref 的 retained-output read
+write → public session_id + chars
+kill  → public session_id + signal/wait
+read  → public output_ref + stream/offset/limit
+```
+
+当前 bundled runtime 的 live polling 可以由 adapter 映射到 `write_stdin(session_id, chars="")`，但该 private tool name 不是 public 合同。
+
+public session 生命周期必须后台收敛，不依赖 Agent 主动 poll 才能结束：
+
+```text
+running → completed | failed | timed_out | cancelled | lost
+```
+
+上游 private session 完成、被 pruning、runtime 重启或 handle 丢失时，LocalBridge 必须保留/生成 terminal public snapshot；不得永久停留 `running`。如果 private handle 在 terminal outcome 被可靠观察前丢失，public session 进入 `lost`/失败终态并返回精确稳定错误 `SessionUnavailable`，而不是继续假装运行。
+
+普通 process exit 的稳定语义：`exit_code == 0` 才是 `completed`；任何 `exit_code != 0` 均为 `failed` / `ProcessFailed`，即使 stdout/stderr 为空也必须 `ok=false` / `isError=true`，并把 CurrentTask 投影为 Failed。timeout/cancel 分别使用稳定 timed-out/cancelled 终态。
+
+#### Public action completeness
+
+`tools/list` 不得广告调用后恒定返回“当前不可用”的 action。当前 v1 已冻结 action 必须在 LB-006 PASS 前真实可执行：
+
+```text
+agent_workflow: diagnose / bugfix / feature / refactor / test_failure / build_release / document / resume / custom
+task_control: get / cancel
+document_workflow: inspect / create / convert / rebuild
+```
+
+未来若新增 action，必须先有实现、typed contract、PEP classification 与测试再进入 public schema；禁止“先暴露、后实现”。
+
+#### Workspace-relative public path inputs
+
+除 `workspace_context.workspace` 这一只读 informational projection 外，所有 workspace-bound public path/workdir 参数采用 **active-workspace-relative** 语义。至少包括：
+
+```text
+exec_command.workdir
+git_workflow.path / paths
+document_workflow.path
+view_image.path
+```
+
+drive-letter absolute、UNC absolute、Win32 verbatim、POSIX-leading-slash 与包含 `..` traversal 的输入必须在 LocalBridge public boundary fail-closed，并映射为稳定 LocalBridge `WorkspaceDenied`/`InvalidArgument`，不得泄露 upstream `ABSOLUTE_PATH_DENIED` 等 private error。LocalBridge 不得通过“把任意绝对路径正规化成相对路径”扩大 workspace 授权。
+
+#### Nested Git repository discovery
+
+`git_workflow` 的五个 action 必须共享 LocalBridge-owned repository resolver。对 active workspace 内的 nested repository：
+
+```text
+status / diff / log / show:
+  从请求 path 所在目录向上寻找最近 repository root，最多到 active workspace root
+
+blame:
+  从请求文件 parent 向上寻找最近 repository root，并保留该文件相对 repo root 的 path
+```
+
+`path` 用于选择 repository context；action-specific `paths` 才作为 path filter/pathspec。`git_status(path="LocalBridge")` 能识别的 nested repo，`git_log/git_show/git_diff` 必须识别同一 repo，`git_blame(path="LocalBridge/package.json")` 必须识别其 enclosing repo。若 resolver 已确认 repository，`git_diff` 禁止静默降级成 `non-git diff fallback`。repository discovery 永远不能越过 active workspace root。
+
 ### Schema26 — Administrator Mode Safety Consent Gate
 
 管理员模式可见入口的视觉与授权状态机由 LocalBridge 自己拥有，不能由 frontend 直接跳到 UAC：

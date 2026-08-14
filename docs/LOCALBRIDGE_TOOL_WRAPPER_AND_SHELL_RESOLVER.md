@@ -267,6 +267,8 @@ privilege state summary
 
 其内部可组合多个 primitive，但返回必须是 LocalBridge 自有 typed schema。
 
+当前 schema27 冻结最小稳定字段语义：存在 active workspace 时，`workspace` 是与 freshly validated filesystem identity 绑定的非空 ordinary Win32 绝对路径（例如 `D:\project`，禁止 `\\?\`）；`default_cwd` 是该 workspace 内的相对路径（`.` 或子路径）。上游 `get_default_cwd` 的字段名/shape 只是 adapter 私有细节，字段不兼容不能静默投影为空字符串。
+
 ### 5.2 `agent_workflow`
 
 负责常见工程编排：
@@ -296,7 +298,18 @@ write
 kill
 ```
 
-内部可映射 upstream `write_stdin/read_output/kill_session`，public session id 由 LocalBridge 自己定义。
+内部可映射 upstream `write_stdin/read_output/kill_session`，但 public session/output handle 必须由 LocalBridge 自己定义并通过 Session Manager 映射，禁止 raw upstream handle 穿透。
+
+稳定 action 语义：
+
+```text
+poll(session_id)  → live session state / incremental output
+write(session_id) → stdin
+kill(session_id)  → terminate/cancel
+read(output_ref)  → retained output pagination
+```
+
+poll 不得被实现成只接受 `output_ref` 的 retained-output read。Session Manager 必须主动观察/reap 进程生命周期并保存 terminal snapshot，使 session 在客户端不持续 poll 的情况下也能从 `running` 收敛到 `completed/failed/timed_out/cancelled/lost`。private session pruning、runtime restart 或 handle 丢失不能造成永久 Running；无法恢复 terminal outcome 时使用精确稳定错误 `SessionUnavailable`。
 
 ### 5.4 `git_workflow`
 
@@ -312,6 +325,8 @@ blame
 
 底层可从 coding-tools adapter 逐步替换为 `git.exe` / git2-rs；workspace/subrepository/path 修正在 LocalBridge adapter 层完成。
 
+schema27 要求五个 action 共享一个 repository resolver。对 active workspace 内 nested repo，status/diff/log/show 从请求目录向上寻找最近 repo root，blame 从请求文件 parent 向上寻找最近 repo root；搜索最多到 active workspace root。directory action 的 `path` 选择 repository context，`paths` 才是可选 path filter/pathspec。一个 repo 一旦被 resolver 确认，diff 不得 silent fallback 到 non-git diff。
+
 ### 5.5 `document_workflow`
 
 高层支持至少：
@@ -324,6 +339,8 @@ rebuild
 ```
 
 覆盖 PDF/DOCX/Markdown/TXT 等产品级文档工作流，避免模型临时拼接 Python/PowerShell/LibreOffice/pandoc。文件仍受 Workspace Guard / capability policy。
+
+Public Registry 的 action 不能先广告再恒定返回 unavailable。当前冻结的 `inspect/create/convert/rebuild` 与 `agent_workflow` 九 action、`task_control get/cancel` 都必须在对应当前 v1 schema 对外提供时真实可执行；未来 action 必须先实现、分类、测试，再进入 public schema。
 
 ---
 
@@ -445,6 +462,8 @@ Single Last Tool Metadata
 短调用必须 backend wake-driven：真实工具可 50ms 返回，但 UI presentation 至少可见 500ms；UI 最低可见期绝不能拖慢真实 MCP 返回。
 
 长进程必须有 timeout/cancel/bounded output/session control，并受 Process Supervisor / Windows Job Object 管理；PID-only 不能作为最终 ownership。
+
+普通命令结果按稳定进程终态解释：`exit_code == 0` 才是 `completed`；`exit_code != 0` 一律为 `failed` / `ProcessFailed`，不能因为 stdout/stderr 为空就包装成 `ok=true`。timeout/cancel 分别投影 timed-out/cancelled；CurrentTask 使用同一 terminal truth。
 
 ---
 
@@ -761,6 +780,7 @@ ProcessFailed
 ProcessTimedOut
 ProcessCancelled
 OutputTruncated
+SessionUnavailable
 RuntimeUnavailable
 RuntimeProtocolMismatch
 RuntimeCapabilityMismatch
@@ -791,6 +811,8 @@ UI display path:             D:\project
 ```
 
 `\\?\` 只允许用于 filesystem identity、reparse/junction/symlink 防护、去重和授权身份比较；不得进入 MCP/Broker/sidecar/process/tool 的 path/cwd/workdir/current_dir，也不得显示给 UI。
+
+Public workspace-bound **输入**进一步统一为 active-workspace-relative：包括 `exec_command.workdir`、`git_workflow.path/paths`、`document_workflow.path`、`view_image.path` 等。drive-letter absolute、UNC absolute、verbatim、POSIX-leading-slash 和 `..` traversal 由 LocalBridge public boundary typed deny；不得把 upstream `ABSOLUTE_PATH_DENIED` 私有错误穿透，也不得通过 normalization 将任意绝对路径变成新授权。`workspace_context.workspace` 返回 ordinary absolute path 只是只读上下文投影，不改变这一输入合同。
 
 system tools 作用于 workspace 外的 Windows 系统资源时必须走独立 system capability，workspace 授权不能自动扩大为系统级文件权限。
 
@@ -907,6 +929,12 @@ MCP 指定任意 shell executable
 - public `tools/list` 只来自 LocalBridge Tool Registry。
 - upstream private tool name/schema/error 不穿透。
 - public actions 以 stable LocalBridge capability 分类。
+- public schema 不广告恒定 unavailable 的 action；当前冻结 action 必须真实可执行。
+- public session/output handles 由 LocalBridge Session Manager 拥有；上游 session/output handles 不穿透。
+- `workspace_context.workspace` 非空且为 ordinary active-workspace absolute path；`default_cwd` 独立为 workspace-relative。
+- workspace-bound public path inputs 统一 relative-only；absolute/traversal typed deny。
+- nested Git repo 在五个 git_workflow action 中使用同一 resolver；已发现 repo 时 diff 不得 non-git fallback。
+- silent nonzero exit 必须 `ProcessFailed`，不能 public success。
 
 ### Shell
 

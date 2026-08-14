@@ -44,13 +44,25 @@ LB-012 Elevated Permission Mode
 
 Schema25 Agent Runtime facade 修订从 **LB-006** 重新打开 G2。LB-006 负责 LocalBridge-owned public ToolRegistry/facade、内部可替换 WorkspaceRuntimeAdapter、mandatory capability negotiation、stable result/error normalization、可信 ShellResolver，以及 DirectProcessExecutor / ShellExecutor 分离；LB-007 负责 stable LocalBridge capability/action classifier、transitive workflow capability enforcement 与 public unknown deny。`elevated_exec` 的现有 Broker/permission 语义保持不变。
 
+G2 adversarial generation 9 已实际消费并判定 **FAIL / REWORK_REQUIRED**。Schema27 将 generation 9 及其后 public plugin 复测暴露的 LB-006 行为缺口提升为当前合同：
+
+- LocalBridge-owned public Session Manager；禁止 raw upstream session/output handle；
+- `command_control poll/read/write/kill` 形成真实闭环，poll 不得错误映射 retained-output read；
+- session 必须后台收敛到 terminal outcome，private pruning/丢失不得造成永久 Running；
+- `workspace_context.workspace` 必须投影真实非空 ordinary active workspace，`default_cwd` 独立为 workspace-relative；
+- upstream outputSchema 不足以约束 adapter 所消费字段时，启动前增加 deterministic result semantic probe；
+- 非零进程退出统一为 `ProcessFailed`/Failed task，不能因“无输出”包装成 success；
+- 已进入 public schema 的 `agent_workflow` / `task_control` / `document_workflow` action 不得恒定 unavailable；
+- workspace-bound public path/workdir 输入统一 active-workspace-relative，absolute/traversal fail-closed；
+- `git_workflow` 五 action 使用同一 nested-repository resolver，repo 已发现时 `git_diff` 不得 silent non-git fallback。
+
 该基础合同变化使历史 G2 adversarial generation 8 与 G3 generation 6 仅保留为 provenance，不得继续解锁后续。严格顺序固定为：
 
 ```text
 LB-006 REWORK_REQUIRED
 → LB-007 → ... → LB-012
 → G2 REVIEW_REQUIRED
-→ fresh G2 adversarial generation 9
+→ fresh G2 adversarial generation 10
 → 重新执行/验收 G3
 → fresh G3 adversarial review
 → fresh G3→G4 human Gate
