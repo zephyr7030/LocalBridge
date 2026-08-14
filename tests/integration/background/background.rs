@@ -209,6 +209,8 @@ impl ExitRuntime for BlockingMonitorRuntime {
             active: true,
             state: RuntimeState::Ready,
             current_task: CurrentTaskStatus::Idle,
+            current_task_elapsed_ms: None,
+            last_tool: None,
             configured_workspace: None,
             outage: None,
         }
@@ -274,6 +276,246 @@ fn explicit_control_cancels_before_owner_lock_and_snapshot_remains_responsive() 
     assert_eq!(snapshot.state, RuntimeState::Ready);
     assert!(control_result.expect("control thread returns").is_ok());
     assert!(!lifecycle.runtime_snapshot().active);
+}
+
+#[cfg(windows)]
+struct GenerationTestRuntime {
+    events: Arc<Mutex<Vec<&'static str>>>,
+    workspace: PathBuf,
+}
+
+#[cfg(windows)]
+impl ExitRuntime for GenerationTestRuntime {
+    fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError> {
+        self.events.lock().unwrap().push("tunnel.stop");
+        Ok(())
+    }
+
+    fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError> {
+        self.events.lock().unwrap().push("lower.stop");
+        Ok(())
+    }
+
+    fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
+        DesktopRuntimeSnapshot {
+            active: true,
+            state: RuntimeState::Ready,
+            current_task: CurrentTaskStatus::Idle,
+            current_task_elapsed_ms: None,
+            last_tool: None,
+            configured_workspace: Some(self.workspace.clone()),
+            outage: None,
+        }
+    }
+}
+
+#[cfg(windows)]
+fn ui_ready_test_config(workspace: &str) -> ProductionRuntimeConfig {
+    ProductionRuntimeConfig::new(
+        PathBuf::from(r"C:\LocalBridge"),
+        PathBuf::from(workspace),
+        PathBuf::from(r"C:\LocalBridge-health"),
+        TunnelId::new("tunnel_0123456789abcdef0123456789abcdef").unwrap(),
+        PermissionMode::Full,
+    )
+}
+
+#[cfg(windows)]
+#[test]
+fn foreground_ui_ready_stage_remains_stopped_and_is_one_shot() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    assert!(lifecycle.stage_foreground_start(ui_ready_test_config(r"C:\staged")));
+    assert!(lifecycle.foreground_start_is_pending());
+    let before_ready = lifecycle.runtime_snapshot();
+    assert!(!before_ready.active);
+    assert_eq!(before_ready.state, RuntimeState::Stopped);
+    assert!(before_ready.configured_workspace.is_none());
+
+    let first = lifecycle
+        .foreground_start_pending
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    let second = lifecycle
+        .foreground_start_pending
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    assert!(first.is_some());
+    assert!(second.is_none(), "UI-ready startup intent must be consumable only once");
+    assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::Stopped);
+}
+
+#[cfg(windows)]
+#[test]
+fn duplicate_ui_ready_does_not_restart_existing_healthy_runtime_owner() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    assert!(lifecycle.stage_foreground_start(ui_ready_test_config(r"C:\staged")));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    lifecycle
+        .install_runtime_for_test(GenerationTestRuntime {
+            events: Arc::clone(&events),
+            workspace: PathBuf::from(r"C:\healthy"),
+        })
+        .unwrap();
+
+    assert!(!lifecycle.start_staged_foreground_after_ui_ready().unwrap());
+    assert!(!lifecycle.start_staged_foreground_after_ui_ready().unwrap());
+    assert!(events.lock().unwrap().is_empty());
+    let ready = lifecycle.runtime_snapshot();
+    assert!(ready.active);
+    assert_eq!(ready.state, RuntimeState::Ready);
+    assert_eq!(
+        ready.configured_workspace.as_deref(),
+        Some(Path::new(r"C:\healthy"))
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn stale_built_runtime_is_cleaned_and_cannot_replace_newer_generation_owner_or_snapshot() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    let backend = lifecycle.backend_handle();
+    let old_generation = backend
+        .runtime_control_generation
+        .fetch_add(1, Ordering::AcqRel)
+        + 1;
+    backend.publish_starting_if_current(old_generation, PathBuf::from(r"C:\old"));
+
+    let new_generation = backend
+        .runtime_control_generation
+        .fetch_add(1, Ordering::AcqRel)
+        + 1;
+    backend.publish_starting_if_current(new_generation, PathBuf::from(r"C:\new"));
+
+    thread::sleep(RUNTIME_WATCHDOG_INTERVAL + Duration::from_millis(100));
+    let after_watchdog = backend
+        .runtime_snapshot_cache
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    assert_eq!(after_watchdog.state, RuntimeState::StartingMcp);
+    assert_eq!(
+        after_watchdog.configured_workspace.as_deref(),
+        Some(Path::new(r"C:\new"))
+    );
+
+    let stale_events = Arc::new(Mutex::new(Vec::new()));
+    let _operation = backend
+        .runtime_operation
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    backend
+        .activate_runtime_if_current_locked(
+            Box::new(GenerationTestRuntime {
+                events: Arc::clone(&stale_events),
+                workspace: PathBuf::from(r"C:\old"),
+            }),
+            old_generation,
+        )
+        .unwrap();
+    assert_eq!(&*stale_events.lock().unwrap(), &["tunnel.stop", "lower.stop"]);
+    assert!(!backend.runtime.lock().unwrap().is_active());
+    let still_new = lifecycle.runtime_snapshot();
+    assert_eq!(still_new.state, RuntimeState::StartingMcp);
+    assert_eq!(
+        still_new.configured_workspace.as_deref(),
+        Some(Path::new(r"C:\new"))
+    );
+
+    let current_events = Arc::new(Mutex::new(Vec::new()));
+    backend
+        .activate_runtime_if_current_locked(
+            Box::new(GenerationTestRuntime {
+                events: Arc::clone(&current_events),
+                workspace: PathBuf::from(r"C:\new"),
+            }),
+            new_generation,
+        )
+        .unwrap();
+    assert!(backend.runtime.lock().unwrap().is_active());
+    let ready = lifecycle.runtime_snapshot();
+    assert_eq!(ready.state, RuntimeState::Ready);
+    assert_eq!(
+        ready.configured_workspace.as_deref(),
+        Some(Path::new(r"C:\new"))
+    );
+    assert!(current_events.lock().unwrap().is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn control_plane_stop_invalidates_pending_start_without_active_owner() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    let backend = lifecycle.backend_handle();
+    let pending_generation = backend
+        .runtime_control_generation
+        .fetch_add(1, Ordering::AcqRel)
+        + 1;
+    backend.publish_starting_if_current(
+        pending_generation,
+        PathBuf::from(r"C:\pending"),
+    );
+    assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::StartingMcp);
+
+    lifecycle
+        .stop_runtime_for_control_plane()
+        .expect("pending generation without active owner must stop idempotently");
+    let stopped = lifecycle.runtime_snapshot();
+    assert_eq!(stopped.state, RuntimeState::Stopped);
+    assert!(!stopped.active);
+    assert!(stopped.configured_workspace.is_none());
+
+    let stale_events = Arc::new(Mutex::new(Vec::new()));
+    backend
+        .activate_runtime_if_current_locked(
+            Box::new(GenerationTestRuntime {
+                events: Arc::clone(&stale_events),
+                workspace: PathBuf::from(r"C:\pending"),
+            }),
+            pending_generation,
+        )
+        .unwrap();
+    assert_eq!(&*stale_events.lock().unwrap(), &["tunnel.stop", "lower.stop"]);
+    assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::Stopped);
+}
+
+#[cfg(windows)]
+#[test]
+fn manual_service_stop_invalidates_pending_start_without_active_owner() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    let backend = lifecycle.backend_handle();
+    let pending_generation = backend
+        .runtime_control_generation
+        .fetch_add(1, Ordering::AcqRel)
+        + 1;
+    backend.publish_starting_if_current(
+        pending_generation,
+        PathBuf::from(r"C:\manual-stop-pending"),
+    );
+    assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::StartingMcp);
+
+    assert_eq!(
+        lifecycle.stop_services_for_manual_action(),
+        ShutdownReport::default()
+    );
+    let stopped = lifecycle.runtime_snapshot();
+    assert_eq!(stopped.state, RuntimeState::Stopped);
+    assert!(!stopped.active);
+    assert!(stopped.configured_workspace.is_none());
+
+    let stale_events = Arc::new(Mutex::new(Vec::new()));
+    backend
+        .activate_runtime_if_current_locked(
+            Box::new(GenerationTestRuntime {
+                events: Arc::clone(&stale_events),
+                workspace: PathBuf::from(r"C:\manual-stop-pending"),
+            }),
+            pending_generation,
+        )
+        .unwrap();
+    assert_eq!(&*stale_events.lock().unwrap(), &["tunnel.stop", "lower.stop"]);
+    assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::Stopped);
 }
 
 #[cfg(windows)]

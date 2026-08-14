@@ -25,6 +25,7 @@ pub enum StartupSuppression {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopStartupOutcome {
     ServicesStarted,
+    ServicesAwaitingUiReady,
     ServicesSuppressed(StartupSuppression),
 }
 
@@ -94,6 +95,12 @@ pub fn configure_desktop_startup(
         Ok(config) => config,
         Err(suppression) => return Ok(DesktopStartupOutcome::ServicesSuppressed(suppression)),
     };
+    if startup_mode == StartupMode::Foreground {
+        if lifecycle.stage_foreground_start(config) {
+            return Ok(DesktopStartupOutcome::ServicesAwaitingUiReady);
+        }
+        return Ok(DesktopStartupOutcome::ServicesStarted);
+    }
     lifecycle
         .backend_handle()
         .spawn_start_production_runtime(config)

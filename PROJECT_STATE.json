@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -162,7 +162,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Manual review round 2 reopened G3 from LB-015. Rework LB-015 first, then LB-016 and LB-017 in strict order, then run independent G3 adversarial generation 6. G4/LB-018 and the separate human Gate remain blocked."
+    "next_action": "Schema24 G3 repair and unified machine acceptance are complete through LB-017. Run a separate independent G3 adversarial generation 6 next. G4/LB-018 and the separate G3-to-G4 human Gate remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -312,7 +312,8 @@
     "service_status_dot_source": "shared_typed_projection_for_onboarding_and_dashboard",
     "scrollable_rounded_surface": {
       "outer_corners_preserved": true,
-      "scrollbar": "clipped_or_inset_inside_rounded_shell"
+      "scrollbar": "clipped_or_inset_inside_rounded_shell",
+      "top_bottom_arrow_or_triangle_affordances": false
     }
   },
   "pr_group_policy": {
@@ -365,7 +366,7 @@
       "native_windows_folder_picker": true,
       "raw_path_entry_primary": false,
       "permission_button_content_spacing": "rendered_two_line_height_at_least_2x_single_line_at_780x620",
-      "permission_button_visual_acceptance": "PENDING_HUMAN_780x620",
+      "permission_button_visual_acceptance": "PASS_HUMAN_780x620_2026-08-14",
       "permission_button_css_only_auto_pass_forbidden": true,
       "ordinary_selected_accent": "#0071e3",
       "administrator_selected_accent": "amber",
@@ -374,7 +375,8 @@
       "visible_admin_selection_requests_uac": true,
       "separate_enable_admin_button": false,
       "permission_button_rendered_height_multiplier": 2,
-      "permission_button_computed_geometry_gate": true
+      "permission_button_computed_geometry_gate": true,
+      "permission_button_visual_acceptance_evidence": "user manual visual approval on 2026-08-14; scoped visual acceptance only, not the separate G3-to-G4 human Gate"
     },
     "screen_4": {
       "purpose": "create_custom_plugin",
@@ -554,7 +556,14 @@
     ],
     "os_login_autostart_setting": "开机启动",
     "os_login_autostart_does_not_gate_manual_foreground_runtime_start": true,
-    "background_admin_preference_auto_uac": false
+    "background_admin_preference_auto_uac": false,
+    "foreground_order": "create_show_interactive_ui_then_typed_ui_ready_then_backend_start_services",
+    "service_start_before_ui_ready": false,
+    "ui_ready_intent": "typed_one_shot",
+    "duplicate_ui_ready_backend_behavior": "idempotent_single_owner",
+    "frontend_owns_runtime_lifecycle": false,
+    "background_waits_for_ui_ready": false,
+    "existing_background_runtime_restarted_only_for_ui_ready": false
   },
   "close_window_policy": {
     "setting_label": "关闭窗口后继续运行",
@@ -742,5 +751,23 @@
     "reopen_from_pr": "LB-015",
     "g4_unlocked": false,
     "next_required_adversarial_generation": 6
+  },
+  "g3_schema24_ui_first_scrollbar_amendment_2026_08_14": {
+    "status": "REPAIRED_AWAITING_INDEPENDENT_G3_GENERATION_6",
+    "baseline_commit": "369b84d59d98a2ce2d2aa06ccd27d7b403a27806",
+    "visual_review": {
+      "screen3_permission_buttons_780x620": "PASS_BY_USER",
+      "separate_g3_to_g4_human_gate": "NOT_SATISFIED_BY_THIS_SCOPED_VISUAL_PASS"
+    },
+    "items": [
+      "1. VISUAL PASS EVIDENCE: the user accepted the current 780x620 visual review scope; Screen3 permission-button visual acceptance is recorded PASS unless later Screen3 layout changes invalidate it.",
+      "2. CONTRACT/DEFECT: vertical scrollbars on rounded Settings/sheet/dialog/card surfaces must not show native top or bottom arrow/triangle buttons; scrolling through wheel, track and thumb remains functional and all four outer radii remain intact.",
+      "3. CONTRACT/DEFECT: configured foreground startup is UI-first. The main UI must be created, shown and interactive before any stopped managed runtime/MCP/OpenAI Tunnel startup begins; frontend emits one typed UI-ready intent and backend owns the idempotent asynchronous service start.",
+      "4. BACKGROUND EXCEPTION: --background does not wait for UI-ready, and waking an already-running healthy background runtime must not stop/restart it merely to replay the foreground UI-ready gate."
+    ],
+    "reopen_from_pr": "LB-014",
+    "g4_unlocked": false,
+    "next_required_adversarial_generation": 6,
+    "executor_validation": "FRESH_2026-08-14: LB-013 through LB-017 static contracts PASS; schema24 architecture and G4 human-gate regression PASS; UI language/runtime manifest PASS; frontend Vitest/build PASS; native onboarding and Dashboard WebView2 780x620 at 150% DPI PASS; Dashboard settings_replace_delta=0.00px rounded_scroll=true scrollbar_arrows=false scroll_surface=true; full cargo test PASS with 130 library tests and all integration suites; cargo clippy --all-targets -D warnings PASS; git diff --check PASS."
   }
 }

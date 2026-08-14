@@ -95,7 +95,7 @@ fn failed_candidate_never_becomes_active_and_runtime_rolls_back_to_previous_work
     let old_id = coordinator.add_and_select(&mut runtime, id("old"), old.path(), 1).unwrap();
     let candidate_id = coordinator.add_and_select(&mut runtime, id("candidate"), candidate.path(), 2).unwrap();
     coordinator.select(&mut runtime, &old_id, 3).unwrap();
-    *reject.borrow_mut() = Some(WorkspaceValidator.validate(candidate.path()).unwrap().resolved_path().to_path_buf());
+    *reject.borrow_mut() = Some(WorkspaceValidator.validate(candidate.path()).unwrap().execution_path().to_path_buf());
 
     let error = coordinator.select(&mut runtime, &candidate_id, 4).unwrap_err();
     assert!(matches!(error, WorkspaceControlError::RuntimeSwitch(_)));
@@ -103,7 +103,7 @@ fn failed_candidate_never_becomes_active_and_runtime_rolls_back_to_previous_work
     assert_eq!(runtime.state(), &RuntimeState::Ready);
     let runtime_path = runtime.configured_workspace().unwrap();
     let old_resolved = WorkspaceValidator.validate(old.path()).unwrap();
-    assert_eq!(runtime_path, old_resolved.resolved_path());
+    assert_eq!(runtime_path, old_resolved.execution_path());
 }
 
 #[test]
@@ -174,12 +174,12 @@ fn no_active_workspace_candidate_failure_never_restarts_stale_configured_driver_
     let mut runtime = RuntimeOrchestrator::new(driver);
     assert_eq!(runtime.state(), &RuntimeState::Stopped);
     assert!(coordinator.data().workspace.is_no_active_workspace());
-    let candidate_resolved = WorkspaceValidator
+    let candidate_execution = WorkspaceValidator
         .validate(candidate.path())
         .unwrap()
-        .resolved_path()
+        .execution_path()
         .to_path_buf();
-    *reject.borrow_mut() = Some(candidate_resolved);
+    *reject.borrow_mut() = Some(candidate_execution);
 
     let error = coordinator
         .add_and_select(&mut runtime, id("candidate"), candidate.path(), 1)

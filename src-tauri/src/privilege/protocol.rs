@@ -13,6 +13,10 @@ pub const MAX_ELEVATED_OUTPUT_BYTES: u32 = 1024 * 1024;
 pub const MAX_ELEVATED_REQUEST_ID_BYTES: usize = 128;
 const BROKER_PIPE_PREFIX: &str = r"\\.\pipe\LocalBridge-Privileged-";
 
+fn is_windows_verbatim_path(value: &str) -> bool {
+    value.starts_with(r"\\?\")
+}
+
 pub(crate) fn is_valid_broker_pipe_name(value: &str) -> bool {
     let Some(suffix) = value.strip_prefix(BROKER_PIPE_PREFIX) else {
         return false;
@@ -143,6 +147,7 @@ impl ElevatedExecSpec {
         if self.program.is_empty()
             || self.program.len() > MAX_ELEVATED_STRING_BYTES
             || !Path::new(&self.program).is_absolute()
+            || is_windows_verbatim_path(&self.program)
             || self.args.len() > MAX_ELEVATED_ARGS
             || self
                 .args
@@ -154,6 +159,7 @@ impl ElevatedExecSpec {
                     || value.len() > MAX_ELEVATED_STRING_BYTES
                     || value.as_bytes().contains(&0)
                     || !Path::new(value).is_absolute()
+                    || is_windows_verbatim_path(value)
             })
             || self.timeout_ms == 0
             || self.timeout_ms > MAX_ELEVATED_TIMEOUT_MS

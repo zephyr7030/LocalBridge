@@ -17,6 +17,25 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB014-002",
+      "scope": [
+        "src/App.tsx",
+        "src/bridge.ts",
+        "src-tauri/src/commands/ui.rs",
+        "src-tauri/src/lib.rs",
+        "scripts/authorization-records/LB-014.json"
+      ],
+      "actions": [
+        "Wire one typed UI-ready intent from the interactive WebView milestone to the backend-owned staged foreground-start gate",
+        "Keep runtime lifecycle ownership in Rust and make duplicate UI-ready delivery a backend no-op rather than a second service-start edge"
+      ],
+      "reason": "Schema24 explicitly reopens LB-014 to require UI-first configured foreground startup while LB-014 normal writable paths do not include the existing React/bridge/Tauri command registration composition seams.",
+      "evidence_ref": "Explicit user instruction on 2026-08-14: create/show UI, reach interactive UI, emit a single typed UI-ready, then backend starts runtime/MCP/OpenAI Tunnel; duplicate ready must be idempotent and --background is exempt.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

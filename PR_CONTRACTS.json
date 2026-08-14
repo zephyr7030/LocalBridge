@@ -1,5 +1,5 @@
 {
-  "schema_version": 23,
+  "schema_version": 24,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -188,6 +188,7 @@
     "settings_runtime_api_key_clear_reuses_controlled_connection_change_lifecycle": true,
     "scrollable_rounded_surface_preserves_outer_corners": true,
     "scrollbar_must_be_clipped_or_inset_inside_rounded_surface": true,
+    "scrollbar_arrow_affordances_forbidden": true,
     "copy_feedback_layout_shift_forbidden": true,
     "ui_primary_accent_hex": "#0071e3",
     "ui_black_as_standard_accent_forbidden": true,
@@ -261,6 +262,13 @@
     "background_admin_preference_auto_uac_forbidden": true,
     "foreground_configured_launch_auto_starts_runtime": true,
     "foreground_runtime_start_must_not_block_ui": true,
+    "foreground_ui_ready_before_runtime_start_required": true,
+    "foreground_service_start_before_ui_ready_forbidden": true,
+    "foreground_ui_ready_intent_typed_one_shot": true,
+    "foreground_ui_ready_backend_idempotent": true,
+    "foreground_ui_ready_frontend_lifecycle_ownership_forbidden": true,
+    "background_launch_must_not_wait_for_ui_ready": true,
+    "existing_background_runtime_wake_must_not_restart_for_ui_ready": true,
     "frontend_is_typed_projection_only": true,
     "frontend_runtime_readiness_polling_state_machine_forbidden": true,
     "blocking_backend_work_on_ui_thread_forbidden": true,
@@ -795,15 +803,18 @@
       "required_artifacts": [
         "autostart",
         "single-instance",
-        "foreground configured launch automatic runtime start"
+        "UI-first configured foreground launch automatic runtime start gated by typed UI-ready"
       ],
       "required_tests": [
         "existing background instance wake",
         "manual stop persistence",
         "startup args",
         "Elevated preference does not auto-trigger UAC on background startup",
-        "configured foreground UI launch automatically starts selected project runtime MCP and OpenAI Tunnel without a second user start action",
-        "foreground window remains responsive and projects Starting Ready or Fault while backend startup runs",
+        "configured foreground UI launch automatically starts selected project runtime MCP and OpenAI Tunnel after the interactive UI emits one typed UI-ready intent and without a second user service-start action",
+        "foreground UI is created shown and interactive before backend managed-service startup begins, then projects Starting Ready or Fault while backend startup runs",
+        "before typed UI-ready, a configured foreground launch with stopped runtime does not start selected project runtime MCP or OpenAI Tunnel",
+        "duplicate UI-ready delivery is backend-idempotent and cannot create a second managed runtime owner",
+        "--background startup does not wait for UI-ready and waking an existing healthy background runtime does not restart it merely to replay the foreground UI-ready gate",
         "开机启动 controls Windows login launch registration only and does not gate runtime start after a manual foreground launch"
       ],
       "non_goals": [
@@ -863,6 +874,7 @@
         "Dashboard amber 重启服务 and red 关闭服务 controls backed by real managed lifecycle",
         "Settings Runtime API Key secure credential clear action immediately left of replace",
         "rounded outer UI surfaces that preserve all corners while inner content scrolls",
+        "arrowless rounded-scroll presentation",
         "fixed 780x620 non-resizable non-maximizable main window shell",
         "projection-only responsive frontend boundary"
       ],
@@ -955,6 +967,8 @@
         "ordinary execution path is revalidated or identity-bound to the same freshly validated filesystem object and a mismatch fails closed rather than authorizing a path alias",
         "main window default minimum and maximum inner size are all exactly 780x620 while resizable false maximizable false decorations false and the existing custom chrome semantics remain unchanged",
         "forcing Settings or another rounded sheet/dialog to overflow vertically at 780x620 preserves all four outer rounded corners; the scrollbar is clipped or inset inside the rounded shell and never flattens or cuts the outer radius",
+        "vertical scrollbars on Settings and other scrollable rounded surfaces expose no top or bottom arrow button or triangle affordance at 780x620",
+        "removing scrollbar arrow affordances preserves wheel track and thumb scrolling and does not flatten or cut any outer rounded corner",
         "intentionally slow backend lifecycle operation does not freeze frontend interaction or typed projection refresh"
       ],
       "non_goals": [

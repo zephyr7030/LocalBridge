@@ -121,7 +121,8 @@ bounded recovery、two-phase workspace switch、rollback。
 ## LB-014 — Autostart + Single Instance
 
 - `开机启动` 仅控制 Windows 登录启动。
-- onboarding 已完成且 active workspace/Tunnel ID/Runtime API Key metadata 有效时，普通前台 UI 启动自动异步启动 selected project/runtime/MCP/OpenAI Tunnel；UI 先可响应并反映 Starting/Ready/Fault。
+- onboarding 已完成且 active workspace/Tunnel ID/Runtime API Key metadata 有效时，普通前台启动必须 UI-first：先创建/显示主 UI 并达到可交互 milestone，前端只发一次 typed `UI-ready` intent，backend 收到后才异步启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel；UI-ready 前禁止提前启动服务，重复 ready backend 幂等且不能产生第二 owner。
+- `--background` 不等待 UI-ready；唤醒已有健康后台 runtime 不得仅为重放 UI-ready 而停止或重启该 runtime。
 - 后台恢复管理员偏好只 Requested，不自动 UAC；single-instance/wake/manual-stop 语义继续保留。
 
 ## LB-015 — UI Shell
@@ -135,7 +136,7 @@ bounded recovery、two-phase workspace switch、rollback。
 - 拆分 workspace identity path 与 execution/presentation path：`\\?\D:\project` 仅用于 WorkspaceValidator/filesystem identity、去重、reparse/授权比较；UI、WorkspaceRef/runtime、MCP/Broker/sidecar/process/command/tool 的实际路径参数和 `cwd/workdir/current_dir` 必须使用与同一 validated identity 绑定的普通 `D:\project`。禁止把 verbatim 工作目录传给命令工具；identity 不匹配时 fail-closed，execution/display 转换不得扩大授权。
 - 同级按钮使用统一动作列/左基线；780×620 几何差 ≤1 CSS px，设置两个“更换”保持同一最右动作列，Key“清除”不得推移该列。
 - 主窗口固定改为 780×620，minimum/maximum 同为 780×620；不可缩放、不可最大化、无原生 decorations、自定义 chrome 等其余窗口语义不变。
-- sheet/dialog/card 需要纵向滚动时，外层四个圆角必须保持；scrollbar 必须裁切或内缩在圆角壳内部。
+- sheet/dialog/card 需要纵向滚动时，外层四个圆角必须保持；scrollbar 必须裁切或内缩在圆角壳内部；禁止显示纵向 scrollbar 顶部/底部的箭头、三角形或等价增减按钮，同时保持滚轮/轨道/滑块可用。
 - Dashboard 增加黄色/琥珀 `重启服务` 与红色 `关闭服务`，沿用 shared button design/alignment；真实服务 lifecycle 由 backend 执行。
 - React/WebView 只消费 typed backend projection + user intent；故意延迟 backend 操作时 UI 必须保持响应。
 

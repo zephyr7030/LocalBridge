@@ -86,7 +86,7 @@ UI 冻结补充：
 引导页布局     = 整页；直接使用 custom chrome 内容区；禁止空白页面中居中再套 card/modal/dialog 式向导外壳
 管理员选择     = 仅设置页或 onboarding 第3屏可见选择；点击“管理员模式”即为显式 UAC 动作；无单独“启用管理员权限”按钮；后台恢复偏好仍不自动 UAC
 主页权限       = 不显示“权限模式”及编辑/完整/管理员三档选项；不得从主页修改 PermissionMode 或触发模式 UAC；只读显示管理员权限实际状态；权限编辑允许设置页与用户显式重新打开的 onboarding 第3屏
-前台启动       = onboarding 完成且配置有效时自动、异步启动 runtime/MCP/Tunnel；UI 不等待后端阻塞工作
+前台启动       = UI-first：先创建/显示并达到可交互 UI → 单次 typed UI-ready → backend 再异步启动 runtime/MCP/Tunnel；UI-ready 前禁止启动原本停止的服务；--background 例外
 任务状态       = backend 唤醒式绑定真实工具调用；轮询不得作为短任务传输；每次工具调用至少可见500ms且不延迟真实返回；首行当前状态/等待命令，第二行“上次执行工具：…”且 nS前/n分钟前/大于1小时/大于n天 靠右；无历史列表
 临时提示       = “无法准备管理员权限”等一次性操作提示默认 3 秒自动消失；持续 runtime fault 仍由 typed 状态表达
 项目路径边界   = \\?\D:\project 仅限内部 filesystem identity 校验；UI 与 MCP/Broker/sidecar/process/command/tool 的 cwd/workdir/current_dir/路径参数必须使用同一 validated identity 对应的普通 D:\project；verbatim 工作目录不得传给命令工具，execution/display 转换不得参与授权
@@ -96,9 +96,9 @@ UI 冻结补充：
 诊断           = 运行状态/项目/最近脱敏日志；只保留“打开日志 / 导出诊断 / 完成”
 关闭窗口       = 设置项“关闭窗口后继续运行”；开=hide+后台继续，关=有序退出
 UI/backend     = frontend 纯投影；耗时 lifecycle/process/credential/UAC/recovery 工作必须离开 UI/WebView 线程
-权限按钮高度   = 780×620 下两行按钮真实 rendered 高度≥单行控件2倍且两行均完整可见；min-height≥80px 仅作最低保护，仍需人工视觉 Gate
+权限按钮高度   = 780×620 下两行按钮真实 rendered 高度≥单行控件2倍且两行均完整可见；min-height≥80px 仅作最低保护；2026-08-14 用户人工视觉审核已 PASS，后续若该布局变化须复验
 OpenAI已保存项 = Tunnel ID 显示当前持久化值；Key 固定提示“已安全保存至windows安全凭据”，聚焦时按已存key位数显示同位数*掩码且不回传明文；安全提示仅“Runtime API Key 仅保存在 Windows 安全凭据中。”
-滚动圆角       = sheet/dialog/card 出现纵向滚动条时仍保留四角圆角，scrollbar 必须裁切或内缩于圆角外壳内部
+滚动圆角       = sheet/dialog/card 出现纵向滚动条时仍保留四角圆角，scrollbar 必须裁切或内缩；顶部/底部箭头/三角按钮禁止显示，滚轮/轨道/滑块仍可用
 Cloudflare     = LB-018 从最终 bundle/manifest/installer/启动参数/fallback 移除 cloudflared；历史兼容证据可留但不可执行/打包
 ```
 

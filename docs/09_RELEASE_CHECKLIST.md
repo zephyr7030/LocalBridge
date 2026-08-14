@@ -225,7 +225,8 @@
 - [ ] MCP cannot mutate project registry/current project
 ## G3 UI/Backend Responsiveness
 
-- [ ] configured foreground launch auto-starts runtime asynchronously
+- [ ] configured foreground launch creates/shows interactive UI first, emits one typed UI-ready, and only then backend asynchronously starts any stopped runtime/MCP/Tunnel
+- [ ] no stopped managed service starts before UI-ready; duplicate UI-ready is backend-idempotent/single-owner; `--background` does not wait for ready and a healthy background runtime is not restarted solely for this gate
 - [ ] UI remains responsive during intentionally slow backend startup/lifecycle work
 - [ ] React/WebView owns no runtime readiness/retry/UAC state machine
 - [ ] production MCP/Broker CurrentTaskStatus reaches Dashboard end-to-end
@@ -233,5 +234,5 @@
 - [ ] Settings matches frozen 常规/连接/权限 layout and has no 测试连接
 - [ ] Diagnostics matches frozen 运行状态/项目/日志 layout and exact action set
 - [ ] main window default/minimum/maximum inner size are all exactly 780×620; resizable/maximizable/decorations/custom-chrome semantics remain frozen
-- [ ] title+description permission buttons render at least 2× the actual height of a single-line control at 780×620 with both line boxes complete; CSS marker presence alone does not PASS
-- [ ] a scrollable rounded sheet/dialog/card preserves all four outer corners and clips/insets the scrollbar inside the rounded shell
+- [x] title+description permission buttons render at least 2× the actual height of a single-line control at 780×620 with both line boxes complete; user scoped visual review PASS 2026-08-14 (reopen if Screen3 layout changes)
+- [ ] a scrollable rounded sheet/dialog/card preserves all four outer corners, clips/insets the scrollbar inside the rounded shell, shows no top/bottom arrow or triangle buttons, and retains wheel/track/thumb scrolling

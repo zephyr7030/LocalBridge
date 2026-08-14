@@ -1,4 +1,5 @@
 mod bundle;
+mod git_adapter;
 mod guard;
 mod http;
 mod policy;
@@ -14,4 +15,6 @@ pub use runtime::{
     CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,
     CodingToolsRuntimeError, InternalBearer,
 };
-pub use server::{CurrentTaskProjection, PolicyEnforcementError, PolicyEnforcementRuntime};
+pub use server::{
+    CurrentTaskProjection, CurrentTaskWake, PolicyEnforcementError, PolicyEnforcementRuntime,
+};

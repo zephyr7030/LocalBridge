@@ -32,6 +32,38 @@
       "recorded_by": "LocalBridge Development Agent",
       "user_audit_status": "PENDING",
       "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB017-003",
+      "scope": [
+        "tests/integration/background/lb013_contract.test.mjs",
+        "scripts/authorization-records/LB-017.json"
+      ],
+      "actions": [
+        "Update the LB-013 static lifecycle assertion from the superseded .activate(runtime) implementation spelling to the current generation-safe owner.activate_boxed(runtime)? production activation marker",
+        "Preserve the same single ProductionRuntimeOwner lifecycle ownership contract without changing production behavior or widening any PR scope"
+      ],
+      "reason": "Fresh G3 group-final validation after the accepted LB-015 generation-safe lifecycle refactor found that the LB-013 static contract still asserted an obsolete method spelling even though the current ProductionRuntimeOwner and the full Rust runtime suite preserve the required ownership semantics.",
+      "evidence_ref": "2026-08-14 fresh G3 group-final regression: tests/integration/background/lb013_contract.test.mjs failed only on .activate(runtime); current src-tauri/src/app/background.rs activates through owner.activate_boxed(runtime)? and cargo test --locked passed the full runtime/lifecycle suite.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
+    },
+    {
+      "authorization_id": "EXEC-PREAUTH-LB017-004",
+      "scope": [
+        "tests/integration/autostart/lb014_contract.test.mjs",
+        "scripts/authorization-records/LB-017.json"
+      ],
+      "actions": [
+        "Replace the stale LB-014 inline configured_workspace Starting-projection implementation marker with the current generation-safe publish_starting_if_current production markers",
+        "Preserve the original LB-014 requirement that configured foreground startup immediately projects typed Starting state asynchronously before backend runtime construction"
+      ],
+      "reason": "Fresh G3 group-final validation found the LB-014 static contract coupled to the pre-LB-015 inline DesktopRuntimeSnapshot construction even though the accepted generation-safe lifecycle refactor moved the same projection into publish_starting_if_current.",
+      "evidence_ref": "2026-08-14 fresh G3 contract chain: LB-013 PASS then LB-014 failed only on configured_workspace: Some(configured_workspace.clone()); current src-tauri/src/app/background.rs spawn_start_production_runtime calls self.publish_starting_if_current(generation, configured_workspace.clone()) before spawning localbridge-desktop-start, and full cargo test --locked passed.",
+      "recorded_by": "LocalBridge Development Agent",
+      "user_audit_status": "PENDING",
+      "does_not_expand_future_pr_writable_paths": true
     }
   ]
 }

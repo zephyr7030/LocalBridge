@@ -178,6 +178,30 @@ pub enum CurrentTaskStatus {
     Active(CurrentTask),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastToolTiming {
+    pub kind: TaskKind,
+    pub summary: SafeTaskSummary,
+    pub age_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentTaskTiming {
+    pub status: CurrentTaskStatus,
+    pub elapsed_ms: Option<u64>,
+    pub last_tool: Option<LastToolTiming>,
+}
+
+impl Default for CurrentTaskTiming {
+    fn default() -> Self {
+        Self {
+            status: CurrentTaskStatus::Idle,
+            elapsed_ms: None,
+            last_tool: None,
+        }
+    }
+}
+
 impl CurrentTaskStatus {
     pub fn project(
         kind: TaskKind,

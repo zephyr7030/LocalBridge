@@ -75,7 +75,13 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .service-status-dot.status-starting{background:var(--status-starting)}
 .service-status-dot.status-fault{background:var(--status-fault)}
 .service-status-dot.status-unknown{background:var(--status-unknown)}
+.service-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;margin:0 0 10px}
+.secondary.service-restart{background:#fff5df;border-color:rgba(182,106,0,.28);color:var(--admin-accent)}
+.secondary.service-stop{background:#fff0f1;border-color:rgba(215,0,21,.25);color:var(--status-fault)}
 .task-row{display:flex;align-items:center;gap:10px;min-height:26px;padding:2px;font-size:14px}
+.last-tool-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:24px;padding:0 2px 2px 20px;font-size:12px;color:#6e6e73}
+.last-tool-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.last-tool-age{flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums}
 .activity-dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:#8e8e93}
 .activity-dot.active{background:#34c759;animation:task-pulse 1.35s ease-in-out infinite}
 @keyframes task-pulse{0%,100%{opacity:.45;transform:scale(.88)}50%{opacity:1;transform:scale(1)}}
@@ -84,10 +90,35 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   .ghost,.secondary,.primary,.choice{transition:none}
 }
 .sheet-backdrop,.dialog-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.24);display:grid;place-items:center;padding:20px;z-index:10}
-.sheet,.dialog{width:min(560px,100%);max-height:84vh;overflow:auto;border-radius:20px;background:#fff;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.2)}
+.sheet,.dialog{width:min(560px,100%);max-height:84vh;overflow:auto;border-radius:20px;clip-path:inset(0 round 20px);scrollbar-gutter:stable;background:#fff;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.2)}
+.sheet::-webkit-scrollbar,.dialog::-webkit-scrollbar{width:10px;height:10px}
+.sheet::-webkit-scrollbar-track,.dialog::-webkit-scrollbar-track{margin-block:16px;background:transparent;border-radius:999px}
+.sheet::-webkit-scrollbar-thumb,.dialog::-webkit-scrollbar-thumb{min-height:32px;border:3px solid transparent;border-radius:999px;background:rgba(110,110,115,.48);background-clip:content-box}
+.sheet::-webkit-scrollbar-button,.dialog::-webkit-scrollbar-button,
+.sheet::-webkit-scrollbar-button:single-button,.dialog::-webkit-scrollbar-button:single-button,
+.sheet::-webkit-scrollbar-button:vertical:start:decrement,.dialog::-webkit-scrollbar-button:vertical:start:decrement,
+.sheet::-webkit-scrollbar-button:vertical:end:increment,.dialog::-webkit-scrollbar-button:vertical:end:increment{
+  -webkit-appearance:none!important;
+  appearance:none!important;
+  display:none!important;
+  width:0!important;
+  height:0!important;
+  min-width:0!important;
+  min-height:0!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  background:transparent!important;
+}
 .sheet h2,.dialog h2{margin:0 0 18px;font-size:20px}
 .field{display:grid;gap:8px;margin:16px 0}
 .field input{width:100%}
+.settings-summary{display:grid;grid-template-columns:minmax(0,1fr) 64px 76px;align-items:center;column-gap:8px}
+.settings-summary>span{min-width:0;overflow-wrap:anywhere}
+.settings-summary>.settings-clear{grid-column:2;width:64px;justify-self:start}
+.settings-summary>.settings-replace{grid-column:3;width:76px;justify-self:start}
+.settings-summary>.settings-delete-cancel{grid-column:2;width:64px;justify-self:start}
+.settings-summary>.settings-confirm-delete{grid-column:3;width:76px;justify-self:start;background:#fff0f1;border-color:rgba(215,0,21,.25);color:var(--status-fault)}
 .saved{color:#248a3d;font-size:13px}
 .error{color:#c9342f;font-size:13px;margin-top:10px}
 .project-list{display:grid;gap:8px;margin-top:12px}

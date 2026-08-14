@@ -30,9 +30,9 @@ const createCall = main.indexOf("ensure_main_window", modeGuard);
 if (!(modeGuard >= 0 && createCall > modeGuard)) throw new Error("LB-013 foreground window creation is not startup-mode gated");
 for (const required of [
   ".visible(false)",
-  ".inner_size(900.0, 620.0)",
-  ".min_inner_size(900.0, 620.0)",
-  ".max_inner_size(900.0, 620.0)",
+  ".inner_size(780.0, 620.0)",
+  ".min_inner_size(780.0, 620.0)",
+  ".max_inner_size(780.0, 620.0)",
   ".resizable(false)",
   ".maximizable(false)",
   ".decorations(false)",
@@ -57,7 +57,7 @@ for (const forbidden of ["enforce_main_window_metrics(window.app_handle())", "se
 if (main.includes("WindowEvent::Resized") || main.includes("window.maximize()") || main.includes("window.unmaximize()"))
   throw new Error("LB-013 fixed window still carries resize/maximize runtime behavior");
 if (/notification|toast|banner/i.test(`${main}\n${tray}\n${background}`)) throw new Error("LB-013 added pre-exhaustion notification surface");
-for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required", "ShowFinalErrorWindow", "ProductionRuntimeOwner", "runtime: Arc<Mutex<ProductionRuntimeOwner>>", "ProductionRuntimeOwner::default()", "start_production_runtime", "ProductionRuntimeDriver::new_owned", "WindowsCredentialStore::default", "with_privileged_execution", "self.privilege.gateway()", ".activate(runtime)", "shutdown_in_security_order(Some(&mut *runtime), privilege)"])
+for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required", "ShowFinalErrorWindow", "ProductionRuntimeOwner", "runtime: Arc<Mutex<ProductionRuntimeOwner>>", "ProductionRuntimeOwner::default()", "start_production_runtime", "ProductionRuntimeDriver::new_owned", "WindowsCredentialStore::default", "with_privileged_execution", "self.privilege.gateway()", "owner.activate_boxed(runtime)?", "shutdown_in_security_order(Some(&mut *runtime), privilege)"])
   if (!normalized(background).includes(normalized(required))) throw new Error(`LB-013 recovery attention gate missing: ${required}`);
 if (background.includes("Mutex<Option<Box<dyn ExitRuntime")) throw new Error("LB-013 still permits the production lifecycle owner itself to be absent");
 if (!main.includes("DesktopLifecycle::new(PrivilegeController::new())")) throw new Error("LB-013 production app setup does not construct the runtime owner");
@@ -103,4 +103,4 @@ for (const id of ["EXEC-PREAUTH-LB013-001", "EXEC-PREAUTH-LB013-002", "EXEC-PREA
   if (!record || record.user_audit_status !== "PENDING" || record.does_not_expand_future_pr_writable_paths !== true)
     throw new Error(`LB-013 preauthorization record invalid: ${id}`);
 }
-console.log("LB013_CONTRACT=PASS background_no_window=true logical_fixed_window=900x620 native_dpi_scaling=true inverse_webview_zoom=false physical_pixel_lock=false resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true dpi_change_webview_sync=true close_policy=persisted_v4 hide_or_async_exit=true lifecycle_ui_thread_blocking=false tray_exit_async=true tray_frozen_ico=true tray_native_dpi_frame=true tray_resample_hack=false exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=5");
+console.log("LB013_CONTRACT=PASS background_no_window=true logical_fixed_window=780x620 native_dpi_scaling=true inverse_webview_zoom=false physical_pixel_lock=false resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true dpi_change_webview_sync=true close_policy=persisted_v4 hide_or_async_exit=true lifecycle_ui_thread_blocking=false tray_exit_async=true tray_frozen_ico=true tray_native_dpi_frame=true tray_resample_hack=false exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=5");

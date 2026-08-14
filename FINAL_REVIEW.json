@@ -4,10 +4,10 @@
   "baseline": "v15-FINAL",
   "status": "REWORK_REQUIRED",
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "blocking_findings": [
-    "G3 manual review generation 2 requires rework from LB-013 under PR_CONTRACTS schema 20",
-    "Dashboard permission-mode row and Edit/Full/Admin controls must be removed; Settings is the only post-onboarding permission editor"
+    "G3 schema24 UI-first startup amendment reopens strict execution from LB-014",
+    "Scrollable rounded UI surfaces must remove native top/bottom scrollbar arrow or triangle affordances while preserving scrolling and outer radii"
   ],
   "dynamic_gates_owned_by_lb000": [
     "coding-tools capability surface",

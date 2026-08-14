@@ -7,11 +7,12 @@ use std::time::Duration;
 use crate::credentials::CredentialStore;
 use crate::mcp::{
     CapabilityPolicy, CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,
-    InternalBearer, PolicyEnforcementError, PolicyEnforcementRuntime,
+    CurrentTaskWake, InternalBearer, PolicyEnforcementError, PolicyEnforcementRuntime,
 };
 use crate::privilege::PrivilegedExecution;
 use crate::state::{
-    CurrentTaskStatus, PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState,
+    CurrentTaskStatus, CurrentTaskTiming, PermissionMode, RuntimeComponent, RuntimeFault,
+    RuntimeState,
 };
 use crate::tunnel::{
     ConnectorEndpoint, PreparedTunnelStart, TunnelId, TunnelRuntime, TunnelRuntimeConfig,
@@ -98,6 +99,13 @@ pub trait RuntimeDriver {
     fn stop_mcp(&mut self, mcp: &mut Self::Mcp) -> Result<(), RuntimeFault>;
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus;
+
+    fn current_task_timing(&self, pep: &Self::Pep) -> CurrentTaskTiming {
+        CurrentTaskTiming {
+            status: self.current_task(pep),
+            ..CurrentTaskTiming::default()
+        }
+    }
 
     fn connector_endpoint(&self, _tunnel: &Self::Tunnel) -> Option<ConnectorEndpoint> {
         None
@@ -235,15 +243,19 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
     }
 
     pub fn current_task(&self) -> CurrentTaskStatus {
+        self.current_task_timing().status
+    }
+
+    pub fn current_task_timing(&self) -> CurrentTaskTiming {
         self.ready
             .as_ref()
-            .map(|ready| self.driver.current_task(&ready.pep))
+            .map(|ready| self.driver.current_task_timing(&ready.pep))
             .or_else(|| {
                 self.recovering_pep
                     .as_ref()
-                    .map(|pep| self.driver.current_task(pep))
+                    .map(|pep| self.driver.current_task_timing(pep))
             })
-            .unwrap_or(CurrentTaskStatus::Idle)
+            .unwrap_or_default()
     }
 
     pub fn configured_workspace(&self) -> Option<&Path> {
@@ -1210,6 +1222,7 @@ where
     credential_store: CredentialStoreHandle<'a, C>,
     bearer_factory: B,
     privileged_execution: Option<Arc<dyn PrivilegedExecution>>,
+    task_projection_wake: Option<CurrentTaskWake>,
 }
 
 impl<'a, C, B> ProductionRuntimeDriver<'a, C, B>
@@ -1227,6 +1240,7 @@ where
             credential_store: CredentialStoreHandle::Borrowed(credential_store),
             bearer_factory,
             privileged_execution: None,
+            task_projection_wake: None,
         }
     }
 
@@ -1243,6 +1257,7 @@ where
             credential_store: CredentialStoreHandle::Owned(credential_store),
             bearer_factory,
             privileged_execution: None,
+            task_projection_wake: None,
         }
     }
 
@@ -1251,6 +1266,11 @@ where
         privileged_execution: Arc<dyn PrivilegedExecution>,
     ) -> Self {
         self.privileged_execution = Some(privileged_execution);
+        self
+    }
+
+    pub fn with_task_projection_wake(mut self, wake: CurrentTaskWake) -> Self {
+        self.task_projection_wake = Some(wake);
         self
     }
 
@@ -1321,14 +1341,32 @@ where
     fn start_pep(&mut self, mcp: Self::Mcp) -> Result<Self::Pep, RuntimeFault> {
         let policy = CapabilityPolicy::load(&self.config.install_root.join("runtime-policy.toml"))
             .map_err(|_| RuntimeFault::PolicyInvalid)?;
-        match self.privileged_execution.as_ref() {
-            Some(privileged_execution) => PolicyEnforcementRuntime::start_with_privilege(
+        match (
+            self.privileged_execution.as_ref(),
+            self.task_projection_wake.as_ref(),
+        ) {
+            (Some(privileged_execution), Some(wake)) => {
+                PolicyEnforcementRuntime::start_with_privilege_and_wake(
+                    mcp,
+                    policy,
+                    self.config.permission_mode,
+                    Arc::clone(privileged_execution),
+                    Arc::clone(wake),
+                )
+            }
+            (Some(privileged_execution), None) => PolicyEnforcementRuntime::start_with_privilege(
                 mcp,
                 policy,
                 self.config.permission_mode,
                 Arc::clone(privileged_execution),
             ),
-            None => PolicyEnforcementRuntime::start(mcp, policy, self.config.permission_mode),
+            (None, Some(wake)) => PolicyEnforcementRuntime::start_with_wake(
+                mcp,
+                policy,
+                self.config.permission_mode,
+                Arc::clone(wake),
+            ),
+            (None, None) => PolicyEnforcementRuntime::start(mcp, policy, self.config.permission_mode),
         }
         .map_err(policy_runtime_fault)
     }
@@ -1422,6 +1460,10 @@ where
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus {
         pep.current_task_projection().snapshot()
+    }
+
+    fn current_task_timing(&self, pep: &Self::Pep) -> CurrentTaskTiming {
+        pep.current_task_projection().timing_snapshot()
     }
 
     fn connector_endpoint(&self, tunnel: &Self::Tunnel) -> Option<ConnectorEndpoint> {

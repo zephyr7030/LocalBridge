@@ -77,12 +77,12 @@ impl WorkspaceCoordinator {
         let previous_runtime = previous_authorized_runtime(&before, runtime);
         let selected_id = self.data.workspace.registry.upsert_validated(
             workspace_id,
-            display_path.to_path_buf(),
+            validated.execution_path(),
             &validated,
             last_opened_at,
         )?;
         if let Err(error) =
-            runtime.switch_workspace_to(validated.resolved_path(), previous_runtime.as_deref())
+            runtime.switch_workspace_to(validated.execution_path(), previous_runtime.as_deref())
         {
             self.data = before;
             return Err(WorkspaceControlError::RuntimeSwitch(error));
@@ -119,12 +119,12 @@ impl WorkspaceCoordinator {
         let previous_runtime = previous_authorized_runtime(&before, runtime);
         self.data.workspace.registry.upsert_validated(
             workspace_id.clone(),
-            entry.display_path.clone(),
+            validated.execution_path(),
             &validated,
             last_opened_at,
         )?;
         if let Err(error) =
-            runtime.switch_workspace_to(validated.resolved_path(), previous_runtime.as_deref())
+            runtime.switch_workspace_to(validated.execution_path(), previous_runtime.as_deref())
         {
             self.data = before;
             return Err(WorkspaceControlError::RuntimeSwitch(error));

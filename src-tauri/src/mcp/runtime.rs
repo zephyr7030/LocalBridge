@@ -11,6 +11,7 @@ use crate::runtime::{
 use crate::state::RuntimeFault;
 
 use super::bundle::verify_bundle;
+use super::git_adapter::handle_git_tool;
 use super::http::{McpCancellationClient, McpSession, unauthenticated_initialize_status};
 
 const LOOPBACK_HOST: &str = "127.0.0.1";
@@ -174,6 +175,7 @@ pub struct CodingToolsRuntime {
     supervisor: WindowsProcessSupervisor,
     session: McpSession,
     port: u16,
+    workspace: PathBuf,
 }
 
 impl fmt::Debug for CodingToolsRuntime {
@@ -224,6 +226,9 @@ impl CodingToolsRuntime {
         config: CodingToolsRuntimeConfig,
         bearer: InternalBearer,
     ) -> Result<Self, CodingToolsRuntimeError> {
+        if is_verbatim_workspace_path(&config.workspace) {
+            return Err(CodingToolsRuntimeError::InvalidConfiguration);
+        }
         validate_workspace(&config.workspace)?;
         if config.port == 0 {
             return Err(CodingToolsRuntimeError::InvalidConfiguration);
@@ -273,6 +278,7 @@ impl CodingToolsRuntime {
             supervisor,
             session,
             port: config.port,
+            workspace: config.workspace,
         })
     }
 
@@ -305,6 +311,9 @@ impl CodingToolsRuntime {
         name: &str,
         arguments: Value,
     ) -> Result<Value, CodingToolsRuntimeError> {
+        if let Some(result) = handle_git_tool(&self.workspace, name, &arguments) {
+            return Ok(result);
+        }
         self.session.call_tool(name, arguments)
     }
 
@@ -314,6 +323,9 @@ impl CodingToolsRuntime {
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, CodingToolsRuntimeError> {
+        if let Some(result) = handle_git_tool(&self.workspace, name, &arguments) {
+            return Ok(result);
+        }
         match request_id {
             Some(request_id) => self
                 .session
@@ -401,6 +413,18 @@ fn validate_workspace(workspace: &Path) -> Result<(), CodingToolsRuntimeError> {
         }
         Err(_) => Err(CodingToolsRuntimeError::WorkspaceInvalid),
     }
+}
+
+#[cfg(windows)]
+fn is_verbatim_workspace_path(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    let prefix = [b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    path.as_os_str().encode_wide().take(prefix.len()).eq(prefix)
+}
+
+#[cfg(not(windows))]
+fn is_verbatim_workspace_path(_path: &Path) -> bool {
+    false
 }
 
 fn reserve_loopback_port(port: u16) -> Result<(), CodingToolsRuntimeError> {

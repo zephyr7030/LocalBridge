@@ -1,7 +1,9 @@
 use std::ffi::{OsStr, OsString, c_void};
 use std::fmt;
+use std::io::Read;
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::io::FromRawHandle;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -9,21 +11,28 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, FILETIME, HANDLE, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, FILETIME, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+    WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
+use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
+use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, GetProcessTimes,
-    PROCESS_INFORMATION, ResumeThread, STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
+    GetExitCodeProcess, GetProcessTimes, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
+    STARTUPINFOW, TerminateProcess, WaitForSingleObject,
 };
 
 const FORCED_EXIT_CODE: u32 = 0x4C42_0004;
+const BOUNDED_TIMEOUT_EXIT_CODE: u32 = 0x4C42_0005;
 const FORCED_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_BOUNDED_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_BOUNDED_COMMAND_OUTPUT: usize = 1024 * 1024;
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -224,6 +233,14 @@ pub enum StopDisposition {
     AlreadyStopped,
     Graceful,
     Forced,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundedCommandOutput {
+    pub exit_code: u32,
+    pub output: Vec<u8>,
+    pub truncated: bool,
+    pub timed_out: bool,
 }
 
 #[derive(Debug)]
@@ -448,6 +465,185 @@ impl WindowsProcessSupervisor {
     }
 }
 
+pub fn run_bounded_command(
+    executable: &Path,
+    args: &[OsString],
+    current_dir: &Path,
+    timeout: Duration,
+    max_output_bytes: usize,
+) -> Result<BoundedCommandOutput, SupervisorError> {
+    if !executable.is_absolute()
+        || !executable.is_file()
+        || is_verbatim_path(executable)
+        || !current_dir.is_absolute()
+        || !current_dir.is_dir()
+        || is_verbatim_path(current_dir)
+        || timeout.is_zero()
+        || timeout > MAX_BOUNDED_COMMAND_TIMEOUT
+        || max_output_bytes == 0
+        || max_output_bytes > MAX_BOUNDED_COMMAND_OUTPUT
+        || executable.as_os_str().encode_wide().any(|value| value == 0)
+        || current_dir
+            .as_os_str()
+            .encode_wide()
+            .any(|value| value == 0)
+        || args
+            .iter()
+            .any(|arg| arg.encode_wide().any(|value| value == 0))
+    {
+        return Err(SupervisorError::InvalidSpec("invalid bounded command spec"));
+    }
+
+    let (read_handle, write_handle) = create_bounded_output_pipe()?;
+    let job = match create_kill_on_close_job() {
+        Ok(job) => job,
+        Err(error) => {
+            close_handle(read_handle);
+            close_handle(write_handle);
+            return Err(error);
+        }
+    };
+    let mut command_line = build_command_line(executable, args);
+    let application = wide_null(executable.as_os_str());
+    let current_directory = wide_null(current_dir.as_os_str());
+    let mut startup: STARTUPINFOW = unsafe { zeroed() };
+    startup.cb = size_of::<STARTUPINFOW>() as u32;
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdOutput = write_handle;
+    startup.hStdError = write_handle;
+    startup.hStdInput = null_mut();
+    let mut process_info: PROCESS_INFORMATION = unsafe { zeroed() };
+    let created = unsafe {
+        CreateProcessW(
+            application.as_ptr(),
+            command_line.as_mut_ptr(),
+            null(),
+            null(),
+            1,
+            CREATE_SUSPENDED | CREATE_NO_WINDOW,
+            null(),
+            current_directory.as_ptr(),
+            &startup,
+            &mut process_info,
+        )
+    };
+    if created == 0 {
+        let error = last_error("CreateProcessW");
+        close_handle(read_handle);
+        close_handle(write_handle);
+        close_handle(job);
+        return Err(error);
+    }
+    close_handle(write_handle);
+
+    if unsafe { AssignProcessToJobObject(job, process_info.hProcess) } == 0 {
+        let error = last_error("AssignProcessToJobObject");
+        unsafe { TerminateProcess(process_info.hProcess, FORCED_EXIT_CODE) };
+        close_handle(process_info.hThread);
+        close_handle(process_info.hProcess);
+        close_handle(job);
+        close_handle(read_handle);
+        return Err(error);
+    }
+    if unsafe { ResumeThread(process_info.hThread) } == u32::MAX {
+        unsafe { TerminateJobObject(job, FORCED_EXIT_CODE) };
+        close_handle(process_info.hThread);
+        close_handle(process_info.hProcess);
+        close_handle(job);
+        close_handle(read_handle);
+        return Err(SupervisorError::ResumeFailed);
+    }
+    close_handle(process_info.hThread);
+
+    let reader_handle = read_handle as usize;
+    let reader =
+        thread::spawn(move || drain_bounded_output(reader_handle as HANDLE, max_output_bytes));
+    let started = Instant::now();
+    let timed_out = loop {
+        match query_active_processes(job) {
+            Ok(0) => break false,
+            Ok(_) => {}
+            Err(error) => {
+                unsafe { TerminateJobObject(job, FORCED_EXIT_CODE) };
+                let _ = wait_for_job_empty(job, FORCED_DRAIN_TIMEOUT);
+                close_handle(process_info.hProcess);
+                close_handle(job);
+                let _ = reader.join();
+                return Err(error);
+            }
+        }
+        if started.elapsed() >= timeout {
+            if unsafe { TerminateJobObject(job, BOUNDED_TIMEOUT_EXIT_CODE) } == 0 {
+                let error = last_error("TerminateJobObject");
+                close_handle(process_info.hProcess);
+                close_handle(job);
+                let _ = reader.join();
+                return Err(error);
+            }
+            break true;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let job_empty = match wait_for_job_empty(job, FORCED_DRAIN_TIMEOUT) {
+        Ok(empty) => empty,
+        Err(error) => {
+            unsafe { TerminateJobObject(job, FORCED_EXIT_CODE) };
+            let _ = wait_for_job_empty(job, FORCED_DRAIN_TIMEOUT);
+            close_handle(process_info.hProcess);
+            close_handle(job);
+            let _ = reader.join();
+            return Err(error);
+        }
+    };
+    if !job_empty {
+        unsafe { TerminateJobObject(job, FORCED_EXIT_CODE) };
+        let _ = wait_for_job_empty(job, FORCED_DRAIN_TIMEOUT);
+        let remaining_processes = query_active_processes(job).unwrap_or(1);
+        close_handle(process_info.hProcess);
+        close_handle(job);
+        let _ = reader.join();
+        return Err(SupervisorError::ForcedTerminationDidNotDrain {
+            remaining_processes,
+        });
+    }
+    let process_exited = match wait_for_process_exit(process_info.hProcess, FORCED_DRAIN_TIMEOUT) {
+        Ok(exited) => exited,
+        Err(error) => {
+            unsafe { TerminateJobObject(job, FORCED_EXIT_CODE) };
+            let _ = wait_for_job_empty(job, FORCED_DRAIN_TIMEOUT);
+            close_handle(process_info.hProcess);
+            close_handle(job);
+            let _ = reader.join();
+            return Err(error);
+        }
+    };
+    if !process_exited {
+        unsafe { TerminateJobObject(job, FORCED_EXIT_CODE) };
+        let _ = wait_for_job_empty(job, FORCED_DRAIN_TIMEOUT);
+        close_handle(process_info.hProcess);
+        close_handle(job);
+        let _ = reader.join();
+        return Err(SupervisorError::RootProcessDidNotSignalAfterStop);
+    }
+    let mut exit_code = 0u32;
+    if unsafe { GetExitCodeProcess(process_info.hProcess, &mut exit_code) } == 0 {
+        let error = last_error("GetExitCodeProcess");
+        close_handle(process_info.hProcess);
+        close_handle(job);
+        let _ = reader.join();
+        return Err(error);
+    }
+    close_handle(process_info.hProcess);
+    close_handle(job);
+    let (output, truncated) = reader.join().unwrap_or_else(|_| (Vec::new(), true));
+    Ok(BoundedCommandOutput {
+        exit_code,
+        output,
+        truncated,
+        timed_out,
+    })
+}
+
 impl Drop for WindowsProcessSupervisor {
     fn drop(&mut self) {
         unsafe {
@@ -484,6 +680,56 @@ fn create_kill_on_close_job() -> Result<HANDLE, SupervisorError> {
         return Err(error);
     }
     Ok(job)
+}
+
+fn create_bounded_output_pipe() -> Result<(HANDLE, HANDLE), SupervisorError> {
+    let security = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: null_mut(),
+        bInheritHandle: 1,
+    };
+    let mut read_handle: HANDLE = null_mut();
+    let mut write_handle: HANDLE = null_mut();
+    if unsafe { CreatePipe(&mut read_handle, &mut write_handle, &security, 0) } == 0 {
+        return Err(last_error("CreatePipe"));
+    }
+    if unsafe { SetHandleInformation(read_handle, HANDLE_FLAG_INHERIT, 0) } == 0 {
+        let error = last_error("SetHandleInformation");
+        close_handle(read_handle);
+        close_handle(write_handle);
+        return Err(error);
+    }
+    Ok((read_handle, write_handle))
+}
+
+fn drain_bounded_output(handle: HANDLE, limit: usize) -> (Vec<u8>, bool) {
+    let mut file = unsafe { std::fs::File::from_raw_handle(handle.cast()) };
+    let mut retained = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let mut truncated = false;
+    loop {
+        match file.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => {
+                let available = limit.saturating_sub(retained.len());
+                let keep = count.min(available);
+                retained.extend_from_slice(&chunk[..keep]);
+                truncated |= keep < count;
+            }
+        }
+    }
+    (retained, truncated)
+}
+
+fn close_handle(handle: HANDLE) {
+    if handle != INVALID_HANDLE_VALUE && !handle.is_null() {
+        unsafe { CloseHandle(handle) };
+    }
+}
+
+fn is_verbatim_path(path: &Path) -> bool {
+    let prefix = [b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    path.as_os_str().encode_wide().take(prefix.len()).eq(prefix)
 }
 
 fn query_active_processes(job: HANDLE) -> Result<u32, SupervisorError> {

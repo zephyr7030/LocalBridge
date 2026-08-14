@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, TryLockError, mpsc};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
@@ -13,8 +13,8 @@ use crate::privilege::{
     ElevatedExecOutcome, ElevatedExecSpec, PrivilegedExecError, PrivilegedExecution,
 };
 use crate::state::{
-    Capability, CurrentTaskStatus, PermissionMode, PrivilegeState, SafeTaskSummary,
-    TaskExecutionState, TaskKind,
+    Capability, CurrentTask, CurrentTaskStatus, CurrentTaskTiming, LastToolTiming, PermissionMode,
+    PrivilegeState, SafeTaskSummary, TaskExecutionState, TaskKind,
 };
 
 use super::guard::{GuardError, McpGuard, ToolCallRequest};
@@ -28,6 +28,7 @@ const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const ACCEPT_IDLE: Duration = Duration::from_millis(10);
+const MIN_TASK_PRESENTATION: Duration = Duration::from_millis(500);
 const MAX_CONNECTION_WORKERS: usize = 32;
 static SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -53,8 +54,65 @@ struct ElevatedCallContext<'a> {
     stopping: &'a AtomicBool,
 }
 
-#[derive(Clone, Default)]
-pub struct CurrentTaskProjection(Arc<Mutex<CurrentTaskStatus>>);
+#[derive(Debug, Clone)]
+struct PresentedTask {
+    sequence: u64,
+    task: CurrentTask,
+    visible_since: Instant,
+    completed_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone)]
+struct QueuedTask {
+    sequence: u64,
+    task: CurrentTask,
+    completed_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone)]
+struct CompletedTool {
+    task: CurrentTask,
+    completed_at: Instant,
+}
+
+#[derive(Debug)]
+struct CurrentTaskProjectionState {
+    actual_status: CurrentTaskStatus,
+    current: Option<PresentedTask>,
+    queued: VecDeque<QueuedTask>,
+    active_sequence: Option<u64>,
+    next_sequence: u64,
+    last_tool: Option<CompletedTool>,
+}
+
+impl Default for CurrentTaskProjectionState {
+    fn default() -> Self {
+        Self {
+            actual_status: CurrentTaskStatus::Idle,
+            current: None,
+            queued: VecDeque::new(),
+            active_sequence: None,
+            next_sequence: 1,
+            last_tool: None,
+        }
+    }
+}
+
+pub type CurrentTaskWake = Arc<dyn Fn() + Send + Sync + 'static>;
+
+struct CurrentTaskProjectionInner {
+    state: Mutex<CurrentTaskProjectionState>,
+    wake: Option<CurrentTaskWake>,
+}
+
+#[derive(Clone)]
+pub struct CurrentTaskProjection(Arc<CurrentTaskProjectionInner>);
+
+impl Default for CurrentTaskProjection {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
 
 impl fmt::Debug for CurrentTaskProjection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -65,18 +123,178 @@ impl fmt::Debug for CurrentTaskProjection {
 }
 
 impl CurrentTaskProjection {
+    pub fn new(wake: Option<CurrentTaskWake>) -> Self {
+        Self(Arc::new(CurrentTaskProjectionInner {
+            state: Mutex::new(CurrentTaskProjectionState::default()),
+            wake,
+        }))
+    }
+
     pub fn snapshot(&self) -> CurrentTaskStatus {
         self.0
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .current
+            .as_ref()
+            .map(|current| CurrentTaskStatus::Active(current.task.clone()))
+            .unwrap_or(CurrentTaskStatus::Idle)
     }
 
     fn project(&self, status: CurrentTaskStatus) {
-        *self
+        let now = Instant::now();
+        let mut schedule = None;
+        {
+            let mut state = self
             .0
+            .state
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = status;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match &status {
+                CurrentTaskStatus::Active(task) => {
+                    let sequence = match state.active_sequence {
+                        Some(sequence) if matches!(state.actual_status, CurrentTaskStatus::Active(_)) => sequence,
+                        _ => {
+                            let sequence = state.next_sequence;
+                            state.next_sequence = state.next_sequence.saturating_add(1);
+                            state.active_sequence = Some(sequence);
+                            if state.current.is_none() {
+                                state.current = Some(PresentedTask {
+                                    sequence,
+                                    task: task.clone(),
+                                    visible_since: now,
+                                    completed_at: None,
+                                });
+                            } else {
+                                state.queued.push_back(QueuedTask {
+                                    sequence,
+                                    task: task.clone(),
+                                    completed_at: None,
+                                });
+                            }
+                            sequence
+                        }
+                    };
+                    if let Some(current) = state.current.as_mut().filter(|item| item.sequence == sequence) {
+                        current.task = task.clone();
+                    } else if let Some(queued) = state.queued.iter_mut().find(|item| item.sequence == sequence) {
+                        queued.task = task.clone();
+                    }
+                    state.actual_status = status;
+                }
+                CurrentTaskStatus::Idle => {
+                    if let Some(sequence) = state.active_sequence.take() {
+                        if let Some(current) = state.current.as_mut().filter(|item| item.sequence == sequence) {
+                            current.completed_at = Some(now);
+                            schedule = Some((sequence, current.visible_since));
+                        } else if let Some(queued) = state.queued.iter_mut().find(|item| item.sequence == sequence) {
+                            queued.completed_at = Some(now);
+                        }
+                    }
+                    state.actual_status = CurrentTaskStatus::Idle;
+                }
+            }
+        }
+        self.wake();
+        if let Some((sequence, visible_since)) = schedule {
+            self.schedule_retirement(sequence, visible_since);
+        }
+    }
+
+    pub fn timing_snapshot(&self) -> CurrentTaskTiming {
+        let now = Instant::now();
+        let state = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let status = state
+            .current
+            .as_ref()
+            .map(|current| CurrentTaskStatus::Active(current.task.clone()))
+            .unwrap_or(CurrentTaskStatus::Idle);
+        CurrentTaskTiming {
+            status,
+            elapsed_ms: state.current.as_ref().map(|current| {
+                now.saturating_duration_since(current.visible_since)
+                    .as_millis()
+                    .min(u64::MAX as u128) as u64
+            }),
+            last_tool: state.last_tool.as_ref().map(|last| LastToolTiming {
+                kind: last.task.kind,
+                summary: last.task.summary.clone(),
+                age_ms: now
+                    .saturating_duration_since(last.completed_at)
+                    .as_millis()
+                    .min(u64::MAX as u128) as u64,
+            }),
+        }
+    }
+
+    fn schedule_retirement(&self, sequence: u64, visible_since: Instant) {
+        let projection = self.clone();
+        let due = visible_since + MIN_TASK_PRESENTATION;
+        let _ = thread::Builder::new()
+            .name("localbridge-task-presentation".into())
+            .spawn(move || {
+                let now = Instant::now();
+                if due > now {
+                    thread::sleep(due - now);
+                }
+                projection.retire_if_completed(sequence);
+            });
+    }
+
+    fn retire_if_completed(&self, sequence: u64) {
+        let mut next_schedule = None;
+        let changed = {
+            let mut state = self
+                .0
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(current) = state.current.as_ref() else {
+                return;
+            };
+            if current.sequence != sequence
+                || current.completed_at.is_none()
+                || current.visible_since.elapsed() < MIN_TASK_PRESENTATION
+            {
+                return;
+            }
+            let completed = state.current.take().expect("checked current task");
+            state.last_tool = Some(CompletedTool {
+                task: completed.task,
+                completed_at: completed.completed_at.expect("checked completion time"),
+            });
+            if let Some(queued) = state.queued.pop_front() {
+                let visible_since = Instant::now();
+                let sequence = queued.sequence;
+                let completed_at = queued.completed_at;
+                state.current = Some(PresentedTask {
+                    sequence,
+                    task: queued.task,
+                    visible_since,
+                    completed_at,
+                });
+                if completed_at.is_some() {
+                    next_schedule = Some((sequence, visible_since));
+                }
+            }
+            true
+        };
+        if changed {
+            self.wake();
+        }
+        if let Some((sequence, visible_since)) = next_schedule {
+            self.schedule_retirement(sequence, visible_since);
+        }
+    }
+
+    fn wake(&self) {
+        if let Some(wake) = self.0.wake.as_ref() {
+            wake();
+        }
     }
 }
 
@@ -130,7 +348,16 @@ impl PolicyEnforcementRuntime {
         policy: CapabilityPolicy,
         permission_mode: PermissionMode,
     ) -> Result<Self, PolicyEnforcementError> {
-        Self::start_inner(coding_runtime, policy, permission_mode, None)
+        Self::start_inner(coding_runtime, policy, permission_mode, None, None)
+    }
+
+    pub fn start_with_wake(
+        coding_runtime: CodingToolsRuntime,
+        policy: CapabilityPolicy,
+        permission_mode: PermissionMode,
+        wake: CurrentTaskWake,
+    ) -> Result<Self, PolicyEnforcementError> {
+        Self::start_inner(coding_runtime, policy, permission_mode, None, Some(wake))
     }
 
     pub fn start_with_privilege(
@@ -139,7 +366,23 @@ impl PolicyEnforcementRuntime {
         permission_mode: PermissionMode,
         privileged: Arc<dyn PrivilegedExecution>,
     ) -> Result<Self, PolicyEnforcementError> {
-        Self::start_inner(coding_runtime, policy, permission_mode, Some(privileged))
+        Self::start_inner(coding_runtime, policy, permission_mode, Some(privileged), None)
+    }
+
+    pub fn start_with_privilege_and_wake(
+        coding_runtime: CodingToolsRuntime,
+        policy: CapabilityPolicy,
+        permission_mode: PermissionMode,
+        privileged: Arc<dyn PrivilegedExecution>,
+        wake: CurrentTaskWake,
+    ) -> Result<Self, PolicyEnforcementError> {
+        Self::start_inner(
+            coding_runtime,
+            policy,
+            permission_mode,
+            Some(privileged),
+            Some(wake),
+        )
     }
 
     fn start_inner(
@@ -147,6 +390,7 @@ impl PolicyEnforcementRuntime {
         policy: CapabilityPolicy,
         permission_mode: PermissionMode,
         privileged: Option<Arc<dyn PrivilegedExecution>>,
+        wake: Option<CurrentTaskWake>,
     ) -> Result<Self, PolicyEnforcementError> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| PolicyEnforcementError::BindFailed)?;
@@ -158,7 +402,7 @@ impl PolicyEnforcementRuntime {
             .map_err(|_| PolicyEnforcementError::BindFailed)?
             .port();
         let permission_mode = Arc::new(RwLock::new(permission_mode));
-        let current_task = CurrentTaskProjection::default();
+        let current_task = CurrentTaskProjection::new(wake);
         let thread_mode = Arc::clone(&permission_mode);
         let thread_task = current_task.clone();
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
@@ -1128,6 +1372,49 @@ mod tests {
 
     const SYNTHETIC_BEARER: &str = "LB009_PEP_INTERNAL_BEARER_SYNTHETIC_DO_NOT_LEAK";
 
+    #[test]
+    fn current_task_projection_retains_fast_call_for_minimum_visibility_without_delaying_finish() {
+        let projection = CurrentTaskProjection::default();
+        let initial = projection.timing_snapshot();
+        assert_eq!(initial.status, CurrentTaskStatus::Idle);
+        assert_eq!(initial.elapsed_ms, None);
+        assert_eq!(initial.last_tool, None);
+
+        let started = Instant::now();
+        projection.project(CurrentTaskStatus::start(
+            TaskKind::ModifyFile,
+            "write probe.txt",
+        ));
+        projection.project(CurrentTaskStatus::Idle);
+        assert!(started.elapsed() < Duration::from_millis(100));
+        let retained = projection.timing_snapshot();
+        assert!(matches!(retained.status, CurrentTaskStatus::Active(_)));
+        assert_eq!(retained.last_tool, None);
+
+        thread::sleep(Duration::from_millis(540));
+        let finished = projection.timing_snapshot();
+        assert_eq!(finished.status, CurrentTaskStatus::Idle);
+        assert_eq!(finished.elapsed_ms, None);
+        assert_eq!(finished.last_tool.as_ref().map(|tool| tool.kind), Some(TaskKind::ModifyFile));
+    }
+
+    #[test]
+    fn current_task_projection_serializes_burst_fast_calls_for_full_visibility() {
+        let projection = CurrentTaskProjection::default();
+        projection.project(CurrentTaskStatus::start(TaskKind::ReadFile, "read a"));
+        projection.project(CurrentTaskStatus::Idle);
+        projection.project(CurrentTaskStatus::start(TaskKind::ExecuteCommand, "echo ok"));
+        projection.project(CurrentTaskStatus::Idle);
+
+        assert!(matches!(projection.snapshot(), CurrentTaskStatus::Active(CurrentTask { kind: TaskKind::ReadFile, .. })));
+        thread::sleep(Duration::from_millis(540));
+        assert!(matches!(projection.snapshot(), CurrentTaskStatus::Active(CurrentTask { kind: TaskKind::ExecuteCommand, .. })));
+        assert_eq!(projection.timing_snapshot().last_tool.as_ref().map(|tool| tool.kind), Some(TaskKind::ReadFile));
+        thread::sleep(Duration::from_millis(540));
+        assert_eq!(projection.snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(projection.timing_snapshot().last_tool.as_ref().map(|tool| tool.kind), Some(TaskKind::ExecuteCommand));
+    }
+
     #[derive(Debug)]
     struct FakePrivilegedExecution {
         state: RwLock<PrivilegeState>,
@@ -1415,9 +1702,20 @@ mod tests {
             }),
         );
         assert_eq!(denied.body["error"]["code"], -32001);
-        assert_eq!(
+        assert!(matches!(
             pep.current_task_projection().snapshot(),
-            CurrentTaskStatus::Idle
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ExecuteCommand,
+                state: TaskExecutionState::Blocked,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
+        let denied_timing = pep.current_task_projection().timing_snapshot();
+        assert_eq!(denied_timing.status, CurrentTaskStatus::Idle);
+        assert_eq!(
+            denied_timing.last_tool.as_ref().map(|tool| tool.kind),
+            Some(TaskKind::ExecuteCommand)
         );
 
         let edit_tools = post(
@@ -1430,6 +1728,7 @@ mod tests {
             15
         );
 
+        let read_started = Instant::now();
         let read = post(
             pep.port(),
             Some(&session),
@@ -1438,14 +1737,29 @@ mod tests {
                 "params":{"name":"read_file","arguments":{"path":"probe.txt"}}
             }),
         );
+        let read_round_trip = read_started.elapsed();
         assert!(
             read.body.get("result").is_some(),
             "allowed read_file must forward: {}",
             read.body
         );
-        assert_eq!(
+        assert!(
+            read_round_trip < Duration::from_millis(500),
+            "UI presentation retention must not delay real MCP response: {read_round_trip:?}"
+        );
+        assert!(matches!(
             pep.current_task_projection().snapshot(),
-            CurrentTaskStatus::Idle
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ReadFile,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
+        let timing = pep.current_task_projection().timing_snapshot();
+        assert_eq!(timing.status, CurrentTaskStatus::Idle);
+        assert_eq!(
+            timing.last_tool.as_ref().map(|tool| tool.kind),
+            Some(TaskKind::ReadFile)
         );
 
         let reinitialized = initialize(pep.port(), 6);
@@ -1720,9 +2034,20 @@ mod tests {
             "cancelled"
         );
         assert_eq!(cancelled_result.body["result"]["isError"], true);
-        assert_eq!(
+        assert!(matches!(
             pep.current_task_projection().snapshot(),
-            CurrentTaskStatus::Idle
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ElevatedOperation,
+                state: TaskExecutionState::Cancelled,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
+        let cancelled_timing = pep.current_task_projection().timing_snapshot();
+        assert_eq!(cancelled_timing.status, CurrentTaskStatus::Idle);
+        assert_eq!(
+            cancelled_timing.last_tool.as_ref().map(|tool| tool.kind),
+            Some(TaskKind::ElevatedOperation)
         );
 
         pep.set_permission_mode(PermissionMode::Full);
@@ -1751,6 +2076,16 @@ mod tests {
         );
         assert_eq!(full_denied.body["error"]["code"], -32001);
         assert_eq!(fake.start_count(), 1);
+        assert!(matches!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ElevatedOperation,
+                state: TaskExecutionState::Blocked,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
+        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
 
         pep.set_permission_mode(PermissionMode::Elevated);
         fake.set_state(PrivilegeState::AwaitingUac);
@@ -1768,6 +2103,15 @@ mod tests {
         assert_eq!(awaiting.body["error"]["code"], -32002);
         assert_eq!(awaiting.body["error"]["message"], "ElevationRequired");
         assert_eq!(fake.start_count(), 1);
+        assert!(matches!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ElevatedOperation,
+                state: TaskExecutionState::AwaitingAuthorization,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
         assert_eq!(
             pep.current_task_projection().snapshot(),
             CurrentTaskStatus::Idle
@@ -1782,11 +2126,14 @@ mod tests {
             }),
         );
         assert_eq!(control_plane.body["error"]["code"], -32001);
+        thread::sleep(Duration::from_millis(540));
+        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
 
         fake.set_state(PrivilegeState::Active {
             broker_generation: crate::state::GenerationId::new(78),
         });
         fake.complete.store(true, Ordering::Release);
+        let completed_started = Instant::now();
         let completed = post(
             pep.port(),
             Some(&session),
@@ -1798,6 +2145,7 @@ mod tests {
                 }}
             }),
         );
+        let completed_round_trip = completed_started.elapsed();
         assert_eq!(
             completed.body["result"]["structuredContent"]["outcome"],
             "completed"
@@ -1807,6 +2155,24 @@ mod tests {
             "LB012_FAKE_PRIVILEGED_OK"
         );
         assert_eq!(fake.start_count(), 2);
+        assert!(
+            completed_round_trip < Duration::from_millis(500),
+            "UI retention must not delay Broker response: {completed_round_trip:?}"
+        );
+        assert!(matches!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ElevatedOperation,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
+        let completed_timing = pep.current_task_projection().timing_snapshot();
+        assert_eq!(completed_timing.status, CurrentTaskStatus::Idle);
+        assert_eq!(
+            completed_timing.last_tool.as_ref().map(|tool| tool.kind),
+            Some(TaskKind::ElevatedOperation)
+        );
 
         fake.complete.store(false, Ordering::Release);
         let first_port = pep.port();
@@ -1875,9 +2241,35 @@ mod tests {
             "completed"
         );
         assert_eq!(fake.start_count(), 4);
-        assert_eq!(
+        assert!(matches!(
             pep.current_task_projection().snapshot(),
-            CurrentTaskStatus::Idle
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ElevatedOperation,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
+        let first_serialized_retired = pep.current_task_projection().timing_snapshot();
+        assert!(matches!(
+            first_serialized_retired.status,
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ElevatedOperation,
+                ..
+            })
+        ));
+        assert_eq!(
+            first_serialized_retired
+                .last_tool
+                .as_ref()
+                .map(|tool| tool.kind),
+            Some(TaskKind::ElevatedOperation)
+        );
+        thread::sleep(Duration::from_millis(540));
+        let serialized_timing = pep.current_task_projection().timing_snapshot();
+        assert_eq!(serialized_timing.status, CurrentTaskStatus::Idle);
+        assert_eq!(
+            serialized_timing.last_tool.as_ref().map(|tool| tool.kind),
+            Some(TaskKind::ElevatedOperation)
         );
 
         let mut coding = pep.stop().expect("PEP stop after privileged routing");

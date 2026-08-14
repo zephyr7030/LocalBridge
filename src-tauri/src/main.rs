@@ -129,6 +129,23 @@ struct FixedWindowE2eMetrics {
     content: Option<FixedWindowE2eRect>,
     onboarding: Option<FixedWindowE2eRect>,
     dashboard: Option<FixedWindowE2eRect>,
+    settings_replace_lefts: Vec<f64>,
+    settings_sheet_overflowing: bool,
+    settings_sheet_border_radius: Option<String>,
+    settings_sheet_clip_path: Option<String>,
+    settings_sheet_scrollbar_gutter: Option<String>,
+    settings_sheet_overflow_y: Option<String>,
+    settings_scrollbar_width: Option<String>,
+    settings_scrollbar_track_display: Option<String>,
+    settings_scrollbar_track_margin_top: Option<String>,
+    settings_scrollbar_track_margin_bottom: Option<String>,
+    settings_scrollbar_thumb_display: Option<String>,
+    settings_scrollbar_button_display: Option<String>,
+    settings_scrollbar_button_width: Option<String>,
+    settings_scrollbar_button_height: Option<String>,
+    settings_scrollbar_button_appearance: Option<String>,
+    settings_sheet_scroll_range: f64,
+    settings_sheet_scroll_top: f64,
     controls: Vec<String>,
     view: String,
 }
@@ -143,6 +160,22 @@ const FIXED_WINDOW_E2E_METRICS_SCRIPT: &str = r#"
   const chromes = document.querySelectorAll('.window-chrome');
   const dashboard = document.querySelector('.shell');
   const onboarding = document.querySelector('.onboarding-shell');
+  if (dashboard && !document.querySelector('.sheet')) {
+    const settings = Array.from(document.querySelectorAll('.top-actions button'))
+      .find((element) => (element.textContent || '').trim() === '设置');
+    settings?.click();
+  }
+  const sheet = document.querySelector('.sheet');
+  if (dashboard && sheet) sheet.style.maxHeight = '180px';
+  const sheetStyle = sheet ? getComputedStyle(sheet) : null;
+  const scrollbarStyle = sheet ? getComputedStyle(sheet, '::-webkit-scrollbar') : null;
+  const scrollbarTrackStyle = sheet ? getComputedStyle(sheet, '::-webkit-scrollbar-track') : null;
+  const scrollbarThumbStyle = sheet ? getComputedStyle(sheet, '::-webkit-scrollbar-thumb') : null;
+  const scrollbarButtonStyle = sheet ? getComputedStyle(sheet, '::-webkit-scrollbar-button') : null;
+  const settingsSheetScrollRange = sheet ? Math.max(0, sheet.scrollHeight - sheet.clientHeight) : 0;
+  if (sheet && settingsSheetScrollRange > 0) sheet.scrollTop = Math.min(24, settingsSheetScrollRange);
+  const settingsReplaceLefts = Array.from(document.querySelectorAll('.settings-replace'))
+    .map((element) => element.getBoundingClientRect().left);
   const metrics = {
     innerWidth: window.innerWidth,
     innerHeight: window.innerHeight,
@@ -153,6 +186,23 @@ const FIXED_WINDOW_E2E_METRICS_SCRIPT: &str = r#"
     content: rect(document.querySelector('.window-content')),
     onboarding: rect(onboarding),
     dashboard: rect(dashboard),
+    settingsReplaceLefts,
+    settingsSheetOverflowing: !!sheet && sheet.scrollHeight > sheet.clientHeight,
+    settingsSheetBorderRadius: sheetStyle?.borderRadius || null,
+    settingsSheetClipPath: sheetStyle?.clipPath || null,
+    settingsSheetScrollbarGutter: sheetStyle?.scrollbarGutter || null,
+    settingsSheetOverflowY: sheetStyle?.overflowY || null,
+    settingsScrollbarWidth: scrollbarStyle?.width || null,
+    settingsScrollbarTrackDisplay: scrollbarTrackStyle?.display || null,
+    settingsScrollbarTrackMarginTop: scrollbarTrackStyle?.marginTop || null,
+    settingsScrollbarTrackMarginBottom: scrollbarTrackStyle?.marginBottom || null,
+    settingsScrollbarThumbDisplay: scrollbarThumbStyle?.display || null,
+    settingsScrollbarButtonDisplay: scrollbarButtonStyle?.display || null,
+    settingsScrollbarButtonWidth: scrollbarButtonStyle?.width || null,
+    settingsScrollbarButtonHeight: scrollbarButtonStyle?.height || null,
+    settingsScrollbarButtonAppearance: scrollbarButtonStyle?.webkitAppearance || scrollbarButtonStyle?.appearance || null,
+    settingsSheetScrollRange,
+    settingsSheetScrollTop: sheet?.scrollTop || 0,
     controls: Array.from(document.querySelectorAll('.window-control')).map((element) => element.getAttribute('aria-label') || ''),
     view: dashboard ? 'dashboard' : onboarding ? 'onboarding' : 'other'
   };
@@ -235,9 +285,9 @@ fn execute_fixed_window_e2e(
     }
     let logical_width = f64::from(physical.width) / scale;
     let logical_height = f64::from(physical.height) / scale;
-    if (logical_width - 900.0).abs() > 2.0 || (logical_height - 620.0).abs() > 2.0 {
+    if (logical_width - 780.0).abs() > 2.0 || (logical_height - 620.0).abs() > 2.0 {
         return Err(format!(
-            "native client is {logical_width:.1}x{logical_height:.1} logical ({}x{} physical at {scale}x), expected 900x620 logical",
+            "native client is {logical_width:.1}x{logical_height:.1} logical ({}x{} physical at {scale}x), expected 780x620 logical",
             physical.width,
             physical.height
         ));
@@ -283,8 +333,16 @@ fn execute_fixed_window_e2e(
     })
     .ok_or("custom close control did not reach CloseRequested close-to-hide behavior")?;
 
+    let dashboard_geometry = if matches!(view, FixedWindowE2eView::Dashboard) {
+        format!(
+            " settings_replace_delta={:.2}px rounded_scroll=true scrollbar_arrows=false scroll_surface=true",
+            (metrics.settings_replace_lefts[0] - metrics.settings_replace_lefts[1]).abs()
+        )
+    } else {
+        String::new()
+    };
     Ok(format!(
-        "logical={}x{} physical={}x{} webview={}x{} native_scale={} dpr={} decorations=false resizable=false maximizable=false chrome=edge-to-edge controls=drag,minimize,close minimize_click=true close_hide=true",
+        "logical={}x{} physical={}x{} webview={}x{} native_scale={} dpr={} decorations=false resizable=false maximizable=false chrome=edge-to-edge controls=drag,minimize,close minimize_click=true close_hide=true{}",
         logical_width.round(),
         logical_height.round(),
         physical.width,
@@ -292,7 +350,8 @@ fn execute_fixed_window_e2e(
         metrics.inner_width.round(),
         metrics.inner_height.round(),
         scale,
-        metrics.dpr
+        metrics.dpr,
+        dashboard_geometry
     ))
 }
 
@@ -311,7 +370,10 @@ fn collect_fixed_window_e2e_metrics(
         if let Ok(payload) = metrics_rx.recv_timeout(Duration::from_millis(150)) {
             last_payload = payload;
             if let Ok(metrics) = serde_json::from_str::<FixedWindowE2eMetrics>(&last_payload) {
-                if metrics.view == view.as_str() {
+                let dashboard_ready = !matches!(view, FixedWindowE2eView::Dashboard)
+                    || (metrics.settings_replace_lefts.len() == 2
+                        && metrics.settings_sheet_clip_path.is_some());
+                if metrics.view == view.as_str() && dashboard_ready {
                     return Ok(metrics);
                 }
             }
@@ -388,6 +450,113 @@ fn assert_fixed_window_e2e_metrics(
                 .ok_or("dashboard shell missing")?;
             if child.width > content.width + 1.0 || child.height < 1.0 {
                 return Err("dashboard does not fit fixed chrome content area".into());
+            }
+            let replace_delta =
+                (metrics.settings_replace_lefts[0] - metrics.settings_replace_lefts[1]).abs();
+            if replace_delta > 1.0 {
+                return Err(format!(
+                    "Settings replacement buttons are not in one action column: delta={replace_delta:.2}px"
+                ));
+            }
+            if !metrics.settings_sheet_overflowing {
+                return Err("forced Settings sheet did not produce real overflow".into());
+            }
+            let radius = metrics
+                .settings_sheet_border_radius
+                .as_deref()
+                .ok_or("Settings sheet computed border radius missing")?;
+            if !radius.contains("20px") {
+                return Err(format!("Settings sheet rounded corners drifted: {radius}"));
+            }
+            let clip = metrics
+                .settings_sheet_clip_path
+                .as_deref()
+                .ok_or("Settings sheet computed clip path missing")?;
+            if clip == "none" || !clip.contains("20px") {
+                return Err(format!("Settings scrollbar is not clipped by rounded shell: {clip}"));
+            }
+            let gutter = metrics
+                .settings_sheet_scrollbar_gutter
+                .as_deref()
+                .ok_or("Settings sheet scrollbar gutter missing")?;
+            if !gutter.contains("stable") {
+                return Err(format!("Settings scrollbar gutter is not stable/inset: {gutter}"));
+            }
+            let overflow = metrics
+                .settings_sheet_overflow_y
+                .as_deref()
+                .ok_or("Settings sheet overflowY missing")?;
+            if overflow != "auto" && overflow != "scroll" {
+                return Err(format!("Settings sheet is not a real scroll surface: {overflow}"));
+            }
+            let scrollbar_width = metrics.settings_scrollbar_width.as_deref().unwrap_or("");
+            if scrollbar_width.is_empty() || scrollbar_width == "0px" || scrollbar_width == "auto" {
+                return Err(format!(
+                    "Settings custom scrollbar width is not active: {scrollbar_width}"
+                ));
+            }
+            let track_display = metrics
+                .settings_scrollbar_track_display
+                .as_deref()
+                .unwrap_or("");
+            let track_margin_top = metrics
+                .settings_scrollbar_track_margin_top
+                .as_deref()
+                .unwrap_or("");
+            let track_margin_bottom = metrics
+                .settings_scrollbar_track_margin_bottom
+                .as_deref()
+                .unwrap_or("");
+            let thumb_display = metrics
+                .settings_scrollbar_thumb_display
+                .as_deref()
+                .unwrap_or("");
+            if track_display == "none" || thumb_display == "none" {
+                return Err(format!(
+                    "Settings custom scrollbar lost track/thumb: track={track_display} thumb={thumb_display}"
+                ));
+            }
+            let parse_px = |value: &str| {
+                value
+                    .strip_suffix("px")
+                    .and_then(|number| number.parse::<f64>().ok())
+                    .unwrap_or(-1.0)
+            };
+            if parse_px(track_margin_top) < 14.0 || parse_px(track_margin_bottom) < 14.0 {
+                return Err(format!(
+                    "Settings scrollbar track does not stay clear of rounded corners: top={track_margin_top} bottom={track_margin_bottom}"
+                ));
+            }
+            let button_display = metrics
+                .settings_scrollbar_button_display
+                .as_deref()
+                .unwrap_or("");
+            let button_width = metrics
+                .settings_scrollbar_button_width
+                .as_deref()
+                .unwrap_or("");
+            let button_height = metrics
+                .settings_scrollbar_button_height
+                .as_deref()
+                .unwrap_or("");
+            let button_appearance = metrics
+                .settings_scrollbar_button_appearance
+                .as_deref()
+                .unwrap_or("");
+            let button_hidden = button_display == "none"
+                && button_width == "0px"
+                && button_height == "0px"
+                && (button_appearance == "none" || button_appearance.is_empty());
+            if !button_hidden {
+                return Err(format!(
+                    "Settings scrollbar button/arrow contract is not fully suppressed: display={button_display} width={button_width} height={button_height} appearance={button_appearance}"
+                ));
+            }
+            if metrics.settings_sheet_scroll_range <= 0.0 {
+                return Err("Settings sheet lost a real scroll range".into());
+            }
+            if metrics.settings_sheet_scroll_top <= 0.0 {
+                return Err("Settings sheet no longer scrolls after arrow removal".into());
             }
         }
     }

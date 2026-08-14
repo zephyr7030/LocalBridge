@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
 import { WizardFrame } from "../../components/WizardFrame";
 import { ReadinessCheck } from "../../components/ReadinessCheck";
 import { bridge, type AccessCode, type MainProjection } from "../../bridge";
@@ -6,7 +6,7 @@ import { accessText } from "../../presentation";
 import { onboardingApi, type OnboardingState } from "./api";
 import "./onboarding.css";
 
-const KEY_HINT = "Runtime API Key 仅保存在 Windows 安全凭据中，不会写入配置文件、日志、命令行或浏览器存储。";
+const KEY_HINT = "Runtime API Key 仅保存在 Windows 安全凭据中。";
 
 type Screen4CopyKey = "name" | "tunnel";
 
@@ -14,11 +14,18 @@ const messageFrom = (value: unknown, fallback: string) =>
   typeof value === "string" ? value : value instanceof Error ? value.message : fallback;
 
 export function Onboarding({ initial, onComplete, previewMode = false }: { initial: OnboardingState; onComplete: () => void; previewMode?: boolean }) {
-  const [step, setStep] = useState(1);
+  const viteDev = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
+  const permissionGeometryE2e = viteDev
+    && typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("lb016-e2e") === "permission-geometry";
+  const [step, setStep] = useState(permissionGeometryE2e ? 3 : 1);
   const [state, setState] = useState(initial);
   const [main, setMain] = useState<MainProjection | null>(null);
-  const [tunnelId, setTunnelId] = useState("");
+  const [tunnelId, setTunnelId] = useState(initial.tunnelId ?? "");
   const [runtimeKey, setRuntimeKey] = useState("");
+  const [runtimeKeyEditing, setRuntimeKeyEditing] = useState(!initial.runtimeKeySaved);
+  const [runtimeKeyFocused, setRuntimeKeyFocused] = useState(false);
+  const [permissionGeometryFailed, setPermissionGeometryFailed] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState("");
   const [rememberedProject, setRememberedProject] = useState("");
   const [permission, setPermission] = useState<AccessCode>("edit");
@@ -26,6 +33,14 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
   const copyTimers = useRef<Record<Screen4CopyKey, number | null>>({ name: null, tunnel: null });
   const [preparingProject, setPreparingProject] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const savedRuntimeKeyMask = state.runtimeKeySaved && state.runtimeKeyLength
+    ? "*".repeat(state.runtimeKeyLength)
+    : "";
+  const runtimeKeyDisplayValue = runtimeKeyEditing
+    ? runtimeKey
+    : runtimeKeyFocused
+      ? savedRuntimeKeyMask
+      : "";
   const allGreen = main !== null
     && main.localEnvironmentService === "online"
     && main.codingService === "online"
@@ -38,6 +53,36 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
   }, []);
 
   useEffect(() => {
+    if (!error) return;
+    const timer = window.setTimeout(() => setError(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [error]);
+
+  useLayoutEffect(() => {
+    if (!permissionGeometryE2e || step !== 3) return;
+    const ordinary = document.querySelector<HTMLButtonElement>(".onboarding-folder-row button");
+    const permissionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".onboarding-permission"));
+    const lineBoxesInside = (button: HTMLButtonElement, element: Element | null) => {
+      if (!element) return false;
+      const buttonRect = button.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const boxes = Array.from(range.getClientRects());
+      return boxes.length > 0 && boxes.every((box) => box.width > 0 && box.height > 0
+        && box.top >= buttonRect.top - 0.5 && box.bottom <= buttonRect.bottom + 0.5
+        && box.left >= buttonRect.left - 0.5 && box.right <= buttonRect.right + 0.5);
+    };
+    const ordinaryHeight = ordinary?.getBoundingClientRect().height ?? 0;
+    const geometryPass = window.innerWidth === 780
+      && ordinaryHeight > 0
+      && permissionButtons.length === 3
+      && permissionButtons.every((button) => button.getBoundingClientRect().height + 0.5 >= ordinaryHeight * 2
+        && lineBoxesInside(button, button.querySelector("strong"))
+        && lineBoxesInside(button, button.querySelector("small")));
+    if (!geometryPass) setPermissionGeometryFailed(true);
+  }, [permissionGeometryE2e, step]);
+
+  useEffect(() => {
     void bridge.read().then((projection) => {
       setMain(projection);
       setPermission(projection.permission);
@@ -48,21 +93,28 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
 
   useEffect(() => {
     if (step !== 4 && step !== 5) return;
-    let active = true;
-    const refreshProjection = async () => {
-      try {
-        const projection = await bridge.read();
-        if (active) setMain(projection);
-      } catch {
-        if (active) setError("无法读取运行状态");
+    let cancelled = false;
+    void (async () => {
+      let revision = 0;
+      while (!cancelled) {
+        try {
+          const projection = await bridge.read();
+          if (cancelled) return;
+          setMain(projection);
+          revision = projection.projectionRevision;
+          await bridge.waitForProjectionChange(revision);
+        } catch {
+          if (cancelled) return;
+          setError("无法读取运行状态");
+          try {
+            await bridge.waitForProjectionChange(revision);
+          } catch {
+            /* next backend wake/read retries */
+          }
+        }
       }
-    };
-    void refreshProjection();
-    const timer = window.setInterval(() => void refreshProjection(), 1200);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
+    })();
+    return () => { cancelled = true; };
   }, [step]);
 
   const chosenProject = useMemo(() => main?.projects.find((item) => item.id === rememberedProject) ?? null, [main, rememberedProject]);
@@ -70,13 +122,40 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
   const saveConnection = async () => {
     setError(null);
     try {
-      await onboardingApi.saveConnection(tunnelId.trim(), runtimeKey);
+      await onboardingApi.saveConnection(tunnelId.trim(), runtimeKeyEditing ? runtimeKey : "");
       setRuntimeKey("");
-      setState(await onboardingApi.read());
+      const nextState = await onboardingApi.read();
+      setState(nextState);
+      setTunnelId(nextState.tunnelId ?? "");
+      setRuntimeKeyEditing(!nextState.runtimeKeySaved);
+      setRuntimeKeyFocused(false);
       setStep(3);
     } catch (value) {
       setError(messageFrom(value, "OpenAI 连接设置未保存"));
     }
+  };
+
+  const startRuntimeKeyReplacement = (value = "") => {
+    setRuntimeKeyEditing(true);
+    setRuntimeKey(value);
+  };
+
+  const handleRuntimeKeyBeforeInput = (event: FormEvent<HTMLInputElement>) => {
+    if (runtimeKeyEditing || !state.runtimeKeySaved) return;
+    const input = event.nativeEvent as InputEvent;
+    if (input.inputType.startsWith("delete")) {
+      event.preventDefault();
+      startRuntimeKeyReplacement();
+    } else if (input.inputType.startsWith("insert") && input.data) {
+      event.preventDefault();
+      startRuntimeKeyReplacement(input.data);
+    }
+  };
+
+  const handleRuntimeKeyPaste = (event: ClipboardEvent<HTMLInputElement>) => {
+    if (runtimeKeyEditing || !state.runtimeKeySaved) return;
+    event.preventDefault();
+    startRuntimeKeyReplacement(event.clipboardData.getData("text"));
   };
 
   const chooseFolder = async () => {
@@ -145,6 +224,8 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     }
   };
 
+  if (permissionGeometryFailed) return <main className="onboarding-geometry-failed" data-lb016-permission-geometry="fail" />;
+
   if (step === 1) return (
     <WizardFrame step={1} title="简单设置 即可开始" footer={<button className="primary" onClick={() => setStep(2)}>开始</button>}>
       <p className="onboarding-copy">LocalBridge是链接ChatGPT与本地代码的工具</p>
@@ -152,10 +233,10 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
   );
 
   if (step === 2) return (
-    <WizardFrame step={2} title="OpenAI 设置" footer={<><button className="secondary" onClick={() => setStep(1)}>返回</button><button className="primary" disabled={!tunnelId.trim() || (!runtimeKey && !state.runtimeKeySaved)} onClick={() => void saveConnection()}>继续</button></>}>
+    <WizardFrame step={2} title="OpenAI 设置" footer={<><button className="secondary" onClick={() => setStep(1)}>返回</button><button className="primary" disabled={!tunnelId.trim() || (runtimeKeyEditing ? !runtimeKey : !state.runtimeKeySaved)} onClick={() => void saveConnection()}>继续</button></>}>
       <div className="onboarding-field"><label htmlFor="tunnel-id">Tunnel ID</label><input id="tunnel-id" value={tunnelId} onChange={(event) => setTunnelId(event.target.value)} placeholder="tunnel_…" autoComplete="off" /></div>
       <div className="onboarding-link-row"><button className="secondary" onClick={() => void onboardingApi.openTunnelSettings().catch(() => setError("无法打开 Tunnel ID 设置"))}>打开 Tunnel ID 设置</button></div>
-      <div className="onboarding-field"><label htmlFor="runtime-key-onboarding">Runtime API Key</label><input id="runtime-key-onboarding" type="password" value={runtimeKey} onChange={(event) => setRuntimeKey(event.target.value)} placeholder={state.runtimeKeySaved ? "已安全保存，可保持不变" : "输入 Runtime API Key"} autoComplete="off" /></div>
+      <div className="onboarding-field"><label htmlFor="runtime-key-onboarding">Runtime API Key</label><input id="runtime-key-onboarding" type="password" value={runtimeKeyDisplayValue} onFocus={() => setRuntimeKeyFocused(true)} onBlur={() => setRuntimeKeyFocused(false)} onBeforeInput={handleRuntimeKeyBeforeInput} onPaste={handleRuntimeKeyPaste} onChange={(event) => { if (runtimeKeyEditing) setRuntimeKey(event.target.value); }} placeholder={state.runtimeKeySaved ? "已安全保存至windows安全凭据" : "输入 Runtime API Key"} autoComplete="off" /></div>
       <div className="onboarding-link-row"><button className="secondary" onClick={() => void onboardingApi.openApiKeys().catch(() => setError("无法打开 Runtime API Key 设置"))}>打开 Runtime API Key 设置</button></div>
       <p className="onboarding-hint">{KEY_HINT}</p>
       {error && <p className="onboarding-error" role="alert">{error}</p>}

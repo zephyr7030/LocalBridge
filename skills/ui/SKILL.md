@@ -16,7 +16,7 @@
 
 禁止第 6 屏；旧 `Local Bridge 使用确认` 整页已删除。除第 1 屏外，第 2/3/4/5 屏都必须有明确 `返回`，任何保存、启动或配置失败不得锁死用户。
 
-第 3 屏新项目使用原生 Windows 文件夹选择器。三个权限模式按钮不得固定高度压缩说明；换行必须安全自动增高，并具备 `min-height >= 80px` 或等效可证明结构高度，确保“标题 + 两行说明 + 上下留白”不被压扁。900×620 实机内容与边框留白仍由人工视觉 Gate 验收，不能仅凭 CSS `padding/min-height` 判 PASS。普通 selected 使用蓝色 `#0071e3`；管理员模式在 onboarding 与设置页使用黄色/琥珀逻辑色，不得被普通蓝色 selected 覆盖。可见用户在 onboarding 第 3 屏或设置页点击/重新点击管理员模式就是显式 UAC 动作，若 Broker 未 Active 必须立即请求 Windows 授权；禁止额外“启用管理员权限”按钮。后台恢复管理员偏好仍不得自动 UAC。
+第 3 屏新项目使用原生 Windows 文件夹选择器。三个权限模式按钮不得固定高度压缩说明；换行必须安全自动增高，并具备 `min-height >= 80px` 或等效可证明结构高度。780×620 下两行按钮真实 rendered 高度必须至少为单行控件 2 倍且文本完整；2026-08-14 用户已通过该视觉审核，后续若该布局变化须复验。普通 selected 使用蓝色 `#0071e3`；管理员模式在 onboarding 与设置页使用黄色/琥珀逻辑色，不得被普通蓝色 selected 覆盖。可见用户在 onboarding 第 3 屏或设置页点击/重新点击管理员模式就是显式 UAC 动作，若 Broker 未 Active 必须立即请求 Windows 授权；禁止额外“启用管理员权限”按钮。后台恢复管理员偏好仍不得自动 UAC。
 
 Dashboard/主控界面不得显示 `权限模式` 行，也不得显示编辑/完整/管理员三档选项；完成 onboarding 后设置页是唯一权限模式编辑入口。Dashboard 只能显示只读 `管理员权限` 实际运行状态，并直接消费 `PrivilegeState`；不得从 Dashboard 修改 PermissionMode 或触发模式 UAC。
 
@@ -34,7 +34,7 @@ Dashboard/主控界面不得显示 `权限模式` 行，也不得显示编辑/�
 
 按钮必须统一且可辨识，禁止白底白按钮；普通 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；管理员模式使用黄色/琥珀逻辑色。提示只保留当前动作所需的最少信息，状态/复制反馈不得造成布局位移。
 
-窗口固定 900×620；minimum/maximum inner size 都是 900×620，`resizable=false`、`maximizable=false`。native `decorations=false`；只允许一层 edge-to-edge 自定义 chrome，必须贴满 client area，禁止双边框。自定义 chrome 提供拖拽、最小化、关闭，无最大化。Dashboard 和 onboarding 必须在固定 client area 内完整可操作。
+窗口固定 780×620；minimum/maximum inner size 都是 780×620，`resizable=false`、`maximizable=false`。native `decorations=false`；只允许一层 edge-to-edge 自定义 chrome，必须贴满 client area，禁止双边框。自定义 chrome 提供拖拽、最小化、关闭，无最大化。Dashboard 和 onboarding 必须在固定 client area 内完整可操作。
 
 首次 onboarding 必须是整页内容，不是弹窗：直接使用 custom chrome 内容区，禁止空白画布中再套居中的整体 `.card` / modal / dialog，也禁止用大圆角、整体阴影或边框形成二级窗口。正常页面 padding、字段和局部分组不受此限制。
 
@@ -45,3 +45,5 @@ Dashboard/主控界面不得显示 `权限模式` 行，也不得显示编辑/�
 - 设置页严格三组：常规（开机启动、关闭窗口后继续运行）、连接（`Tunnel ID`、`Runtime API Key`，各自“更换”）、权限（三种模式）；底部 `打开欢迎页` / `完成`。`Runtime API Key` 为冻结英文专有字段名，不翻译、不回显完整值。连接编辑按字段独立提交；保存即校验、安全写入并在需要时受控重连；禁止“测试连接”。
 - 诊断页严格三段：运行状态（本地运行环境/编码服务/OpenAI Tunnel/管理员权限）、项目（实际路径）、最近脱敏日志；动作仅 `打开日志 / 导出诊断 / 完成`。
 - frontend/WebView 只 render typed projection + send typed intent；不得拥有 runtime/readiness/retry/UAC 状态机。耗时 backend 工作必须在独立 worker/async 执行上下文，UI 在人为延迟 backend 工作时仍需可响应。
+- configured 前台启动必须先显示可交互 UI，再由前端仅发送一次 typed `UI-ready` intent；backend 收到后才启动原本停止的 runtime/MCP/Tunnel，重复 ready 幂等且保持 single owner。`--background` 不等待 UI-ready，唤醒已有健康后台 runtime 不得仅因此重启。
+- rounded sheet/dialog/card 的 scrollbar 必须裁切/内缩并保留四角；纵向 scrollbar 顶部/底部箭头或三角按钮不得显示，滚轮/轨道/滑块仍可用。

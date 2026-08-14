@@ -179,8 +179,8 @@
 | A184 | onboarding 整页布局 | 5 屏直接使用 custom chrome 内容区；不得用居中 floating card/modal/dialog 或大圆角+整体阴影/边框制造“窗口里的窗口” |
 | A205 | 管理员模式选择 | 仅设置页或 onboarding 第3屏可见；点击/重新点击“管理员模式”时若 Broker 未 Active，立即发起 Windows UAC；不存在单独“启用管理员权限”按钮；后台偏好恢复不自动 UAC |
 | A206 | 离开管理员模式 | 在设置页或 onboarding 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker；Dashboard 无模式切换入口 |
-| A207 | 前台启动 | onboarding 已完成且配置有效时，打开 UI 自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作 |
-| A208 | 前台慢启动 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新 |
+| A207 | 前台启动顺序 | configured 前台先创建/显示并达到可交互 UI，再由前端发送一次 typed `UI-ready`；backend 收到后才启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel，ready 前禁止提前启动服务 |
+| A208 | 前台慢启动 / ready 幂等 | backend 故意延迟时 UI 仍可交互并投影 Starting/Ready/Fault；重复 ready 不产生第二 owner；`--background` 不等待 ready，健康后台实例不因此重启 |
 | A209 | CurrentTask idle | 左下状态固定显示“等待命令”，不得显示“空闲”或隐藏 |
 | A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus/timing 并通过唤醒式 delivery 反映到 UI；短 create/delete/modify/command 不依赖 polling；活动显示持续时间；terminal 回到第一行“等待命令”，第二行保留唯一上一工具+年龄；前端不伪造 |
 | A211 | Dashboard 新项目 | “选择其他文件夹”打开原生 Windows 文件夹选择器，手填路径不是主流程 |
@@ -191,7 +191,7 @@
 | A216 | 设置保存 | 基础格式校验→安全写入→运行/连接中且有效连接配置变化时受控重连；Starting/connecting 且 active=false 也不得沿用旧 captured config；不存在“测试连接”按钮 |
 | A217 | 关闭窗口继续运行=开 | X 仅隐藏窗口，runtime/tray 继续 |
 | A218 | 关闭窗口继续运行=关 | X 有序关闭 privileged gate/Broker/Tunnel/PEP/MCP 后退出；偏好版本化持久化 |
-| A219 | 3/5 权限按钮结构 | `min-height >= 80px` 仅作最低保护；780×620 实际 rendered geometry 必须证明两行按钮高度至少为单行控件 2 倍且标题/说明完整；人工视觉 Gate 仍必须 PASS |
+| A219 | 3/5 权限按钮结构 | `min-height >= 80px` 仅作最低保护；780×620 rendered geometry 满足两行按钮≥单行 2 倍且文本完整；2026-08-14 scoped 人工视觉已 PASS，布局变化须复验 |
 | A220 | Onboarding backend ownership | React 不拥有 runtime start/readiness polling 状态机；backend 持有并投影；慢 backend 时 UI 仍响应 |
 | A221 | 诊断结构 | 仅运行状态/项目/日志；运行状态四行=本地运行环境/编码服务/OpenAI Tunnel/管理员权限；项目显示实际路径 |
 | A222 | 诊断日志/动作 | 最近限量脱敏日志；页面动作仅“打开日志/导出诊断/完成”，无刷新/重试连接/打开欢迎页/工程 generation 字段 |
@@ -214,8 +214,8 @@
 | A239 | 上次执行工具行 | 第二行固定 `上次执行工具：` + 脱敏用户标签/安全摘要，禁止 raw MCP id；相对时间在最右；仅保留一个上一工具元数据，第一行不显示年龄 |
 | A240 | 2/5 已保存连接显示 | 已保存 Tunnel ID 预填当前值；已保存 Key 固定文本 `已安全保存至windows安全凭据`；安全提示严格为 `Runtime API Key 仅保存在 Windows 安全凭据中。` |
 | A241 | 2/5 Key 掩码 | 聚焦已保存 Key 只基于长度元数据显示同位数 `*`；plaintext 不回前端，未真正替换时掩码不得被提交/保存 |
-| A242 | 两行权限按钮真实几何 | 780×620 下两行权限按钮 rendered 高度 ≥ 单行控件 2 倍且两个 line box 完整；CSS marker 不构成 PASS，人工视觉 Gate 必须通过 |
+| A242 | 两行权限按钮真实几何 | 780×620 下两行权限按钮 rendered 高度 ≥ 单行控件 2 倍且两个 line box 完整；CSS marker 不构成 PASS；2026-08-14 用户 scoped 视觉审核已 PASS，布局变化须复验 |
 | A243 | 固定窗口 780×620 | default/min/max inner size 全为 780×620，其余不可缩放/不可最大化/无原生 decorations/custom chrome 语义保持 |
 | A244 | 设置 Key 清除位置 | Key 已保存时 `清除` 紧邻位于 Key `更换` 左侧；两项 `更换` 仍处同一最右动作列 |
 | A245 | 设置 Key 清除语义 | `清除` 删除 Windows 安全凭据，不回显 secret，投影为未保存；active/connecting 时使用既有受控连接配置变化 lifecycle |
-| A246 | 滚动圆角保持 | rounded sheet/dialog/card 出现纵向 overflow 时四角仍完整，scrollbar 被裁切/内缩在圆角壳内部，不切平右侧圆角 |
+| A246 | 滚动圆角 / 无箭头 | rounded sheet/dialog/card 出现纵向 overflow 时四角仍完整，scrollbar 被裁切/内缩；顶部/底部箭头、三角形或等价按钮不显示，滚轮/轨道/滑块仍可用 |

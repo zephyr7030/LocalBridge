@@ -45,3 +45,30 @@ fn nonce_debug_is_redacted_and_foundation_operations_are_only_ping_shutdown() {
     let shutdown = BrokerRequest::Shutdown;
     assert!(matches!(shutdown, BrokerRequest::Shutdown));
 }
+
+#[cfg(windows)]
+#[test]
+fn elevated_exec_rejects_win32_verbatim_program_and_workdir() {
+    let valid = ElevatedExecSpec {
+        program: r"C:\Windows\System32\whoami.exe".to_string(),
+        args: vec!["/user".to_string()],
+        workdir: Some(r"C:\project".to_string()),
+        timeout_ms: 1_000,
+        max_output_bytes: 4_096,
+    };
+    assert_eq!(valid.validate(), Ok(()));
+
+    let mut verbatim_program = valid.clone();
+    verbatim_program.program = r"\\?\C:\Windows\System32\whoami.exe".to_string();
+    assert_eq!(
+        verbatim_program.validate(),
+        Err(BrokerProtocolError::MalformedFrame)
+    );
+
+    let mut verbatim_workdir = valid;
+    verbatim_workdir.workdir = Some(r"\\?\C:\project".to_string());
+    assert_eq!(
+        verbatim_workdir.validate(),
+        Err(BrokerProtocolError::MalformedFrame)
+    );
+}

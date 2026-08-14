@@ -10,9 +10,9 @@ const compactCss = css.replace(/\s+/g, "");
 const compactOnboarding = onboardingCss.replace(/\s+/g, "");
 
 for (const marker of [
-  ".inner_size(900.0, 620.0)",
-  ".min_inner_size(900.0, 620.0)",
-  ".max_inner_size(900.0, 620.0)",
+  ".inner_size(780.0, 620.0)",
+  ".min_inner_size(780.0, 620.0)",
+  ".max_inner_size(780.0, 620.0)",
   ".resizable(false)",
   ".maximizable(false)",
   ".decorations(false)",
@@ -60,4 +60,4 @@ const onboardingRule = compactOnboarding.match(/\.onboarding-shell\{([^}]*)\}/)?
 for (const token of ["width:100%", "height:100%", "min-height:0"]) if (!onboardingRule.includes(token)) throw new Error(`LB-015 onboarding fixed-content sizing missing: ${token}`);
 if (/100dvh|100vh/.test(onboardingRule)) throw new Error("LB-015 onboarding still escapes chrome content area");
 
-console.log("LB015_WINDOW_CHROME=PASS logical_fixed=900x620 native_dpi_scaling=true native_decorations=false single_custom_chrome=true edge_to_edge=true drag=true minimize=true close=true maximize=false least_privilege_capability=true dashboard_fit=true onboarding_fit=true");
+console.log("LB015_WINDOW_CHROME=PASS logical_fixed=780x620 native_dpi_scaling=true native_decorations=false single_custom_chrome=true edge_to_edge=true drag=true minimize=true close=true maximize=false least_privilege_capability=true dashboard_fit=true onboarding_fit=true");

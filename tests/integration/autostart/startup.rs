@@ -1,7 +1,7 @@
 use super::*;
 use crate::privilege::PrivilegeController;
 use crate::settings::{AppData, StoredPermissionMode};
-use crate::state::PrivilegeState;
+use crate::state::{PrivilegeState, RuntimeState};
 use crate::workspace::{WorkspaceId, WorkspaceValidator};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -67,7 +67,7 @@ fn background_resume_requires_auto_start_no_manual_stop_and_fresh_active_workspa
     .unwrap()
     .unwrap();
     let freshly_validated = WorkspaceValidator.validate(&workspace.0).unwrap();
-    assert_eq!(config.workspace, freshly_validated.resolved_path());
+    assert_eq!(config.workspace, freshly_validated.execution_path());
 
     profile.record_manual_stop();
     assert_eq!(
@@ -127,7 +127,7 @@ fn manual_foreground_launch_ignores_login_autostart_and_manual_stop_latch() {
     .unwrap()
     .unwrap();
     let freshly_validated = WorkspaceValidator.validate(&workspace.0).unwrap();
-    assert_eq!(config.workspace, freshly_validated.resolved_path());
+    assert_eq!(config.workspace, freshly_validated.execution_path());
     assert_eq!(config.permission_mode, PermissionMode::Full);
 }
 
@@ -163,4 +163,20 @@ fn elevated_preference_restores_requested_without_uac_for_background_and_foregro
     let foreground = DesktopLifecycle::new(PrivilegeController::new());
     restore_privilege_preference(PermissionMode::Elevated, &foreground).unwrap();
     assert_eq!(foreground.privilege().state(), PrivilegeState::Requested);
+}
+
+#[test]
+fn manual_stop_services_persists_latch_before_shutdown() {
+    let app_data = TempDir::new("manual-stop");
+    let store = StartupProfileStore::new(app_data.0.join(STARTUP_PROFILE_FILE_NAME));
+    let mut profile = StartupProfile::default();
+    profile.set_tunnel_id(VALID_TUNNEL).unwrap();
+    store.save(&profile).unwrap();
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+
+    let report = manual_stop_services(&app_data.0, &lifecycle).unwrap();
+
+    assert_eq!(report, ShutdownReport::default());
+    assert!(store.load().unwrap().manual_stop_latched());
+    assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::Stopped);
 }

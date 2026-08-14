@@ -2,7 +2,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use localbridge_lib::mcp::{
-    CapabilityPolicy, CodingToolsRuntimeError, GuardError, GuardRuntime, McpGuard, ToolCallRequest,
+    CapabilityPolicy, CodingToolsRuntimeError, DenyReason, GuardError, GuardRuntime, McpGuard,
+    ToolCallRequest,
 };
 use localbridge_lib::state::{
     Capability, CurrentTask, CurrentTaskStatus, PermissionMode, SafeTaskSummary, TaskExecutionState,
@@ -91,6 +92,52 @@ fn workflow_indirect_exec_and_control_plane_are_blocked_before_upstream() {
         assert!(states.iter().all(|s| !matches!(active_state(s), Some(task) if task.state == TaskExecutionState::Running)));
     }
     assert!(calls.borrow().is_empty());
+}
+
+#[test]
+fn win32_verbatim_execution_paths_are_blocked_before_upstream_without_scanning_patch_content() {
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut guard = McpGuard::new(FakeRuntime::new(calls.clone()), policy());
+    let denied = [
+        ToolCallRequest::new("read_file", json!({"path":r"\\?\C:\project\probe.txt"})),
+        ToolCallRequest::new("git_diff", json!({"paths":[r"\\?\C:\project\probe.txt"]})),
+        ToolCallRequest::new("set_default_cwd", json!({"path":r"\\?\C:\project"})),
+        ToolCallRequest::new("exec_command", json!({"cmd":"echo safe","cwd":r"\\?\C:\project"})),
+        ToolCallRequest::new("exec_command", json!({"cmd":r"type \\?\C:\project\probe.txt"})),
+        ToolCallRequest::new("exec_command", json!({"cmd":"powershell -Command -","stdin":r"Get-Item \\?\C:\project"})),
+        ToolCallRequest::new("exec_command", json!({"cmd":"echo %LB_PATH%","env":{"LB_PATH":r"\\?\C:\project"}})),
+        ToolCallRequest::new("write_stdin", json!({"session_id":"synthetic","chars":r"cd \\?\C:\project\n"})),
+    ];
+    for request in denied {
+        assert_eq!(
+            guard.decision(PermissionMode::Full, &request).deny_reason,
+            Some(DenyReason::VerbatimExecutionPath)
+        );
+        let mut states = Vec::new();
+        let result = guard.call_tool(PermissionMode::Full, request, |state| states.push(state));
+        assert!(matches!(
+            result,
+            Err(GuardError::Denied(denied))
+                if denied.reason == DenyReason::VerbatimExecutionPath
+        ));
+        assert!(matches!(
+            active_state(&states[0]),
+            Some(task) if task.state == TaskExecutionState::Blocked
+        ));
+        assert_eq!(states.last(), Some(&CurrentTaskStatus::Idle));
+    }
+    assert!(calls.borrow().is_empty());
+
+    let allowed = guard.call_tool(
+        PermissionMode::Edit,
+        ToolCallRequest::new(
+            "apply_patch",
+            json!({"patch":r"*** Begin Patch\n*** Add File: docs/probe.txt\n+literal \\?\C:\project for documentation\n*** End Patch"}),
+        ),
+        |_| {},
+    );
+    assert!(allowed.is_ok(), "patch content is data, not an execution-path argument");
+    assert_eq!(&*calls.borrow(), &["apply_patch"]);
 }
 
 #[test]

@@ -163,6 +163,7 @@ pub enum DenyReason {
     IndirectUnknownCapability,
     PrivilegedRouteNotAvailable,
     ElevatedExecNotReviewed,
+    VerbatimExecutionPath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -554,6 +555,9 @@ fn reviewed_elevated_exec(arguments: &Value) -> bool {
     let Some(trusted_program) = reviewed_elevated_program() else {
         return false;
     };
+    let Ok(trusted_program) = trusted_program.canonicalize() else {
+        return false;
+    };
     let requested = Path::new(&spec.program);
     let Ok(metadata) = fs::symlink_metadata(requested) else {
         return false;
@@ -586,7 +590,7 @@ pub fn reviewed_elevated_program() -> Option<PathBuf> {
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return None;
     }
-    program.canonicalize().ok()
+    Some(program)
 }
 
 fn same_windows_path(left: &Path, right: &Path) -> bool {

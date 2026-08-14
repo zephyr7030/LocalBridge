@@ -471,6 +471,50 @@ const G3_MANUAL_REVIEW_ROUND2_2026_08_14 = Object.freeze({
   },
 });
 
+const G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14 = Object.freeze({
+  schemaVersion: 24,
+  baselineCommit: "369b84d59d98a2ce2d2aa06ccd27d7b403a27806",
+  baselineSchemaVersion: 23,
+  addedRules: {
+    scrollbar_arrow_affordances_forbidden: true,
+    foreground_ui_ready_before_runtime_start_required: true,
+    foreground_service_start_before_ui_ready_forbidden: true,
+    foreground_ui_ready_intent_typed_one_shot: true,
+    foreground_ui_ready_backend_idempotent: true,
+    foreground_ui_ready_frontend_lifecycle_ownership_forbidden: true,
+    background_launch_must_not_wait_for_ui_ready: true,
+    existing_background_runtime_wake_must_not_restart_for_ui_ready: true,
+  },
+  lb014: {
+    artifactReplacements: [[
+      "UI-first configured foreground launch automatic runtime start gated by typed UI-ready",
+      "foreground configured launch automatic runtime start",
+    ]],
+    testReplacements: [
+      [
+        "configured foreground UI launch automatically starts selected project runtime MCP and OpenAI Tunnel after the interactive UI emits one typed UI-ready intent and without a second user service-start action",
+        "configured foreground UI launch automatically starts selected project runtime MCP and OpenAI Tunnel without a second user start action",
+      ],
+      [
+        "foreground UI is created shown and interactive before backend managed-service startup begins, then projects Starting Ready or Fault while backend startup runs",
+        "foreground window remains responsive and projects Starting Ready or Fault while backend startup runs",
+      ],
+    ],
+    addedTests: [
+      "before typed UI-ready, a configured foreground launch with stopped runtime does not start selected project runtime MCP or OpenAI Tunnel",
+      "duplicate UI-ready delivery is backend-idempotent and cannot create a second managed runtime owner",
+      "--background startup does not wait for UI-ready and waking an existing healthy background runtime does not restart it merely to replay the foreground UI-ready gate",
+    ],
+  },
+  lb015: {
+    addedArtifacts: ["arrowless rounded-scroll presentation"],
+    addedTests: [
+      "vertical scrollbars on Settings and other scrollable rounded surfaces expose no top or bottom arrow button or triangle affordance at 780x620",
+      "removing scrollbar arrow affordances preserves wheel track and thumb scrolling and does not flatten or cut any outer rounded corner",
+    ],
+  },
+});
+
 const containsAll = (values, required) => Array.isArray(values) && (required ?? []).every((item) => values.includes(item));
 const containsNone = (values, forbidden) => Array.isArray(values) && (forbidden ?? []).every((item) => !values.includes(item));
 const removeItems = (values, removed) => (values ?? []).filter((item) => !(removed ?? []).includes(item));
@@ -710,6 +754,47 @@ export function normalizeG3ManualReviewRound2_20260814(contractsDoc) {
   return normalized;
 }
 
+export function hasExactG3UiFirstScrollbarAmendment20260814(contractsDoc) {
+  if (contractsDoc?.schema_version !== G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.schemaVersion) return false;
+  const rules = contractsDoc?.rules;
+  for (const [key, expected] of Object.entries(G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.addedRules)) {
+    if (JSON.stringify(rules?.[key]) !== JSON.stringify(expected)) return false;
+  }
+  const lb014 = contractsDoc?.prs?.["LB-014"];
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  if (!lb014 || !lb015) return false;
+  for (const [current, old] of G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb014.artifactReplacements) {
+    if (!lb014.required_artifacts?.includes(current) || lb014.required_artifacts?.includes(old)) return false;
+  }
+  for (const [current, old] of G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb014.testReplacements) {
+    if (!lb014.required_tests?.includes(current) || lb014.required_tests?.includes(old)) return false;
+  }
+  if (!containsAll(lb014.required_tests, G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb014.addedTests)) return false;
+  if (!containsAll(lb015.required_artifacts, G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb015.addedArtifacts)) return false;
+  if (!containsAll(lb015.required_tests, G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb015.addedTests)) return false;
+  return true;
+}
+
+export function normalizeG3UiFirstScrollbarAmendment20260814(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.baselineSchemaVersion;
+  for (const key of Object.keys(G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.addedRules)) delete normalized.rules[key];
+  const lb014 = normalized.prs?.["LB-014"];
+  if (lb014) {
+    lb014.required_artifacts = lb014.required_artifacts
+      .map((item) => G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb014.artifactReplacements.find(([current]) => current === item)?.[1] ?? item);
+    lb014.required_tests = removeItems(lb014.required_tests, G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb014.addedTests)
+      .map((item) => G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb014.testReplacements.find(([current]) => current === item)?.[1] ?? item);
+  }
+  const lb015 = normalized.prs?.["LB-015"];
+  if (lb015) {
+    lb015.required_artifacts = removeItems(lb015.required_artifacts, G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb015.addedArtifacts);
+    lb015.required_tests = removeItems(lb015.required_tests, G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.lb015.addedTests);
+  }
+  return normalized;
+}
+
 export function hasExactG3HumanReviewAmendment(prs) {
   const lb015 = prs?.["LB-015"];
   const lb016 = prs?.["LB-016"];
@@ -816,6 +901,27 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.schemaVersion) {
+    if (!hasExactG3UiFirstScrollbarAmendment20260814(authorizationContracts)) {
+      findings.push(`${expected.id}:ui-first-scrollbar-20260814-contract-amendment-drift`);
+    }
+    const schema24BaselineCommit = G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.baselineCommit;
+    const schema24Baseline = git.commitExists(schema24BaselineCommit) && git.isAncestor(schema24BaselineCommit)
+      ? git.jsonAt(schema24BaselineCommit, "PR_CONTRACTS.json")
+      : null;
+    const normalizedSchema24 = normalizeG3UiFirstScrollbarAmendment20260814(authorizationContracts);
+    if (schema24Baseline?.schema_version !== G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.baselineSchemaVersion) {
+      findings.push(`${expected.id}:ui-first-scrollbar-20260814-baseline`);
+    } else {
+      if (JSON.stringify(normalizedSchema24?.prs) !== JSON.stringify(schema24Baseline.prs)) {
+        findings.push(`${expected.id}:ui-first-scrollbar-20260814-pr-drift`);
+      }
+      if (canonicalJson(normalizedSchema24?.rules) !== canonicalJson(schema24Baseline.rules)) {
+        findings.push(`${expected.id}:ui-first-scrollbar-20260814-rule-drift`);
+      }
+    }
+    authorizationContracts = normalizedSchema24;
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= G3_MANUAL_REVIEW_ROUND2_2026_08_14.schemaVersion) {
     if (!hasExactG3ManualReviewRound2_20260814(authorizationContracts)) {
       findings.push(`${expected.id}:manual-review-round2-20260814-contract-amendment-drift`);

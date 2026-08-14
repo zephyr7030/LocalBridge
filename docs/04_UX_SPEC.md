@@ -147,12 +147,12 @@ OpenAI Tunnel
 - 不为自解释操作堆叠重复说明；
 - 成功/复制状态预留空间，不推动周围内容；
 - 同一页面/分组的同级动作按钮必须共享动作列和水平左基线；固定 780×620 自动几何 Gate 容差 `<= 1 CSS px`。设置连接区两个“更换”按钮必须占同一最右动作列；Runtime API Key 已保存时，`清除` 紧邻位于该行“更换”的左侧，且不得推动最右“更换”列；
-- 任意 sheet/dialog/card 等圆角表面出现纵向滚动时，四个外层圆角必须保持完整；scrollbar 必须被裁切或内缩在圆角壳内部，禁止滚动轨道切平右上/右下圆角；
+- 任意 sheet/dialog/card 等圆角表面出现纵向滚动时，四个外层圆角必须保持完整；scrollbar 必须被裁切或内缩在圆角壳内部，禁止滚动轨道切平右上/右下圆角；纵向 scrollbar 顶部/底部的原生箭头、三角形或等价增减按钮不得显示，滚轮/轨道/滑块滚动能力必须保持；
 - `无法准备管理员权限`、一次性保存/选择失败等 one-shot 提示默认 3 秒自动清除；持续 runtime/reconnect fault 仍通过 typed 状态/故障窗口保持，不得错误套用临时提示规则。
 
 ## UI / Backend 执行边界
 
-React/WebView 只渲染 backend typed projection 并发送 typed user intent。runtime start/readiness、retry/recovery、workspace switch、credential/UAC、CurrentTask truth 必须由 backend 持有；耗时工作在独立 worker/async 执行上下文完成。故意延迟 backend 工作时窗口仍必须可交互、可刷新状态。onboarding 不得用 React polling loop 作为 runtime readiness 状态机。
+React/WebView 只渲染 backend typed projection 并发送 typed user intent。runtime start/readiness、retry/recovery、workspace switch、credential/UAC、CurrentTask truth 必须由 backend 持有；耗时工作在独立 worker/async 执行上下文完成。configured 前台启动时必须先创建/显示并达到可交互 UI，再由前端发送唯一 typed `UI-ready` intent；backend 收到后才可启动原本停止的 managed runtime/MCP/OpenAI Tunnel。重复 ready 必须幂等且不能产生第二 owner；`--background` 不等待 ready，已有健康后台实例被唤醒时不因此重启。故意延迟 backend 工作时窗口仍必须可交互、可刷新状态。onboarding 不得用 React polling loop 作为 runtime readiness 状态机。
 
 # 主控界面
 
@@ -372,7 +372,7 @@ LocalBridge
 关闭窗口后继续运行                      ●
 ```
 
-`开机启动` 仅控制 Windows 登录启动注册；已完成配置的应用被用户正常打开时，runtime 必须自动异步启动。`关闭窗口后继续运行=true`：关闭 X 仅隐藏窗口，服务与托盘继续；false：有序停止 runtime/Broker 后退出。该偏好必须版本化持久化。禁止“开机后静默运行”“自动启动服务”等重复开关。
+`开机启动` 仅控制 Windows 登录启动注册；已完成配置的应用被用户正常打开时，UI 必须先进入可交互状态并发出 typed UI-ready，之后 backend 自动异步启动原本停止的 runtime，无额外“启动服务”按钮。`关闭窗口后继续运行=true`：关闭 X 仅隐藏窗口，服务与托盘继续；false：有序停止 runtime/Broker 后退出。该偏好必须版本化持久化。禁止“开机后静默运行”“自动启动服务”等重复开关。
 
 ## 连接
 

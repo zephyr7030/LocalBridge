@@ -39,6 +39,15 @@ Domain 不依赖 coding-tools-mcp / tunnel-client 私有结构。
 
 ## 启动/停止
 
+普通 configured 前台入口先完成 UI milestone：
+
+```text
+create/show main UI → interactive → typed UI-ready
+→ backend managed-service start
+```
+
+若 runtime 原本停止，`UI-ready` 前不得启动 MCP/PEP/Tunnel；前端只发送一次 typed intent，不拥有 lifecycle。backend 对重复 ready 幂等并维持 single owner。`--background` 不依赖 UI-ready；唤醒已有健康后台 runtime 不因 UI-ready gate 重启。
+
 启动：
 
 ```text

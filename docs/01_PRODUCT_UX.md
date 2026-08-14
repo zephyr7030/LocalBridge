@@ -344,7 +344,7 @@ Tunnel start → ready
 主窗口固定为 780×620。minimum inner size 与 maximum inner size 均固定为 780×620，`resizable=false`、`maximizable=false`。原生 Windows 窗口 decorations 必须关闭；LocalBridge 只允许一层自定义风格化窗口 chrome，并且外框必须从 client area 的 `(0,0)` 开始、以 100% 宽高贴合整个窗口，不能在原生边框内部再绘制一个内缩“假窗口”。自定义 chrome 必须提供窗口拖拽区、最小化和关闭；不提供最大化。Dashboard 与 onboarding 必须在该固定 client area 内完整可操作。
 ## UI / Backend 分离
 
-WebView/React 只负责展示 backend typed projection 与发送 typed user intent。runtime 启停、readiness、retry/recovery、workspace switch、credential 写入、UAC 与 CurrentTask truth 均由 Rust/backend 状态机负责；可能耗时的操作必须运行在独立 worker/async 执行上下文，禁止占用 UI/WebView 事件线程。正常前台启动在 onboarding 已完成且持久化配置有效时自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，窗口必须先保持可交互并实时反映 Starting/Ready/Fault。
+WebView/React 只负责展示 backend typed projection 与发送 typed user intent。runtime 启停、readiness、retry/recovery、workspace switch、credential 写入、UAC 与 CurrentTask truth 均由 Rust/backend 状态机负责；可能耗时的操作必须运行在独立 worker/async 执行上下文，禁止占用 UI/WebView 事件线程。正常 configured 前台启动严格采用 UI-first 顺序：先创建/显示窗口并达到可交互 milestone，前端仅发送一次 typed `UI-ready` intent，之后 backend 才异步启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel，并实时投影 Starting/Ready/Fault。UI-ready 之前不得提前启动这些服务；重复 ready 必须 backend 幂等且不能生成第二 runtime owner。`--background` 不等待 UI-ready；唤醒已经健康运行的后台实例不得仅为重放 UI-ready 而重启服务。
 
 必须有故意延迟 backend 工作时 UI 仍可响应并持续读取 typed projection 的回归 Gate。
 
@@ -371,7 +371,7 @@ Runtime API Key    已保存               清除    更换
 
 `Runtime API Key` 是冻结英文专有字段名，不翻译为“运行密钥”；完整值永不回显。默认连接区只显示持久化摘要和动作。点“更换”后才进入编辑态，Tunnel ID 与 Runtime API Key 独立修改；只改其中一个时另一个不得要求重输或被覆盖。Runtime API Key 输入不得用已保存 secret 预填，只显示密码输入控件与提示 `Runtime API Key 仅保存在 Windows 安全凭据中。`。Tunnel ID 与 Runtime API Key 两个固定态“更换”必须位于同一最右动作列，在固定 780×620 下几何差不超过 1 CSS px。Runtime API Key 已保存时，在其“更换”紧邻左侧显示 `清除`；`清除` 真实删除 Windows 安全凭据、不得读取或回显 secret，并在 active/connecting 时复用连接配置变化的受控 lifecycle，随后投影为 `未保存`。
 
-所有 sheet/dialog/card 等圆角表面如果内容需要纵向滚动，外层圆角必须仍完整保留四个角。scrollbar 必须通过“外层圆角壳 `overflow:hidden` + 内层 scroll container”或等效方式裁切/内缩在圆角内部，不得让滚动轨道切平右侧圆角或破坏顶部/底部圆角视觉。
+所有 sheet/dialog/card 等圆角表面如果内容需要纵向滚动，外层圆角必须仍完整保留四个角。scrollbar 必须通过“外层圆角壳 `overflow:hidden` + 内层 scroll container”或等效方式裁切/内缩在圆角内部，不得让滚动轨道切平右侧圆角或破坏顶部/底部圆角视觉。纵向 scrollbar 不得显示顶部/底部原生箭头、三角形或等价增减按钮；滚轮、轨道点击与滑块拖拽等正常滚动能力必须保留。
 
 保存顺序固定：基础格式校验 → 安全写入 → 若当前正在运行/连接且有效连接配置发生变化则执行受控重连。“正在连接”明确包括 `StartingMcp / WaitingMcpReady / StartingPolicyEnforcement / WaitingPolicyReady / StartingTunnel / WaitingTunnelReady` 等异步启动阶段；这些阶段即使 snapshot `active=false` 也不得直接返回并继续使用旧 captured config，必须受控切换到最新持久化配置。禁止额外“测试连接”按钮。`开机启动` 只控制 Windows 登录启动；手动打开已配置应用仍自动启动 runtime。`关闭窗口后继续运行=true` 时 X 仅 hide 并保持 runtime/tray；false 时 X 有序停止受管 runtime/Broker 后退出。
 

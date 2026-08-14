@@ -51,7 +51,7 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     }
     let rendered = serde_json::to_string(&MainProjection {
         permission: "admin", privilege: "active", local_environment_service: "online", tunnel_service: "online", coding_service: "online",
-        current_project: None, projects: vec![], current_task: None, tunnel_id: Some("tunnel_01401401401401401401401401401401".to_owned()),
+        current_project: None, projects: vec![], current_task: None, last_tool: None, projection_revision: 7, tunnel_id: Some("tunnel_01401401401401401401401401401401".to_owned()),
         runtime_key_saved: true, auto_start: true, close_window_continue_running: true,
         reconnect: None,
     }).unwrap();
@@ -63,15 +63,16 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
 #[test]
 fn current_task_projection_uses_only_pre_redacted_summary() {
     let safe = CurrentTaskStatus::project(TaskKind::Test, SafeTaskSummary::from_untrusted("cargo test"), TaskExecutionState::Running).unwrap();
-    let projected = task_projection(&safe).unwrap();
+    let projected = task_projection(&safe, Some(1234)).unwrap();
     assert_eq!(projected.kind, "test");
     assert_eq!(projected.summary.as_deref(), Some("cargo test"));
     assert_eq!(projected.state, "running");
+    assert_eq!(projected.elapsed_ms, Some(1234));
     let secret = CurrentTaskStatus::project(TaskKind::ExecuteCommand, SafeTaskSummary::from_untrusted("--api-key=synthetic-secret"), TaskExecutionState::Blocked).unwrap();
-    let projected = task_projection(&secret).unwrap();
+    let projected = task_projection(&secret, None).unwrap();
     assert_eq!(projected.summary, None);
     assert_eq!(projected.state, "blocked");
-    assert_eq!(task_projection(&CurrentTaskStatus::Idle), None);
+    assert_eq!(task_projection(&CurrentTaskStatus::Idle, None), None);
 }
 
 #[derive(Clone)]

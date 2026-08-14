@@ -162,6 +162,16 @@ impl<R: GuardRuntime> McpGuard<R> {
                 capability: decision.descriptor.capability,
             }));
         }
+        if has_verbatim_execution_path(&request) {
+            let blocked = CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
+                .expect("Blocked is a valid active task state");
+            project(blocked);
+            project(CurrentTaskStatus::Idle);
+            return Err(GuardError::Denied(PolicyDenied {
+                reason: DenyReason::VerbatimExecutionPath,
+                capability: decision.descriptor.capability,
+            }));
+        }
 
         project(
             CurrentTaskStatus::project(kind, summary, TaskExecutionState::Running)
@@ -193,12 +203,20 @@ impl<R: GuardRuntime> McpGuard<R> {
 
     pub fn decision(&self, mode: PermissionMode, request: &ToolCallRequest) -> PolicyDecision {
         let indirect_capabilities = effective_indirect_capabilities(request);
-        self.policy.decide_request(
+        let decision = self.policy.decide_request(
             mode,
             &request.name,
             &indirect_capabilities,
             &request.arguments,
-        )
+        );
+        if decision.allowed && has_verbatim_execution_path(request) {
+            return PolicyDecision {
+                descriptor: decision.descriptor,
+                allowed: false,
+                deny_reason: Some(DenyReason::VerbatimExecutionPath),
+            };
+        }
+        decision
     }
 
     pub fn privileged_tool_visible(&self, mode: PermissionMode, name: &str) -> bool {
@@ -257,6 +275,66 @@ fn string_argument(arguments: &Value, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| arguments.get(*key).and_then(Value::as_str))
         .map(ToOwned::to_owned)
+}
+
+fn has_verbatim_execution_path(request: &ToolCallRequest) -> bool {
+    let Some(arguments) = request.arguments.as_object() else {
+        return false;
+    };
+    let path_keys: &[&str] = match request.name.as_str() {
+        "set_default_cwd" | "read_file" | "list_dir" | "list_files" | "search_text"
+        | "view_image" | "git_status" | "git_log" | "git_blame" => &["path"],
+        "git_diff" | "git_show" => &["path", "paths"],
+        "exec_command" => &["cwd", "workdir"],
+        _ => &[],
+    };
+    if path_keys
+        .iter()
+        .filter_map(|key| arguments.get(*key))
+        .any(value_has_verbatim_path)
+    {
+        return true;
+    }
+    match request.name.as_str() {
+        "exec_command" => {
+            ["cmd", "stdin"]
+                .iter()
+                .filter_map(|key| arguments.get(*key).and_then(Value::as_str))
+                .any(contains_verbatim_path_text)
+                || arguments
+                    .get("env")
+                    .and_then(Value::as_object)
+                    .is_some_and(|env| {
+                        env.values()
+                            .filter_map(Value::as_str)
+                            .any(contains_verbatim_path_text)
+                    })
+        }
+        "write_stdin" => arguments
+            .get("chars")
+            .and_then(Value::as_str)
+            .is_some_and(contains_verbatim_path_text),
+        _ => false,
+    }
+}
+
+fn value_has_verbatim_path(value: &Value) -> bool {
+    match value {
+        Value::String(value) => starts_with_verbatim_path(value),
+        Value::Array(values) => values
+            .iter()
+            .filter_map(Value::as_str)
+            .any(starts_with_verbatim_path),
+        _ => false,
+    }
+}
+
+fn starts_with_verbatim_path(value: &str) -> bool {
+    value.starts_with(r"\\?\") || value.starts_with("//?/")
+}
+
+fn contains_verbatim_path_text(value: &str) -> bool {
+    value.contains(r"\\?\") || value.contains("//?/")
 }
 
 fn refined_task_kind(descriptor: ToolDescriptor, arguments: &Value) -> TaskKind {

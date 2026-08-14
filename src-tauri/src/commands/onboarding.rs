@@ -45,6 +45,7 @@ pub struct OnboardingState {
     complete: bool,
     connection_configured: bool,
     runtime_key_saved: bool,
+    runtime_key_length: Option<usize>,
     tunnel_id: Option<String>,
     readiness: OnboardingReadiness,
 }
@@ -217,14 +218,18 @@ fn project_state(app: &AppHandle, lifecycle: &DesktopLifecycle) -> Result<Onboar
         .validated_tunnel_id()
         .map_err(|_| "Tunnel ID 格式无效".to_string())?;
     let connection_configured = tunnel_id.is_some();
-    let runtime_key_saved = WindowsCredentialStore::default()
-        .runtime_api_key_metadata()
-        .map_err(|_| "无法读取Runtime API Key状态".to_string())?
-        .has_runtime_key;
+    let runtime_key = WindowsCredentialStore::default()
+        .read_runtime_api_key()
+        .map_err(|_| "无法读取Runtime API Key状态".to_string())?;
+    let runtime_key_saved = runtime_key.is_some();
+    let runtime_key_length = runtime_key
+        .as_ref()
+        .map(|secret| secret.expose_secret().chars().count());
     Ok(OnboardingState {
         complete: data.settings.onboarding_complete,
         connection_configured,
         runtime_key_saved,
+        runtime_key_length,
         tunnel_id: tunnel_id.map(|value| value.expose().to_owned()),
         readiness: readiness(lifecycle),
     })

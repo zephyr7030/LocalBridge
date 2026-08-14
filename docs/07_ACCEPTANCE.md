@@ -216,11 +216,11 @@
 | A201 | 窗口外框 | native `decorations=false`；仅存在一层 edge-to-edge 自定义 chrome，不出现原生标题栏/边框 + 自定义边框的双框 |
 | A202 | 自定义标题栏 | 可拖拽窗口；提供最小化与关闭；不提供最大化；chrome 从 client `(0,0)` 覆盖 100% 宽高 |
 | A203 | 首次引导整页布局 | onboarding 直接占用 custom chrome 内容区，不存在“大面积空白画布 + 居中 floating card/modal/dialog”整体向导外壳；页面级 padding 与局部分组允许 |
-| A204 | 3/5 权限模式按钮视觉 | 固定 780×620 下真实 computed/rendered 高度证明：含标题+说明的两行按钮至少为单行控件 2 倍且两个 line box 完整；`min-height >= 80px` 只作最低保护，人工视觉验收仍必须 PASS |
+| A204 | 3/5 权限模式按钮视觉 | 固定 780×620 下真实 computed/rendered 高度证明：含标题+说明的两行按钮至少为单行控件 2 倍且两个 line box 完整；`min-height >= 80px` 只作最低保护；该视觉项已由用户于 2026-08-14 PASS，后续若 Screen3 布局变化必须重新人工验收 |
 | A205 | 管理员模式选择 | 仅设置页或 onboarding 第3屏可见；点击/重新点击“管理员模式”时若 Broker 未 Active，立即发起 Windows UAC；不存在单独“启用管理员权限”按钮；后台偏好恢复不自动 UAC |
 | A206 | 离开管理员模式 | 在设置页或 onboarding 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker；Dashboard 无模式切换入口 |
-| A207 | 前台启动 | onboarding 已完成且配置有效时，打开 UI 自动异步启动 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作 |
-| A208 | 前台慢启动 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新 |
+| A207 | 前台启动顺序 | onboarding 已完成且配置有效时，先创建/显示并达到可交互 UI；前端只发送一次 typed `UI-ready`，backend 收到后才异步启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作；UI-ready 前不得提前启动服务 |
+| A208 | 前台慢启动 / ready 幂等 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新；重复 UI-ready 不产生第二 runtime owner；`--background` 不等待 UI-ready，唤醒已有健康后台 runtime 不仅因 ready gate 重启 |
 | A209 | CurrentTask idle | 左下状态固定显示“等待命令”，不得显示“空闲”或隐藏 |
 | A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus/timing 并通过唤醒式 delivery 反映到 UI；短 create/delete/modify/command 不依赖 polling；活动显示持续时间，terminal 回到第一行“等待命令”，第二行保留唯一上一工具+年龄；前端不伪造 |
 | A211 | Dashboard 新项目 | “选择其他文件夹”打开原生 Windows 文件夹选择器，手填路径不是主流程 |
@@ -231,7 +231,7 @@
 | A216 | 设置保存 | 基础格式校验→安全写入→运行/连接中且有效连接配置变化时受控重连；Starting/connecting 且 active=false 也不得沿用旧 captured config；不存在“测试连接”按钮 |
 | A217 | 关闭窗口继续运行=开 | X 仅隐藏窗口，runtime/tray 继续 |
 | A218 | 关闭窗口继续运行=关 | X 有序关闭 privileged gate/Broker/Tunnel/PEP/MCP 后退出；偏好版本化持久化 |
-| A219 | 3/5 权限按钮结构 | `min-height >= 80px` 仅是最低保护；780×620 实际 rendered geometry 必须证明两行按钮高度至少为单行控件 2 倍且标题/说明均完整；人工视觉 Gate 仍必须 PASS |
+| A219 | 3/5 权限按钮结构 | `min-height >= 80px` 仅是最低保护；780×620 实际 rendered geometry 必须证明两行按钮高度至少为单行控件 2 倍且标题/说明均完整；2026-08-14 scoped 人工视觉项已 PASS，布局变化时重新验收 |
 | A220 | Onboarding backend ownership | React 不拥有 runtime start/readiness polling 状态机；backend 持有并投影；慢 backend 时 UI 仍响应 |
 | A221 | 诊断结构 | 仅运行状态/项目/日志；运行状态四行=本地运行环境/编码服务/OpenAI Tunnel/管理员权限；项目显示实际路径 |
 | A222 | 诊断日志/动作 | 最近限量脱敏日志；页面动作仅“打开日志/导出诊断/完成”，无刷新/重试连接/打开欢迎页/工程 generation 字段 |
@@ -254,8 +254,8 @@
 | A239 | 上次执行工具行 | 第一行 Idle 只显示“等待命令”；第二行固定前缀“上次执行工具：”+脱敏用户标签/安全摘要，禁止 raw MCP id；相对时间位于第二行最右并覆盖 nS前/n分钟前/大于1小时/大于n天；只保留一条上一工具元数据 |
 | A240 | 2/5 已保存连接显示 | 已有 Tunnel ID 时输入框预填当前持久化值；已有 Runtime API Key 时固定显示“已安全保存至windows安全凭据”；安全提示严格为“Runtime API Key 仅保存在 Windows 安全凭据中。” |
 | A241 | 2/5 已保存 Key 掩码 | 聚焦已保存 Runtime API Key 输入框时，只根据 backend 长度元数据显示与已存 key 字符数相同的 `*`；plaintext 永不返回前端，未真正输入新 key 时掩码不得被提交/保存为替代 key |
-| A242 | 两行权限按钮真实几何 | 780×620 下含标题+说明的权限按钮实际 rendered 高度至少为普通单行控件 2 倍，两个文本 line box 均完整可见；仅有 `min-height/padding` CSS 不构成 PASS，最终人工视觉 Gate 必须通过 |
+| A242 | 两行权限按钮真实几何 | 780×620 下含标题+说明的权限按钮实际 rendered 高度至少为普通单行控件 2 倍，两个文本 line box 均完整可见；仅有 `min-height/padding` CSS 不构成 PASS；2026-08-14 用户已通过该 scoped 视觉验收，后续布局变化须复验 |
 | A243 | 固定窗口 780×620 | 主窗口 default/minimum/maximum inner size 全部严格为 780×620；`resizable=false`、`maximizable=false`、`decorations=false`、唯一 edge-to-edge custom chrome 等其余窗口语义不变 |
 | A244 | 设置 Key 清除位置 | Runtime API Key 已保存时显示“清除”，紧邻位于该行“更换”的左侧；Tunnel ID/Runtime API Key 两个“更换”仍保持同一最右动作列 |
 | A245 | 设置 Key 清除语义 | 点击“清除”真实删除 Windows 安全凭据中的 Runtime API Key，不读取/回显 secret，投影更新为“未保存”；runtime active/connecting 时按现有有效连接配置变化 lifecycle 受控处理，不允许旧 runtime 继续依赖已清除 credential |
-| A246 | 滚动圆角保持 | 强制 Settings 或其他 rounded sheet/dialog/card 产生纵向 overflow 时四个外层圆角仍完整；scrollbar 被裁切或内缩在圆角壳内，不得像人工截图中那样切平/破坏右侧圆角 |
+| A246 | 滚动圆角 / 无箭头 | 强制 Settings 或其他 rounded sheet/dialog/card 产生纵向 overflow 时四个外层圆角仍完整；scrollbar 被裁切或内缩在圆角壳内；顶部/底部原生箭头、三角形或等价增减按钮不得显示，滚轮/轨道/滑块仍必须可用 |

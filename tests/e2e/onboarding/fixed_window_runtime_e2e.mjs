@@ -31,7 +31,7 @@ async function runView(view) {
   writeFileSync(join(ROOT, configPath), JSON.stringify({
     identifier: `com.localbridge.desktop.fixedwindowe2e.${view}`,
     build: {
-      devUrl: `http://127.0.0.1:${devPort}`,
+      devUrl: `http://127.0.0.1:${devPort}${view === "onboarding" ? "?lb016-e2e=permission-geometry" : ""}`,
       beforeDevCommand: `npm run dev -- --port ${devPort}`,
     },
     bundle: { active: false },
@@ -72,8 +72,16 @@ async function runView(view) {
   });
 }
 
-const onboarding = await runView("onboarding");
-const dashboard = await runView("dashboard");
-console.log("LB016_FIXED_WINDOW_E2E=PASS views=2 logical_fixed=900x620 native_dpi_scaling=true native_decorations=false resizable=false maximizable=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false");
-console.log(onboarding);
-console.log(dashboard);
+const requestedView = process.argv[2];
+if (requestedView) {
+  if (!['onboarding', 'dashboard'].includes(requestedView)) throw new Error(`Unknown fixed-window E2E view: ${requestedView}`);
+  const marker = await runView(requestedView);
+  console.log(`LB016_FIXED_WINDOW_E2E=PASS view=${requestedView} logical_fixed=780x620 native_dpi_scaling=true native_decorations=false resizable=false maximizable=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false permission_geometry=${requestedView === "onboarding" ? "self_gated" : "n/a"}`);
+  console.log(marker);
+} else {
+  const onboarding = await runView("onboarding");
+  const dashboard = await runView("dashboard");
+  console.log("LB016_FIXED_WINDOW_E2E=PASS views=2 logical_fixed=780x620 native_dpi_scaling=true native_decorations=false resizable=false maximizable=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false permission_geometry=self_gated");
+  console.log(onboarding);
+  console.log(dashboard);
+}

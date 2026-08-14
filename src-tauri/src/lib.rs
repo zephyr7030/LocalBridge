@@ -17,6 +17,8 @@ macro_rules! localbridge_invoke_handler {
     ($($extra:path),* $(,)?) => {
         tauri::generate_handler![
             commands::ui::get_main_projection,
+            commands::ui::wait_main_projection_change,
+            commands::ui::ui_ready,
             commands::ui::set_permission_mode,
             commands::ui::set_auto_start,
             commands::ui::set_close_window_continue_running,
@@ -27,6 +29,8 @@ macro_rules! localbridge_invoke_handler {
             commands::ui::add_project,
             commands::ui::select_project,
             commands::ui::remove_project,
+            commands::ui::restart_services,
+            commands::ui::stop_services,
             commands::onboarding::get_onboarding_state,
             commands::onboarding::save_onboarding_connection,
             commands::onboarding::open_openai_tunnel_settings,

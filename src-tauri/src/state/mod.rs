@@ -12,8 +12,8 @@ pub use runtime::{
 };
 pub use settings::Settings;
 pub use task::{
-    CurrentTask, CurrentTaskContractError, CurrentTaskStatus, SafeTaskSummary, TaskExecutionState,
-    TaskKind,
+    CurrentTask, CurrentTaskContractError, CurrentTaskStatus, CurrentTaskTiming, LastToolTiming,
+    SafeTaskSummary, TaskExecutionState, TaskKind,
 };
 pub use workspace::{
     ActiveWorkspaceState, WorkspaceControlState, WorkspaceIdentity, WorkspaceModelError,

@@ -11,6 +11,7 @@ export interface OnboardingState {
   complete: boolean;
   connectionConfigured: boolean;
   runtimeKeySaved: boolean;
+  runtimeKeyLength: number | null;
   tunnelId: string | null;
   readiness: OnboardingReadiness;
 }

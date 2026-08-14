@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,31 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema23Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema24Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactG3UiFirstScrollbarAmendment20260814(schema24Contracts), true);
+const schema23Contracts = normalizeG3UiFirstScrollbarAmendment20260814(schema24Contracts);
+assert.equal(schema23Contracts.schema_version, 23);
+assert.equal(Object.hasOwn(schema23Contracts.rules, "scrollbar_arrow_affordances_forbidden"), false);
+assert.equal(Object.hasOwn(schema23Contracts.rules, "foreground_ui_ready_before_runtime_start_required"), false);
+assert.equal(schema23Contracts.prs["LB-014"].required_artifacts.includes("foreground configured launch automatic runtime start"), true);
+assert.equal(schema23Contracts.prs["LB-015"].required_artifacts.includes("arrowless rounded-scroll presentation"), false);
+
+const schema24ArrowRegression = structuredClone(schema24Contracts);
+schema24ArrowRegression.rules.scrollbar_arrow_affordances_forbidden = false;
+assert.equal(hasExactG3UiFirstScrollbarAmendment20260814(schema24ArrowRegression), false);
+const schema24MissingArrowTest = structuredClone(schema24Contracts);
+schema24MissingArrowTest.prs["LB-015"].required_tests = schema24MissingArrowTest.prs["LB-015"].required_tests.filter((item) => !item.startsWith("vertical scrollbars on Settings"));
+assert.equal(hasExactG3UiFirstScrollbarAmendment20260814(schema24MissingArrowTest), false);
+const schema24PrematureServiceStart = structuredClone(schema24Contracts);
+schema24PrematureServiceStart.prs["LB-014"].required_tests = schema24PrematureServiceStart.prs["LB-014"].required_tests.map((item) => item.startsWith("foreground UI is created shown and interactive") ? "foreground runtime may start before the UI becomes interactive" : item);
+assert.equal(hasExactG3UiFirstScrollbarAmendment20260814(schema24PrematureServiceStart), false);
+const schema24MissingReadyIdempotency = structuredClone(schema24Contracts);
+schema24MissingReadyIdempotency.prs["LB-014"].required_tests = schema24MissingReadyIdempotency.prs["LB-014"].required_tests.filter((item) => !item.startsWith("duplicate UI-ready delivery"));
+assert.equal(hasExactG3UiFirstScrollbarAmendment20260814(schema24MissingReadyIdempotency), false);
+const schema24MissingBackgroundException = structuredClone(schema24Contracts);
+schema24MissingBackgroundException.prs["LB-014"].required_tests = schema24MissingBackgroundException.prs["LB-014"].required_tests.filter((item) => !item.startsWith("--background startup does not wait"));
+assert.equal(hasExactG3UiFirstScrollbarAmendment20260814(schema24MissingBackgroundException), false);
+
 assert.equal(hasExactG3ManualReviewRound2_20260814(schema23Contracts), true);
 const schema22Contracts = normalizeG3ManualReviewRound2_20260814(schema23Contracts);
 assert.equal(schema22Contracts.schema_version, 22);

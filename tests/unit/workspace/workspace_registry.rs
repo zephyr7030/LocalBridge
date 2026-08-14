@@ -117,7 +117,39 @@ fn legitimate_persisted_workspace_is_revalidated_on_restart() {
         panic!("expected active workspace after fresh validation");
     };
     assert_eq!(active.identity().as_str(), expected.identity().as_str());
-    assert_eq!(active.display_path(), expected.resolved_path());
+    assert_eq!(active.display_path(), expected.execution_path());
+}
+
+#[test]
+fn verbatim_alias_is_identity_only_and_active_execution_path_is_ordinary() {
+    let validator = WorkspaceValidator;
+    let workspace = TempWorkspace::new("verbatim-execution-boundary");
+    let ordinary = validator.validate(workspace.path()).unwrap();
+    let alias = PathBuf::from(format!(r"\\?\{}", workspace.path().display()));
+    let through_alias = validator.validate(&alias).unwrap();
+
+    assert_eq!(ordinary.identity(), through_alias.identity());
+    assert!(through_alias.resolved_path().to_string_lossy().starts_with(r"\\?\"));
+    assert!(!through_alias.execution_path().to_string_lossy().starts_with(r"\\?\"));
+
+    let mut state = WorkspacePersistence::default();
+    let id = state
+        .registry
+        .upsert_validated(
+            WorkspaceId::from_validated("verbatim-execution").unwrap(),
+            through_alias.execution_path(),
+            &through_alias,
+            1,
+        )
+        .unwrap();
+    state.set_active_reference(id).unwrap();
+    let control = state.to_control_state(&validator).unwrap();
+    let ActiveWorkspaceState::Active(active) = control.active() else {
+        panic!("expected active workspace");
+    };
+    assert_eq!(active.identity().as_str(), through_alias.identity().as_str());
+    assert_eq!(active.display_path(), through_alias.execution_path());
+    assert!(!active.display_path().to_string_lossy().starts_with(r"\\?\"));
 }
 
 #[test]

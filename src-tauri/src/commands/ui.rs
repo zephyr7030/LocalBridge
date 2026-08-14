@@ -5,15 +5,15 @@ use tauri::{AppHandle, Manager};
 
 use crate::app::{
     AutostartManager, DesktopLifecycle, DesktopRuntimeStartError, STARTUP_PROFILE_FILE_NAME,
-    StartupProfileStore,
+    StartupProfileStore, manual_stop_services,
 };
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::diagnostics::record_runtime_user_events;
 use crate::runtime::ProductionRuntimeConfig;
 use crate::settings::{AppData, SettingsStore, StoredPermissionMode};
 use crate::state::{
-    CurrentTaskStatus, PermissionMode, PrivilegeState, RuntimeComponent, RuntimeFault,
-    RuntimeState, TaskExecutionState, TaskKind,
+    CurrentTaskStatus, LastToolTiming, PermissionMode, PrivilegeState, RuntimeComponent,
+    RuntimeFault, RuntimeState, TaskExecutionState, TaskKind,
 };
 use crate::tunnel::TunnelId;
 use crate::workspace::{WorkspaceId, WorkspaceValidator};
@@ -29,6 +29,8 @@ pub struct MainProjection {
     current_project: Option<String>,
     projects: Vec<ProjectProjection>,
     current_task: Option<TaskProjection>,
+    last_tool: Option<LastToolProjection>,
+    projection_revision: u64,
     tunnel_id: Option<String>,
     runtime_key_saved: bool,
     auto_start: bool,
@@ -50,6 +52,15 @@ struct TaskProjection {
     kind: &'static str,
     summary: Option<String>,
     state: &'static str,
+    elapsed_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LastToolProjection {
+    kind: &'static str,
+    summary: Option<String>,
+    age_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -65,6 +76,32 @@ pub async fn get_main_projection(app: AppHandle) -> Result<MainProjection, Strin
     })
     .await
     .map_err(|_| "主控状态后台任务异常".to_string())?
+}
+
+#[tauri::command]
+pub async fn wait_main_projection_change(
+    since_revision: u64,
+    app: AppHandle,
+) -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<DesktopLifecycle>();
+        Ok(lifecycle.wait_projection_change_after(since_revision))
+    })
+    .await
+    .map_err(|_| "状态唤醒后台任务异常".to_string())?
+}
+
+#[tauri::command]
+pub async fn ui_ready(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<DesktopLifecycle>();
+        lifecycle
+            .start_staged_foreground_after_ui_ready()
+            .map(|_| ())
+            .map_err(|_| "无法启动后台服务".to_string())
+    })
+    .await
+    .map_err(|_| "界面就绪后台任务异常".to_string())?
 }
 
 fn get_main_projection_blocking(
@@ -101,16 +138,26 @@ fn get_main_projection_blocking(
         .workspace
         .remembered_entries()
         .iter()
-        .map(|entry| ProjectProjection {
-            id: entry.workspace_id.as_str().to_owned(),
-            path: entry.display_path.to_string_lossy().into_owned(),
-            active: active_id == Some(entry.workspace_id.as_str()),
+        .map(|entry| {
+            let path = WorkspaceValidator
+                .validate(&entry.display_path)
+                .ok()
+                .filter(|validated| {
+                    entry.validated_identity.as_str() == validated.identity().as_str()
+                })
+                .map(|validated| validated.execution_path().to_string_lossy().into_owned())
+                .unwrap_or_else(|| "项目已无法访问".to_string());
+            ProjectProjection {
+                id: entry.workspace_id.as_str().to_owned(),
+                path,
+                active: active_id == Some(entry.workspace_id.as_str()),
+            }
         })
         .collect::<Vec<_>>();
-    let current_project = data
-        .workspace
-        .active_entry()
-        .map(|entry| entry.display_path.to_string_lossy().into_owned());
+    let current_project = projects
+        .iter()
+        .find(|project| project.active)
+        .map(|project| project.path.clone());
     let (tunnel_service, coding_service) = service_codes(&snapshot.state);
     let reconnect = snapshot.outage.and_then(|outage| {
         outage
@@ -127,7 +174,9 @@ fn get_main_projection_blocking(
         coding_service,
         current_project,
         projects,
-        current_task: task_projection(&snapshot.current_task),
+        current_task: task_projection(&snapshot.current_task, snapshot.current_task_elapsed_ms),
+        last_tool: snapshot.last_tool.as_ref().map(last_tool_projection),
+        projection_revision: lifecycle.projection_revision(),
         tunnel_id,
         runtime_key_saved: metadata.has_runtime_key,
         auto_start: data.settings.auto_start_services,
@@ -295,11 +344,15 @@ pub async fn save_tunnel_id(value: String, app: AppHandle) -> Result<(), String>
 }
 
 #[tauri::command]
-pub async fn delete_runtime_key() -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        WindowsCredentialStore::default()
+pub async fn delete_runtime_key(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let deleted = WindowsCredentialStore::default()
             .delete_runtime_api_key()
             .map_err(|_| "无法删除Runtime API Key".to_string())?;
+        if deleted {
+            let lifecycle = app.state::<DesktopLifecycle>();
+            reconnect_after_connection_change(&app, &lifecycle)?;
+        }
         Ok(())
     })
     .await
@@ -349,7 +402,12 @@ pub(crate) fn add_project_blocking(
     let id = data
         .workspace
         .registry
-        .upsert_validated(generated, &candidate_path, &validated, unix_seconds())
+        .upsert_validated(
+            generated,
+            validated.execution_path(),
+            &validated,
+            unix_seconds(),
+        )
         .map_err(|_| "无法保存项目记录".to_string())?;
     let id_value = id.as_str().to_owned();
     if defer_activation.unwrap_or(false) {
@@ -364,7 +422,7 @@ pub(crate) fn add_project_blocking(
         &store,
         &mut data,
         id,
-        validated.resolved_path(),
+        validated.execution_path(),
     )?;
     Ok(id_value)
 }
@@ -404,7 +462,7 @@ pub(crate) fn select_project_blocking(
         &store,
         &mut data,
         id,
-        validated.resolved_path(),
+        validated.execution_path(),
     )
 }
 
@@ -431,7 +489,7 @@ fn remove_project_blocking(
     }
     let was_active = data.workspace.active_workspace_id.as_ref() == Some(&id);
     let runtime_before = lifecycle.runtime_snapshot();
-    if was_active && runtime_before.active {
+    if was_active {
         lifecycle
             .stop_runtime_for_control_plane()
             .map_err(|_| "无法停止当前项目服务".to_string())?;
@@ -441,7 +499,7 @@ fn remove_project_blocking(
     }
     let _ = data.workspace.registry.remove(&id);
     if store.save(&data).is_err() {
-        if was_active && runtime_before.active {
+        if was_active && !matches!(runtime_before.state, RuntimeState::Stopped) {
             if let Some(path) = runtime_before.configured_workspace.as_deref() {
                 let _ = start_runtime_for_path(app, lifecycle, &original, path);
             }
@@ -496,6 +554,17 @@ fn start_runtime_for_path(
     data: &AppData,
     path: &Path,
 ) -> Result<(), String> {
+    let config = production_runtime_config_for_path(app, data, path)?;
+    lifecycle
+        .start_production_runtime(config)
+        .map_err(runtime_start_message)
+}
+
+fn production_runtime_config_for_path(
+    app: &AppHandle,
+    data: &AppData,
+    path: &Path,
+) -> Result<ProductionRuntimeConfig, String> {
     let app_data = app_data_dir(app)?;
     let profile = StartupProfileStore::new(app_data.join(STARTUP_PROFILE_FILE_NAME))
         .load()
@@ -504,16 +573,34 @@ fn start_runtime_for_path(
         .validated_tunnel_id()
         .map_err(|_| "Tunnel ID 无效".to_string())?
         .ok_or_else(|| "尚未配置 Tunnel ID".to_string())?;
-    let config = ProductionRuntimeConfig::new(
+    Ok(ProductionRuntimeConfig::new(
         production_install_root()?,
         path,
         app_data.join("health"),
         tunnel_id,
         PermissionMode::from(data.settings.permission_mode),
-    );
-    lifecycle
-        .start_production_runtime(config)
-        .map_err(runtime_start_message)
+    ))
+}
+
+fn production_runtime_config_for_active_workspace(
+    app: &AppHandle,
+    data: &AppData,
+) -> Result<ProductionRuntimeConfig, String> {
+    let entry = data
+        .workspace
+        .active_entry()
+        .ok_or_else(|| "尚未选择项目".to_string())?;
+    let validated = WorkspaceValidator
+        .validate(&entry.display_path)
+        .map_err(|_| "当前项目已无法访问".to_string())?;
+    if entry.validated_identity.as_str() != validated.identity().as_str() {
+        return Err("项目身份已变化，请重新添加".to_string());
+    }
+    production_runtime_config_for_path(app, data, validated.execution_path())
+}
+
+fn connection_change_requires_restart(state: &RuntimeState) -> bool {
+    !matches!(state, RuntimeState::Stopped)
 }
 
 fn reconnect_after_connection_change(
@@ -521,20 +608,50 @@ fn reconnect_after_connection_change(
     lifecycle: &DesktopLifecycle,
 ) -> Result<(), String> {
     let snapshot = lifecycle.runtime_snapshot();
-    if !snapshot.active {
+    if !connection_change_requires_restart(&snapshot.state) {
         return Ok(());
     }
-    let workspace = snapshot
-        .configured_workspace
-        .as_deref()
-        .ok_or_else(|| "当前项目状态无效".to_string())?
-        .to_path_buf();
     let (_, data) = load_app_data(app)?;
+    let config = production_runtime_config_for_active_workspace(app, &data)?;
     lifecycle
-        .stop_runtime_for_control_plane()
-        .map_err(|_| "无法应用连接设置".to_string())?;
-    start_runtime_for_path(app, lifecycle, &data, &workspace)
+        .backend_handle()
+        .restart_production_runtime(config)
         .map_err(|_| "连接设置已保存，但服务重连失败".to_string())
+}
+
+#[tauri::command]
+pub async fn restart_services(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        clear_manual_stop_for_explicit_action(&app)?;
+        let (_, data) = load_app_data(&app)?;
+        let config = production_runtime_config_for_active_workspace(&app, &data)?;
+        let lifecycle = app.state::<DesktopLifecycle>();
+        lifecycle
+            .backend_handle()
+            .restart_production_runtime(config)
+            .map_err(|_| "无法重启服务".to_string())
+    })
+    .await
+    .map_err(|_| "服务重启后台任务异常".to_string())?
+}
+
+#[tauri::command]
+pub async fn stop_services(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let app_data = app_data_dir(&app)?;
+        let lifecycle = app.state::<DesktopLifecycle>();
+        let report =
+            manual_stop_services(&app_data, &lifecycle).map_err(|_| "无法关闭服务".to_string())?;
+        if report.tunnel_stop_failed
+            || report.privilege_stop_failed
+            || report.lower_runtime_stop_failed
+        {
+            return Err("服务关闭不完整，请查看诊断".to_string());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| "服务关闭后台任务异常".to_string())?
 }
 
 fn runtime_start_message(error: DesktopRuntimeStartError) -> String {
@@ -701,7 +818,14 @@ fn local_environment_service_code(state: &RuntimeState) -> &'static str {
         RuntimeState::Faulted(_) => "fault",
     }
 }
-fn task_projection(status: &CurrentTaskStatus) -> Option<TaskProjection> {
+fn last_tool_projection(last: &LastToolTiming) -> LastToolProjection {
+    LastToolProjection {
+        kind: task_kind_code(last.kind),
+        summary: last.summary.as_deref().map(str::to_owned),
+        age_ms: last.age_ms,
+    }
+}
+fn task_projection(status: &CurrentTaskStatus, elapsed_ms: Option<u64>) -> Option<TaskProjection> {
     let CurrentTaskStatus::Active(task) = status else {
         return None;
     };
@@ -709,6 +833,7 @@ fn task_projection(status: &CurrentTaskStatus) -> Option<TaskProjection> {
         kind: task_kind_code(task.kind),
         summary: task.summary.as_deref().map(str::to_owned),
         state: task_state_code(task.state),
+        elapsed_ms,
     })
 }
 fn task_kind_code(kind: TaskKind) -> &'static str {
@@ -767,5 +892,17 @@ mod tests {
             assert!(!message.contains("OrchestratorError"));
             assert!(!message.contains("synthetic-secret"));
         }
+    }
+
+    #[test]
+    fn connection_changes_restart_runtime_when_starting_or_connected() {
+        assert!(!connection_change_requires_restart(&RuntimeState::Stopped));
+        assert!(connection_change_requires_restart(
+            &RuntimeState::StartingMcp
+        ));
+        assert!(connection_change_requires_restart(
+            &RuntimeState::WaitingMcpReady
+        ));
+        assert!(connection_change_requires_restart(&RuntimeState::Ready));
     }
 }

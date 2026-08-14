@@ -114,7 +114,7 @@ impl WorkspaceEntry {
         let identity =
             WorkspaceIdentity::from_validated(freshly_validated.identity().as_str().to_owned())
                 .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)?;
-        WorkspaceRef::from_validated(identity, freshly_validated.resolved_path().to_path_buf())
+        WorkspaceRef::from_validated(identity, freshly_validated.execution_path().to_path_buf())
             .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)
     }
 }
@@ -316,6 +316,8 @@ pub enum WorkspaceRegistryError {
     ActiveWorkspaceMissingFromRegistry,
     WorkspaceIdMissing,
     PersistedIdentityMismatch,
+    ExecutionPathUnavailable,
+    ExecutionPathIdentityMismatch,
     WorkspaceNotDirectory,
     WorkspaceValidationWindowsApi { operation: &'static str, code: u32 },
     UnsupportedPlatform,

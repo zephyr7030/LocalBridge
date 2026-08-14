@@ -1,23 +1,39 @@
+use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::app::DesktopLifecycle;
 use crate::credentials::{CredentialStore, WindowsCredentialStore};
 use crate::diagnostics::{
-    DiagnosticsOutageInput, DiagnosticsRuntimeInput, DiagnosticsSnapshot, build_snapshot,
-    export_snapshot,
+    BrokerDiagnosticState, DiagnosticCheck, DiagnosticEvent, DiagnosticsOutageInput,
+    DiagnosticsRuntimeInput, DiagnosticsSnapshot, build_snapshot, export_snapshot,
 };
+use crate::settings::SettingsStore;
+use crate::workspace::WorkspaceValidator;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsViewProjection {
+    checks: Vec<DiagnosticCheck>,
+    privilege: BrokerDiagnosticState,
+    active_workspace_path: Option<String>,
+    recent_events: Vec<DiagnosticEvent>,
+}
 
 #[tauri::command]
-pub async fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsSnapshot, String> {
+pub async fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsViewProjection, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let lifecycle = app.state::<DesktopLifecycle>();
-        get_diagnostics_blocking(&lifecycle)
+        let snapshot = get_diagnostics_snapshot_blocking(&lifecycle)?;
+        let active_workspace_path = active_workspace_path(&app)?;
+        Ok(project_diagnostics_view(snapshot, active_workspace_path))
     })
     .await
     .map_err(|_| "诊断状态后台任务异常".to_string())?
 }
 
-fn get_diagnostics_blocking(lifecycle: &DesktopLifecycle) -> Result<DiagnosticsSnapshot, String> {
+fn get_diagnostics_snapshot_blocking(
+    lifecycle: &DesktopLifecycle,
+) -> Result<DiagnosticsSnapshot, String> {
     let metadata = WindowsCredentialStore::default()
         .runtime_api_key_metadata()
         .map_err(|_| "无法读取Runtime API Key状态".to_string())?;
@@ -39,6 +55,45 @@ fn get_diagnostics_blocking(lifecycle: &DesktopLifecycle) -> Result<DiagnosticsS
         &diagnostics_runtime,
         &lifecycle.privilege().refresh_broker_state(),
         metadata.has_runtime_key,
+    ))
+}
+
+fn project_diagnostics_view(
+    snapshot: DiagnosticsSnapshot,
+    active_workspace_path: Option<String>,
+) -> DiagnosticsViewProjection {
+    DiagnosticsViewProjection {
+        checks: snapshot
+            .checks
+            .into_iter()
+            .filter(|check| check.code != "runtime_key")
+            .collect(),
+        privilege: snapshot.broker.state,
+        active_workspace_path,
+        recent_events: snapshot.recent_events,
+    }
+}
+
+fn active_workspace_path(app: &AppHandle) -> Result<Option<String>, String> {
+    let settings = SettingsStore::new(
+        app.path()
+            .app_data_dir()
+            .map_err(|_| "无法定位应用数据目录".to_string())?
+            .join("settings.json"),
+    )
+    .load()
+    .map_err(|_| "无法读取设置".to_string())?;
+    let Some(entry) = settings.workspace.active_entry() else {
+        return Ok(None);
+    };
+    let validated = WorkspaceValidator
+        .validate(&entry.display_path)
+        .map_err(|_| "当前项目已无法访问".to_string())?;
+    if entry.validated_identity.as_str() != validated.identity().as_str() {
+        return Err("项目身份已变化，请重新添加".to_string());
+    }
+    Ok(Some(
+        validated.execution_path().to_string_lossy().into_owned(),
     ))
 }
 
@@ -65,7 +120,7 @@ pub async fn open_logs(app: AppHandle) -> Result<(), String> {
 pub async fn export_diagnostics(app: AppHandle) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let lifecycle = app.state::<DesktopLifecycle>();
-        let snapshot = get_diagnostics_blocking(&lifecycle)?;
+        let snapshot = get_diagnostics_snapshot_blocking(&lifecycle)?;
         let root = app
             .path()
             .app_data_dir()
