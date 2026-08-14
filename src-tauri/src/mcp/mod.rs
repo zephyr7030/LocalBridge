@@ -16,8 +16,8 @@ pub use facade::{
 };
 pub use guard::{GuardError, GuardRuntime, McpGuard, PolicyDenied, ToolCallRequest};
 pub use policy::{
-    CapabilityPolicy, DenyReason, PolicyDecision, PolicyError, ToolDescriptor,
-    reviewed_elevated_program,
+    CapabilityPolicy, DenyReason, PolicyDecision, PolicyError, PublicActionDescriptor,
+    PublicCapabilityDeclaration, ToolDescriptor, reviewed_elevated_program,
 };
 pub use runtime::{
     CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,

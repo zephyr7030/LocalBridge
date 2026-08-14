@@ -685,19 +685,6 @@ pub struct ShellCommandRequest {
 
 pub trait WorkspaceRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError>;
-    fn public_tool_allowed_for_list(
-        &self,
-        policy: &CapabilityPolicy,
-        mode: PermissionMode,
-        public_name: &str,
-    ) -> bool;
-    fn public_policy_decision(
-        &self,
-        policy: &CapabilityPolicy,
-        mode: PermissionMode,
-        public_name: &str,
-        arguments: &Value,
-    ) -> Option<PolicyDecision>;
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError>;
     fn execute_shell(
         &mut self,
@@ -779,27 +766,6 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError> {
         let catalog = self.runtime.list_tools().map_err(normalize_runtime_error)?;
         validate_runtime_capabilities(&catalog)
-    }
-
-    fn public_tool_allowed_for_list(
-        &self,
-        policy: &CapabilityPolicy,
-        mode: PermissionMode,
-        public_name: &str,
-    ) -> bool {
-        coding_tools_policy_anchor_for_list(public_name)
-            .is_some_and(|anchor| policy.tool_allowed_for_list(mode, anchor))
-    }
-
-    fn public_policy_decision(
-        &self,
-        policy: &CapabilityPolicy,
-        mode: PermissionMode,
-        public_name: &str,
-        arguments: &Value,
-    ) -> Option<PolicyDecision> {
-        coding_tools_policy_anchor_for_call(public_name, arguments)
-            .map(|anchor| policy.decide(mode, anchor, &[]))
     }
 
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError> {
@@ -932,13 +898,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
     pub fn public_tools(&self, mode: PermissionMode) -> Value {
         let tools = V1_CORE_TOOL_NAMES
             .iter()
-            .filter(|name| {
-                self.adapter
-                    .public_tool_allowed_for_list(&self.policy, mode, name)
-            })
+            .filter(|name| self.policy.public_tool_allowed_for_list(mode, name))
             .map(|name| public_tool_schema(name))
             .collect::<Vec<_>>();
         json!({"tools":tools})
+    }
+
+    pub fn replace_policy(&mut self, policy: CapabilityPolicy) {
+        self.policy = policy;
     }
 
     pub fn privileged_tool_visible(&self, mode: PermissionMode, name: &str) -> bool {
@@ -971,17 +938,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 capability: Capability::Unknown,
             }));
         }
-        let Some(decision) =
-            self.adapter
-                .public_policy_decision(&self.policy, mode, name, &arguments)
-        else {
-            return Ok(FacadeError::new(
-                FacadeErrorCode::InvalidArgument,
-                "LocalBridge 工具参数无效或该动作尚不可用",
-                false,
-            )
-            .to_mcp_result());
-        };
+        let decision = self.policy.decide_public(mode, name, &arguments);
         let kind = public_task_kind(name, &arguments);
         let summary = public_safe_summary(name, &arguments);
         if !decision.allowed {
@@ -1181,50 +1138,6 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
         self.adapter.inspect_image(arguments, request_id)
-    }
-}
-
-fn coding_tools_policy_anchor_for_list(name: &str) -> Option<&'static str> {
-    match name {
-        "workspace_context" => Some("server_info"),
-        "agent_workflow" => Some("exec_command"),
-        "exec_command" => Some("exec_command"),
-        "command_control" => Some("read_output"),
-        "task_control" => Some("read_output"),
-        "git_workflow" => Some("git_status"),
-        "document_workflow" => Some("apply_patch"),
-        "view_image" => Some("view_image"),
-        _ => None,
-    }
-}
-
-fn coding_tools_policy_anchor_for_call(name: &str, arguments: &Value) -> Option<&'static str> {
-    match name {
-        "workspace_context" => Some("server_info"),
-        "exec_command" => Some("exec_command"),
-        "command_control" => match arguments.get("action").and_then(Value::as_str) {
-            Some("poll" | "read") => Some("read_output"),
-            Some("write") => Some("write_stdin"),
-            Some("kill") => Some("kill_session"),
-            _ => None,
-        },
-        "git_workflow" => match arguments.get("action").and_then(Value::as_str) {
-            Some("status") => Some("git_status"),
-            Some("diff") => Some("git_diff"),
-            Some("log") => Some("git_log"),
-            Some("show") => Some("git_show"),
-            Some("blame") => Some("git_blame"),
-            _ => None,
-        },
-        "document_workflow" => match arguments.get("action").and_then(Value::as_str) {
-            Some("inspect") => Some("read_file"),
-            Some("create" | "rebuild") => Some("apply_patch"),
-            _ => None,
-        },
-        "view_image" => Some("view_image"),
-        "agent_workflow" => Some("exec_command"),
-        "task_control" => Some("read_output"),
-        _ => None,
     }
 }
 
@@ -1687,27 +1600,6 @@ mod tests {
     impl WorkspaceRuntimeAdapter for FakeAdapter {
         fn negotiate(&mut self) -> Result<(), FacadeError> {
             validate_runtime_capabilities(&self.catalog)
-        }
-
-        fn public_tool_allowed_for_list(
-            &self,
-            policy: &CapabilityPolicy,
-            mode: PermissionMode,
-            public_name: &str,
-        ) -> bool {
-            coding_tools_policy_anchor_for_list(public_name)
-                .is_some_and(|anchor| policy.tool_allowed_for_list(mode, anchor))
-        }
-
-        fn public_policy_decision(
-            &self,
-            policy: &CapabilityPolicy,
-            mode: PermissionMode,
-            public_name: &str,
-            arguments: &Value,
-        ) -> Option<PolicyDecision> {
-            coding_tools_policy_anchor_for_call(public_name, arguments)
-                .map(|anchor| policy.decide(mode, anchor, &[]))
         }
 
         fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {

@@ -76,16 +76,17 @@ The LB-000 live Tunnel credential blocker does not affect this decision because 
 
 ## LB-007 production boundary
 
-LB-007 implements the accepted decision inside `src-tauri/src/mcp/**` in front of the LB-006 stable runtime adapter. `policy.rs` owns the frozen capability model, `guard.rs` owns mandatory per-call authorization, and `server.rs` is the first-party loopback Streamable HTTP PEP consumed by Tunnel. `runtime-policy.toml` schema 4 is parsed and semantically validated against the pinned coding-tools-mcp 0.2.2 review surface before a Guard is constructed.
+LB-007 implements the accepted decision inside `src-tauri/src/mcp/**` in front of the LB-006 stable runtime adapter. The production authorization identity is now the **LocalBridge public tool/action**, not an upstream primitive name. `policy.rs` owns the stable public classifier and transitive capability declarations, `AgentFacade` applies that policy before adapter dispatch, and `server.rs` is the first-party loopback Streamable HTTP PEP consumed by Tunnel. `runtime-policy.toml` schema 6 contains a `localbridge_public` policy that may narrow the frozen public maxima but may not widen them.
 
 - `tools/list` filtering is UX-only and never grants authority.
-- every `tools/call` receives the current `PermissionMode` and is re-authorized immediately before forwarding, so a cached Full-mode catalog cannot bypass a later switch to Edit.
-- the exact 20-tool v0.2.2 review surface is classified in Rust; future or unknown tools are denied until compatibility review updates both baseline and policy.
+- every `tools/call` receives the current `PermissionMode` and current LocalBridge public policy and is re-authorized immediately before adapter dispatch; a cached Full-mode catalog cannot bypass a later switch to Edit or a later policy narrowing.
+- the public classifier recognizes only the versioned LocalBridge Registry/action vocabulary. Raw upstream names are not public authorization anchors and cannot be called as a bypass.
+- the exact upstream v0.2.2 surface remains an **internal adapter compatibility baseline** for LB-006 capability negotiation only. It is not the public PEP identity and upstream additions never become public automatically.
 - `request_permissions` and LocalBridge workspace/permission/credential/tunnel/MCP configuration names are `ControlPlane` and denied in every mode.
-- workflow/compound callers must declare indirect capabilities; indirect `ProcessExec` is denied in Edit and indirect unknown/control-plane/privileged capabilities fail closed.
+- high-level public workflows declare their complete transitive LocalBridge read/write/process/git/network/privilege requirements before execution. Edit denies any workflow containing process execution; unreviewed network and privilege routes fail closed; unknown actions/capabilities fail closed.
 - denied calls project `Blocked` without first projecting `Running`; allowed calls project `Running` only immediately before the real upstream call, then return to `Idle` (or briefly `Failed` then `Idle` on runtime failure).
 - task summaries use minimal request fields and always pass through `SafeTaskSummary`; patch bodies and stdin payloads are never UI summaries.
 - MCP policy modules do not mutate `WorkspaceRegistry` or active workspace state. Session-local `set_default_cwd` is distinct from LocalBridge workspace authorization and remains constrained by the upstream active-workspace runtime.
 - the PEP owns one downstream Tunnel MCP session, accepts bounded concurrent HTTP connections, and preserves downstream JSON-RPC request IDs when forwarding `tools/call`; `notifications/cancelled` is forwarded promptly over the authenticated upstream session without waiting for the serialized Guard execution lock. Actual guarded tool execution remains serialized so the product still has exactly one ephemeral `CurrentTaskStatus` projection.
 
-Raw LB-006 transport methods remain for adapter regression compatibility, while architecture verification forbids production callers outside `src-tauri/src/mcp/**`; application code enters through `McpGuard`.
+The older private-name `McpGuard` remains only as a compatibility/test layer for the pinned upstream review surface. Production public traffic enters through `PolicyEnforcementRuntime → AgentFacade → CapabilityPolicy::decide_public → WorkspaceRuntimeAdapter`; the adapter translates an already-authorized stable LocalBridge action to private runtime primitives and cannot grant public authority itself.

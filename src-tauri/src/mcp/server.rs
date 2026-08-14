@@ -478,6 +478,17 @@ impl PolicyEnforcementRuntime {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = mode;
     }
 
+    pub fn replace_policy(&self, policy: CapabilityPolicy) -> Result<(), PolicyEnforcementError> {
+        let Some(guard) = self.guard.as_ref() else {
+            return Err(PolicyEnforcementError::ThreadTerminated);
+        };
+        guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replace_policy(policy);
+        Ok(())
+    }
+
     pub fn current_task_projection(&self) -> CurrentTaskProjection {
         self.current_task.clone()
     }
@@ -1819,6 +1830,81 @@ mod tests {
             Some(TaskKind::ReadFile)
         );
 
+        pep.set_permission_mode(PermissionMode::Full);
+        let cached_full = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":"cached-full","method":"tools/list","params":{}}),
+        );
+        assert!(
+            cached_full.body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "exec_command")
+        );
+
+        let unknown_action = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":"unknown-public-action","method":"tools/call",
+                "params":{"name":"git_workflow","arguments":{"action":"future_private_action"}}
+            }),
+        );
+        assert_eq!(unknown_action.body["error"]["code"], -32001);
+        assert!(matches!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Active(CurrentTask {
+                state: TaskExecutionState::Blocked,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
+
+        let base_policy = fs::read_to_string(root.join("runtime-policy.toml")).unwrap();
+        let narrowed_policy = base_policy
+            .replace(
+                "full_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "full_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            )
+            .replace(
+                "elevated_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "elevated_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            );
+        pep.replace_policy(CapabilityPolicy::from_toml(&narrowed_policy).unwrap())
+            .expect("live public policy narrowing");
+        let stale_policy_call = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":"stale-policy-call","method":"tools/call",
+                "params":{"name":"exec_command","arguments":{"command":"echo cached-list-must-not-run"}}
+            }),
+        );
+        assert_eq!(stale_policy_call.body["error"]["code"], -32001);
+        assert!(matches!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ExecuteCommand,
+                state: TaskExecutionState::Blocked,
+                ..
+            })
+        ));
+        let narrowed_tools = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":"narrowed-tools","method":"tools/list","params":{}}),
+        );
+        assert!(
+            !narrowed_tools.body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "exec_command")
+        );
+        thread::sleep(Duration::from_millis(540));
+
         let reinitialized = initialize(pep.port(), 6);
         let new_session = reinitialized.session.unwrap();
         assert_ne!(new_session, session);
@@ -1938,10 +2024,14 @@ mod tests {
             "cancelled tools/call must terminate with a JSON-RPC response: {}",
             call_result.body
         );
-        assert_eq!(
-            pep.current_task_projection().snapshot(),
-            CurrentTaskStatus::Idle
-        );
+        let presentation_deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while pep.current_task_projection().snapshot() != CurrentTaskStatus::Idle {
+            assert!(
+                std::time::Instant::now() < presentation_deadline,
+                "cancelled tool remained visible beyond the bounded presentation window"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
 
         let mut coding = pep.stop().expect("PEP stop after cancellation");
         coding.stop().expect("MCP Job stop after cancellation");

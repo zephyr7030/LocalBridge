@@ -31,6 +31,89 @@ pub struct ToolDescriptor {
     pub task_kind: TaskKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublicCapabilityDeclaration {
+    pub read: bool,
+    pub write: bool,
+    pub process_exec: bool,
+    pub git: bool,
+    pub network: bool,
+    pub privilege: bool,
+    pub control_plane: bool,
+}
+
+impl PublicCapabilityDeclaration {
+    const READ: Self = Self {
+        read: true,
+        write: false,
+        process_exec: false,
+        git: false,
+        network: false,
+        privilege: false,
+        control_plane: false,
+    };
+    const PROCESS: Self = Self {
+        read: false,
+        write: false,
+        process_exec: true,
+        git: false,
+        network: false,
+        privilege: false,
+        control_plane: false,
+    };
+    const GIT: Self = Self {
+        read: false,
+        write: false,
+        process_exec: false,
+        git: true,
+        network: false,
+        privilege: false,
+        control_plane: false,
+    };
+    const fn workflow(
+        write: bool,
+        process_exec: bool,
+        git: bool,
+        network: bool,
+        privilege: bool,
+    ) -> Self {
+        Self {
+            read: true,
+            write,
+            process_exec,
+            git,
+            network,
+            privilege,
+            control_plane: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PublicActionDescriptor {
+    pub tool: &'static str,
+    pub action: &'static str,
+    pub descriptor: ToolDescriptor,
+    pub transitive: PublicCapabilityDeclaration,
+}
+
+const PUBLIC_CORE_TOOLS: &[&str] = &[
+    "workspace_context",
+    "agent_workflow",
+    "exec_command",
+    "command_control",
+    "task_control",
+    "git_workflow",
+    "document_workflow",
+    "view_image",
+];
+const PUBLIC_EDIT_MAX: &[&str] = &[
+    "workspace_context",
+    "git_workflow",
+    "document_workflow",
+    "view_image",
+];
+
 pub const PINNED_TOOLS: &[ToolDescriptor] = &[
     ToolDescriptor {
         name: "server_info",
@@ -161,6 +244,7 @@ pub enum DenyReason {
     IndirectProcessExecInEdit,
     IndirectControlPlane,
     IndirectUnknownCapability,
+    NetworkRouteNotAvailable,
     PrivilegedRouteNotAvailable,
     ElevatedExecNotReviewed,
     VerbatimExecutionPath,
@@ -179,6 +263,9 @@ pub struct CapabilityPolicy {
     full_allowed: HashSet<String>,
     elevated_allowed: HashSet<String>,
     blocked: HashSet<String>,
+    public_edit_allowed: HashSet<String>,
+    public_full_allowed: HashSet<String>,
+    public_elevated_allowed: HashSet<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +282,18 @@ struct PolicyDocument {
     upstream_coding_tools: UpstreamSection,
     workspace_registry: WorkspaceSection,
     elevated_exec: ElevatedExecSection,
+    localbridge_public: LocalBridgePublicSection,
+}
+
+#[derive(Debug, Deserialize)]
+struct LocalBridgePublicSection {
+    edit_tools: Vec<String>,
+    full_tools: Vec<String>,
+    elevated_tools: Vec<String>,
+    unknown_action: String,
+    network: String,
+    privilege: String,
+    control_plane: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,7 +374,75 @@ impl CapabilityPolicy {
             full_allowed: document.full_allowed_tools.into_iter().collect(),
             elevated_allowed: document.elevated_allowed_tools.into_iter().collect(),
             blocked: document.blocked_tools.into_iter().collect(),
+            public_edit_allowed: document.localbridge_public.edit_tools.into_iter().collect(),
+            public_full_allowed: document.localbridge_public.full_tools.into_iter().collect(),
+            public_elevated_allowed: document
+                .localbridge_public
+                .elevated_tools
+                .into_iter()
+                .collect(),
         })
+    }
+
+    pub fn classify_public_action(
+        &self,
+        tool_name: &str,
+        arguments: &Value,
+    ) -> Option<PublicActionDescriptor> {
+        classify_public_action(tool_name, arguments)
+    }
+
+    pub fn decide_public(
+        &self,
+        mode: PermissionMode,
+        tool_name: &str,
+        arguments: &Value,
+    ) -> PolicyDecision {
+        let Some(action) = classify_public_action(tool_name, arguments) else {
+            return denied(
+                ToolDescriptor {
+                    name: "localbridge-public-unknown",
+                    capability: Capability::Unknown,
+                    task_kind: TaskKind::Other,
+                },
+                DenyReason::UnknownTool,
+            );
+        };
+        let declaration = action.transitive;
+        if declaration.control_plane {
+            return denied(action.descriptor, DenyReason::ControlPlane);
+        }
+        if declaration.privilege {
+            return denied(action.descriptor, DenyReason::PrivilegedRouteNotAvailable);
+        }
+        if declaration.network {
+            return denied(action.descriptor, DenyReason::NetworkRouteNotAvailable);
+        }
+        if mode == PermissionMode::Edit && declaration.process_exec {
+            return denied(action.descriptor, DenyReason::IndirectProcessExecInEdit);
+        }
+        let allowed = match mode {
+            PermissionMode::Edit => &self.public_edit_allowed,
+            PermissionMode::Full => &self.public_full_allowed,
+            PermissionMode::Elevated => &self.public_elevated_allowed,
+        };
+        if !allowed.contains(tool_name) {
+            return denied(action.descriptor, DenyReason::ToolNotAllowedInMode);
+        }
+        PolicyDecision {
+            descriptor: action.descriptor,
+            allowed: true,
+            deny_reason: None,
+        }
+    }
+
+    pub fn public_tool_allowed_for_list(&self, mode: PermissionMode, tool_name: &str) -> bool {
+        let allowed = match mode {
+            PermissionMode::Edit => &self.public_edit_allowed,
+            PermissionMode::Full => &self.public_full_allowed,
+            PermissionMode::Elevated => &self.public_elevated_allowed,
+        };
+        PUBLIC_CORE_TOOLS.contains(&tool_name) && allowed.contains(tool_name)
     }
 
     pub fn classify(&self, name: &str) -> ToolDescriptor {
@@ -387,6 +554,238 @@ fn denied(descriptor: ToolDescriptor, reason: DenyReason) -> PolicyDecision {
     }
 }
 
+fn public_descriptor(
+    tool: &'static str,
+    action: &'static str,
+    capability: Capability,
+    task_kind: TaskKind,
+    transitive: PublicCapabilityDeclaration,
+) -> PublicActionDescriptor {
+    PublicActionDescriptor {
+        tool,
+        action,
+        descriptor: ToolDescriptor {
+            name: tool,
+            capability,
+            task_kind,
+        },
+        transitive,
+    }
+}
+
+fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicActionDescriptor> {
+    let action = arguments.get("action").and_then(Value::as_str);
+    match tool_name {
+        "workspace_context" if action.is_none() => Some(public_descriptor(
+            "workspace_context",
+            "context",
+            Capability::Read,
+            TaskKind::ReadFile,
+            PublicCapabilityDeclaration::READ,
+        )),
+        "exec_command" if action.is_none() => {
+            let command = arguments
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            Some(public_descriptor(
+                "exec_command",
+                "execute",
+                Capability::ProcessExec,
+                TaskKind::ExecuteCommand,
+                PublicCapabilityDeclaration {
+                    privilege: contains_privileged_external_runtime(command),
+                    ..PublicCapabilityDeclaration::PROCESS
+                },
+            ))
+        }
+        "command_control" => match action? {
+            "poll" => Some(public_descriptor(
+                "command_control",
+                "poll",
+                Capability::ProcessExec,
+                TaskKind::ExecuteCommand,
+                PublicCapabilityDeclaration::PROCESS,
+            )),
+            "read" => Some(public_descriptor(
+                "command_control",
+                "read",
+                Capability::ProcessExec,
+                TaskKind::ExecuteCommand,
+                PublicCapabilityDeclaration::PROCESS,
+            )),
+            "write" => Some(public_descriptor(
+                "command_control",
+                "write",
+                Capability::ProcessExec,
+                TaskKind::ExecuteCommand,
+                PublicCapabilityDeclaration::PROCESS,
+            )),
+            "kill" => Some(public_descriptor(
+                "command_control",
+                "kill",
+                Capability::ProcessExec,
+                TaskKind::ExecuteCommand,
+                PublicCapabilityDeclaration::PROCESS,
+            )),
+            _ => None,
+        },
+        "task_control" => match action? {
+            "get" => Some(public_descriptor(
+                "task_control",
+                "get",
+                Capability::Workflow,
+                TaskKind::Other,
+                PublicCapabilityDeclaration::READ,
+            )),
+            "cancel" => Some(public_descriptor(
+                "task_control",
+                "cancel",
+                Capability::Workflow,
+                TaskKind::ExecuteCommand,
+                PublicCapabilityDeclaration::PROCESS,
+            )),
+            _ => None,
+        },
+        "git_workflow" => match action? {
+            "status" => Some(public_descriptor(
+                "git_workflow",
+                "status",
+                Capability::Git,
+                TaskKind::GitOperation,
+                PublicCapabilityDeclaration::GIT,
+            )),
+            "diff" => Some(public_descriptor(
+                "git_workflow",
+                "diff",
+                Capability::Git,
+                TaskKind::GitOperation,
+                PublicCapabilityDeclaration::GIT,
+            )),
+            "log" => Some(public_descriptor(
+                "git_workflow",
+                "log",
+                Capability::Git,
+                TaskKind::GitOperation,
+                PublicCapabilityDeclaration::GIT,
+            )),
+            "show" => Some(public_descriptor(
+                "git_workflow",
+                "show",
+                Capability::Git,
+                TaskKind::GitOperation,
+                PublicCapabilityDeclaration::GIT,
+            )),
+            "blame" => Some(public_descriptor(
+                "git_workflow",
+                "blame",
+                Capability::Git,
+                TaskKind::GitOperation,
+                PublicCapabilityDeclaration::GIT,
+            )),
+            _ => None,
+        },
+        "document_workflow" => match action? {
+            "inspect" => Some(public_descriptor(
+                "document_workflow",
+                "inspect",
+                Capability::Read,
+                TaskKind::ReadFile,
+                PublicCapabilityDeclaration::READ,
+            )),
+            "create" => Some(public_descriptor(
+                "document_workflow",
+                "create",
+                Capability::Write,
+                TaskKind::ModifyFile,
+                PublicCapabilityDeclaration::workflow(true, false, false, false, false),
+            )),
+            "rebuild" => Some(public_descriptor(
+                "document_workflow",
+                "rebuild",
+                Capability::Write,
+                TaskKind::ModifyFile,
+                PublicCapabilityDeclaration::workflow(true, false, false, false, false),
+            )),
+            "convert" => Some(public_descriptor(
+                "document_workflow",
+                "convert",
+                Capability::Workflow,
+                TaskKind::ModifyFile,
+                PublicCapabilityDeclaration::workflow(true, true, false, false, false),
+            )),
+            _ => None,
+        },
+        "view_image" if action.is_none() => Some(public_descriptor(
+            "view_image",
+            "inspect",
+            Capability::Read,
+            TaskKind::ReadFile,
+            PublicCapabilityDeclaration::READ,
+        )),
+        "agent_workflow" => {
+            let (name, declaration) = match action? {
+                "diagnose" => (
+                    "diagnose",
+                    PublicCapabilityDeclaration::workflow(false, true, true, false, false),
+                ),
+                "document" => (
+                    "document",
+                    PublicCapabilityDeclaration::workflow(true, false, false, false, false),
+                ),
+                "bugfix" => (
+                    "bugfix",
+                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
+                ),
+                "feature" => (
+                    "feature",
+                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
+                ),
+                "refactor" => (
+                    "refactor",
+                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
+                ),
+                "test_failure" => (
+                    "test_failure",
+                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
+                ),
+                "build_release" => (
+                    "build_release",
+                    PublicCapabilityDeclaration::workflow(true, true, true, true, false),
+                ),
+                "resume" => (
+                    "resume",
+                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
+                ),
+                "custom" => (
+                    "custom",
+                    PublicCapabilityDeclaration::workflow(true, true, true, true, true),
+                ),
+                _ => return None,
+            };
+            Some(public_descriptor(
+                "agent_workflow",
+                name,
+                Capability::Workflow,
+                TaskKind::Other,
+                declaration,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn contains_privileged_external_runtime(command: &str) -> bool {
+    command
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+        .any(|word| {
+            matches!(
+                word.to_ascii_lowercase().as_str(),
+                "docker" | "docker.exe" | "podman" | "podman.exe" | "wsl" | "wsl.exe"
+            )
+        })
+}
+
 fn is_control_plane_name(name: &str) -> bool {
     CONTROL_PLANE_NAMES.contains(&name)
         || name.starts_with("localbridge.")
@@ -400,9 +799,9 @@ fn exact_set(actual: &[String], expected: &[&str]) -> bool {
 }
 
 fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
-    if document.schema_version != 5
+    if document.schema_version != 6
         || document.runtime_version != PINNED_RUNTIME_VERSION
-        || document.status != "LB_000_VERIFIED"
+        || document.status != "LB_007_STABLE_PUBLIC_POLICY"
     {
         return Err(PolicyError::ContractMismatch("identity"));
     }
@@ -477,6 +876,38 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
     }
     if !exact_set(&document.blocked_tools, &["request_permissions"]) {
         return Err(PolicyError::ContractMismatch("blocked_tools"));
+    }
+    let public_edit = document
+        .localbridge_public
+        .edit_tools
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let public_full = document
+        .localbridge_public
+        .full_tools
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let public_elevated = document
+        .localbridge_public
+        .elevated_tools
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let public_core = PUBLIC_CORE_TOOLS.iter().copied().collect::<HashSet<_>>();
+    let public_edit_max = PUBLIC_EDIT_MAX.iter().copied().collect::<HashSet<_>>();
+    if !public_edit.is_subset(&public_edit_max)
+        || !public_full.is_subset(&public_core)
+        || !public_elevated.is_subset(&public_core)
+        || !public_edit.is_subset(&public_full)
+        || !public_full.is_subset(&public_elevated)
+        || document.localbridge_public.unknown_action != "deny"
+        || document.localbridge_public.network != "deny_unreviewed"
+        || document.localbridge_public.privilege != "broker_only"
+        || document.localbridge_public.control_plane != "deny_always"
+    {
+        return Err(PolicyError::ContractMismatch("localbridge_public"));
     }
     if document.capabilities.unknown != "deny"
         || document.capabilities.process_exec_in_edit != "deny"
