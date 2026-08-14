@@ -98,7 +98,7 @@ for (const required of ["start_for_recovery", "wait_ready_for_recovery", "initia
   if (!mcpRuntime.includes(required) && !mcpHttp.includes(required)) throw new Error(`LB-010 bounded MCP recovery seam missing: ${required}`);
 }
 if (!orchestrator.includes("Duration::from_millis(250)")) throw new Error("LB-010 production recovery transport slice is not bounded to 250ms");
-for (const required of ["wait_ready_for_recovery", "probe_ready_with_timeout"]) {
+for (const required of ["wait_ready_for_recovery", "probe_ready_metadata_with_timeout"]) {
   if (!tunnelRuntime.includes(required) && !tunnelHealth.includes(required)) throw new Error(`LB-010 bounded Tunnel recovery seam missing: ${required}`);
 }
 for (const endpoint of ['"/readyz"', '"/api/status"']) {
