@@ -162,7 +162,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Schema24 G3 repair and unified machine acceptance are complete through LB-017. Run a separate independent G3 adversarial generation 6 next. G4/LB-018 and the separate G3-to-G4 human Gate remain blocked."
+    "next_action": "G3 independent adversarial generation 6 PASS. Run the separate G3-to-G4 human manual/detail review generation 2 next; keep G4/LB-018 blocked until that human Gate is independently accepted as PASS."
   },
   "current_task_ui": {
     "enabled": true,
@@ -497,38 +497,37 @@
     "replacement_without_contract": false
   },
   "g3_adversarial_review": {
-    "status": "FAIL",
-    "generation": 5,
+    "status": "PASS",
+    "generation": 6,
     "date": "2026-08-14",
-    "baseline_commit": "b9fa6bae4ef697bf65bab02544c4dcdbb77a3ed1",
-    "severity": "MAJOR",
-    "reopen_from_pr": "LB-015",
-    "finding": "Generation 5 remains FAIL because connection changes during asynchronous Starting/connecting can skip the required controlled reconnect and continue with captured old startup configuration. The earlier same-generation claim that explicitly reopened onboarding Screen3 is an illegal second permission editor was superseded by direct user ratification on 2026-08-14 and is not a defect.",
+    "baseline_commit": "338957059646df988a052685afaf5d77bb70fa0c",
+    "finding": "No blocking G3 defect was found against schema24 after independent first-principles code review and fresh runtime verification. The generation-5 Starting/connecting reconnect defect and the later scrollbar Clippy defect are repaired on the committed REVIEW_REQUIRED baseline.",
     "evidence": [
-      "PR_CONTRACTS.json requires Settings save to perform controlled reconnect when effective connection configuration changes while runtime is active/connecting.",
-      "src-tauri/src/app/background.rs:733-752 publishes RuntimeState::StartingMcp with active=false before the asynchronous startup thread consumes its captured ProductionRuntimeConfig.",
-      "src-tauri/src/commands/ui.rs:519-525 reconnect_after_connection_change returns Ok immediately whenever snapshot.active is false; therefore save_tunnel_id/save_runtime_key during Starting/connecting can skip cancellation/restart while the old captured startup continues.",
-      "current G3 tests contain no Starting/connecting connection-change regression for reconnect_after_connection_change."
-    ],
-    "reproduction": [
-      "Start a configured foreground launch and observe the backend projection in StartingMcp/connecting before the runtime owner becomes active. Change Tunnel ID or Runtime API Key in Settings. reconnect_after_connection_change sees active=false and returns without controlled restart while the already spawned startup thread retains the old startup config. Expected: active OR connecting configuration change cancels/restarts/queues startup so effective configuration matches saved configuration."
+      "src-tauri/src/commands/ui.rs treats every RuntimeState except Stopped as requiring controlled reconnect, reloads the current persisted connection/workspace configuration, and calls backend restart_production_runtime.",
+      "src-tauri/src/app/background.rs uses runtime_control_generation plus serialized runtime_operation ownership so a superseded asynchronous Starting path cannot activate an old captured configuration after a controlled restart/stop.",
+      "src-tauri/src/main.rs uses scrollbar_width.is_empty() and the native WebView2 E2E verifies an overflowing rounded Settings sheet with scrollbar_arrows=false while track/thumb scrolling remains usable.",
+      "Committed baseline 338957059646df988a052685afaf5d77bb70fa0c contains G3=REVIEW_REQUIRED, review_status=REQUIRED and all LB-013 through LB-017 PASS; tracked worktree was clean before this review decision."
     ],
     "independent_verification": {
-      "npm_test": "PASS",
-      "frontend_build": "PASS (npm build command exited 0; generic build wrapper separately reported no newly timestamped artifact)",
-      "architecture_verify": "PASS before recording this FAIL decision",
       "lb013_contract": "PASS",
       "lb014_contract": "PASS",
-      "lb015_contract": "PASS but missing the retained Starting/connecting controlled-reconnect adversarial path",
+      "lb015_contract": "PASS",
       "lb016_contract": "PASS",
       "lb017_contract": "PASS",
-      "cargo_test_locked": "PASS: 120 library tests plus integration suites; no failures",
-      "cargo_clippy_all_targets_deny_warnings": "PASS"
+      "npm_test": "PASS: 3 files / 5 tests",
+      "frontend_build": "PASS",
+      "architecture_verify": "PASS: 26 active architecture rules",
+      "ui_language_verify": "PASS",
+      "runtime_manifest_verify": "PASS",
+      "cargo_test_locked": "PASS: 130 library tests plus integration suites; no failures",
+      "cargo_clippy_all_targets_deny_warnings": "PASS",
+      "native_fixed_window_webview2": "PASS at 150% DPI: onboarding and Dashboard logical 780x620, physical 1170x930, single edge-to-edge custom chrome, decorations/resizable/maximizable false, Settings replace delta 0.00px, rounded_scroll=true, scrollbar_arrows=false, scroll_surface=true",
+      "git_diff_check": "PASS"
     },
+    "screen3_permission_visual_evidence": "PASS_BY_USER_780x620_2026-08-14; scoped visual evidence only and does not satisfy the separate G3-to-G4 human Gate",
     "g4_unlocked": false,
-    "next_required_adversarial_generation": 6,
-    "rework_status": "REOPENED_BY_MANUAL_SUPPLEMENT_ROUND2",
-    "review_decision_commit": "e66a3b9a0d5a844fa35ed6f63b70acaeae4e4110"
+    "human_review_required": true,
+    "human_review_generation": 2
   },
   "ui_backend_separation": {
     "frontend_role": "typed_projection_and_user_intent_only",
