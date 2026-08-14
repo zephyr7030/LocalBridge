@@ -170,8 +170,12 @@ impl PreparedTunnelStart {
         for key in REMOVED_PARENT_ENV {
             spec = spec.env_remove(key).map_err(classify_supervisor)?;
         }
-        spec = spec.env(API_KEY_ENV, self.secret.expose_secret()).map_err(classify_supervisor)?;
-        spec = spec.env(TUNNEL_ID_ENV, self.config.tunnel_id.expose()).map_err(classify_supervisor)?;
+        spec = spec
+            .env(API_KEY_ENV, self.secret.expose_secret())
+            .map_err(classify_supervisor)?;
+        spec = spec
+            .env(TUNNEL_ID_ENV, self.config.tunnel_id.expose())
+            .map_err(classify_supervisor)?;
         spec = spec
             .env(
                 "CONTROL_PLANE_BASE_URL",
@@ -628,6 +632,31 @@ mod tests {
         ));
         assert_eq!(store.reads(), 2);
         fs::remove_dir_all(base.health_state_dir).unwrap();
+    }
+
+    #[test]
+    fn credential_and_configuration_faults_never_enter_restart_or_reread_secret() {
+        let store = FakeStore::new([Some(SECRET_ONE)]);
+        let base = config("non-recoverable");
+        for fault in [
+            TunnelError::RuntimeKeyMissing,
+            TunnelError::InvalidTunnelId,
+            TunnelError::InvalidMcpTarget,
+        ] {
+            assert_eq!(fault.retryability(), Retryability::NonRecoverable);
+            assert!(matches!(
+                TunnelRestartPrimitive::prepare(base.clone(), &store, &fault),
+                Err(TunnelError::RestartDenied)
+            ));
+        }
+        assert_eq!(
+            store.reads(),
+            0,
+            "non-recoverable credential/configuration faults must not reread the secret"
+        );
+        if base.health_state_dir.exists() {
+            fs::remove_dir_all(base.health_state_dir).unwrap();
+        }
     }
 
     #[test]
