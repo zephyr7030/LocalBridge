@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -66,7 +66,7 @@
     "G4 remains blocked after G3 adversarial PASS until a separate human manual/detail review is accepted as PASS",
     "Human review treats user/executor factual claims as untrusted evidence and requires user-audited concrete executor pre-authorizations"
   ],
-  "execution_plan_version": 19,
+  "execution_plan_version": 20,
   "total_prs": 20,
   "architecture_decisions_pending_lb000": [
     "Policy Enforcement implementation: upstream / adapter / Rust Guard",
@@ -175,7 +175,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 LB-006 through LB-012 schema25 rework chain is accepted. Run a fresh independent G2 adversarial review generation 9 against the committed review-ready baseline before LB-013. Generation 8 remains historical invalidated provenance only. Do not unlock or execute G3/LB-013 until generation 9 PASS; historical G3 generation 6 remains invalidated and G4 remains blocked. Schema26 administrator safety consent remains queued for LB-015/LB-016."
+    "next_action": "G2 independent adversarial review generation 9 FAIL. Rework LB-006 first: own the public command/session lifecycle instead of exposing upstream session/output references; make command_control poll/read/write/kill semantically correct and resilient when private sessions finish or are pruned; implement every advertised v1 core/public action or remove it from the advertised contract; classify silent nonzero process exits into an explicit stable process outcome/failed task state. Then rework LB-007 so privileged-external-runtime review cannot be bypassed by shell-time command construction/indirection. Reaccept LB-008 through LB-012 sequentially only after their dependencies pass, then run fresh G2 adversarial generation 10. LB-013/G3/G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -951,5 +951,82 @@
     "next_live_pr": "LB-006",
     "lb007_blocked": true,
     "g2_generation_9_consumed": false
+  },
+  "g2_adversarial_review_generation_9_2026_08_14": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 9,
+    "baseline_commit": "f2c4af4b337d6a390c27179894852d8df0f58aff",
+    "reopen_from_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "acceptance": [
+          "A249",
+          "A256"
+        ],
+        "summary": "Public command sessions are raw upstream sessions and can become orphaned/stale; command_control poll is semantically miswired.",
+        "evidence": [
+          "Live coding-tools reproduction: persistent task current_command remained status=running with session YMLwvR9ZPwDzm0K_6sZgNZbQ while command_control.poll returned SESSION_NOT_FOUND; task_control.get still retained the stale running command.",
+          "Bundled runtime retains completed sessions for 300 seconds then prunes them; persistent task truth is not background-synchronized to that lifecycle.",
+          "LocalBridge normalize_command_success copies upstream session_id/output_ref directly into the public result instead of using a LocalBridge-owned public session mapping.",
+          "LocalBridge CommandControlAction::Poll routes to private read_output, but running-session polling in the pinned runtime uses write_stdin with session_id and empty chars; read_output requires output_ref."
+        ]
+      },
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "acceptance": [
+          "A247",
+          "A251",
+          "A256"
+        ],
+        "summary": "The v1 public Registry advertises nonfunctional core/actions.",
+        "evidence": [
+          "AgentFacade dispatch always returns InvalidArgument/currently unavailable for agent_workflow and task_control even though Full/Elevated tools/list advertises them.",
+          "document_workflow schema advertises inspect/create/convert/rebuild but only inspect is implemented; the other advertised actions always return adapter action unavailable."
+        ]
+      },
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "acceptance": [
+          "A256"
+        ],
+        "summary": "Silent nonzero command exits are normalized as public success instead of an explicit failed process/task outcome.",
+        "evidence": [
+          "Live no-output probe cmd /c exit 7 returned coding-tools ok=true, status=exited, exit_code=7, empty stdout/stderr.",
+          "LocalBridge private_call treats this as success and normalize_command_success always emits structuredContent.ok=true/isError=false; CurrentTask therefore does not project Failed, despite stable FacadeErrorCode::ProcessFailed existing."
+        ]
+      },
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-007",
+        "acceptance": [
+          "A251"
+        ],
+        "summary": "privileged-external-runtime review enforcement is bypassable because classification is lexical command-text matching.",
+        "evidence": [
+          "contains_privileged_external_runtime only matches literal docker/docker.exe/podman/podman.exe/wsl/wsl.exe tokens.",
+          "A PowerShell command can construct the executable name at runtime, e.g. $x=('do'+'cker'); & $x ps, so no protected literal token reaches the classifier while the shell can still invoke the external runtime.",
+          "runtime-policy.toml requires privileged_external_runtime=review_required and ADR-0001 requires transitive docker/podman/wsl classification."
+        ]
+      }
+    ],
+    "verified_passes": [
+      "cargo test --locked: PASS; 147 library tests plus invoked unit/integration suites all passed.",
+      "cargo clippy --locked --all-targets -- -D warnings: PASS.",
+      "verify:runtime-manifest: PASS.",
+      "verify:architecture: PASS before governance transition.",
+      "g4-human-gate.test.mjs: PASS before governance transition.",
+      "Tunnel secret injection/redaction, tools/call mandatory PEP, recovery generation/single-owner behavior, Broker Active gate/replay/nonce checks had no equally strong new bypass found in this review."
+    ],
+    "user_report_status": "INDEPENDENTLY_REPRODUCED_AND_ROOT_CAUSE_TRACED",
+    "next_required_g2_adversarial_generation": 10,
+    "g2_generation_9_consumed": true,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
