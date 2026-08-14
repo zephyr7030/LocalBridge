@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -175,7 +175,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-010 Recovery + Workspace Switch fresh revalidation accepted. Execute LB-011 Privileged Broker IPC Foundation next, then LB-012 Elevated Permission Mode. After LB-012 acceptance stop at G2 REVIEW_REQUIRED and require fresh independent adversarial generation 9; do not run or unlock G3/G4."
+    "next_action": "LB-011 Privileged Broker IPC Foundation fresh revalidation accepted. Execute LB-012 Elevated Permission Mode next. After LB-012 acceptance stop G2 at REVIEW_REQUIRED / review REQUIRED for fresh independent adversarial generation 9; LB-013/G3 and G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
