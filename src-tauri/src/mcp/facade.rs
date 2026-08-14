@@ -261,26 +261,264 @@ fn public_tool_schema(name: &str) -> Value {
     })
 }
 
-const REQUIRED_PRIVATE_CAPABILITIES: &[(&str, &[&str])] = &[
-    ("server_info", &[]),
-    ("check_exec_environment", &[]),
-    ("get_default_cwd", &[]),
-    ("set_default_cwd", &["path"]),
-    ("read_file", &["path"]),
-    ("list_dir", &["path"]),
-    ("list_files", &["path"]),
-    ("search_text", &["query"]),
-    ("apply_patch", &["patch"]),
-    ("exec_command", &["cmd"]),
-    ("write_stdin", &["session_id"]),
-    ("kill_session", &["session_id"]),
-    ("read_output", &["output_ref"]),
-    ("git_status", &["path"]),
-    ("git_diff", &["paths"]),
-    ("git_log", &["path"]),
-    ("git_show", &["rev"]),
-    ("git_blame", &["path"]),
-    ("view_image", &["path"]),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrivateParameterKind {
+    String,
+    Integer,
+    Boolean,
+    StringArray,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PrivateParameterContract {
+    name: &'static str,
+    kind: PrivateParameterKind,
+    min_length: Option<u64>,
+    minimum: Option<i64>,
+    maximum: Option<i64>,
+    enum_values: &'static [&'static str],
+}
+
+#[derive(Debug)]
+struct PrivateCapabilityContract {
+    name: &'static str,
+    required: &'static [&'static str],
+    parameters: &'static [PrivateParameterContract],
+}
+
+const fn private_parameter(
+    name: &'static str,
+    kind: PrivateParameterKind,
+) -> PrivateParameterContract {
+    PrivateParameterContract {
+        name,
+        kind,
+        min_length: None,
+        minimum: None,
+        maximum: None,
+        enum_values: &[],
+    }
+}
+
+const fn private_string(
+    name: &'static str,
+    min_length: Option<u64>,
+    enum_values: &'static [&'static str],
+) -> PrivateParameterContract {
+    PrivateParameterContract {
+        name,
+        kind: PrivateParameterKind::String,
+        min_length,
+        minimum: None,
+        maximum: None,
+        enum_values,
+    }
+}
+
+const fn private_integer(
+    name: &'static str,
+    minimum: Option<i64>,
+    maximum: Option<i64>,
+) -> PrivateParameterContract {
+    PrivateParameterContract {
+        name,
+        kind: PrivateParameterKind::Integer,
+        min_length: None,
+        minimum,
+        maximum,
+        enum_values: &[],
+    }
+}
+
+const REQUIRED_PRIVATE_CAPABILITIES: &[PrivateCapabilityContract] = &[
+    PrivateCapabilityContract {
+        name: "server_info",
+        required: &[],
+        parameters: &[],
+    },
+    PrivateCapabilityContract {
+        name: "check_exec_environment",
+        required: &[],
+        parameters: &[],
+    },
+    PrivateCapabilityContract {
+        name: "get_default_cwd",
+        required: &[],
+        parameters: &[],
+    },
+    PrivateCapabilityContract {
+        name: "set_default_cwd",
+        required: &[],
+        parameters: &[private_parameter("path", PrivateParameterKind::String)],
+    },
+    PrivateCapabilityContract {
+        name: "read_file",
+        required: &["path"],
+        parameters: &[
+            private_string("path", Some(1), &[]),
+            private_integer("start_line", Some(1), None),
+            private_integer("end_line", Some(1), None),
+            private_integer("max_lines", Some(1), None),
+            private_integer("max_bytes", Some(1), Some(1_048_576)),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "list_dir",
+        required: &[],
+        parameters: &[
+            private_parameter("path", PrivateParameterKind::String),
+            private_parameter("include_hidden", PrivateParameterKind::Boolean),
+            private_parameter("include_ignored", PrivateParameterKind::Boolean),
+            private_parameter("max_depth", PrivateParameterKind::Integer),
+            private_parameter("max_entries", PrivateParameterKind::Integer),
+            private_parameter("recursive", PrivateParameterKind::Boolean),
+            private_parameter("sort", PrivateParameterKind::String),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "list_files",
+        required: &[],
+        parameters: &[
+            private_parameter("path", PrivateParameterKind::String),
+            private_parameter("patterns", PrivateParameterKind::StringArray),
+            private_parameter("glob", PrivateParameterKind::String),
+            private_parameter("exclude_patterns", PrivateParameterKind::StringArray),
+            private_parameter("include_hidden", PrivateParameterKind::Boolean),
+            private_parameter("include_ignored", PrivateParameterKind::Boolean),
+            private_parameter("max_results", PrivateParameterKind::Integer),
+            private_parameter("sort", PrivateParameterKind::String),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "search_text",
+        required: &["query"],
+        parameters: &[
+            private_string("query", Some(1), &[]),
+            private_parameter("path", PrivateParameterKind::String),
+            private_parameter("regex", PrivateParameterKind::Boolean),
+            private_parameter("case_sensitive", PrivateParameterKind::Boolean),
+            private_parameter("include_globs", PrivateParameterKind::StringArray),
+            private_parameter("exclude_globs", PrivateParameterKind::StringArray),
+            private_parameter("glob", PrivateParameterKind::String),
+            private_parameter("context_lines", PrivateParameterKind::Integer),
+            private_parameter("max_results", PrivateParameterKind::Integer),
+            private_parameter("max_preview_bytes", PrivateParameterKind::Integer),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "apply_patch",
+        required: &["patch"],
+        parameters: &[
+            private_string("patch", Some(1), &[]),
+            private_parameter("dry_run", PrivateParameterKind::Boolean),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "exec_command",
+        required: &["cmd"],
+        parameters: &[
+            private_string("cmd", Some(1), &[]),
+            private_parameter("workdir", PrivateParameterKind::String),
+            private_integer("timeout_ms", Some(1), Some(600_000)),
+            private_integer("yield_time_ms", Some(0), Some(30_000)),
+            private_integer("max_output_bytes", Some(1), Some(1_048_576)),
+            private_parameter("stdin", PrivateParameterKind::String),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "write_stdin",
+        required: &["session_id"],
+        parameters: &[
+            private_string("session_id", Some(1), &[]),
+            private_parameter("chars", PrivateParameterKind::String),
+            private_integer("yield_time_ms", Some(0), Some(30_000)),
+            private_integer("max_output_bytes", Some(1), Some(1_048_576)),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "kill_session",
+        required: &["session_id"],
+        parameters: &[
+            private_string("session_id", Some(1), &[]),
+            private_string("signal", None, &["TERM", "KILL", "INT"]),
+            private_integer("wait_ms", Some(0), Some(30_000)),
+            private_integer("max_output_bytes", Some(1), Some(1_048_576)),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "read_output",
+        required: &["output_ref"],
+        parameters: &[
+            private_string("output_ref", Some(1), &[]),
+            private_string("stream", None, &["stdout", "stderr"]),
+            private_integer("offset", Some(0), None),
+            private_integer("limit", Some(1), Some(1_048_576)),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "git_status",
+        required: &[],
+        parameters: &[
+            private_parameter("path", PrivateParameterKind::String),
+            private_parameter("include_untracked", PrivateParameterKind::Boolean),
+            private_parameter("max_entries", PrivateParameterKind::Integer),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "git_diff",
+        required: &[],
+        parameters: &[
+            private_parameter("path", PrivateParameterKind::String),
+            private_parameter("paths", PrivateParameterKind::StringArray),
+            private_parameter("staged", PrivateParameterKind::Boolean),
+            private_parameter("unstaged", PrivateParameterKind::Boolean),
+            private_parameter("context_lines", PrivateParameterKind::Integer),
+            private_parameter("max_bytes", PrivateParameterKind::Integer),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "git_log",
+        required: &[],
+        parameters: &[
+            private_parameter("path", PrivateParameterKind::String),
+            private_parameter("ref", PrivateParameterKind::String),
+            private_parameter("max_count", PrivateParameterKind::Integer),
+            private_parameter("skip", PrivateParameterKind::Integer),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "git_show",
+        required: &[],
+        parameters: &[
+            private_parameter("rev", PrivateParameterKind::String),
+            private_parameter("path", PrivateParameterKind::String),
+            private_parameter("paths", PrivateParameterKind::StringArray),
+            private_parameter("context_lines", PrivateParameterKind::Integer),
+            private_parameter("max_bytes", PrivateParameterKind::Integer),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "git_blame",
+        required: &["path"],
+        parameters: &[
+            private_parameter("path", PrivateParameterKind::String),
+            private_parameter("rev", PrivateParameterKind::String),
+            private_parameter("start_line", PrivateParameterKind::Integer),
+            private_parameter("end_line", PrivateParameterKind::Integer),
+            private_parameter("max_lines", PrivateParameterKind::Integer),
+        ],
+    },
+    PrivateCapabilityContract {
+        name: "view_image",
+        required: &["path"],
+        parameters: &[
+            private_string("path", Some(1), &[]),
+            private_integer("max_bytes", Some(1_024), Some(10_485_760)),
+            private_integer("max_width", Some(1), Some(10_000)),
+            private_integer("max_height", Some(1), Some(10_000)),
+            private_parameter("auto_resize", PrivateParameterKind::Boolean),
+        ],
+    },
 ];
 
 pub fn validate_runtime_capabilities(catalog: &Value) -> Result<(), FacadeError> {
@@ -292,9 +530,9 @@ pub fn validate_runtime_capabilities(catalog: &Value) -> Result<(), FacadeError>
         .iter()
         .filter_map(|tool| Some((tool.get("name")?.as_str()?.to_owned(), tool)))
         .collect::<HashMap<_, _>>();
-    for (name, properties) in REQUIRED_PRIVATE_CAPABILITIES {
+    for contract in REQUIRED_PRIVATE_CAPABILITIES {
         let tool = by_name
-            .get(*name)
+            .get(contract.name)
             .copied()
             .ok_or_else(runtime_capability_mismatch)?;
         let schema = tool
@@ -308,14 +546,109 @@ pub fn validate_runtime_capabilities(catalog: &Value) -> Result<(), FacadeError>
             .get("properties")
             .and_then(Value::as_object)
             .ok_or_else(runtime_capability_mismatch)?;
-        if properties
+        let required = schema
+            .get("required")
+            .and_then(Value::as_array)
+            .ok_or_else(runtime_capability_mismatch)?;
+        let mut actual_required = required
             .iter()
-            .any(|property| !schema_properties.contains_key(*property))
-        {
+            .map(|value| value.as_str().ok_or_else(runtime_capability_mismatch))
+            .collect::<Result<Vec<_>, _>>()?;
+        actual_required.sort_unstable();
+        let mut expected_required = contract.required.to_vec();
+        expected_required.sort_unstable();
+        if actual_required != expected_required {
             return Err(runtime_capability_mismatch());
+        }
+        for parameter in contract.parameters {
+            let property = schema_properties
+                .get(parameter.name)
+                .ok_or_else(runtime_capability_mismatch)?;
+            if !private_parameter_schema_compatible(property, *parameter) {
+                return Err(runtime_capability_mismatch());
+            }
         }
     }
     Ok(())
+}
+
+fn private_parameter_schema_compatible(schema: &Value, contract: PrivateParameterContract) -> bool {
+    let type_compatible = match contract.kind {
+        PrivateParameterKind::String => schema_accepts_type(schema, "string"),
+        PrivateParameterKind::Integer => schema_accepts_type(schema, "integer"),
+        PrivateParameterKind::Boolean => schema_accepts_type(schema, "boolean"),
+        PrivateParameterKind::StringArray => {
+            schema_accepts_type(schema, "array")
+                && schema
+                    .get("items")
+                    .is_some_and(|items| schema_accepts_type(items, "string"))
+        }
+    };
+    type_compatible
+        && min_length_compatible(schema, contract.min_length)
+        && integer_bounds_compatible(schema, contract.minimum, contract.maximum)
+        && enum_values_compatible(schema, contract.enum_values)
+}
+
+fn min_length_compatible(schema: &Value, expected: Option<u64>) -> bool {
+    let Some(expected) = expected else {
+        return true;
+    };
+    match schema.get("minLength") {
+        None => true,
+        Some(value) => value.as_u64().is_some_and(|actual| actual <= expected),
+    }
+}
+
+fn integer_bounds_compatible(
+    schema: &Value,
+    expected_minimum: Option<i64>,
+    expected_maximum: Option<i64>,
+) -> bool {
+    if let Some(expected) = expected_minimum {
+        if let Some(actual) = schema.get("minimum") {
+            let Some(actual) = actual.as_f64() else {
+                return false;
+            };
+            if actual > expected as f64 {
+                return false;
+            }
+        }
+    }
+    if let Some(expected) = expected_maximum {
+        if let Some(actual) = schema.get("maximum") {
+            let Some(actual) = actual.as_f64() else {
+                return false;
+            };
+            if actual < expected as f64 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn enum_values_compatible(schema: &Value, expected: &[&str]) -> bool {
+    if expected.is_empty() {
+        return true;
+    }
+    let Some(actual) = schema.get("enum") else {
+        return true;
+    };
+    let Some(actual) = actual.as_array() else {
+        return false;
+    };
+    expected
+        .iter()
+        .all(|expected| actual.iter().any(|value| value.as_str() == Some(*expected)))
+}
+
+fn schema_accepts_type(schema: &Value, expected: &str) -> bool {
+    match schema.get("type") {
+        Some(Value::String(actual)) => actual == expected,
+        Some(Value::Array(actual)) => actual.iter().any(|value| value.as_str() == Some(expected)),
+        _ => false,
+    }
 }
 
 fn runtime_capability_mismatch() -> FacadeError {
@@ -532,12 +865,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             GitWorkflowAction::Blame => "git_blame",
         };
         let raw = self.private_call(private_name, arguments, request_id)?;
-        let mut data = raw
-            .get("structuredContent")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
-        scrub_private_navigation(&mut data);
-        Ok(stable_success(data, "Git workflow completed"))
+        Ok(normalize_git_success(action, &raw))
     }
 
     fn inspect_document(
@@ -558,24 +886,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
         let raw = self.private_call("view_image", arguments, request_id)?;
-        let content = raw
-            .get("content")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|item| {
-                matches!(
-                    item.get("type").and_then(Value::as_str),
-                    Some("image") | Some("text")
-                )
-            })
-            .collect::<Vec<_>>();
-        Ok(json!({
-            "content": content,
-            "structuredContent":{"ok":true,"data":{"kind":"image"}},
-            "isError":false
-        }))
+        Ok(normalize_image_success(&raw))
     }
 
     fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
@@ -1108,22 +1419,226 @@ fn extract_stable_string(raw: &Value, keys: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-fn scrub_private_navigation(value: &mut Value) {
-    match value {
-        Value::Object(object) => {
-            object.remove("next_action");
-            object.remove("tool");
-            for child in object.values_mut() {
-                scrub_private_navigation(child);
-            }
-        }
-        Value::Array(values) => {
-            for child in values {
-                scrub_private_navigation(child);
-            }
-        }
-        _ => {}
+#[derive(Debug, Clone, Copy)]
+enum PublicFieldKind {
+    String,
+    NullableString,
+    Boolean,
+    Integer,
+    NullableInteger,
+    StringArray,
+}
+
+fn normalize_git_success(action: GitWorkflowAction, raw: &Value) -> Value {
+    let source = raw
+        .get("structuredContent")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut data = match action {
+        GitWorkflowAction::Status => sanitize_public_fields(
+            &source,
+            &[
+                ("is_repo", PublicFieldKind::Boolean),
+                ("branch", PublicFieldKind::NullableString),
+                ("head", PublicFieldKind::NullableString),
+                ("upstream", PublicFieldKind::NullableString),
+                ("ahead", PublicFieldKind::Integer),
+                ("behind", PublicFieldKind::Integer),
+                ("clean", PublicFieldKind::Boolean),
+                ("truncated", PublicFieldKind::Boolean),
+            ],
+        ),
+        GitWorkflowAction::Diff => sanitize_public_fields(
+            &source,
+            &[
+                ("diff", PublicFieldKind::String),
+                ("truncated", PublicFieldKind::Boolean),
+                ("truncated_by", PublicFieldKind::NullableString),
+                ("output_bytes", PublicFieldKind::Integer),
+                ("output_lines", PublicFieldKind::Integer),
+                ("warnings", PublicFieldKind::StringArray),
+            ],
+        ),
+        GitWorkflowAction::Log => sanitize_public_fields(
+            &source,
+            &[
+                ("is_repo", PublicFieldKind::Boolean),
+                ("ref", PublicFieldKind::String),
+                ("path", PublicFieldKind::String),
+                ("max_count", PublicFieldKind::Integer),
+                ("skip", PublicFieldKind::Integer),
+                ("truncated", PublicFieldKind::Boolean),
+                ("warnings", PublicFieldKind::StringArray),
+            ],
+        ),
+        GitWorkflowAction::Show => sanitize_public_fields(
+            &source,
+            &[
+                ("is_repo", PublicFieldKind::Boolean),
+                ("rev", PublicFieldKind::String),
+                ("content", PublicFieldKind::String),
+                ("truncated", PublicFieldKind::Boolean),
+                ("truncated_by", PublicFieldKind::NullableString),
+                ("output_bytes", PublicFieldKind::Integer),
+                ("output_lines", PublicFieldKind::Integer),
+                ("warnings", PublicFieldKind::StringArray),
+            ],
+        ),
+        GitWorkflowAction::Blame => sanitize_public_fields(
+            &source,
+            &[
+                ("is_repo", PublicFieldKind::Boolean),
+                ("path", PublicFieldKind::String),
+                ("rev", PublicFieldKind::NullableString),
+                ("start_line", PublicFieldKind::Integer),
+                ("end_line", PublicFieldKind::NullableInteger),
+                ("max_lines", PublicFieldKind::Integer),
+                ("truncated", PublicFieldKind::Boolean),
+                ("warnings", PublicFieldKind::StringArray),
+            ],
+        ),
+    };
+    match action {
+        GitWorkflowAction::Status => sanitize_object_array(
+            &source,
+            &mut data,
+            "entries",
+            &[
+                ("path", PublicFieldKind::String),
+                ("original_path", PublicFieldKind::NullableString),
+                ("index_status", PublicFieldKind::String),
+                ("worktree_status", PublicFieldKind::String),
+            ],
+        ),
+        GitWorkflowAction::Diff | GitWorkflowAction::Show => sanitize_object_array(
+            &source,
+            &mut data,
+            "files",
+            &[
+                ("path", PublicFieldKind::String),
+                ("status", PublicFieldKind::String),
+                ("binary", PublicFieldKind::Boolean),
+            ],
+        ),
+        GitWorkflowAction::Log => sanitize_object_array(
+            &source,
+            &mut data,
+            "commits",
+            &[
+                ("hash", PublicFieldKind::String),
+                ("short_hash", PublicFieldKind::String),
+                ("author_name", PublicFieldKind::String),
+                ("author_email", PublicFieldKind::String),
+                ("author_date", PublicFieldKind::String),
+                ("subject", PublicFieldKind::String),
+            ],
+        ),
+        GitWorkflowAction::Blame => sanitize_object_array(
+            &source,
+            &mut data,
+            "lines",
+            &[
+                ("commit", PublicFieldKind::String),
+                ("original_line", PublicFieldKind::Integer),
+                ("line", PublicFieldKind::Integer),
+                ("author", PublicFieldKind::String),
+                ("author_mail", PublicFieldKind::String),
+                ("author_time", PublicFieldKind::String),
+                ("summary", PublicFieldKind::String),
+                ("content", PublicFieldKind::String),
+            ],
+        ),
     }
+    stable_success(Value::Object(data), "Git workflow completed")
+}
+
+fn normalize_image_success(raw: &Value) -> Value {
+    let content = raw
+        .get("content")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| match item.get("type").and_then(Value::as_str) {
+            Some("image") => Some(json!({
+                "type":"image",
+                "data": item.get("data")?.as_str()?,
+                "mimeType": item.get("mimeType")?.as_str()?
+            })),
+            Some("text") => Some(json!({
+                "type":"text",
+                "text": item.get("text")?.as_str()?
+            })),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "content": content,
+        "structuredContent":{"ok":true,"data":{"kind":"image"}},
+        "isError":false
+    })
+}
+
+fn sanitize_public_fields(
+    source: &Map<String, Value>,
+    fields: &[(&str, PublicFieldKind)],
+) -> Map<String, Value> {
+    fields
+        .iter()
+        .filter_map(|(name, kind)| {
+            sanitize_public_value(source.get(*name)?, *kind).map(|value| ((*name).into(), value))
+        })
+        .collect()
+}
+
+fn sanitize_public_value(value: &Value, kind: PublicFieldKind) -> Option<Value> {
+    match kind {
+        PublicFieldKind::String => value.as_str().map(|value| Value::String(value.into())),
+        PublicFieldKind::NullableString => value
+            .is_null()
+            .then_some(Value::Null)
+            .or_else(|| value.as_str().map(|value| Value::String(value.into()))),
+        PublicFieldKind::Boolean => value.as_bool().map(Value::Bool),
+        PublicFieldKind::Integer => value
+            .as_u64()
+            .map(Value::from)
+            .or_else(|| value.as_i64().map(Value::from)),
+        PublicFieldKind::NullableInteger => value
+            .is_null()
+            .then_some(Value::Null)
+            .or_else(|| value.as_u64().map(Value::from))
+            .or_else(|| value.as_i64().map(Value::from)),
+        PublicFieldKind::StringArray => value.as_array().map(|values| {
+            Value::Array(
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|value| Value::String(value.into()))
+                    .collect(),
+            )
+        }),
+    }
+}
+
+fn sanitize_object_array(
+    source: &Map<String, Value>,
+    target: &mut Map<String, Value>,
+    name: &str,
+    fields: &[(&str, PublicFieldKind)],
+) {
+    let Some(values) = source.get(name).and_then(Value::as_array) else {
+        return;
+    };
+    target.insert(
+        name.into(),
+        Value::Array(
+            values
+                .iter()
+                .filter_map(Value::as_object)
+                .map(|value| Value::Object(sanitize_public_fields(value, fields)))
+                .collect(),
+        ),
+    );
 }
 
 fn structured_command_line(program: &Path, args: &[std::ffi::OsString]) -> String {
@@ -1250,24 +1765,11 @@ mod tests {
         CapabilityPolicy::from_toml(include_str!("../../../runtime-policy.toml")).unwrap()
     }
 
-    fn private_tool(name: &str, properties: &[&str]) -> Value {
-        let properties = properties
-            .iter()
-            .map(|name| ((*name).to_string(), json!({"type":"string"})))
-            .collect::<Map<_, _>>();
-        json!({"name":name,"inputSchema":{"type":"object","properties":properties,"additionalProperties":false}})
-    }
-
     fn compatible_catalog() -> Value {
-        let mut tools = REQUIRED_PRIVATE_CAPABILITIES
-            .iter()
-            .map(|(name, properties)| private_tool(name, properties))
-            .collect::<Vec<_>>();
-        tools.push(private_tool(
-            "future_private_tool",
-            &["secret_private_field"],
-        ));
-        json!({"tools":tools})
+        serde_json::from_str(include_str!(
+            "../../../compatibility/coding-tools/0.2.2/tools-list.json"
+        ))
+        .unwrap()
     }
 
     #[test]
@@ -1299,7 +1801,7 @@ mod tests {
         catalog["tools"].as_array_mut().unwrap().push(json!({
             "name":"malicious_new_private_tool",
             "description":"must never become public",
-            "inputSchema":{"type":"object","properties":{"danger":{"type":"string"}}}
+            "inputSchema":{"type":"object","properties":{"danger":{"type":"string"}},"required":[]}
         }));
         catalog["tools"][0]["description"] = Value::String("private description changed".into());
         catalog["tools"][0]["inputSchema"]["properties"]["future_optional_private_field"] =
@@ -1359,6 +1861,164 @@ mod tests {
     }
 
     #[test]
+    fn private_capability_type_requiredness_and_array_item_drift_fail_closed() {
+        let mut wrong_type = compatible_catalog();
+        let exec = wrong_type["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "exec_command")
+            .unwrap();
+        exec["inputSchema"]["properties"]["cmd"]["type"] = Value::String("integer".into());
+        assert_eq!(
+            validate_runtime_capabilities(&wrong_type).unwrap_err().code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+
+        let mut missing_requiredness = compatible_catalog();
+        let exec = missing_requiredness["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "exec_command")
+            .unwrap();
+        exec["inputSchema"]["required"] = json!([]);
+        assert_eq!(
+            validate_runtime_capabilities(&missing_requiredness)
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+
+        let mut unexpected_required = compatible_catalog();
+        let exec = unexpected_required["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "exec_command")
+            .unwrap();
+        exec["inputSchema"]["properties"]["future_required"] = json!({"type":"string"});
+        exec["inputSchema"]["required"] = json!(["cmd", "future_required"]);
+        assert_eq!(
+            validate_runtime_capabilities(&unexpected_required)
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+
+        let mut wrong_array_items = compatible_catalog();
+        let diff = wrong_array_items["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "git_diff")
+            .unwrap();
+        diff["inputSchema"]["properties"]["paths"]["items"]["type"] =
+            Value::String("integer".into());
+        assert_eq!(
+            validate_runtime_capabilities(&wrong_array_items)
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+
+        let mut compatible_union = compatible_catalog();
+        let exec = compatible_union["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "exec_command")
+            .unwrap();
+        exec["inputSchema"]["properties"]["cmd"]["type"] = json!(["string", "null"]);
+        assert!(validate_runtime_capabilities(&compatible_union).is_ok());
+    }
+
+    #[test]
+    fn private_capability_constraint_narrowing_fails_closed_while_widening_is_compatible() {
+        let mut min_length_narrowed = compatible_catalog();
+        let exec = min_length_narrowed["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "exec_command")
+            .unwrap();
+        exec["inputSchema"]["properties"]["cmd"]["minLength"] = json!(2);
+        assert_eq!(
+            validate_runtime_capabilities(&min_length_narrowed)
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+
+        let mut maximum_narrowed = compatible_catalog();
+        let exec = maximum_narrowed["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "exec_command")
+            .unwrap();
+        exec["inputSchema"]["properties"]["timeout_ms"]["maximum"] = json!(599_999);
+        assert_eq!(
+            validate_runtime_capabilities(&maximum_narrowed)
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+
+        let mut signal_narrowed = compatible_catalog();
+        let kill = signal_narrowed["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "kill_session")
+            .unwrap();
+        kill["inputSchema"]["properties"]["signal"]["enum"] = json!(["TERM", "KILL"]);
+        assert_eq!(
+            validate_runtime_capabilities(&signal_narrowed)
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+
+        let mut stream_narrowed = compatible_catalog();
+        let read = stream_narrowed["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "read_output")
+            .unwrap();
+        read["inputSchema"]["properties"]["stream"]["enum"] = json!(["stdout"]);
+        assert_eq!(
+            validate_runtime_capabilities(&stream_narrowed)
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+
+        let mut widened = compatible_catalog();
+        let exec = widened["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "exec_command")
+            .unwrap();
+        exec["inputSchema"]["properties"]["cmd"]
+            .as_object_mut()
+            .unwrap()
+            .remove("minLength");
+        exec["inputSchema"]["properties"]["timeout_ms"]["maximum"] = json!(900_000);
+        let kill = widened["tools"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|tool| tool["name"] == "kill_session")
+            .unwrap();
+        kill["inputSchema"]["properties"]["signal"]["enum"] =
+            json!(["TERM", "KILL", "INT", "BREAK"]);
+        assert!(validate_runtime_capabilities(&widened).is_ok());
+    }
+
+    #[test]
     fn private_error_is_normalized_without_private_message_or_shape() {
         let raw = json!({
             "content":[{"type":"text","text":"SECRET_PRIVATE_RUNTIME_DETAIL"}],
@@ -1392,6 +2052,102 @@ mod tests {
         assert!(rendered.contains("exit_code"));
         assert!(!rendered.contains("future_private_field"));
         assert!(!rendered.contains("SECRET_PRIVATE_SCHEMA_VALUE"));
+    }
+
+    #[test]
+    fn git_success_shape_is_rebuilt_from_typed_allowlists() {
+        let cases = [
+            (
+                GitWorkflowAction::Status,
+                json!({
+                    "structuredContent":{
+                        "ok":true,"is_repo":true,"branch":"main","ahead":0,"behind":0,
+                        "clean":false,"truncated":false,"future_private":"SECRET_TOP",
+                        "entries":[{"path":"a.txt","original_path":null,"index_status":"M","worktree_status":" ","private":"SECRET_NESTED"}]
+                    }
+                }),
+            ),
+            (
+                GitWorkflowAction::Diff,
+                json!({
+                    "structuredContent":{
+                        "ok":true,"diff":"diff --git a/a b/a","truncated":false,"warnings":["safe"],
+                        "future_private":"SECRET_TOP","files":[{"path":"a","status":"modified","binary":false,"private":"SECRET_NESTED"}]
+                    }
+                }),
+            ),
+            (
+                GitWorkflowAction::Log,
+                json!({
+                    "structuredContent":{
+                        "ok":true,"is_repo":true,"ref":"HEAD","path":".","max_count":20,"skip":0,"truncated":false,
+                        "warnings":[],"next_action":{"tool":"git_log","private":"SECRET_NAV"},"future_private":"SECRET_TOP",
+                        "commits":[{"hash":"abc","short_hash":"abc","author_name":"A","author_email":"a@example.invalid","author_date":"2026-01-01","subject":"s","private":"SECRET_NESTED"}]
+                    }
+                }),
+            ),
+            (
+                GitWorkflowAction::Show,
+                json!({
+                    "structuredContent":{
+                        "ok":true,"is_repo":true,"rev":"HEAD","content":"safe","truncated":false,"warnings":[],
+                        "future_private":"SECRET_TOP","files":[{"path":"a","status":"modified","binary":false,"private":"SECRET_NESTED"}]
+                    }
+                }),
+            ),
+            (
+                GitWorkflowAction::Blame,
+                json!({
+                    "structuredContent":{
+                        "ok":true,"is_repo":true,"path":"a","rev":null,"start_line":1,"end_line":1,"max_lines":200,
+                        "truncated":false,"warnings":[],"next_action":{"tool":"git_blame","private":"SECRET_NAV"},"future_private":"SECRET_TOP",
+                        "lines":[{"commit":"abc","original_line":1,"line":1,"author":"A","author_mail":"<a@example.invalid>","author_time":"1","summary":"s","content":"safe","private":"SECRET_NESTED"}]
+                    }
+                }),
+            ),
+        ];
+        for (action, raw) in cases {
+            let public = normalize_git_success(action, &raw);
+            let rendered = serde_json::to_string(&public).unwrap();
+            assert!(!rendered.contains("future_private"));
+            assert!(!rendered.contains("SECRET_TOP"));
+            assert!(!rendered.contains("SECRET_NESTED"));
+            assert!(!rendered.contains("SECRET_NAV"));
+            assert!(!rendered.contains("next_action"));
+        }
+    }
+
+    #[test]
+    fn image_success_content_is_rebuilt_without_private_item_fields() {
+        let raw = json!({
+            "content":[
+                {"type":"image","data":"BASE64","mimeType":"image/png","private":"SECRET_IMAGE"},
+                {"type":"text","text":"safe text","private":"SECRET_TEXT"},
+                {"type":"resource","uri":"SECRET_RESOURCE"}
+            ],
+            "structuredContent":{"ok":true,"future_private":"SECRET_STRUCTURED"},
+            "isError":false
+        });
+        let public = normalize_image_success(&raw);
+        assert_eq!(public["content"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            public["content"][0],
+            json!({"type":"image","data":"BASE64","mimeType":"image/png"})
+        );
+        assert_eq!(
+            public["content"][1],
+            json!({"type":"text","text":"safe text"})
+        );
+        let rendered = serde_json::to_string(&public).unwrap();
+        for private in [
+            "SECRET_IMAGE",
+            "SECRET_TEXT",
+            "SECRET_RESOURCE",
+            "SECRET_STRUCTURED",
+            "future_private",
+        ] {
+            assert!(!rendered.contains(private));
+        }
     }
 
     #[test]
