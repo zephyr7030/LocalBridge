@@ -2322,15 +2322,15 @@ class Runtime:
                 self.request_sessions[request_id] = session.session_id
         start_reader_threads(session)
         start_session_watchdog(session)
-        try:
-            if stdin_text:
+        if stdin_text:
+            try:
                 session.write_input(stdin_text.encode("utf-8"))
-        except ToolFailure:
-            if process.poll() is None:
-                raise
-        finally:
-            if not tty:
-                session.close_stdin()
+            except ToolFailure:
+                if process.poll() is None:
+                    raise
+            finally:
+                if not tty:
+                    session.close_stdin()
         initial_wait = max(0, min(yield_ms, 30000)) / 1000.0
 
         def finish() -> dict[str, Any]:

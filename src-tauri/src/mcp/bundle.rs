@@ -24,7 +24,7 @@ const CODING_TOOLS_FULL_ARCHIVE_SHA256: &str =
 const CODING_TOOLS_SUBSET_SHA256: &str =
     "cc2171854ce0035942b752ce88bb3aec2e286cdf9603dd51ad41734ea70dcda6";
 const CODING_TOOLS_TREE_SHA256: &str =
-    "793c2f5de976c29cffc04ef43c778820089ae3cb1a4b80947e7fba7461e927c1";
+    "2ec7c75c8f53c486fa63b6b8bf43a2539b7aa7d1ce6a9db461a29c7635bb65fe";
 const PYJWT_VERSION: &str = "2.10.1";
 const PYJWT_WHEEL_SHA256: &str = "dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb";
 

@@ -338,6 +338,29 @@ impl CodingToolsRuntime {
         }
     }
 
+    pub(crate) fn call_tool_with_request_id_and_timeout(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        request_id: Option<&Value>,
+        transport_timeout: Duration,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        if let Some(result) = handle_git_tool(&self.workspace, name, &arguments) {
+            return Ok(result);
+        }
+        match request_id {
+            Some(request_id) => self.session.call_tool_with_request_id_and_timeout(
+                name,
+                arguments,
+                request_id,
+                transport_timeout,
+            ),
+            None => self
+                .session
+                .call_tool_with_timeout(name, arguments, transport_timeout),
+        }
+    }
+
     pub(crate) fn cancellation_client(
         &self,
     ) -> Result<McpCancellationClient, CodingToolsRuntimeError> {

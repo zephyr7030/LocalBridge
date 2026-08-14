@@ -5,6 +5,7 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
 
@@ -340,6 +341,12 @@ pub struct ShellExecutionSpec {
     pub max_output_bytes: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellRuntimeInvocation {
+    pub command_line: String,
+    pub comspec: PathBuf,
+}
+
 pub struct ShellExecutor<D = SystemShellDiscovery, P = SystemShellVersionProbe> {
     resolver: ShellResolver<D, P>,
     direct: DirectProcessExecutor,
@@ -395,6 +402,37 @@ where
         })
     }
 
+    pub fn runtime_invocation(
+        &self,
+        spec: &ShellExecutionSpec,
+    ) -> Result<ShellRuntimeInvocation, ShellResolveError> {
+        let shell = self.resolver.resolve(spec.shell)?;
+        let trusted_cmd = self.resolver.resolve(ShellSelector::Cmd)?;
+        let command_line = match shell.kind {
+            ResolvedShellKind::Cmd => spec.command.clone(),
+            ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
+                let script = format!(
+                    "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{}",
+                    spec.command
+                );
+                let mut utf16le = Vec::with_capacity(script.len() * 2);
+                for unit in script.encode_utf16() {
+                    utf16le.extend_from_slice(&unit.to_le_bytes());
+                }
+                let encoded = base64::engine::general_purpose::STANDARD.encode(utf16le);
+                format!(
+                    "{} -NoLogo -NoProfile -NonInteractive -EncodedCommand {}",
+                    windows_shell_quote(shell.executable.as_os_str()),
+                    encoded
+                )
+            }
+        };
+        Ok(ShellRuntimeInvocation {
+            command_line,
+            comspec: trusted_cmd.executable,
+        })
+    }
+
     pub fn execute(
         &self,
         spec: &ShellExecutionSpec,
@@ -406,6 +444,33 @@ where
             .execute(&direct)
             .map_err(ShellExecutionError::Process)
     }
+}
+
+fn windows_shell_quote(value: &OsStr) -> String {
+    let value = value.to_string_lossy();
+    if !value.contains([' ', '\t', '"']) {
+        return value.into_owned();
+    }
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0usize;
+    for ch in value.chars() {
+        match ch {
+            '\\' => backslashes += 1,
+            '"' => {
+                quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+                quoted.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                quoted.push_str(&"\\".repeat(backslashes));
+                backslashes = 0;
+                quoted.push(ch);
+            }
+        }
+    }
+    quoted.push_str(&"\\".repeat(backslashes * 2));
+    quoted.push('"');
+    quoted
 }
 
 #[derive(Debug)]
@@ -652,5 +717,80 @@ mod tests {
             std::any::TypeId::of::<DirectProcessSpec>(),
             std::any::TypeId::of::<ShellExecutionSpec>()
         );
+    }
+
+    #[test]
+    fn powershell_runtime_invocation_encodes_user_text_for_single_parse_and_utf8_prologue() {
+        let win = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+        let cmd = PathBuf::from(r"C:\Windows\System32\cmd.exe");
+        let resolver = ShellResolver::new(
+            FakeDiscovery {
+                pwsh: vec![],
+                trusted: HashSet::new(),
+                windows: Some(win),
+                cmd: Some(cmd.clone()),
+            },
+            FakeProbe {
+                versions: HashMap::new(),
+                probed: Arc::new(Mutex::new(Vec::new())),
+            },
+        );
+        let executor = ShellExecutor::new(resolver);
+        let user = "Write-Output \"a|b\"; Write-Output \"a&b\"; Write-Output 'q|b'; Write-Output 'q&b'; Write-Output '中文输出✓'";
+        let invocation = executor
+            .runtime_invocation(&ShellExecutionSpec {
+                shell: ShellSelector::WindowsPowershell,
+                command: user.into(),
+                cwd: PathBuf::from(r"C:\work"),
+                timeout_ms: 1000,
+                max_output_bytes: 4096,
+            })
+            .unwrap();
+        assert_eq!(invocation.comspec, cmd);
+        assert!(!invocation.command_line.contains("a|b"));
+        assert!(!invocation.command_line.contains("a&b"));
+        assert!(!invocation.command_line.contains("中文输出"));
+        let encoded = invocation.command_line.split_whitespace().last().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        assert_eq!(bytes.len() % 2, 0);
+        let units = bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect::<Vec<_>>();
+        let decoded = String::from_utf16(&units).unwrap();
+        assert!(decoded.contains("OutputEncoding"));
+        assert!(decoded.ends_with(user));
+    }
+
+    #[test]
+    fn cmd_runtime_invocation_keeps_user_text_raw_and_binds_trusted_comspec() {
+        let cmd = PathBuf::from(r"C:\Windows\System32\cmd.exe");
+        let resolver = ShellResolver::new(
+            FakeDiscovery {
+                pwsh: vec![],
+                trusted: HashSet::new(),
+                windows: None,
+                cmd: Some(cmd.clone()),
+            },
+            FakeProbe {
+                versions: HashMap::new(),
+                probed: Arc::new(Mutex::new(Vec::new())),
+            },
+        );
+        let executor = ShellExecutor::new(resolver);
+        let command = "echo a^|b & echo a^&b";
+        let invocation = executor
+            .runtime_invocation(&ShellExecutionSpec {
+                shell: ShellSelector::Cmd,
+                command: command.into(),
+                cwd: PathBuf::from(r"C:\work"),
+                timeout_ms: 1000,
+                max_output_bytes: 4096,
+            })
+            .unwrap();
+        assert_eq!(invocation.comspec, cmd);
+        assert_eq!(invocation.command_line, command);
     }
 }

@@ -147,6 +147,22 @@ impl McpSession {
         self.request("tools/call", json!({"name": name, "arguments": arguments}))
     }
 
+    pub(crate) fn call_tool_with_timeout(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        transport_timeout: Duration,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        let id = self.next_id;
+        self.next_id = self.next_id.saturating_add(1);
+        self.request_with_id_and_timeout(
+            "tools/call",
+            json!({"name": name, "arguments": arguments}),
+            Value::from(id),
+            transport_timeout,
+        )
+    }
+
     pub(crate) fn call_tool_with_request_id(
         &mut self,
         name: &str,
@@ -160,6 +176,24 @@ impl McpSession {
             "tools/call",
             json!({"name": name, "arguments": arguments}),
             request_id.clone(),
+        )
+    }
+
+    pub(crate) fn call_tool_with_request_id_and_timeout(
+        &mut self,
+        name: &str,
+        arguments: Value,
+        request_id: &Value,
+        transport_timeout: Duration,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        if !valid_request_id(request_id) {
+            return Err(CodingToolsRuntimeError::ProtocolMismatch);
+        }
+        self.request_with_id_and_timeout(
+            "tools/call",
+            json!({"name": name, "arguments": arguments}),
+            request_id.clone(),
+            transport_timeout,
         )
     }
 

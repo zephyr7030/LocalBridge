@@ -2178,6 +2178,326 @@ mod tests {
     }
 
     #[test]
+    fn schema28_public_runtime_behavior_is_real_end_to_end() {
+        use base64::Engine as _;
+
+        let root = repo_root();
+        let workspace = temp_workspace();
+        fs::write(
+            workspace.join("range.txt"),
+            b"line1\nline2\nline3\nline4\nline5\nline6\n",
+        )
+        .unwrap();
+        image::RgbaImage::from_pixel(1024, 1024, image::Rgba([19, 37, 53, 255]))
+            .save(workspace.join("large.png"))
+            .unwrap();
+
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("schema28 bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("schema28 PEP ready after live private-result semantic probe");
+        let initialized = initialize(pep.port(), 700);
+        let session = initialized.session.expect("schema28 downstream session");
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+
+        let quoted = public_tool_call(
+            pep.port(),
+            &session,
+            701,
+            "exec_command",
+            json!({
+                "command":"Write-Output \"a|b\"; Write-Output \"a&b\"; Write-Output 'q|b'; Write-Output 'q&b'; Write-Output '中文输出✓'",
+                "shell":"windows_powershell",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(
+            quoted.body["result"]["isError"], false,
+            "{:#?}",
+            quoted.body
+        );
+        let quoted_output = quoted.body["result"]["structuredContent"]["data"]["output"]
+            .as_str()
+            .unwrap_or_default();
+        for literal in ["a|b", "a&b", "q|b", "q&b", "中文输出✓"] {
+            assert!(
+                quoted_output.contains(literal),
+                "missing {literal:?}: {quoted_output:?}"
+            );
+        }
+
+        let auto_utf8 = public_tool_call(
+            pep.port(),
+            &session,
+            702,
+            "exec_command",
+            json!({
+                "command":"Write-Output '自动中文✓'",
+                "shell":"auto",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(
+            auto_utf8.body["result"]["isError"], false,
+            "{:#?}",
+            auto_utf8.body
+        );
+        assert!(
+            auto_utf8.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("自动中文✓")
+        );
+
+        let running = public_tool_call(
+            pep.port(),
+            &session,
+            703,
+            "exec_command",
+            json!({
+                "command":"Start-Sleep -Milliseconds 300; Write-Output 'poll-1'; Start-Sleep -Milliseconds 600; Write-Output 'poll-2'; Start-Sleep -Milliseconds 600; Write-Output 'poll-3'; $line=[Console]::In.ReadLine(); Write-Output ('write:'+ $line); Start-Sleep -Seconds 30",
+                "shell":"windows_powershell",
+                "yield_time_ms":0,
+                "timeout_ms":45000
+            }),
+        );
+        assert_eq!(
+            running.body["result"]["structuredContent"]["data"]["status"], "running",
+            "{:#?}",
+            running.body
+        );
+        let public_session = running.body["result"]["structuredContent"]["data"]["session_id"]
+            .as_str()
+            .expect("schema28 public session")
+            .to_string();
+
+        let mut nonempty_polls = Vec::new();
+        let poll_deadline = Instant::now() + Duration::from_secs(6);
+        let mut poll_id = 710u64;
+        while nonempty_polls.len() < 3 && Instant::now() < poll_deadline {
+            thread::sleep(Duration::from_millis(120));
+            let poll = public_tool_call(
+                pep.port(),
+                &session,
+                poll_id,
+                "command_control",
+                json!({"action":"poll","session_id":public_session,"wait_ms":0}),
+            );
+            poll_id += 1;
+            assert!(poll.body.get("error").is_none(), "{:#?}", poll.body);
+            let output = poll.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            if !output.is_empty() {
+                nonempty_polls.push(output);
+            }
+        }
+        assert_eq!(
+            nonempty_polls.len(),
+            3,
+            "incremental polls: {nonempty_polls:#?}"
+        );
+        for (index, marker) in ["poll-1", "poll-2", "poll-3"].into_iter().enumerate() {
+            assert!(
+                nonempty_polls[index].contains(marker),
+                "{nonempty_polls:#?}"
+            );
+            for other in ["poll-1", "poll-2", "poll-3"] {
+                if other != marker {
+                    assert!(
+                        !nonempty_polls[index].contains(other),
+                        "{nonempty_polls:#?}"
+                    );
+                }
+            }
+        }
+        let empty_poll = public_tool_call(
+            pep.port(),
+            &session,
+            poll_id,
+            "command_control",
+            json!({"action":"poll","session_id":public_session,"wait_ms":0}),
+        );
+        assert_eq!(
+            empty_poll.body["result"]["structuredContent"]["data"]["output"], "",
+            "poll output replayed: {:#?}",
+            empty_poll.body
+        );
+
+        let written = public_tool_call(
+            pep.port(),
+            &session,
+            poll_id + 1,
+            "command_control",
+            json!({
+                "action":"write",
+                "session_id":public_session,
+                "chars":"after-start\n",
+                "wait_ms":1000
+            }),
+        );
+        assert_eq!(
+            written.body["result"]["isError"], false,
+            "{:#?}",
+            written.body
+        );
+        assert!(
+            written.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("write:after-start"),
+            "{:#?}",
+            written.body
+        );
+
+        let killed = public_tool_call(
+            pep.port(),
+            &session,
+            poll_id + 2,
+            "command_control",
+            json!({"action":"kill","session_id":public_session,"signal":"TERM","wait_ms":1000}),
+        );
+        assert_eq!(
+            killed.body["result"]["structuredContent"]["error"]["code"], "ProcessCancelled",
+            "healthy kill regressed: {:#?}",
+            killed.body
+        );
+        assert_eq!(
+            killed.body["result"]["structuredContent"]["data"]["status"],
+            "cancelled"
+        );
+        for id in [poll_id + 3, poll_id + 4] {
+            let terminal = public_tool_call(
+                pep.port(),
+                &session,
+                id,
+                "command_control",
+                json!({"action":"poll","session_id":public_session}),
+            );
+            assert_eq!(
+                terminal.body["result"]["structuredContent"]["error"]["code"], "ProcessCancelled",
+                "terminal regressed to unavailable: {:#?}",
+                terminal.body
+            );
+            assert_eq!(
+                terminal.body["result"]["structuredContent"]["data"]["status"],
+                "cancelled"
+            );
+        }
+        let second_terminal = public_tool_call(
+            pep.port(),
+            &session,
+            poll_id + 5,
+            "command_control",
+            json!({"action":"poll","session_id":public_session}),
+        );
+        assert_eq!(
+            second_terminal.body["result"]["structuredContent"]["data"]["output"],
+            ""
+        );
+
+        for (id, size) in [(760u64, 512u32), (761u64, 64u32)] {
+            let viewed = public_tool_call(
+                pep.port(),
+                &session,
+                id,
+                "view_image",
+                json!({
+                    "path":"large.png",
+                    "max_width":size,
+                    "max_height":size,
+                    "auto_resize":true,
+                    "max_bytes":10485760
+                }),
+            );
+            assert_eq!(
+                viewed.body["result"]["isError"], false,
+                "{:#?}",
+                viewed.body
+            );
+            let data = &viewed.body["result"]["structuredContent"]["data"];
+            assert_eq!(data["original_width"], 1024);
+            assert_eq!(data["original_height"], 1024);
+            assert_eq!(data["width"], size);
+            assert_eq!(data["height"], size);
+            assert_eq!(data["resized"], true);
+            let encoded = viewed.body["result"]["content"][0]["data"]
+                .as_str()
+                .expect("public image data");
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap();
+            let decoded = image::load_from_memory(&bytes).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), (size, size));
+        }
+
+        let one_line = public_tool_call(
+            pep.port(),
+            &session,
+            770,
+            "document_workflow",
+            json!({"action":"inspect","path":"range.txt","start_line":5,"end_line":5}),
+        );
+        assert_eq!(
+            one_line.body["result"]["structuredContent"]["data"]["text"],
+            "line5\n"
+        );
+        assert_eq!(
+            one_line.body["result"]["structuredContent"]["data"]["start_line"],
+            5
+        );
+        assert_eq!(
+            one_line.body["result"]["structuredContent"]["data"]["end_line"],
+            5
+        );
+        let three_lines = public_tool_call(
+            pep.port(),
+            &session,
+            771,
+            "document_workflow",
+            json!({"action":"inspect","path":"range.txt","start_line":1,"end_line":3}),
+        );
+        assert_eq!(
+            three_lines.body["result"]["structuredContent"]["data"]["text"],
+            "line1\nline2\nline3\n"
+        );
+        let invalid_range = public_tool_call(
+            pep.port(),
+            &session,
+            772,
+            "document_workflow",
+            json!({"action":"inspect","path":"range.txt","start_line":5,"end_line":3}),
+        );
+        assert_eq!(
+            invalid_range.body["result"]["structuredContent"]["error"]["code"], "InvalidArgument",
+            "{:#?}",
+            invalid_range.body
+        );
+
+        let mut coding = pep.stop().expect("schema28 PEP stops");
+        coding.stop().expect("schema28 Coding Tools runtime stops");
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
     fn actual_bundled_mcp_is_reached_only_through_loopback_policy_server() {
         let root = repo_root();
         let workspace = temp_workspace();

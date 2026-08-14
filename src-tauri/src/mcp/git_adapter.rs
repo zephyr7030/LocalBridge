@@ -603,22 +603,22 @@ fn git_blame(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -
         .get("end_line")
         .and_then(Value::as_u64)
         .map(|value| value as usize);
-    let end_line =
-        requested_end.unwrap_or_else(|| start_line.saturating_add(max_lines).saturating_sub(1));
-    if end_line < start_line {
+    let max_end = start_line.saturating_add(max_lines).saturating_sub(1);
+    let requested_end = requested_end.unwrap_or(max_end);
+    if requested_end < start_line {
         return Some(tool_error(
             "INVALID_ARGUMENT",
             "end_line 不能小于 start_line",
         ));
     }
-    let probe_end = end_line.saturating_add(1);
+    let end_line = requested_end.min(max_end);
     let mut args = vec![
         os("--no-pager"),
         os("blame"),
         os("--line-porcelain"),
         os("--no-textconv"),
         os("-L"),
-        os(format!("{start_line},{probe_end}")),
+        os(format!("{start_line},{end_line}")),
     ];
     if let Some(reference) = reference {
         args.push(os(reference));
@@ -631,7 +631,7 @@ fn git_blame(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -
         Err(message) => return Some(tool_error("GIT_ERROR", &message)),
     };
     let mut lines = parse_blame_porcelain(&String::from_utf8_lossy(&output.output));
-    let truncated = output.truncated || lines.len() > max_lines;
+    let truncated = output.truncated || requested_end > end_line || lines.len() > max_lines;
     lines.truncate(max_lines);
     let actual_end = lines
         .last()
@@ -1042,4 +1042,97 @@ fn is_verbatim_path(path: &Path) -> bool {
 #[cfg(not(windows))]
 fn is_verbatim_path(_path: &Path) -> bool {
     false
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_repo() -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-schema28-blame-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let executable = find_git_executable().expect("git.exe for schema28 blame fixture");
+        let args = args.iter().map(os).collect::<Vec<_>>();
+        let output =
+            run_bounded_command(&executable, &args, root, Duration::from_secs(5), 64 * 1024)
+                .unwrap();
+        assert_eq!(
+            output.exit_code,
+            0,
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&output.output)
+        );
+    }
+
+    #[test]
+    fn blame_ranges_are_one_based_inclusive_and_invalid_reverse_range_fails_closed() {
+        let root = temp_repo();
+        git(&root, &["init"]);
+        git(&root, &["config", "user.email", "schema28@example.invalid"]);
+        git(&root, &["config", "user.name", "LocalBridge Schema28"]);
+        git(&root, &["config", "core.autocrlf", "false"]);
+        fs::write(
+            root.join("blame.txt"),
+            b"line1\nline2\nline3\nline4\nline5\nline6\n",
+        )
+        .unwrap();
+        git(&root, &["add", "blame.txt"]);
+        git(&root, &["commit", "-m", "schema28 blame fixture"]);
+
+        let one = handle_git_tool(
+            &root,
+            "git_blame",
+            &json!({"path":"blame.txt","start_line":5,"end_line":5,"max_lines":200}),
+        )
+        .unwrap();
+        assert_eq!(one["isError"], false, "{one:#?}");
+        let rows = one["structuredContent"]["lines"].as_array().unwrap();
+        assert_eq!(rows.len(), 1, "{one:#?}");
+        assert_eq!(rows[0]["line"], 5);
+        assert_eq!(rows[0]["content"], "line5");
+        assert_eq!(one["structuredContent"]["start_line"], 5);
+        assert_eq!(one["structuredContent"]["end_line"], 5);
+
+        let three = handle_git_tool(
+            &root,
+            "git_blame",
+            &json!({"path":"blame.txt","start_line":1,"end_line":3,"max_lines":200}),
+        )
+        .unwrap();
+        let rows = three["structuredContent"]["lines"].as_array().unwrap();
+        assert_eq!(rows.len(), 3, "{three:#?}");
+        assert_eq!(
+            rows.iter()
+                .map(|row| row["line"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        let invalid = handle_git_tool(
+            &root,
+            "git_blame",
+            &json!({"path":"blame.txt","start_line":5,"end_line":3,"max_lines":200}),
+        )
+        .unwrap();
+        assert_eq!(invalid["isError"], true);
+        assert_eq!(
+            invalid["structuredContent"]["error"]["code"],
+            "INVALID_ARGUMENT"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }
