@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Map, Value, json};
 
@@ -34,6 +35,7 @@ pub enum FacadeErrorCode {
     ProcessFailed,
     ProcessTimedOut,
     ProcessCancelled,
+    SessionUnavailable,
     OutputTruncated,
     RuntimeUnavailable,
     RuntimeProtocolMismatch,
@@ -51,6 +53,7 @@ impl FacadeErrorCode {
             Self::ProcessFailed => "ProcessFailed",
             Self::ProcessTimedOut => "ProcessTimedOut",
             Self::ProcessCancelled => "ProcessCancelled",
+            Self::SessionUnavailable => "SessionUnavailable",
             Self::OutputTruncated => "OutputTruncated",
             Self::RuntimeUnavailable => "RuntimeUnavailable",
             Self::RuntimeProtocolMismatch => "RuntimeProtocolMismatch",
@@ -143,7 +146,25 @@ fn public_tool_schema(name: &str) -> Value {
                 "type":"object",
                 "properties":{
                     "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"]},
-                    "objective":{"type":"string"}
+                    "objective":{"type":"string"},
+                    "patch":{"type":"string","minLength":1},
+                    "commands":{
+                        "type":"array","maxItems":8,
+                        "items":{
+                            "type":"object",
+                            "properties":{
+                                "command":{"type":"string","minLength":1},
+                                "shell":{"type":"string","enum":["auto","powershell","pwsh","windows_powershell","cmd"],"default":"auto"},
+                                "workdir":{"type":"string","default":"."},
+                                "timeout_ms":{"type":"integer","minimum":1,"maximum":600000,"default":30000},
+                                "yield_time_ms":{"type":"integer","minimum":0,"maximum":30000,"default":10000},
+                                "max_output_bytes":{"type":"integer","minimum":1,"maximum":1048576,"default":65536},
+                                "stdin":{"type":"string"}
+                            },
+                            "required":["command"],
+                            "additionalProperties":false
+                        }
+                    }
                 },
                 "required":["action"],
                 "additionalProperties":false
@@ -221,13 +242,14 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "document_workflow" => (
-            "Inspect or mutate workspace documents through a stable LocalBridge workflow.",
+            "Inspect, create, convert, or rebuild UTF-8 workspace documents through a stable LocalBridge workflow.",
             json!({
                 "type":"object",
                 "properties":{
                     "action":{"type":"string","enum":["inspect","create","convert","rebuild"]},
                     "path":{"type":"string"},
-                    "patch":{"type":"string"},
+                    "source":{"type":"string"},
+                    "content":{"type":"string"},
                     "start_line":{"type":"integer","minimum":1},
                     "end_line":{"type":"integer","minimum":1},
                     "max_lines":{"type":"integer","minimum":1},
@@ -708,24 +730,136 @@ pub trait WorkspaceRuntimeAdapter {
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError>;
+    fn apply_document_patch(
+        &mut self,
+        arguments: Value,
+        request_id: Option<&Value>,
+    ) -> Result<Value, FacadeError>;
     fn inspect_image(
         &mut self,
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError>;
     fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError>;
+    fn reap_command_sessions(&mut self);
+}
+
+static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone)]
+struct PublicCommandSession {
+    private_session_id: String,
+    terminal: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct PublicOutputHandle {
+    private_output_ref: String,
+}
+
+#[derive(Debug, Default)]
+struct PublicCommandSessions {
+    sessions: HashMap<String, PublicCommandSession>,
+    private_sessions: HashMap<String, String>,
+    outputs: HashMap<String, PublicOutputHandle>,
+    private_outputs: HashMap<String, String>,
+}
+
+impl PublicCommandSessions {
+    fn public_session_for_private(&mut self, private_session_id: &str) -> String {
+        if let Some(public) = self.private_sessions.get(private_session_id) {
+            return public.clone();
+        }
+        let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
+        let public = format!("lb-session-{generation:x}");
+        self.private_sessions
+            .insert(private_session_id.to_string(), public.clone());
+        self.sessions.insert(
+            public.clone(),
+            PublicCommandSession {
+                private_session_id: private_session_id.to_string(),
+                terminal: None,
+            },
+        );
+        public
+    }
+
+    fn public_output_for_private(&mut self, private_output_ref: &str) -> String {
+        if let Some(public) = self.private_outputs.get(private_output_ref) {
+            return public.clone();
+        }
+        let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
+        let public = format!("lb-output-{generation:x}");
+        self.private_outputs
+            .insert(private_output_ref.to_string(), public.clone());
+        self.outputs.insert(
+            public.clone(),
+            PublicOutputHandle {
+                private_output_ref: private_output_ref.to_string(),
+            },
+        );
+        public
+    }
+
+    fn terminal(&self, public_session_id: &str) -> Option<Value> {
+        self.sessions
+            .get(public_session_id)
+            .and_then(|session| session.terminal.clone())
+    }
+
+    fn private_session(&self, public_session_id: &str) -> Option<String> {
+        self.sessions
+            .get(public_session_id)
+            .map(|session| session.private_session_id.clone())
+    }
+
+    fn private_output(&self, public_output_ref: &str) -> Option<String> {
+        self.outputs
+            .get(public_output_ref)
+            .map(|output| output.private_output_ref.clone())
+    }
+
+    fn mark_terminal(&mut self, public_session_id: &str, result: Value) {
+        if let Some(session) = self.sessions.get_mut(public_session_id) {
+            if session.terminal.is_none() {
+                session.terminal = Some(result);
+            }
+        }
+    }
+
+    fn mark_all_running_lost(&mut self) {
+        let terminal = session_unavailable().to_mcp_result();
+        for session in self.sessions.values_mut() {
+            if session.terminal.is_none() {
+                session.terminal = Some(terminal.clone());
+            }
+        }
+    }
+
+    fn running_sessions(&self) -> Vec<(String, String)> {
+        self.sessions
+            .iter()
+            .filter(|(_, session)| session.terminal.is_none())
+            .map(|(public, session)| (public.clone(), session.private_session_id.clone()))
+            .collect()
+    }
 }
 
 pub struct CodingToolsRuntimeAdapter {
     runtime: CodingToolsRuntime,
+    workspace: PathBuf,
     shell_executor: ShellExecutor,
+    public_commands: PublicCommandSessions,
 }
 
 impl CodingToolsRuntimeAdapter {
     fn new(runtime: CodingToolsRuntime) -> Self {
+        let workspace = runtime.workspace().to_path_buf();
         Self {
             runtime,
+            workspace,
             shell_executor: ShellExecutor::default(),
+            public_commands: PublicCommandSessions::default(),
         }
     }
 
@@ -765,14 +899,26 @@ impl CodingToolsRuntimeAdapter {
 impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError> {
         let catalog = self.runtime.list_tools().map_err(normalize_runtime_error)?;
-        validate_runtime_capabilities(&catalog)
+        validate_runtime_capabilities(&catalog)?;
+        let probe = self.private_call("get_default_cwd", json!({}), None)?;
+        validate_workspace_context_probe(&probe, &self.workspace)
     }
 
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError> {
         let cwd = self.private_call("get_default_cwd", json!({}), request_id)?;
+        validate_workspace_context_probe(&cwd, &self.workspace)?;
+        let structured = cwd
+            .get("structuredContent")
+            .and_then(Value::as_object)
+            .ok_or_else(runtime_capability_mismatch)?;
+        let default_cwd = structured
+            .get("default_cwd")
+            .and_then(Value::as_str)
+            .ok_or_else(runtime_capability_mismatch)?;
         let data = json!({
             "api_version": AGENT_API_VERSION,
-            "workspace": extract_stable_string(&cwd, &["cwd", "path"]).unwrap_or_default(),
+            "workspace": self.workspace.to_string_lossy(),
+            "default_cwd": default_cwd,
             "runtime": "ready"
         });
         Ok(stable_success(data, "LocalBridge workspace context ready"))
@@ -799,7 +945,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             private["stdin"] = Value::String(stdin);
         }
         let raw = self.private_call("exec_command", private, request_id)?;
-        Ok(normalize_command_success(&raw))
+        Ok(self.normalize_command_result(&raw, None, None))
     }
 
     fn control_command(
@@ -808,13 +954,82 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
+        let object = arguments.as_object().ok_or_else(invalid_argument)?;
+        if action == CommandControlAction::Read {
+            let public_output_ref = required_string(object, "output_ref")?;
+            let private_output_ref = self
+                .public_commands
+                .private_output(public_output_ref)
+                .ok_or_else(session_unavailable)?;
+            let mut private = Map::new();
+            private.insert("output_ref".into(), Value::String(private_output_ref));
+            for key in ["stream", "offset", "limit"] {
+                if let Some(value) = object.get(key) {
+                    private.insert(key.into(), value.clone());
+                }
+            }
+            let raw = self.private_call("read_output", Value::Object(private), request_id)?;
+            return Ok(self.normalize_read_output(&raw, public_output_ref));
+        }
+
+        let public_session_id = required_string(object, "session_id")?.to_string();
+        if let Some(terminal) = self.public_commands.terminal(&public_session_id) {
+            return if action == CommandControlAction::Poll {
+                Ok(terminal)
+            } else {
+                Err(session_unavailable())
+            };
+        }
+        let private_session_id = self
+            .public_commands
+            .private_session(&public_session_id)
+            .ok_or_else(session_unavailable)?;
+        let mut private = Map::new();
+        private.insert("session_id".into(), Value::String(private_session_id));
         let private_name = match action {
-            CommandControlAction::Poll | CommandControlAction::Read => "read_output",
-            CommandControlAction::Write => "write_stdin",
-            CommandControlAction::Kill => "kill_session",
+            CommandControlAction::Poll => {
+                private.insert("chars".into(), Value::String(String::new()));
+                private.insert(
+                    "yield_time_ms".into(),
+                    Value::from(object.get("wait_ms").and_then(Value::as_u64).unwrap_or(0)),
+                );
+                "write_stdin"
+            }
+            CommandControlAction::Write => {
+                let chars = object
+                    .get("chars")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(invalid_argument)?;
+                private.insert("chars".into(), Value::String(chars.to_string()));
+                private.insert(
+                    "yield_time_ms".into(),
+                    Value::from(object.get("wait_ms").and_then(Value::as_u64).unwrap_or(0)),
+                );
+                "write_stdin"
+            }
+            CommandControlAction::Kill => {
+                if let Some(signal) = object.get("signal") {
+                    private.insert("signal".into(), signal.clone());
+                }
+                if let Some(wait_ms) = object.get("wait_ms") {
+                    private.insert("wait_ms".into(), wait_ms.clone());
+                }
+                "kill_session"
+            }
+            CommandControlAction::Read => unreachable!(),
         };
-        let raw = self.private_call(private_name, arguments, request_id)?;
-        Ok(normalize_command_success(&raw))
+        match self.private_call(private_name, Value::Object(private), request_id) {
+            Ok(raw) => {
+                Ok(self.normalize_command_result(&raw, Some(&public_session_id), Some(action)))
+            }
+            Err(error) if error.code == FacadeErrorCode::SessionUnavailable => {
+                self.public_commands
+                    .mark_terminal(&public_session_id, session_unavailable().to_mcp_result());
+                Err(session_unavailable())
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn git_workflow(
@@ -840,9 +1055,42 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
         let raw = self.private_call("read_file", arguments, request_id)?;
+        let structured = raw
+            .get("structuredContent")
+            .and_then(Value::as_object)
+            .ok_or_else(runtime_capability_mismatch)?;
+        let text = structured
+            .get("content")
+            .and_then(Value::as_str)
+            .ok_or_else(runtime_capability_mismatch)?;
+        let mut data = Map::new();
+        data.insert("text".into(), Value::String(text.to_string()));
+        for key in [
+            "path",
+            "encoding",
+            "start_line",
+            "end_line",
+            "total_lines",
+            "total_bytes",
+            "bytes_read",
+            "truncated",
+        ] {
+            if let Some(value) = structured.get(key) {
+                data.insert(key.into(), value.clone());
+            }
+        }
+        Ok(stable_success(Value::Object(data), "Document inspected"))
+    }
+
+    fn apply_document_patch(
+        &mut self,
+        arguments: Value,
+        request_id: Option<&Value>,
+    ) -> Result<Value, FacadeError> {
+        self.private_call("apply_patch", arguments, request_id)?;
         Ok(stable_success(
-            json!({"text": first_text(&raw).unwrap_or_default()}),
-            "Document inspected",
+            json!({"applied":true}),
+            "Document workflow applied",
         ))
     }
 
@@ -857,6 +1105,226 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
 
     fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
         self.runtime.root_is_running().map(Some)
+    }
+
+    fn reap_command_sessions(&mut self) {
+        match self.runtime.root_is_running() {
+            Ok(true) => {}
+            Ok(false) | Err(_) => {
+                self.public_commands.mark_all_running_lost();
+                return;
+            }
+        }
+        let running = self.public_commands.running_sessions();
+        for (public_session_id, private_session_id) in running {
+            let private = json!({
+                "session_id": private_session_id,
+                "chars": "",
+                "yield_time_ms": 0,
+                "max_output_bytes": 65536
+            });
+            match self.private_call("write_stdin", private, None) {
+                Ok(raw) => {
+                    let _ = self.normalize_command_result(
+                        &raw,
+                        Some(&public_session_id),
+                        Some(CommandControlAction::Poll),
+                    );
+                }
+                Err(error) if error.code == FacadeErrorCode::SessionUnavailable => {
+                    self.public_commands
+                        .mark_terminal(&public_session_id, session_unavailable().to_mcp_result());
+                }
+                Err(_) => match self.runtime.root_is_running() {
+                    Ok(true) => {}
+                    Ok(false) | Err(_) => self
+                        .public_commands
+                        .mark_terminal(&public_session_id, session_unavailable().to_mcp_result()),
+                },
+            }
+        }
+    }
+}
+
+impl CodingToolsRuntimeAdapter {
+    fn normalize_command_result(
+        &mut self,
+        raw: &Value,
+        existing_public_session: Option<&str>,
+        _action: Option<CommandControlAction>,
+    ) -> Value {
+        let structured = raw.get("structuredContent").and_then(Value::as_object);
+        let private_session_id = structured
+            .and_then(|object| object.get("session_id"))
+            .and_then(Value::as_str);
+        let public_session_id = existing_public_session.map(str::to_string).or_else(|| {
+            private_session_id
+                .map(|private| self.public_commands.public_session_for_private(private))
+        });
+        let private_status = structured
+            .and_then(|object| object.get("status"))
+            .and_then(Value::as_str)
+            .unwrap_or("exited");
+        let exit_code = structured
+            .and_then(|object| object.get("exit_code"))
+            .and_then(Value::as_i64);
+        let timed_out = structured
+            .and_then(|object| object.get("timed_out"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let public_status = command_public_status(private_status, exit_code, timed_out);
+
+        let mut data = Map::new();
+        data.insert("status".into(), Value::String(public_status.into()));
+        if let Some(exit_code) = exit_code {
+            data.insert("exit_code".into(), Value::from(exit_code));
+        }
+        if let Some(session_id) = public_session_id.as_ref() {
+            data.insert("session_id".into(), Value::String(session_id.clone()));
+        }
+        if let Some(value) = structured.and_then(|object| object.get("truncated")) {
+            if value.is_boolean() {
+                data.insert("truncated".into(), value.clone());
+            }
+        }
+        data.insert("output".into(), Value::String(safe_command_output(raw)));
+        self.map_private_output_refs(structured, &mut data);
+
+        let result = match public_status {
+            "failed" => stable_command_error(FacadeErrorCode::ProcessFailed, "命令执行失败", data),
+            "timed_out" => {
+                stable_command_error(FacadeErrorCode::ProcessTimedOut, "命令执行超时", data)
+            }
+            "cancelled" => {
+                stable_command_error(FacadeErrorCode::ProcessCancelled, "命令已取消", data)
+            }
+            _ => stable_success(Value::Object(data), "Command completed"),
+        };
+        if public_status != "running" {
+            if let Some(session_id) = public_session_id {
+                self.public_commands
+                    .mark_terminal(&session_id, result.clone());
+            }
+        }
+        result
+    }
+
+    fn normalize_read_output(&self, raw: &Value, public_output_ref: &str) -> Value {
+        let structured = raw.get("structuredContent").and_then(Value::as_object);
+        let mut data = Map::new();
+        data.insert(
+            "output_ref".into(),
+            Value::String(public_output_ref.to_string()),
+        );
+        for key in [
+            "stream",
+            "offset",
+            "requested_offset",
+            "limit",
+            "content",
+            "next_offset",
+            "truncated",
+        ] {
+            if let Some(value) = structured.and_then(|object| object.get(key)) {
+                data.insert(key.into(), value.clone());
+            }
+        }
+        stable_success(Value::Object(data), "Command output read")
+    }
+
+    fn map_private_output_refs(
+        &mut self,
+        structured: Option<&Map<String, Value>>,
+        data: &mut Map<String, Value>,
+    ) {
+        let Some(structured) = structured else {
+            return;
+        };
+        if let Some(private) = structured.get("output_ref").and_then(Value::as_str) {
+            data.insert(
+                "output_ref".into(),
+                Value::String(self.public_commands.public_output_for_private(private)),
+            );
+        }
+        if let Some(private_refs) = structured.get("output_refs").and_then(Value::as_object) {
+            let mut public_refs = Map::new();
+            for stream in ["stdout", "stderr"] {
+                if let Some(private) = private_refs.get(stream).and_then(Value::as_str) {
+                    public_refs.insert(
+                        stream.into(),
+                        Value::String(self.public_commands.public_output_for_private(private)),
+                    );
+                }
+            }
+            if !public_refs.is_empty() {
+                data.insert("output_refs".into(), Value::Object(public_refs));
+            }
+        }
+    }
+}
+
+fn command_public_status(
+    private_status: &str,
+    exit_code: Option<i64>,
+    timed_out: bool,
+) -> &'static str {
+    if timed_out || private_status == "timeout" {
+        "timed_out"
+    } else if matches!(private_status, "terminated" | "killed") {
+        "cancelled"
+    } else if matches!(private_status, "terminating" | "running") {
+        "running"
+    } else if exit_code.is_some_and(|code| code != 0) {
+        "failed"
+    } else {
+        "completed"
+    }
+}
+
+fn validate_workspace_context_probe(
+    raw: &Value,
+    expected_workspace: &Path,
+) -> Result<(), FacadeError> {
+    let structured = raw
+        .get("structuredContent")
+        .and_then(Value::as_object)
+        .ok_or_else(runtime_capability_mismatch)?;
+    let workspace = structured
+        .get("workspace")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(runtime_capability_mismatch)?;
+    let default_cwd = structured
+        .get("default_cwd")
+        .and_then(Value::as_str)
+        .ok_or_else(runtime_capability_mismatch)?;
+    if !expected_workspace.is_absolute()
+        || expected_workspace.to_string_lossy().starts_with(r"\\?\")
+        || expected_workspace.to_string_lossy().starts_with("//?/")
+        || !Path::new(workspace).is_absolute()
+        || workspace.starts_with(r"\\?\")
+        || workspace.starts_with("//?/")
+        || !ordinary_workspace_paths_match(expected_workspace, workspace)
+        || !workspace_relative_path_valid(default_cwd)
+    {
+        return Err(runtime_capability_mismatch());
+    }
+    Ok(())
+}
+
+fn ordinary_workspace_paths_match(expected: &Path, actual: &str) -> bool {
+    fn normalize(value: &str) -> String {
+        value.replace('/', "\\").trim_end_matches('\\').to_string()
+    }
+    let expected = normalize(&expected.to_string_lossy());
+    let actual = normalize(actual);
+    #[cfg(windows)]
+    {
+        expected.eq_ignore_ascii_case(&actual)
+    }
+    #[cfg(not(windows))]
+    {
+        expected == actual
     }
 }
 
@@ -921,6 +1389,34 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         self.adapter.root_is_running()
     }
 
+    pub fn reap_command_sessions(&mut self) {
+        self.adapter.reap_command_sessions();
+    }
+
+    pub fn authorize_public_request(
+        &self,
+        mode: PermissionMode,
+        name: &str,
+        arguments: &Value,
+    ) -> Result<(), FacadeCallError> {
+        if !self.registry.contains(name) {
+            return Err(FacadeCallError::Denied(FacadeDenied {
+                reason: DenyReason::UnknownTool,
+                capability: Capability::Unknown,
+            }));
+        }
+        let decision = self.policy.decide_public(mode, name, arguments);
+        if !decision.allowed {
+            return Err(FacadeCallError::Denied(FacadeDenied {
+                reason: decision
+                    .deny_reason
+                    .expect("denied policy decision contains reason"),
+                capability: decision.descriptor.capability,
+            }));
+        }
+        Ok(())
+    }
+
     pub fn call_tool<F>(
         &mut self,
         mode: PermissionMode,
@@ -932,38 +1428,30 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
     where
         F: FnMut(CurrentTaskStatus),
     {
-        if !self.registry.contains(name) {
-            return Err(FacadeCallError::Denied(FacadeDenied {
-                reason: DenyReason::UnknownTool,
-                capability: Capability::Unknown,
-            }));
-        }
-        let decision = self.policy.decide_public(mode, name, &arguments);
         let kind = public_task_kind(name, &arguments);
         let summary = public_safe_summary(name, &arguments);
-        if !decision.allowed {
+        if let Err(FacadeCallError::Denied(denied)) =
+            self.authorize_public_request(mode, name, &arguments)
+        {
             project(
                 CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
                     .expect("Blocked is valid"),
             );
             project(CurrentTaskStatus::Idle);
-            return Err(FacadeCallError::Denied(FacadeDenied {
-                reason: decision
-                    .deny_reason
-                    .expect("denied policy decision contains reason"),
-                capability: decision.descriptor.capability,
-            }));
+            return Err(FacadeCallError::Denied(denied));
         }
-        if public_contains_verbatim_execution_path(name, &arguments) {
+        if !public_workspace_paths_valid(name, &arguments) {
             project(
                 CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
                     .expect("Blocked is valid"),
             );
             project(CurrentTaskStatus::Idle);
-            return Err(FacadeCallError::Denied(FacadeDenied {
-                reason: DenyReason::VerbatimExecutionPath,
-                capability: decision.descriptor.capability,
-            }));
+            return Ok(FacadeError::new(
+                FacadeErrorCode::WorkspaceDenied,
+                "工作区路径参数无效",
+                false,
+            )
+            .to_mcp_result());
         }
         project(
             CurrentTaskStatus::project(kind, summary, TaskExecutionState::Running)
@@ -1001,15 +1489,15 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
     ) -> Result<Value, FacadeError> {
         match name {
             "workspace_context" => self.workspace_context(request_id),
+            "agent_workflow" => self.agent_workflow(arguments, request_id),
             "exec_command" => self.exec_command(arguments, request_id),
             "command_control" => self.command_control(arguments, request_id),
             "git_workflow" => self.git_workflow(arguments, request_id),
             "document_workflow" => self.document_workflow(arguments, request_id),
             "view_image" => self.view_image(arguments, request_id),
-            "agent_workflow" | "task_control" => Err(FacadeError::new(
-                FacadeErrorCode::InvalidArgument,
-                "该 LocalBridge facade 动作当前不可用",
-                false,
+            "task_control" => Ok(stable_success(
+                json!({"delegated_to":"localbridge_server_task_controller"}),
+                "Task control delegated",
             )),
             _ => Err(FacadeError::new(
                 FacadeErrorCode::CapabilityDenied,
@@ -1021,6 +1509,152 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
 
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError> {
         self.adapter.workspace_context(request_id)
+    }
+
+    fn agent_workflow(
+        &mut self,
+        arguments: Value,
+        request_id: Option<&Value>,
+    ) -> Result<Value, FacadeError> {
+        let object = object_args(&arguments)?;
+        let action = required_string(object, "action")?;
+        if !matches!(
+            action,
+            "diagnose"
+                | "bugfix"
+                | "feature"
+                | "refactor"
+                | "test_failure"
+                | "build_release"
+                | "document"
+                | "resume"
+                | "custom"
+        ) {
+            return Err(invalid_argument());
+        }
+        let patch = object.get("patch").and_then(Value::as_str);
+        let commands = object
+            .get("commands")
+            .map(|value| value.as_array().ok_or_else(invalid_argument))
+            .transpose()?
+            .cloned()
+            .unwrap_or_default();
+        if patch.is_some() && !agent_action_allows_write(action) {
+            return Err(invalid_argument());
+        }
+        if !commands.is_empty() && !agent_action_allows_process(action) {
+            return Err(invalid_argument());
+        }
+        let workspace = self.adapter.workspace_context(request_id)?;
+        let git_before =
+            self.adapter
+                .git_workflow(GitWorkflowAction::Status, json!({}), request_id)?;
+
+        let mut applied_patch = false;
+        if let Some(patch) = patch {
+            if !public_patch_targets_valid(patch) {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::WorkspaceDenied,
+                    "补丁目标不在当前工作区内",
+                    false,
+                ));
+            }
+            self.adapter
+                .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
+            applied_patch = true;
+        }
+
+        let mut command_results = Vec::new();
+        for command in commands {
+            let command = command.as_object().ok_or_else(invalid_argument)?;
+            let text = required_string(command, "command")?;
+            let shell: ShellSelector = serde_json::from_value(
+                command
+                    .get("shell")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("auto".into())),
+            )
+            .map_err(|_| invalid_argument())?;
+            let workdir = command
+                .get("workdir")
+                .and_then(Value::as_str)
+                .unwrap_or(".");
+            if !workspace_relative_path_valid(workdir) {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::WorkspaceDenied,
+                    "工作区路径参数无效",
+                    false,
+                ));
+            }
+            let result = self.adapter.execute_shell(
+                ShellCommandRequest {
+                    execution: ShellExecutionSpec {
+                        shell,
+                        command: text.to_string(),
+                        cwd: Path::new(workdir).to_path_buf(),
+                        timeout_ms: command
+                            .get("timeout_ms")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(30_000),
+                        max_output_bytes: command
+                            .get("max_output_bytes")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(65_536) as usize,
+                    },
+                    yield_time_ms: command
+                        .get("yield_time_ms")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(10_000),
+                    stdin: command
+                        .get("stdin")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                },
+                request_id,
+            )?;
+            if result.get("isError").and_then(Value::as_bool) == Some(true) {
+                return Ok(result);
+            }
+            let data = stable_data(&result);
+            let running = data.get("status").and_then(Value::as_str) == Some("running");
+            command_results.push(data.clone());
+            if running {
+                return Ok(stable_success(
+                    json!({
+                        "action":action,
+                        "objective":object.get("objective").and_then(Value::as_str),
+                        "state":"running",
+                        "workspace":stable_data(&workspace),
+                        "git_before":stable_data(&git_before),
+                        "patch_applied":applied_patch,
+                        "commands":command_results
+                    }),
+                    "Agent workflow command is running",
+                ));
+            }
+        }
+
+        let git_after =
+            self.adapter
+                .git_workflow(GitWorkflowAction::Status, json!({}), request_id)?;
+        let state = if applied_patch || !command_results.is_empty() {
+            "completed"
+        } else {
+            "context_ready"
+        };
+        Ok(stable_success(
+            json!({
+                "action":action,
+                "objective":object.get("objective").and_then(Value::as_str),
+                "state":state,
+                "workspace":stable_data(&workspace),
+                "git_before":stable_data(&git_before),
+                "git_after":stable_data(&git_after),
+                "patch_applied":applied_patch,
+                "commands":command_results
+            }),
+            "Agent workflow completed",
+        ))
     }
 
     fn exec_command(
@@ -1081,6 +1715,18 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "kill" => CommandControlAction::Kill,
             _ => return Err(invalid_argument()),
         };
+        match action {
+            CommandControlAction::Read => {
+                required_string(object, "output_ref")?;
+            }
+            CommandControlAction::Write => {
+                required_string(object, "session_id")?;
+                required_string(object, "chars")?;
+            }
+            CommandControlAction::Poll | CommandControlAction::Kill => {
+                required_string(object, "session_id")?;
+            }
+        }
         let mut stable = object.clone();
         stable.remove("action");
         self.adapter
@@ -1124,11 +1770,56 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 }
                 self.adapter.inspect_document(private, request_id)
             }
-            _ => Err(FacadeError::new(
-                FacadeErrorCode::InvalidArgument,
-                "该文档动作当前 adapter 尚未实现",
-                false,
-            )),
+            "create" => {
+                let path = required_string(object, "path")?;
+                let content = object
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .ok_or_else(invalid_argument)?;
+                let patch = document_add_patch(path, content);
+                self.adapter
+                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
+                Ok(stable_success(
+                    json!({"action":"create","path":path,"created":true}),
+                    "Document created",
+                ))
+            }
+            "convert" => {
+                let source = required_string(object, "source")?;
+                let path = required_string(object, "path")?;
+                let inspected = self.adapter.inspect_document(
+                    json!({"path":source,"start_line":1,"max_lines":100000,"max_bytes":1048576}),
+                    request_id,
+                )?;
+                let content = stable_document_text(&inspected)?;
+                let patch = document_add_patch(path, content);
+                self.adapter
+                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
+                Ok(stable_success(
+                    json!({"action":"convert","source":source,"path":path,"converted":true}),
+                    "Document converted",
+                ))
+            }
+            "rebuild" => {
+                let path = required_string(object, "path")?;
+                let content = object
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .ok_or_else(invalid_argument)?;
+                let inspected = self.adapter.inspect_document(
+                    json!({"path":path,"start_line":1,"max_lines":100000,"max_bytes":1048576}),
+                    request_id,
+                )?;
+                let existing = stable_document_text(&inspected)?;
+                let patch = document_rebuild_patch(path, existing, content);
+                self.adapter
+                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
+                Ok(stable_success(
+                    json!({"action":"rebuild","path":path,"rebuilt":true}),
+                    "Document rebuilt",
+                ))
+            }
+            _ => Err(invalid_argument()),
         }
     }
 
@@ -1185,21 +1876,156 @@ fn public_safe_summary(name: &str, arguments: &Value) -> SafeTaskSummary {
         .unwrap_or(SafeTaskSummary::Omitted)
 }
 
-fn public_contains_verbatim_execution_path(name: &str, arguments: &Value) -> bool {
+fn stable_document_text(value: &Value) -> Result<&str, FacadeError> {
+    value
+        .get("structuredContent")
+        .and_then(|structured| structured.get("data"))
+        .and_then(|data| data.get("text"))
+        .and_then(Value::as_str)
+        .ok_or_else(runtime_capability_mismatch)
+}
+
+fn document_add_patch(path: &str, content: &str) -> String {
+    let normalized = normalize_document_text(content);
+    let mut patch = format!("*** Begin Patch\n*** Add File: {path}\n");
+    for line in normalized.split_terminator('\n') {
+        patch.push('+');
+        patch.push_str(line);
+        patch.push('\n');
+    }
+    patch.push_str("*** End Patch");
+    patch
+}
+
+fn document_rebuild_patch(path: &str, existing: &str, content: &str) -> String {
+    let existing = normalize_document_text(existing);
+    let content = normalize_document_text(content);
+    let mut patch = format!("*** Begin Patch\n*** Update File: {path}\n@@\n");
+    for line in existing.split_terminator('\n') {
+        patch.push('-');
+        patch.push_str(line);
+        patch.push('\n');
+    }
+    for line in content.split_terminator('\n') {
+        patch.push('+');
+        patch.push_str(line);
+        patch.push('\n');
+    }
+    patch.push_str("*** End Patch");
+    patch
+}
+
+fn normalize_document_text(value: &str) -> String {
+    value.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn public_workspace_paths_valid(name: &str, arguments: &Value) -> bool {
     let Some(object) = arguments.as_object() else {
-        return false;
+        return true;
     };
     let keys: &[&str] = match name {
         "exec_command" => &["workdir"],
-        "git_workflow" | "document_workflow" | "view_image" => &["path"],
+        "git_workflow" | "view_image" => &["path"],
+        "document_workflow" => &["path", "source"],
         _ => &[],
     };
-    keys.iter().any(|key| {
+    if keys.iter().any(|key| {
         object
             .get(*key)
             .and_then(Value::as_str)
-            .is_some_and(|value| value.starts_with(r"\\?\") || value.starts_with("//?/"))
-    })
+            .is_some_and(|value| !workspace_relative_path_valid(value))
+    }) {
+        return false;
+    }
+    if name == "git_workflow"
+        && object
+            .get("paths")
+            .and_then(Value::as_array)
+            .is_some_and(|values| {
+                values.iter().any(|value| {
+                    value
+                        .as_str()
+                        .is_none_or(|value| !workspace_relative_path_valid(value))
+                })
+            })
+    {
+        return false;
+    }
+    true
+}
+
+fn agent_action_allows_write(action: &str) -> bool {
+    matches!(
+        action,
+        "bugfix" | "feature" | "refactor" | "test_failure" | "document" | "resume" | "custom"
+    )
+}
+
+fn agent_action_allows_process(action: &str) -> bool {
+    matches!(
+        action,
+        "bugfix" | "feature" | "refactor" | "test_failure" | "build_release" | "resume" | "custom"
+    )
+}
+
+fn workspace_relative_path_valid(value: &str) -> bool {
+    if value.is_empty()
+        || value.contains(['\0', '\n', '\r', ':'])
+        || value.starts_with('/')
+        || value.starts_with('\\')
+        || value.starts_with("//")
+        || value.starts_with(r"\\?\")
+        || value.starts_with("//?/")
+        || value
+            .as_bytes()
+            .get(1)
+            .is_some_and(|separator| *separator == b':')
+        || Path::new(value).is_absolute()
+    {
+        return false;
+    }
+    !value
+        .replace('\\', "/")
+        .split('/')
+        .any(|component| component == "..")
+}
+
+fn public_patch_targets_valid(patch: &str) -> bool {
+    let mut lines = patch.lines();
+    if lines.next() != Some("*** Begin Patch") {
+        return false;
+    }
+    let mut saw_operation = false;
+    let mut saw_end = false;
+    for line in lines {
+        if line == "*** End Patch" {
+            saw_end = true;
+            break;
+        }
+        let target = [
+            "*** Add File: ",
+            "*** Update File: ",
+            "*** Delete File: ",
+            "*** Move to: ",
+        ]
+        .into_iter()
+        .find_map(|prefix| line.strip_prefix(prefix));
+        if let Some(target) = target {
+            saw_operation = true;
+            if !workspace_relative_path_valid(target) {
+                return false;
+            }
+        } else if line.starts_with("*** ") && line != "*** End of File" {
+            return false;
+        }
+    }
+    saw_operation
+        && saw_end
+        && !patch
+            .lines()
+            .skip_while(|line| *line != "*** End Patch")
+            .skip(1)
+            .any(|line| !line.is_empty())
 }
 
 fn object_args(value: &Value) -> Result<&Map<String, Value>, FacadeError> {
@@ -1261,7 +2087,9 @@ fn normalize_private_error(raw: &Value) -> FacadeError {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_ascii_uppercase();
-    let public = if code.contains("INVALID") {
+    let public = if code.contains("SESSION_NOT_FOUND") || code.contains("SESSION_CLOSED") {
+        FacadeErrorCode::SessionUnavailable
+    } else if code.contains("INVALID") {
         FacadeErrorCode::InvalidArgument
     } else if code.contains("NOT_FOUND") || code.contains("MISSING") {
         FacadeErrorCode::NotFound
@@ -1279,6 +2107,10 @@ fn normalize_private_error(raw: &Value) -> FacadeError {
     FacadeError::new(public, "LocalBridge 工具执行失败", false)
 }
 
+fn session_unavailable() -> FacadeError {
+    FacadeError::new(FacadeErrorCode::SessionUnavailable, "命令会话不可用", false)
+}
+
 fn stable_success(data: Value, text: &str) -> Value {
     json!({
         "content":[{"type":"text","text":text}],
@@ -1287,49 +2119,55 @@ fn stable_success(data: Value, text: &str) -> Value {
     })
 }
 
-fn normalize_command_success(raw: &Value) -> Value {
-    let structured = raw.get("structuredContent").and_then(Value::as_object);
-    let mut data = Map::new();
-    for key in [
-        "exit_code",
-        "status",
-        "session_id",
-        "output_ref",
-        "stdout_ref",
-        "stderr_ref",
-        "truncated",
-        "timed_out",
-        "offset",
-        "next_offset",
-    ] {
-        if let Some(value) = structured.and_then(|object| object.get(key)) {
-            data.insert(key.into(), value.clone());
+fn stable_data(value: &Value) -> Value {
+    value
+        .get("structuredContent")
+        .and_then(|structured| structured.get("data"))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn stable_command_error(code: FacadeErrorCode, message: &str, data: Map<String, Value>) -> Value {
+    json!({
+        "content":[{"type":"text","text":message}],
+        "structuredContent":{
+            "ok":false,
+            "error":{"code":code.as_str(),"message":message,"retryable":false},
+            "data":Value::Object(data)
+        },
+        "isError":true
+    })
+}
+
+fn safe_command_output(raw: &Value) -> String {
+    let Some(structured) = raw.get("structuredContent").and_then(Value::as_object) else {
+        return String::new();
+    };
+    let stdout = structured
+        .get("stdout")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let stderr = structured
+        .get("stderr")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !stdout.is_empty() || !stderr.is_empty() {
+        return [stdout, stderr]
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>()
+            .join(if stdout.is_empty() || stderr.is_empty() {
+                ""
+            } else {
+                "\n"
+            });
+    }
+    for key in ["content", "preview", "summary"] {
+        if let Some(value) = structured.get(key).and_then(Value::as_str) {
+            return value.to_string();
         }
     }
-    data.insert(
-        "output".into(),
-        Value::String(first_text(raw).unwrap_or_default()),
-    );
-    stable_success(Value::Object(data), "Command completed")
-}
-
-fn first_text(raw: &Value) -> Option<String> {
-    raw.get("content")
-        .and_then(Value::as_array)
-        .and_then(|content| {
-            content.iter().find_map(|item| {
-                (item.get("type").and_then(Value::as_str) == Some("text"))
-                    .then(|| item.get("text").and_then(Value::as_str).map(str::to_string))
-                    .flatten()
-            })
-        })
-}
-
-fn extract_stable_string(raw: &Value, keys: &[&str]) -> Option<String> {
-    let structured = raw.get("structuredContent")?;
-    keys.iter()
-        .find_map(|key| structured.get(*key).and_then(Value::as_str))
-        .map(str::to_string)
+    String::new()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1637,7 +2475,15 @@ mod tests {
             _arguments: Value,
             _request_id: Option<&Value>,
         ) -> Result<Value, FacadeError> {
-            Ok(stable_success(json!({}), "ok"))
+            Ok(stable_success(json!({"text":"old\n"}), "ok"))
+        }
+
+        fn apply_document_patch(
+            &mut self,
+            _arguments: Value,
+            _request_id: Option<&Value>,
+        ) -> Result<Value, FacadeError> {
+            Ok(stable_success(json!({"applied":true}), "ok"))
         }
 
         fn inspect_image(
@@ -1651,6 +2497,8 @@ mod tests {
         fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
             Ok(Some(true))
         }
+
+        fn reap_command_sessions(&mut self) {}
     }
 
     fn policy() -> CapabilityPolicy {
@@ -1930,20 +2778,27 @@ mod tests {
     #[test]
     fn private_success_shape_is_allowlisted_before_publication() {
         let raw = json!({
-            "content":[{"type":"text","text":"safe output"}],
+            "content":[{"type":"text","text":"SECRET_PRIVATE_RENDERED_TEXT"}],
             "structuredContent":{
                 "exit_code":0,
+                "stdout":"safe output",
                 "truncated":false,
                 "future_private_field":"SECRET_PRIVATE_SCHEMA_VALUE"
             },
             "isError":false
         });
-        let public = normalize_command_success(&raw);
-        let rendered = serde_json::to_string(&public).unwrap();
-        assert!(rendered.contains("safe output"));
-        assert!(rendered.contains("exit_code"));
-        assert!(!rendered.contains("future_private_field"));
+        assert_eq!(safe_command_output(&raw), "safe output");
+        let rendered = safe_command_output(&raw);
+        assert!(!rendered.contains("SECRET_PRIVATE_RENDERED_TEXT"));
         assert!(!rendered.contains("SECRET_PRIVATE_SCHEMA_VALUE"));
+
+        let mut sessions = PublicCommandSessions::default();
+        let public_session = sessions.public_session_for_private("PRIVATE_SESSION_SECRET");
+        let public_output = sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET");
+        assert!(public_session.starts_with("lb-session-"));
+        assert!(public_output.starts_with("lb-output-"));
+        assert_ne!(public_session, "PRIVATE_SESSION_SECRET");
+        assert_ne!(public_output, "PRIVATE_OUTPUT_SECRET");
     }
 
     #[test]
@@ -2048,5 +2903,148 @@ mod tests {
         assert!(registry.contains("exec_command"));
         assert!(!registry.contains("read_file"));
         assert!(!registry.contains("request_permissions"));
+    }
+
+    #[test]
+    fn every_advertised_agent_and_document_action_has_an_executable_facade_contract() {
+        let mut facade = AgentFacade::with_adapter(
+            FakeAdapter {
+                catalog: compatible_catalog(),
+            },
+            policy(),
+        )
+        .unwrap();
+        for action in [
+            "diagnose",
+            "bugfix",
+            "feature",
+            "refactor",
+            "test_failure",
+            "build_release",
+            "document",
+            "resume",
+            "custom",
+        ] {
+            let result = facade
+                .dispatch("agent_workflow", json!({"action":action}), None)
+                .unwrap();
+            assert_eq!(result["isError"], false, "action={action}: {result:#?}");
+            assert_eq!(
+                result["structuredContent"]["data"]["state"], "context_ready",
+                "action={action}"
+            );
+        }
+        for (action, arguments) in [
+            ("inspect", json!({"action":"inspect","path":"doc.txt"})),
+            (
+                "create",
+                json!({"action":"create","path":"new.txt","content":"new"}),
+            ),
+            (
+                "convert",
+                json!({"action":"convert","source":"doc.txt","path":"copy.txt"}),
+            ),
+            (
+                "rebuild",
+                json!({"action":"rebuild","path":"doc.txt","content":"rebuilt"}),
+            ),
+        ] {
+            let result = facade
+                .dispatch("document_workflow", arguments, None)
+                .unwrap();
+            assert_eq!(result["isError"], false, "action={action}: {result:#?}");
+        }
+    }
+
+    #[test]
+    fn session_handles_are_opaque_terminal_monotonic_and_runtime_loss_is_stable() {
+        let mut sessions = PublicCommandSessions::default();
+        let public = sessions.public_session_for_private("PRIVATE_SESSION");
+        assert!(public.starts_with("lb-session-"));
+        assert_ne!(public, "PRIVATE_SESSION");
+        let completed = stable_success(json!({"status":"completed"}), "done");
+        sessions.mark_terminal(&public, completed.clone());
+        sessions.mark_terminal(
+            &public,
+            stable_command_error(FacadeErrorCode::ProcessFailed, "failed", Map::new()),
+        );
+        assert_eq!(sessions.terminal(&public), Some(completed));
+
+        let lost = sessions.public_session_for_private("PRIVATE_LOST");
+        sessions.mark_all_running_lost();
+        let terminal = sessions.terminal(&lost).expect("lost terminal snapshot");
+        assert_eq!(terminal["isError"], true);
+        assert_eq!(
+            terminal["structuredContent"]["error"]["code"],
+            "SessionUnavailable"
+        );
+    }
+
+    #[test]
+    fn command_exit_status_and_workspace_probe_fail_closed() {
+        assert_eq!(command_public_status("exited", Some(0), false), "completed");
+        assert_eq!(command_public_status("exited", Some(7), false), "failed");
+        assert_eq!(command_public_status("killed", Some(7), false), "cancelled");
+        assert_eq!(command_public_status("running", None, false), "running");
+        assert_eq!(command_public_status("exited", None, true), "timed_out");
+
+        let expected = PathBuf::from(r"C:\workspace-a");
+        let matching = json!({
+            "structuredContent":{"workspace":r"C:\workspace-a","default_cwd":"."}
+        });
+        let mismatch = json!({
+            "structuredContent":{"workspace":r"C:\workspace-b","default_cwd":"."}
+        });
+        assert!(validate_workspace_context_probe(&matching, &expected).is_ok());
+        assert_eq!(
+            validate_workspace_context_probe(&mismatch, &expected)
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::RuntimeCapabilityMismatch
+        );
+    }
+
+    #[test]
+    fn public_paths_and_document_patches_are_target_bound() {
+        for denied in [
+            r"C:\absolute.txt",
+            r"\\server\share\file.txt",
+            r"\\?\C:\verbatim.txt",
+            "/posix/absolute",
+            "../escape.txt",
+            "sub/../../escape.txt",
+            "file.txt:ads",
+        ] {
+            assert!(!workspace_relative_path_valid(denied), "{denied}");
+        }
+        for allowed in [".", "file.txt", "sub/file.txt", r"sub\file.txt"] {
+            assert!(workspace_relative_path_valid(allowed), "{allowed}");
+        }
+
+        let create = document_add_patch("safe/doc.txt", "hello\nworld\n");
+        assert!(create.contains("*** Add File: safe/doc.txt"));
+        assert!(!create.contains("other.txt"));
+        let rebuild = document_rebuild_patch("safe/doc.txt", "old\n", "new\n");
+        assert!(rebuild.contains("*** Update File: safe/doc.txt"));
+        assert!(rebuild.contains("-old"));
+        assert!(rebuild.contains("+new"));
+
+        assert!(public_patch_targets_valid(
+            "*** Begin Patch\n*** Update File: safe/doc.txt\n@@\n-old\n+new\n*** End Patch"
+        ));
+        assert!(public_patch_targets_valid(
+            "*** Begin Patch\n*** Update File: safe/doc.txt\n*** Move to: safe/moved.txt\n@@\n-old\n+new\n*** End Patch"
+        ));
+        for denied in [
+            "*** Begin Patch\n*** Update File: ../escape.txt\n@@\n-old\n+new\n*** End Patch",
+            "*** Begin Patch\n*** Add File: C:\\escape.txt\n+x\n*** End Patch",
+            "*** Begin Patch\n*** Delete File: \\\\server\\share\\escape.txt\n*** End Patch",
+            "*** Begin Patch\n*** Update File: \\\\?\\C:\\escape.txt\n@@\n-old\n+new\n*** End Patch",
+            "*** Begin Patch\n*** Update File: safe.txt:ads\n@@\n-old\n+new\n*** End Patch",
+            "*** Begin Patch\n*** Update File: safe.txt\n*** Move to: ../escape.txt\n@@\n-old\n+new\n*** End Patch",
+            "*** Begin Patch\n*** Unknown File: safe.txt\n*** End Patch",
+        ] {
+            assert!(!public_patch_targets_valid(denied), "{denied}");
+        }
     }
 }

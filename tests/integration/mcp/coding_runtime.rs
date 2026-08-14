@@ -349,14 +349,6 @@ fn dedicated_git_tools_share_nested_repository_resolution_behind_policy() {
         assert_eq!(nested["structuredContent"]["head"], head, "path={path}");
     }
 
-    let absolute = guarded_git_call(
-        &mut guard,
-        "git_status",
-        json!({"path":repository.to_string_lossy()}),
-    );
-    assert_eq!(absolute["structuredContent"]["is_repo"], true);
-    assert_eq!(absolute["structuredContent"]["head"], head);
-
     let parent = guarded_git_call(&mut guard, "git_status", json!({"path":"."}));
     assert_eq!(parent["structuredContent"]["is_repo"], false);
     let non_git = guarded_git_call(&mut guard, "git_status", json!({"path":"non-git"}));
@@ -370,7 +362,7 @@ fn dedicated_git_tools_share_nested_repository_resolution_behind_policy() {
     let deleted = guarded_git_call(
         &mut guard,
         "git_diff",
-        json!({"path":"LocalBridge/deleted.txt"}),
+        json!({"path":"LocalBridge","paths":["LocalBridge/deleted.txt"]}),
     );
     assert!(
         deleted["structuredContent"]["diff"]

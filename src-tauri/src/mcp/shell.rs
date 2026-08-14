@@ -133,17 +133,13 @@ impl SystemShellDiscovery {
 impl ShellDiscovery for SystemShellDiscovery {
     fn pwsh_candidates(&self) -> Vec<PathBuf> {
         let mut candidates = Vec::new();
-        if let Some(path) = std::env::var_os("PATH") {
-            for directory in std::env::split_paths(&path) {
-                if directory.is_absolute() {
-                    candidates.push(directory.join("pwsh.exe"));
-                }
-            }
-        }
         if let Some(root) = Self::trusted_powershell_root() {
             if let Ok(entries) = fs::read_dir(root) {
                 for entry in entries.flatten() {
-                    candidates.push(entry.path().join("pwsh.exe"));
+                    let installation = entry.path();
+                    if installation.is_dir() {
+                        candidates.push(installation.join("pwsh.exe"));
+                    }
                 }
             }
         }
@@ -504,6 +500,19 @@ mod tests {
         let resolved = resolver.resolve(ShellSelector::Auto).unwrap();
         assert_eq!(resolved.executable, core8);
         assert!(!probed.lock().unwrap().contains(&malicious));
+    }
+
+    #[test]
+    fn production_core_discovery_is_not_path_authoritative() {
+        let source = include_str!("shell.rs");
+        let discovery = source
+            .split("impl ShellDiscovery for SystemShellDiscovery")
+            .nth(1)
+            .and_then(|tail| tail.split("impl ShellVersionProbe").next())
+            .expect("production shell discovery source exists");
+        assert!(!discovery.contains("var_os(\"PATH\")"));
+        assert!(!discovery.contains("split_paths"));
+        assert!(discovery.contains("trusted_powershell_root"));
     }
 
     #[test]

@@ -362,49 +362,39 @@ fn git_status(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) 
 }
 
 fn git_diff(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -> Option<Value> {
-    let filters = path_filters(arguments);
-    let locations = if filters.is_empty() {
-        vec![match resolver.resolve_allow_missing(".") {
-            Ok(location) => location,
-            Err(error) => return Some(resolve_error(error)),
-        }]
-    } else {
-        let mut locations = Vec::new();
-        for raw in &filters {
-            match resolver.resolve_allow_missing(raw) {
-                Ok(location) => locations.push(location),
-                Err(error) => return Some(resolve_error(error)),
-            }
-        }
-        locations
+    let context_raw = string_arg(arguments, "path").unwrap_or(".");
+    let context_location = match resolver.resolve_existing(context_raw) {
+        Ok(location) => location,
+        Err(error) => return Some(resolve_error(error)),
     };
-    let resolved = match resolve_same_repository(resolver, locations) {
+    let context = match resolver.repository_for(context_location) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
         Err(error) => return Some(resolve_error(error)),
     };
+    let filters = path_filters(arguments);
+    let pathspecs = match resolve_pathspecs_in_repository(resolver, &context.repository, &filters) {
+        Ok(pathspecs) => pathspecs,
+        Err(error) => return Some(resolve_error(error)),
+    };
     let staged = bool_arg(arguments, "staged", false);
     let unstaged = bool_arg(arguments, "unstaged", true);
-    let context = usize_arg(arguments, "context_lines", 3).min(20);
+    let context_lines = usize_arg(arguments, "context_lines", 3).min(20);
     let max_bytes =
         usize_arg(arguments, "max_bytes", DEFAULT_TEXT_BYTES).clamp(1, MAX_CAPTURE_BYTES);
-    let pathspecs = resolved
-        .iter()
-        .filter_map(|item| item.pathspec.clone())
-        .collect::<Vec<_>>();
     let mut combined = String::new();
     let mut command_truncated = false;
     for cached in [false, true] {
         if (!cached && !unstaged) || (cached && !staged) {
             continue;
         }
-        let repository = &resolved[0].repository;
+        let repository = &context.repository;
         let mut args = vec![
             os("--no-pager"),
             os("diff"),
             os("--no-ext-diff"),
             os("--no-textconv"),
-            os(format!("--unified={context}")),
+            os(format!("--unified={context_lines}")),
         ];
         if cached {
             args.push(os("--cached"));
@@ -464,7 +454,7 @@ fn git_log(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -> 
     }
     let max_count = usize_arg(arguments, "max_count", 20).clamp(1, 100);
     let skip = usize_arg(arguments, "skip", 0);
-    let mut args = vec![
+    let args = vec![
         os("--no-pager"),
         os("log"),
         os(format!("--max-count={}", max_count + 1)),
@@ -473,10 +463,6 @@ fn git_log(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -> 
         os("--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%ad%x1f%s%x1e"),
         os(reference),
     ];
-    if let Some(pathspec) = &resolved.pathspec {
-        args.push(os("--"));
-        args.push(os(pathspec));
-    }
     let output = match run_git(&resolved.repository, &args, MAX_CAPTURE_BYTES) {
         Ok(output) if output.exit_code == 0 && !output.timed_out => output,
         Ok(output) => return Some(git_failure(&output)),
@@ -521,29 +507,26 @@ fn git_log(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -> 
 }
 
 fn git_show(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -> Option<Value> {
-    let filters = path_filters(arguments);
-    let raw_locations = if filters.is_empty() {
-        vec![".".to_string()]
-    } else {
-        filters.clone()
+    let context_raw = string_arg(arguments, "path").unwrap_or(".");
+    let context_location = match resolver.resolve_existing(context_raw) {
+        Ok(location) => location,
+        Err(error) => return Some(resolve_error(error)),
     };
-    let mut locations = Vec::new();
-    for raw in &raw_locations {
-        match resolver.resolve_allow_missing(raw) {
-            Ok(location) => locations.push(location),
-            Err(error) => return Some(resolve_error(error)),
-        }
-    }
-    let resolved = match resolve_same_repository(resolver, locations) {
+    let context = match resolver.repository_for(context_location) {
         Ok(Some(resolved)) => resolved,
         Ok(None) => return None,
+        Err(error) => return Some(resolve_error(error)),
+    };
+    let filters = path_filters(arguments);
+    let pathspecs = match resolve_pathspecs_in_repository(resolver, &context.repository, &filters) {
+        Ok(pathspecs) => pathspecs,
         Err(error) => return Some(resolve_error(error)),
     };
     let reference = string_arg(arguments, "rev").unwrap_or("HEAD");
     if !valid_git_ref(reference) {
         return Some(tool_error("INVALID_ARGUMENT", "无效 Git rev"));
     }
-    let context = usize_arg(arguments, "context_lines", 3).min(20);
+    let context_lines = usize_arg(arguments, "context_lines", 3).min(20);
     let max_bytes =
         usize_arg(arguments, "max_bytes", DEFAULT_TEXT_BYTES).clamp(1, MAX_CAPTURE_BYTES);
     let include_patch = bool_arg(arguments, "include_patch", true);
@@ -553,21 +536,17 @@ fn git_show(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) ->
         os("--no-ext-diff"),
         os("--no-textconv"),
         os("--format=fuller"),
-        os(format!("--unified={context}")),
+        os(format!("--unified={context_lines}")),
     ];
     if !include_patch {
         args.push(os("--no-patch"));
     }
     args.push(os(reference));
-    let pathspecs = resolved
-        .iter()
-        .filter_map(|item| item.pathspec.clone())
-        .collect::<Vec<_>>();
     if !pathspecs.is_empty() {
         args.push(os("--"));
         args.extend(pathspecs.iter().map(os));
     }
-    let output = match run_git(&resolved[0].repository, &args, max_bytes) {
+    let output = match run_git(&context.repository, &args, max_bytes) {
         Ok(output) if output.exit_code == 0 && !output.timed_out => output,
         Ok(output) => return Some(git_failure(&output)),
         Err(message) => return Some(tool_error("GIT_ERROR", &message)),
@@ -677,37 +656,6 @@ fn git_blame(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -
             "next_action": next_action
         }),
     ))
-}
-
-fn resolve_same_repository(
-    resolver: &GitRepositoryResolver,
-    locations: Vec<ResolvedLocation>,
-) -> Result<Option<Vec<ResolvedRepositoryLocation>>, ResolveError> {
-    let mut resolved = Vec::new();
-    let mut root: Option<PathBuf> = None;
-    let mut saw_non_repo = false;
-    for location in locations {
-        match resolver.repository_for(location)? {
-            Some(item) => {
-                if root
-                    .as_ref()
-                    .is_some_and(|expected| *expected != item.repository.canonical_root)
-                {
-                    return Err(ResolveError::RepositoryMismatch);
-                }
-                root.get_or_insert_with(|| item.repository.canonical_root.clone());
-                resolved.push(item);
-            }
-            None => saw_non_repo = true,
-        }
-    }
-    if resolved.is_empty() {
-        Ok(None)
-    } else if saw_non_repo {
-        Err(ResolveError::RepositoryMismatch)
-    } else {
-        Ok(Some(resolved))
-    }
 }
 
 fn resolve_error(error: ResolveError) -> Value {
@@ -1030,13 +978,31 @@ fn truncate_text(text: &str, max_bytes: usize, max_lines: usize) -> (String, boo
 
 fn path_filters(arguments: &Map<String, Value>) -> Vec<String> {
     let mut values = Vec::new();
-    if let Some(path) = string_arg(arguments, "path") {
-        values.push(path.to_string());
-    }
     if let Some(paths) = arguments.get("paths").and_then(Value::as_array) {
         values.extend(paths.iter().filter_map(Value::as_str).map(str::to_string));
     }
     values
+}
+
+fn resolve_pathspecs_in_repository(
+    resolver: &GitRepositoryResolver,
+    repository: &GitRepository,
+    filters: &[String],
+) -> Result<Vec<String>, ResolveError> {
+    let mut pathspecs = Vec::new();
+    for raw in filters {
+        let location = resolver.resolve_allow_missing(raw)?;
+        let Some(resolved) = resolver.repository_for(location)? else {
+            return Err(ResolveError::RepositoryMismatch);
+        };
+        if resolved.repository.canonical_root != repository.canonical_root {
+            return Err(ResolveError::RepositoryMismatch);
+        }
+        if let Some(pathspec) = resolved.pathspec {
+            pathspecs.push(pathspec);
+        }
+    }
+    Ok(pathspecs)
 }
 
 fn valid_git_ref(value: &str) -> bool {

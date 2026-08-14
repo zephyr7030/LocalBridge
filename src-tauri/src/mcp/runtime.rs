@@ -290,6 +290,10 @@ impl CodingToolsRuntime {
         self.port
     }
 
+    pub fn workspace(&self) -> &Path {
+        &self.workspace
+    }
+
     pub const fn process_snapshot(&self) -> &ProcessSnapshot {
         self.supervisor.snapshot()
     }

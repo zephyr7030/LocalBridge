@@ -35,6 +35,7 @@ static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct ConnectionContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
+    public_policy: &'a RwLock<CapabilityPolicy>,
     cancellation: &'a McpCancellationClient,
     permission_mode: &'a RwLock<PermissionMode>,
     current_task: &'a CurrentTaskProjection,
@@ -52,6 +53,25 @@ struct ElevatedCallContext<'a> {
     active_requests: &'a Mutex<Vec<Value>>,
     privileged_requests: &'a Mutex<Vec<(Value, String)>>,
     stopping: &'a AtomicBool,
+}
+
+struct TaskControlContext<'a> {
+    public_policy: &'a RwLock<CapabilityPolicy>,
+    cancellation: &'a McpCancellationClient,
+    current_task: &'a CurrentTaskProjection,
+    active_requests: &'a Mutex<Vec<Value>>,
+    privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
+    privileged_requests: &'a Mutex<Vec<(Value, String)>>,
+}
+
+struct ServeContext {
+    guard: Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>,
+    public_policy: Arc<RwLock<CapabilityPolicy>>,
+    cancellation: McpCancellationClient,
+    permission_mode: Arc<RwLock<PermissionMode>>,
+    current_task: CurrentTaskProjection,
+    privileged: Option<Arc<dyn PrivilegedExecution>>,
+    shutdown: mpsc::Receiver<()>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,6 +159,15 @@ impl CurrentTaskProjection {
             .as_ref()
             .map(|current| CurrentTaskStatus::Active(current.task.clone()))
             .unwrap_or(CurrentTaskStatus::Idle)
+    }
+
+    fn actual_snapshot(&self) -> CurrentTaskStatus {
+        self.0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .actual_status
+            .clone()
     }
 
     fn project(&self, status: CurrentTaskStatus) {
@@ -348,6 +377,7 @@ pub struct PolicyEnforcementRuntime {
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
+    public_policy: Arc<RwLock<CapabilityPolicy>>,
     shutdown: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<AgentFacade<CodingToolsRuntimeAdapter>>>,
 }
@@ -418,6 +448,7 @@ impl PolicyEnforcementRuntime {
         privileged: Option<Arc<dyn PrivilegedExecution>>,
         wake: Option<CurrentTaskWake>,
     ) -> Result<Self, PolicyEnforcementError> {
+        let public_policy = Arc::new(RwLock::new(policy.clone()));
         let guard = AgentFacade::from_coding_runtime(coding_runtime, policy)
             .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
         let cancellation = guard
@@ -439,17 +470,21 @@ impl PolicyEnforcementRuntime {
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
         let guard = Arc::new(Mutex::new(guard));
         let thread_guard = Arc::clone(&guard);
+        let thread_policy = Arc::clone(&public_policy);
         let thread = thread::Builder::new()
             .name("localbridge-mcp-policy".into())
             .spawn(move || {
                 serve(
                     listener,
-                    thread_guard,
-                    cancellation,
-                    thread_mode,
-                    thread_task,
-                    privileged,
-                    shutdown_rx,
+                    ServeContext {
+                        guard: thread_guard,
+                        public_policy: thread_policy,
+                        cancellation,
+                        permission_mode: thread_mode,
+                        current_task: thread_task,
+                        privileged,
+                        shutdown: shutdown_rx,
+                    },
                 )
             })
             .map_err(|_| PolicyEnforcementError::ThreadSpawnFailed)?;
@@ -458,6 +493,7 @@ impl PolicyEnforcementRuntime {
             permission_mode,
             current_task,
             guard: Some(guard),
+            public_policy,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         })
@@ -482,10 +518,15 @@ impl PolicyEnforcementRuntime {
         let Some(guard) = self.guard.as_ref() else {
             return Err(PolicyEnforcementError::ThreadTerminated);
         };
+        let mut public_policy = self
+            .public_policy
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         guard
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .replace_policy(policy);
+            .replace_policy(policy.clone());
+        *public_policy = policy;
         Ok(())
     }
 
@@ -542,24 +583,32 @@ impl Drop for PolicyEnforcementRuntime {
     }
 }
 
-fn serve(
-    listener: TcpListener,
-    guard: Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>,
-    cancellation: McpCancellationClient,
-    permission_mode: Arc<RwLock<PermissionMode>>,
-    current_task: CurrentTaskProjection,
-    privileged: Option<Arc<dyn PrivilegedExecution>>,
-    shutdown: mpsc::Receiver<()>,
-) -> AgentFacade<CodingToolsRuntimeAdapter> {
+fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingToolsRuntimeAdapter> {
+    let ServeContext {
+        guard,
+        public_policy,
+        cancellation,
+        permission_mode,
+        current_task,
+        privileged,
+        shutdown,
+    } = context;
     let sessions = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     let active_requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let privileged_requests = Arc::new(Mutex::new(Vec::<(Value, String)>::new()));
     let stopping = Arc::new(AtomicBool::new(false));
     let mut workers = Vec::<JoinHandle<()>>::new();
+    let mut next_session_reap = Instant::now();
     loop {
         if shutdown.try_recv().is_ok() {
             stopping.store(true, Ordering::Release);
             break;
+        }
+        if Instant::now() >= next_session_reap {
+            if let Ok(mut facade) = guard.try_lock() {
+                facade.reap_command_sessions();
+            }
+            next_session_reap = Instant::now() + Duration::from_millis(100);
         }
         let mut index = 0;
         while index < workers.len() {
@@ -576,6 +625,7 @@ fn serve(
             }
             Ok((stream, _)) => {
                 let worker_guard = Arc::clone(&guard);
+                let worker_policy = Arc::clone(&public_policy);
                 let worker_mode = Arc::clone(&permission_mode);
                 let worker_task = current_task.clone();
                 let worker_sessions = Arc::clone(&sessions);
@@ -589,6 +639,7 @@ fn serve(
                     .spawn(move || {
                         let context = ConnectionContext {
                             guard: &worker_guard,
+                            public_policy: &worker_policy,
                             cancellation: &worker_cancellation,
                             permission_mode: &worker_mode,
                             current_task: &worker_task,
@@ -654,6 +705,7 @@ fn serve(
 fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> Result<(), ()> {
     let ConnectionContext {
         guard,
+        public_policy,
         cancellation,
         permission_mode,
         current_task,
@@ -921,6 +973,23 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     },
                 );
             }
+            if name == "task_control" {
+                return handle_task_control(
+                    &mut stream,
+                    id,
+                    session,
+                    mode,
+                    arguments,
+                    TaskControlContext {
+                        public_policy,
+                        cancellation,
+                        current_task,
+                        active_requests,
+                        privileged,
+                        privileged_requests,
+                    },
+                );
+            }
             active_requests
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -948,6 +1017,133 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             }
         }
         _ => write_rpc_error(&mut stream, id, -32601, "Method not found", Some(session)),
+    }
+}
+
+fn handle_task_control(
+    stream: &mut TcpStream,
+    id: Value,
+    session: &str,
+    mode: PermissionMode,
+    arguments: Value,
+    context: TaskControlContext<'_>,
+) -> Result<(), ()> {
+    let TaskControlContext {
+        public_policy,
+        cancellation,
+        current_task,
+        active_requests,
+        privileged,
+        privileged_requests,
+    } = context;
+    {
+        let policy = public_policy
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let decision = policy.decide_public(mode, "task_control", &arguments);
+        if !decision.allowed {
+            current_task.project(
+                CurrentTaskStatus::project(
+                    TaskKind::ExecuteCommand,
+                    SafeTaskSummary::Omitted,
+                    TaskExecutionState::Blocked,
+                )
+                .expect("task_control blocked is a valid projected task"),
+            );
+            current_task.project(CurrentTaskStatus::Idle);
+            return write_rpc_error(
+                stream,
+                id,
+                -32001,
+                "Tool call denied by LocalBridge policy",
+                Some(session),
+            );
+        }
+    }
+
+    let action = arguments.get("action").and_then(Value::as_str).ok_or(())?;
+    let before = current_task.actual_snapshot();
+    let data = match action {
+        "get" => task_control_snapshot(&before),
+        "cancel" => {
+            let active = active_requests
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let mut cancelled = 0u64;
+            for request_id in active {
+                let result = if let Some(broker_request_id) =
+                    privileged_request_id(privileged_requests, &request_id)
+                {
+                    privileged
+                        .ok_or(())?
+                        .cancel_execute(broker_request_id)
+                        .map_err(|_| ())
+                } else {
+                    cancellation.cancel_request(&request_id).map_err(|_| ())
+                };
+                if result.is_ok() {
+                    cancelled = cancelled.saturating_add(1);
+                }
+            }
+            json!({"state":"cancel_requested","cancelled_requests":cancelled})
+        }
+        _ => {
+            return write_rpc_error(
+                stream,
+                id,
+                -32602,
+                "Invalid task_control action",
+                Some(session),
+            );
+        }
+    };
+    write_rpc_result(
+        stream,
+        id,
+        json!({
+            "content":[{"type":"text","text":"Task control completed"}],
+            "structuredContent":{"ok":true,"data":data},
+            "isError":false
+        }),
+        Some(session),
+    )
+}
+
+fn task_control_snapshot(status: &CurrentTaskStatus) -> Value {
+    match status {
+        CurrentTaskStatus::Idle => json!({"state":"idle"}),
+        CurrentTaskStatus::Active(task) => json!({
+            "state":"active",
+            "execution_state": task_execution_state_name(task.state),
+            "kind": task_kind_name(task.kind),
+            "summary": task.summary.as_deref()
+        }),
+    }
+}
+
+const fn task_execution_state_name(state: TaskExecutionState) -> &'static str {
+    match state {
+        TaskExecutionState::Idle => "idle",
+        TaskExecutionState::Running => "running",
+        TaskExecutionState::AwaitingAuthorization => "awaiting_authorization",
+        TaskExecutionState::Blocked => "blocked",
+        TaskExecutionState::Failed => "failed",
+        TaskExecutionState::Cancelled => "cancelled",
+    }
+}
+
+const fn task_kind_name(kind: TaskKind) -> &'static str {
+    match kind {
+        TaskKind::ReadFile => "read_file",
+        TaskKind::SearchCode => "search_code",
+        TaskKind::ModifyFile => "modify_file",
+        TaskKind::ExecuteCommand => "execute_command",
+        TaskKind::GitOperation => "git_operation",
+        TaskKind::Build => "build",
+        TaskKind::Test => "test",
+        TaskKind::ElevatedOperation => "elevated_operation",
+        TaskKind::Other => "other",
     }
 }
 
@@ -1691,6 +1887,296 @@ mod tests {
         )
     }
 
+    fn public_tool_call(
+        port: u16,
+        session: &str,
+        id: u64,
+        name: &str,
+        arguments: Value,
+    ) -> ClientResponse {
+        post(
+            port,
+            Some(session),
+            &json!({
+                "jsonrpc":"2.0",
+                "id":id,
+                "method":"tools/call",
+                "params":{"name":name,"arguments":arguments}
+            }),
+        )
+    }
+
+    #[test]
+    fn schema27_public_facade_runtime_semantics_are_real_end_to_end() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("schema27 PEP ready");
+        let initialized = initialize(pep.port(), 600);
+        let session = initialized.session.expect("downstream MCP session");
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+
+        let context = public_tool_call(pep.port(), &session, 601, "workspace_context", json!({}));
+        let projected_workspace = context.body["result"]["structuredContent"]["data"]["workspace"]
+            .as_str()
+            .expect("workspace projection");
+        assert!(!projected_workspace.is_empty());
+        assert!(!projected_workspace.starts_with(r"\\?\"));
+        assert_eq!(
+            PathBuf::from(projected_workspace).canonicalize().unwrap(),
+            workspace.canonicalize().unwrap()
+        );
+        assert_eq!(
+            context.body["result"]["structuredContent"]["data"]["default_cwd"],
+            "."
+        );
+
+        let absolute = public_tool_call(
+            pep.port(),
+            &session,
+            602,
+            "document_workflow",
+            json!({"action":"inspect","path":workspace.join("probe.txt").to_string_lossy()}),
+        );
+        assert_eq!(
+            absolute.body["result"]["structuredContent"]["error"]["code"],
+            "WorkspaceDenied"
+        );
+        assert_eq!(absolute.body["result"]["isError"], true);
+
+        let nonzero = public_tool_call(
+            pep.port(),
+            &session,
+            603,
+            "exec_command",
+            json!({"command":"exit /b 7","shell":"cmd","yield_time_ms":10000}),
+        );
+        assert_eq!(nonzero.body["result"]["isError"], true);
+        assert_eq!(
+            nonzero.body["result"]["structuredContent"]["error"]["code"],
+            "ProcessFailed"
+        );
+        assert_eq!(
+            nonzero.body["result"]["structuredContent"]["data"]["exit_code"],
+            7
+        );
+
+        let running = public_tool_call(
+            pep.port(),
+            &session,
+            604,
+            "exec_command",
+            json!({
+                "command":"Start-Sleep -Milliseconds 900; Write-Output LB_SCHEMA27_DONE",
+                "shell":"windows_powershell",
+                "yield_time_ms":0
+            }),
+        );
+        assert_eq!(
+            running.body["result"]["structuredContent"]["data"]["status"],
+            "running"
+        );
+        let public_session = running.body["result"]["structuredContent"]["data"]["session_id"]
+            .as_str()
+            .expect("public session id")
+            .to_string();
+        assert!(public_session.starts_with("lb-session-"));
+        assert!(
+            !serde_json::to_string(&running.body)
+                .unwrap()
+                .contains("session:lb-session-")
+        );
+
+        let polled = public_tool_call(
+            pep.port(),
+            &session,
+            605,
+            "command_control",
+            json!({"action":"poll","session_id":public_session,"wait_ms":25}),
+        );
+        assert!(polled.body.get("error").is_none(), "{:#?}", polled.body);
+
+        thread::sleep(Duration::from_millis(1200));
+        let terminal = public_tool_call(
+            pep.port(),
+            &session,
+            606,
+            "command_control",
+            json!({"action":"poll","session_id":public_session}),
+        );
+        assert_eq!(
+            terminal.body["result"]["structuredContent"]["data"]["status"], "completed",
+            "{:#?}",
+            terminal.body
+        );
+        assert!(
+            terminal.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("LB_SCHEMA27_DONE")
+        );
+
+        if let Some(output_ref) =
+            terminal.body["result"]["structuredContent"]["data"]["output_refs"]["stdout"].as_str()
+        {
+            assert!(output_ref.starts_with("lb-output-"));
+            let read = public_tool_call(
+                pep.port(),
+                &session,
+                607,
+                "command_control",
+                json!({"action":"read","output_ref":output_ref,"stream":"stdout","offset":0,"limit":4096}),
+            );
+            assert!(
+                read.body["result"]["structuredContent"]["data"]["content"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("LB_SCHEMA27_DONE")
+            );
+        }
+
+        let task = public_tool_call(
+            pep.port(),
+            &session,
+            608,
+            "task_control",
+            json!({"action":"get"}),
+        );
+        assert_eq!(task.body["result"]["structuredContent"]["ok"], true);
+        assert!(matches!(
+            task.body["result"]["structuredContent"]["data"]["state"].as_str(),
+            Some("idle") | Some("active")
+        ));
+
+        let create = public_tool_call(
+            pep.port(),
+            &session,
+            609,
+            "document_workflow",
+            json!({"action":"create","path":"schema27.txt","content":"alpha\nbeta\n"}),
+        );
+        assert_eq!(
+            create.body["result"]["structuredContent"]["ok"], true,
+            "{:#?}",
+            create.body
+        );
+        let inspect = public_tool_call(
+            pep.port(),
+            &session,
+            610,
+            "document_workflow",
+            json!({"action":"inspect","path":"schema27.txt"}),
+        );
+        assert_eq!(
+            inspect.body["result"]["structuredContent"]["data"]["text"],
+            "alpha\nbeta\n"
+        );
+        let rebuild = public_tool_call(
+            pep.port(),
+            &session,
+            611,
+            "document_workflow",
+            json!({"action":"rebuild","path":"schema27.txt","content":"gamma\ndelta\n"}),
+        );
+        assert_eq!(
+            rebuild.body["result"]["structuredContent"]["ok"], true,
+            "{:#?}",
+            rebuild.body
+        );
+        let rebuilt = public_tool_call(
+            pep.port(),
+            &session,
+            612,
+            "document_workflow",
+            json!({"action":"inspect","path":"schema27.txt"}),
+        );
+        assert_eq!(
+            rebuilt.body["result"]["structuredContent"]["data"]["text"],
+            "gamma\ndelta\n"
+        );
+        let convert = public_tool_call(
+            pep.port(),
+            &session,
+            613,
+            "document_workflow",
+            json!({"action":"convert","source":"schema27.txt","path":"schema27-copy.txt"}),
+        );
+        assert_eq!(
+            convert.body["result"]["structuredContent"]["ok"], true,
+            "{:#?}",
+            convert.body
+        );
+        let converted = public_tool_call(
+            pep.port(),
+            &session,
+            614,
+            "document_workflow",
+            json!({"action":"inspect","path":"schema27-copy.txt"}),
+        );
+        assert_eq!(
+            converted.body["result"]["structuredContent"]["data"]["text"],
+            "gamma\ndelta\n"
+        );
+
+        let diagnose = public_tool_call(
+            pep.port(),
+            &session,
+            615,
+            "agent_workflow",
+            json!({"action":"diagnose","objective":"schema27 context"}),
+        );
+        assert_eq!(
+            diagnose.body["result"]["structuredContent"]["data"]["state"], "context_ready",
+            "{:#?}",
+            diagnose.body
+        );
+        let executable_workflow = public_tool_call(
+            pep.port(),
+            &session,
+            616,
+            "agent_workflow",
+            json!({
+                "action":"bugfix",
+                "objective":"schema27 executable orchestration",
+                "commands":[{"command":"echo LB_SCHEMA27_AGENT","shell":"cmd","workdir":".","yield_time_ms":10000}]
+            }),
+        );
+        assert_eq!(
+            executable_workflow.body["result"]["structuredContent"]["data"]["state"], "completed",
+            "{:#?}",
+            executable_workflow.body
+        );
+        assert!(
+            executable_workflow.body["result"]["structuredContent"]["data"]["commands"][0]["output"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("LB_SCHEMA27_AGENT")
+        );
+
+        let mut coding = pep.stop().expect("schema27 PEP stops");
+        coding.stop().expect("schema27 Coding Tools runtime stops");
+        cleanup_test_directory(&workspace);
+    }
+
     #[test]
     fn actual_bundled_mcp_is_reached_only_through_loopback_policy_server() {
         let root = repo_root();
@@ -1760,6 +2246,7 @@ mod tests {
             }),
         );
         assert_eq!(raw_private.body["error"]["code"], -32001);
+        thread::sleep(Duration::from_millis(540));
 
         pep.set_permission_mode(PermissionMode::Edit);
         let denied = post(
@@ -2036,6 +2523,115 @@ mod tests {
 
         let mut coding = pep.stop().expect("PEP stop after cancellation");
         coding.stop().expect("MCP Job stop after cancellation");
+        assert_eq!(coding.active_processes().unwrap(), 0);
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn task_control_cancel_reaches_running_call_without_waiting_for_facade_execution_lock() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP listener ready");
+        let initialized = initialize(pep.port(), 30);
+        let session = initialized.session.expect("downstream MCP session");
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+
+        let port = pep.port();
+        let call_session = session.clone();
+        let call_started = std::time::Instant::now();
+        let call = thread::spawn(move || {
+            post(
+                port,
+                Some(&call_session),
+                &json!({
+                    "jsonrpc":"2.0",
+                    "id":"task-control-me",
+                    "method":"tools/call",
+                    "params":{
+                        "name":"exec_command",
+                        "arguments":{
+                            "command":"Start-Sleep -Seconds 10",
+                            "shell":"windows_powershell",
+                            "yield_time_ms":10000,
+                            "timeout_ms":20000,
+                            "max_output_bytes":4096
+                        }
+                    }
+                }),
+            )
+        });
+
+        let running_deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while !matches!(
+            pep.current_task_projection().actual_snapshot(),
+            CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
+        ) {
+            assert!(
+                std::time::Instant::now() < running_deadline,
+                "tool call never became actually Running"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let cancel_started = std::time::Instant::now();
+        let cancel = public_tool_call(
+            pep.port(),
+            &session,
+            31,
+            "task_control",
+            json!({"action":"cancel"}),
+        );
+        assert!(
+            cancel_started.elapsed() < Duration::from_secs(2),
+            "task_control cancel blocked behind the facade execution mutex"
+        );
+        assert_eq!(
+            cancel.body["result"]["structuredContent"]["data"]["state"], "cancel_requested",
+            "{:#?}",
+            cancel.body
+        );
+        assert!(
+            cancel.body["result"]["structuredContent"]["data"]["cancelled_requests"]
+                .as_u64()
+                .is_some_and(|count| count >= 1),
+            "{:#?}",
+            cancel.body
+        );
+
+        let result = call.join().expect("tools/call client thread");
+        assert!(
+            call_started.elapsed() < Duration::from_secs(5),
+            "task_control cancellation did not interrupt the long command"
+        );
+        assert!(result.body.get("result").is_some() || result.body.get("error").is_some());
+
+        let mut coding = pep
+            .stop()
+            .expect("PEP stop after task_control cancellation");
+        coding
+            .stop()
+            .expect("MCP Job stop after task_control cancellation");
         assert_eq!(coding.active_processes().unwrap(), 0);
         drop(coding);
         cleanup_test_directory(&workspace);
