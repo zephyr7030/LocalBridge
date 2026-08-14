@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -175,7 +175,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Schema25 LocalBridge Agent Runtime facade redesign is ratified. Schema26 administrator safety consent is queued for LB-015/LB-016 and does not move the execution pointer. Rework LB-006 first, then LB-007 through LB-012 in strict order, then run fresh G2 adversarial generation 9. G3 generation 6 is historical and must be rerun after the foundational G2 redesign is accepted; when strict sequencing later reaches LB-015/LB-016, schema26 must be implemented there. G4/LB-018 remains blocked."
+    "next_action": "LB-006 LocalBridge Agent Runtime facade rework is accepted. Execute LB-007 next, then continue LB-008 through LB-012 in strict order and run fresh G2 adversarial generation 9. G3 generation 6 remains historical and must be rerun after the foundational G2 redesign is accepted; schema26 administrator safety consent remains queued for LB-015/LB-016 when strict sequencing reaches them. G4/LB-018 remains blocked."
   },
   "current_task_ui": {
     "enabled": true,
