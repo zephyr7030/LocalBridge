@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -175,7 +175,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-011 Privileged Broker IPC Foundation fresh revalidation accepted. Execute LB-012 Elevated Permission Mode next. After LB-012 acceptance stop G2 at REVIEW_REQUIRED / review REQUIRED for fresh independent adversarial generation 9; LB-013/G3 and G4 remain blocked."
+    "next_action": "G2 LB-006 through LB-012 schema25 rework chain is accepted. Run a fresh independent G2 adversarial review generation 9 against the committed review-ready baseline before LB-013. Generation 8 remains historical invalidated provenance only. Do not unlock or execute G3/LB-013 until generation 9 PASS; historical G3 generation 6 remains invalidated and G4 remains blocked. Schema26 administrator safety consent remains queued for LB-015/LB-016."
   },
   "current_task_ui": {
     "enabled": true,
