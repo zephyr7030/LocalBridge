@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -32,12 +32,6 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "LB-006: public command/session lifecycle is not LocalBridge-owned; command_control live poll/read/write/kill and terminal convergence are incomplete",
-    "LB-006: workspace_context can return an empty workspace because the adapter consumes the wrong private result fields and lacks required semantic result probing",
-    "LB-006: advertised agent_workflow/task_control/document_workflow actions remain unavailable",
-    "LB-006: silent nonzero ordinary process exit is incorrectly normalized as public success rather than ProcessFailed",
-    "LB-006: nested Git repository discovery is inconsistent across status/diff/log/show/blame and diff may silently fall back to non-git behavior",
-    "LB-006: trusted ShellResolver can still trust or probe a non-system PowerShell candidate when executable identity trust is not established",
     "LB-007: docker/podman/wsl privileged-external-runtime review is bypassable through shell-time executable-name construction/indirection"
   ],
   "known_risks": [
@@ -180,7 +174,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 independent adversarial review generation 9 FAIL. First complete schema27 LB-006 rework: LocalBridge-owned public Session Manager and opaque handles; correct command_control poll/read/write/kill semantics with backend terminal convergence and SessionUnavailable on unrecoverable handle loss; non-empty ordinary workspace_context plus deterministic private-result semantic probe; nonzero exit -> ProcessFailed/Failed CurrentTask; all advertised agent_workflow/task_control/document_workflow actions genuinely executable; active-workspace-relative public path validation; one workspace-bounded nested Git repo resolver with no diff fallback after repo discovery; and retain the generation-9 trusted ShellResolver trust-before-probe correction. Then rework LB-007 so privileged-external-runtime review cannot be bypassed by shell-time command construction/indirection. Reaccept LB-008 through LB-012 sequentially only after their dependencies pass, then run fresh G2 adversarial generation 10. LB-013/G3/G4 remain blocked."
+    "next_action": "LB-006 schema27 public facade/runtime semantics rework is accepted at implementation commit e717a0f8d69a93c17faa426694e009ad03a80d9e. Execute LB-007 next to close the remaining generation-9 privileged-external-runtime shell-indirection bypass, then reaccept LB-008 through LB-012 sequentially and run fresh G2 adversarial generation 10. Historical G2 generation 9 remains FAIL provenance; LB-013/G3/G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1037,6 +1031,16 @@
   "schema27_lb006_public_facade_runtime_semantics_amendment_2026_08_14": {
     "status": "CONTRACT_AMENDMENT_AND_REWORK_REQUIRED",
     "ratified": true,
+    "implementation_status": "ACCEPTED",
+    "implementation_commit": "e717a0f8d69a93c17faa426694e009ad03a80d9e",
+    "acceptance_verification": {
+      "cargo_test_locked": "PASS",
+      "cargo_clippy_all_targets_deny_warnings": "PASS",
+      "runtime_manifest_verify": "PASS",
+      "architecture_verify": "PASS",
+      "g4_human_gate_test": "PASS",
+      "git_diff_check": "PASS"
+    },
     "source_review_generation": 9,
     "post_review_plugin_supplement": true,
     "owner_pr": "LB-006",
