@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -32,14 +32,6 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "LB-006/schema28: public shell quoting must preserve exactly one intended shell parse; double-quoted pipe/ampersand PowerShell literals currently reparse incorrectly",
-    "LB-006/schema28: command_control.poll must expose ordered incremental output exactly once; current plugin behavior loses intermediate chunks and replays the latest chunk",
-    "LB-006/schema28: command_control.write must work on a valid live public session after exec returns; current plugin behavior returns SessionUnavailable",
-    "LB-006/schema28: command_control.kill must converge to stable cancelled without RuntimeUnavailable on a healthy runtime or later SessionUnavailable degradation",
-    "LB-006/schema28: view_image auto_resize must perform real bounded resize; current plugin behavior fails whenever resize is actually required",
-    "LB-006/schema28: Windows PowerShell public output must be UTF-8; current plugin behavior mojibakes Chinese output",
-    "LB-006/schema28: git_workflow.blame end_line must be one-based inclusive without off-by-one",
-    "LB-006/schema28: document_workflow start_line > end_line must return InvalidArgument instead of empty success",
     "LB-007: docker/podman/wsl privileged-external-runtime review is bypassable through shell-time executable-name construction/indirection"
   ],
   "known_risks": [
@@ -182,7 +174,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Schema28 supersedes the schema27 LB-006 acceptance after fresh public-plugin behavior findings. Rework LB-006 first against A276-A288 and the strengthened runtime semantic contracts; LB-007 through LB-012 remain blocked. Generation 10 is not consumed. After LB-006 and the remaining G2 PRs pass sequentially, run fresh G2 adversarial generation 10; G3/G4 remain blocked."
+    "next_action": "LB-006 schema28 public runtime correction is accepted at d041ca1d86dda36872f79117e408d78f49b81b5d with governance-regression verifier correction 4755d2db6b9a0cb9a77b11c2f84e41365bc22172. Execute LB-007 next to close the remaining privileged-external-runtime shell-indirection bypass, then reaccept LB-008 through LB-012 sequentially. Generation 10 remains unconsumed; after all G2 PRs pass, run fresh G2 adversarial generation 10. G3/G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1087,9 +1079,23 @@
     "g4_unlocked": false
   },
   "schema28_test_orchestration_and_public_runtime_corrections_2026_08_14": {
-    "status": "CONTRACT_AMENDMENT_AND_REWORK_REQUIRED",
+    "status": "IMPLEMENTED_AND_ACCEPTED",
     "ratified": true,
     "owner_pr": "LB-006",
+    "implementation_commit": "d041ca1d86dda36872f79117e408d78f49b81b5d",
+    "governance_regression_verifier_commit": "4755d2db6b9a0cb9a77b11c2f84e41365bc22172",
+    "implementation_verification": {
+      "schema28_real_bundled_runtime_e2e": "PASS: A281-A286 and A288",
+      "git_blame_real_fixture": "PASS: A287",
+      "private_result_semantic_probe": "PASS: live exec/write/read/kill before facade serving plus mutation tests for A273",
+      "cargo_test_locked": "PASS: 162 library tests plus all integration suites",
+      "cargo_clippy_all_targets_deny_warnings": "PASS",
+      "runtime_manifest_verify": "PASS",
+      "architecture_verify": "PASS",
+      "g4_human_gate_test": "PASS with immutable schema28 ratification assertions rather than live-pointer pinning",
+      "frontend_test_and_build_after_verifier_fix": "PASS",
+      "git_diff_check": "PASS"
+    },
     "source": "public plugin runtime testing plus independent test-orchestration review",
     "test_orchestration": {
       "tiers": ["pr_fast", "pr_runtime", "group_release"],
