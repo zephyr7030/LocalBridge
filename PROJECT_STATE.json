@@ -527,7 +527,8 @@
     "screen3_permission_visual_evidence": "PASS_BY_USER_780x620_2026-08-14; scoped visual evidence only and does not satisfy the separate G3-to-G4 human Gate",
     "g4_unlocked": false,
     "human_review_required": true,
-    "human_review_generation": 2
+    "human_review_generation": 2,
+    "review_decision_commit": "d3ba82ffbd8e1a42f1e9a3fb5317f77559d2aa0a"
   },
   "ui_backend_separation": {
     "frontend_role": "typed_projection_and_user_intent_only",
