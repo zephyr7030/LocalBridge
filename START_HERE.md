@@ -102,6 +102,23 @@ OpenAI已保存项 = Tunnel ID 显示当前持久化值；Key 固定提示“已
 Cloudflare     = LB-018 从最终 bundle/manifest/installer/启动参数/fallback 移除 cloudflared；历史兼容证据可留但不可执行/打包
 ```
 
+Agent Runtime / ShellResolver 冻结补充（schema25）：
+
+```text
+Public Agent API = LocalBridge 自有、版本化；禁止直接转发 upstream tools/list/schema/error
+v1 core registry = workspace_context / agent_workflow / exec_command / command_control / task_control / git_workflow / document_workflow / view_image
+实际 tools/list  = 当前 policy 允许的 core registry 子集 + 当前 policy 允许的 LocalBridge 特权扩展
+特权扩展         = elevated_exec；仅既有 Elevated + Broker policy 条件式开放，不属于普通 core
+安全路由         = LocalBridge Tool Registry → stable capability/action → PEP → adapter/executor
+Runtime adapter  = coding-tools-mcp 为内部可替换 backend；启动必须做 mandatory capability negotiation，缺失/不兼容 fail-closed
+Shell selector   = auto / powershell / pwsh / windows_powershell / cmd；禁止 command-text guessing、任意 executable selector、自动安装/更新
+auto shell       = 在已验证可信候选中按 semantic version 选最高兼容 PowerShell Core → Windows PowerShell 5.1 → cmd
+PATH             = 仅发现线索，不是信任依据；version probe/执行前先验证可信安装位置或显式注册 executable identity
+执行模型         = DirectProcessExecutor 与 ShellExecutor 分离，均使用 structured spec
+v0.1 非目标      = WSL/container/remote shell、custom shell registry、environment manager、固定内部目录布局
+当前返工入口     = G2 / LB-006；LB-006→LB-012 严格重验，之后 fresh G2 adversarial generation 9；旧 G2 gen8/G3 gen6 仅保留历史证据
+```
+
 ```text
 品牌图标       = assets/icons/localbridge.ico
 品牌 PNG       = assets/icons/localbridge.png

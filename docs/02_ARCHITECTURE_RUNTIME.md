@@ -37,6 +37,30 @@ external runtime
 
 Domain 不依赖 coding-tools-mcp / tunnel-client 私有结构。
 
+### Schema25 — LocalBridge Agent Runtime Facade
+
+Public MCP 不再以 upstream tool catalog 为合同：
+
+```text
+ChatGPT Agent
+  ↓
+LocalBridge versioned Tool Registry
+  ↓
+stable LocalBridge capability/action classification
+  ↓
+PEP
+  ↓
+WorkspaceRuntimeAdapter / Local executors / Privileged Broker
+```
+
+v1 非特权 core Registry 固定为：`workspace_context`、`agent_workflow`、`exec_command`、`command_control`、`task_control`、`git_workflow`、`document_workflow`、`view_image`。实际 `tools/list` 只返回当前 policy 允许的 Registry 子集，并可附加当前 policy 允许的 LocalBridge 特权扩展；`elevated_exec` 保持为现有 Broker-governed conditional privileged extension。upstream `tools/list`、私有 tool schema/name/error 和新增 tool 都不得自动成为 public API。
+
+runtime adapter 初始化必须协商 facade mandatory capabilities；缺失能力或 adapter schema 不兼容时 fail-closed。adapter 负责把 upstream result/error 转成稳定 LocalBridge result/error，CurrentTask 也只使用稳定 LocalBridge public tool/capability identity 与脱敏摘要。
+
+ShellResolver 只接受 `auto/powershell/pwsh/windows_powershell/cmd`。`auto` 在已验证可信候选中按 semantic version 选择最高兼容 PowerShell Core，再 Windows PowerShell 5.1，再 `cmd.exe`。PATH 只能发现候选，不能赋予信任；任何候选在 version probe/执行前必须先通过可信安装位置或显式注册 executable identity 的重新验证。禁止 command-text guessing、MCP 任意 shell executable、shell auto-install/update。
+
+DirectProcessExecutor 与 ShellExecutor 是两个结构化边界；direct/privileged process 不以 shell string 为 canonical。WSL/container/remote、custom shell registry、environment-manager abstraction 与精确目录结构延后，不属于 v0.1 Gate。
+
 ## 启动/停止
 
 普通 configured 前台入口先完成 UI milestone：

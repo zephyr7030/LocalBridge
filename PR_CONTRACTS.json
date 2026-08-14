@@ -1,5 +1,5 @@
 {
-  "schema_version": 24,
+  "schema_version": 25,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -175,7 +175,11 @@
     "ui_white_on_white_ambiguous_button_forbidden": true,
     "ui_minimum_prompt_required": true,
     "ui_transient_operation_notice_seconds": 3,
-    "ui_transient_operation_notice_examples": ["无法准备管理员权限", "权限模式未更新", "一次性保存/选择失败"],
+    "ui_transient_operation_notice_examples": [
+      "无法准备管理员权限",
+      "权限模式未更新",
+      "一次性保存/选择失败"
+    ],
     "persistent_runtime_fault_not_treated_as_transient_notice": true,
     "peer_action_button_left_edge_alignment_required": true,
     "peer_action_button_alignment_tolerance_css_px": 1,
@@ -330,7 +334,10 @@
       "settings",
       "onboarding_screen_3"
     ],
-    "permission_mode_post_onboarding_edit_surfaces": ["settings", "explicitly_reopened_onboarding_screen_3"],
+    "permission_mode_post_onboarding_edit_surfaces": [
+      "settings",
+      "explicitly_reopened_onboarding_screen_3"
+    ],
     "reopened_onboarding_screen_3_permission_edit_allowed": true,
     "dashboard_admin_privilege_status_read_only": true,
     "workspace_user_facing_verbatim_prefix_forbidden": true,
@@ -342,7 +349,10 @@
     "workspace_execution_path_derived_from_validated_identity_required": true,
     "workspace_display_normalization_must_not_authorize": true,
     "workspace_execution_path_normalization_must_not_authorize": true,
-    "dashboard_service_controls": ["重启服务", "关闭服务"],
+    "dashboard_service_controls": [
+      "重启服务",
+      "关闭服务"
+    ],
     "dashboard_restart_service_accent": "amber",
     "dashboard_stop_service_accent": "red",
     "dashboard_service_controls_shared_button_language_required": true,
@@ -352,7 +362,59 @@
     "dashboard_stop_orderly_managed_shutdown_required": true,
     "cloudflared_final_bundle_forbidden": true,
     "cloudflare_managed_tunnel_runtime_forbidden": true,
-    "cloudflare_historical_compatibility_evidence_may_remain_non_executable": true
+    "cloudflare_historical_compatibility_evidence_may_remain_non_executable": true,
+    "localbridge_agent_api_owned": true,
+    "localbridge_agent_api_versioned": true,
+    "upstream_tools_list_public_passthrough_forbidden": true,
+    "upstream_tool_schema_public_leak_forbidden": true,
+    "upstream_tool_private_error_leak_forbidden": true,
+    "upstream_new_tools_auto_publication_forbidden": true,
+    "localbridge_agent_api_v1_core_tools": [
+      "workspace_context",
+      "agent_workflow",
+      "exec_command",
+      "command_control",
+      "task_control",
+      "git_workflow",
+      "document_workflow",
+      "view_image"
+    ],
+    "localbridge_agent_api_privileged_extensions": [
+      "elevated_exec"
+    ],
+    "elevated_exec_conditional_broker_policy_preserved": true,
+    "runtime_capability_negotiation_required": true,
+    "runtime_missing_required_capability_fail_closed": true,
+    "runtime_adapter_result_error_normalization_required": true,
+    "policy_classifies_localbridge_capabilities_not_upstream_names": true,
+    "workflow_transitive_capability_declaration_required": true,
+    "upstream_runtime_internal_replaceable_backend": true,
+    "execution_envelope_localbridge_tool_identity_required": true,
+    "shell_resolver_owned_by_localbridge": true,
+    "shell_selector_values": [
+      "auto",
+      "powershell",
+      "pwsh",
+      "windows_powershell",
+      "cmd"
+    ],
+    "shell_auto_preference": [
+      "trusted_highest_powershell_core",
+      "windows_powershell_5_1",
+      "cmd"
+    ],
+    "shell_text_guessing_forbidden": true,
+    "shell_arbitrary_executable_from_mcp_forbidden": true,
+    "shell_auto_install_or_update_forbidden": true,
+    "shell_default_candidate_requires_trusted_install_or_explicit_registered_identity": true,
+    "shell_path_discovery_is_not_trust_authority": true,
+    "shell_probe_requires_candidate_trust_validation": true,
+    "shell_version_selection_semantic_required": true,
+    "direct_process_and_shell_execution_separated": true,
+    "custom_shell_registry_v0_1_required": false,
+    "wsl_container_remote_shell_v0_1_required": false,
+    "environment_manager_abstraction_v0_1_required": false,
+    "public_tools_list_policy_filtered_subset_of_registry_required": true
   },
   "prs": {
     "LB-000": {
@@ -578,7 +640,9 @@
         "runtime/coding-tools-mcp/**",
         "runtime-manifest.toml",
         "scripts/**",
-        "tests/integration/mcp/**"
+        "tests/integration/mcp/**",
+        "tests/unit/mcp/**",
+        "tests/integration/command/**"
       ],
       "forbidden_paths": [
         "src/features/**",
@@ -588,7 +652,13 @@
         "portable Python runtime",
         "pinned coding-tools runtime",
         "embedded Python exact layout",
-        "no-external-Python contract"
+        "no-external-Python contract",
+        "LocalBridge-owned versioned public ToolRegistry and Agent Runtime facade",
+        "replaceable internal WorkspaceRuntimeAdapter or equivalent package adapter boundary",
+        "runtime capability negotiator for mandatory LocalBridge facade capabilities",
+        "LocalBridge ShellResolver using structured logical shell selectors",
+        "separate DirectProcessExecutor and ShellExecutor execution paths",
+        "stable LocalBridge result and typed-error normalization adapter"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -598,11 +668,24 @@
         "stop/redaction",
         "no system Python fallback",
         "offline embedded Python startup",
-        "no runtime pip install"
+        "no runtime pip install",
+        "public ToolRegistry defines exactly the eight LocalBridge v1 non-privileged core tools; tools/list returns only the current-policy-eligible subset plus policy-eligible LocalBridge privileged extensions and never upstream private tool names",
+        "adding a fake new upstream tool or changing an upstream private tool schema does not change the public LocalBridge tool registry",
+        "missing any mandatory LocalBridge facade runtime capability or incompatible adapter schema fails closed before serving the facade",
+        "upstream private result and error shapes are normalized into stable LocalBridge result/error contracts without leaking private schema details",
+        "ShellResolver auto selects the highest compatible trusted PowerShell Core by semantic version then Windows PowerShell 5.1 then cmd",
+        "a malicious earlier PATH pwsh.exe is rejected without execution or version probing unless its executable identity independently satisfies the trusted candidate policy",
+        "logical selectors auto powershell pwsh windows_powershell cmd resolve without command-text guessing and MCP cannot supply an arbitrary shell executable path",
+        "ShellResolver never automatically installs or updates a shell",
+        "direct process execution and shell execution remain structurally separate and use structured specifications"
       ],
       "non_goals": [
         "policy enforcement",
-        "Tunnel"
+        "Tunnel",
+        "WSL container or remote shell backends in v0.1",
+        "custom shell registry in v0.1",
+        "environment-manager abstraction in v0.1",
+        "freezing the exact internal source directory layout"
       ]
     },
     "LB-007": {
@@ -619,7 +702,9 @@
       ],
       "required_artifacts": [
         "capability policy enforcement",
-        "PEP-to-current-task status integration"
+        "PEP-to-current-task status integration",
+        "LocalBridge stable public capability/action classifier independent of upstream tool names",
+        "transitive capability declarations for high-level LocalBridge workflows"
       ],
       "required_tests": [
         "tools/call bypass",
@@ -629,7 +714,12 @@
         "mode-switch cached list",
         "denied tools/call projects Blocked not Running",
         "allowed tools/call projects actual execution state",
-        "task summary redacts sensitive arguments"
+        "task summary redacts sensitive arguments",
+        "PEP classifies stable LocalBridge public actions and capabilities rather than raw upstream tool names",
+        "raw upstream tool names cannot be called as a public bypass around the LocalBridge facade",
+        "unknown LocalBridge public actions or capabilities fail closed",
+        "high-level workflows declare and enforce all transitive write process network and privilege capabilities before execution",
+        "cached or stale public tools/list cannot bypass a later permission-mode or capability-policy change"
       ],
       "non_goals": [
         "Tunnel",

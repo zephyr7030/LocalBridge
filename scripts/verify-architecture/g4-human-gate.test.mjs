@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,42 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema24Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema25Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25Contracts), true);
+const schema24Contracts = normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25Contracts);
+assert.equal(schema24Contracts.schema_version, 24);
+assert.equal(Object.hasOwn(schema24Contracts.rules, "localbridge_agent_api_owned"), false);
+assert.equal(schema24Contracts.prs["LB-006"].writable_paths.includes("tests/integration/command/**"), false);
+assert.equal(schema24Contracts.prs["LB-007"].required_artifacts.includes("LocalBridge stable public capability/action classifier independent of upstream tool names"), false);
+
+const schema25UpstreamPassthrough = structuredClone(schema25Contracts);
+schema25UpstreamPassthrough.rules.upstream_tools_list_public_passthrough_forbidden = false;
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25UpstreamPassthrough), false);
+const schema25RawCoreTool = structuredClone(schema25Contracts);
+schema25RawCoreTool.rules.localbridge_agent_api_v1_core_tools.push("read_file");
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25RawCoreTool), false);
+const schema25UnfilteredToolsList = structuredClone(schema25Contracts);
+schema25UnfilteredToolsList.rules.public_tools_list_policy_filtered_subset_of_registry_required = false;
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25UnfilteredToolsList), false);
+const schema25NoCapabilityNegotiation = structuredClone(schema25Contracts);
+schema25NoCapabilityNegotiation.rules.runtime_capability_negotiation_required = false;
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25NoCapabilityNegotiation), false);
+const schema25RawNamePolicy = structuredClone(schema25Contracts);
+schema25RawNamePolicy.rules.policy_classifies_localbridge_capabilities_not_upstream_names = false;
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25RawNamePolicy), false);
+const schema25PathAsTrust = structuredClone(schema25Contracts);
+schema25PathAsTrust.rules.shell_path_discovery_is_not_trust_authority = false;
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25PathAsTrust), false);
+const schema25ArbitraryShell = structuredClone(schema25Contracts);
+schema25ArbitraryShell.rules.shell_arbitrary_executable_from_mcp_forbidden = false;
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25ArbitraryShell), false);
+const schema25MergedExecutors = structuredClone(schema25Contracts);
+schema25MergedExecutors.rules.direct_process_and_shell_execution_separated = false;
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25MergedExecutors), false);
+const schema25MissingPathHijackTest = structuredClone(schema25Contracts);
+schema25MissingPathHijackTest.prs["LB-006"].required_tests = schema25MissingPathHijackTest.prs["LB-006"].required_tests.filter((item) => !item.startsWith("a malicious earlier PATH pwsh.exe"));
+assert.equal(hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(schema25MissingPathHijackTest), false);
+
 assert.equal(hasExactG3UiFirstScrollbarAmendment20260814(schema24Contracts), true);
 const schema23Contracts = normalizeG3UiFirstScrollbarAmendment20260814(schema24Contracts);
 assert.equal(schema23Contracts.schema_version, 23);

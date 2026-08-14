@@ -96,3 +96,13 @@ This section supersedes conflicting older G3 UI/lifecycle wording while preservi
 - any scrollable rounded sheet/dialog/card must preserve all four outer rounded corners; its scrollbar is clipped or inset inside the rounded shell and cannot flatten the right-side radius; vertical scrollbar top/bottom arrow, triangle, or equivalent increment/decrement buttons are forbidden while wheel/track/thumb scrolling remains usable;
 - Diagnostics is exactly `运行状态 / 项目 / 日志`; runtime rows = 本地运行环境 / 编码服务 / OpenAI Tunnel / 管理员权限; project = actual path; logs = bounded recent redacted events; page actions only `打开日志 / 导出诊断 / 完成`; engineering generation/attempt/PID/SID/nonce/IPC details are not normal UI;
 - LB-018 must retire Cloudflare/cloudflared from the final LocalBridge distribution: no `cloudflared.exe`, cloudflared manifest, Cloudflare managed-tunnel activation, launcher argument or fallback in final bundle/runtime manifest/installer. Historical compatibility evidence may retain the upstream fact but must not become executable packaged runtime.
+
+## Schema25 — LocalBridge Agent Runtime facade ratification（2026-08-14）
+
+`docs/LOCALBRIDGE_TOOL_WRAPPER_AND_SHELL_RESOLVER.md` 已作为设计输入完成独立审核；其合理方向被消化进 schema25，但原文不是逐字权威合同。冻结结论：LocalBridge 自己拥有版本化 public Tool Registry/API；coding-tools-mcp 退为可替换内部 workspace runtime；upstream tools/list/schema/name/error/new tool 不得自动穿透；v1 非特权 Registry 固定八个 core，实际 `tools/list` 仍按当前 policy 返回允许子集，`elevated_exec` 保留为 Broker-governed conditional privileged extension；runtime adapter 必须做 mandatory capability negotiation 并归一化 result/error；PEP 以稳定 LocalBridge capability/action 与 workflow transitive capability 为依据。
+
+ShellResolver 只接受逻辑 selector `auto/powershell/pwsh/windows_powershell/cmd`。`auto` 仅在已经建立信任的候选中按 semantic version 选择最高兼容 PowerShell Core，再 Windows PowerShell 5.1，再 `cmd.exe`。PATH 不是信任来源，任何候选在执行或版本 probe 前必须先通过可信安装位置或显式注册 executable identity 的重新验证。禁止 command-text guessing、任意 shell executable、自动安装/更新；DirectProcessExecutor 与 ShellExecutor 保持结构化分离。
+
+未冻结为 v0.1 必交付：WSL/container/remote shell、custom shell registry、environment-manager abstraction、原设计文档的精确内部目录布局。
+
+该基础架构修订使执行入口回到 `G2 / LB-006`：LB-006→LB-012 必须严格重新验收，随后执行 fresh G2 adversarial generation 9；历史 G2 generation 8 与 G3 generation 6 仅保留 provenance，不能继续作为当前解锁依据。G3 必须在新 G2 基线通过后重新执行，G3→G4 human Gate 当前不可执行，G4/LB-018 保持 BLOCKED。

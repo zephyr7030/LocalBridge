@@ -43,6 +43,22 @@ LB-011 Privileged Broker IPC Foundation
 LB-012 Elevated Permission Mode
 ```
 
+Schema25 Agent Runtime facade 修订从 **LB-006** 重新打开 G2。LB-006 负责 LocalBridge-owned public ToolRegistry/facade、内部可替换 WorkspaceRuntimeAdapter、mandatory capability negotiation、stable result/error normalization、可信 ShellResolver，以及 DirectProcessExecutor / ShellExecutor 分离；LB-007 负责 stable LocalBridge capability/action classifier、transitive workflow capability enforcement 与 public unknown deny。`elevated_exec` 的现有 Broker/permission 语义保持不变。
+
+该基础合同变化使历史 G2 adversarial generation 8 与 G3 generation 6 仅保留为 provenance，不得继续解锁后续。严格顺序固定为：
+
+```text
+LB-006 REWORK_REQUIRED
+→ LB-007 → ... → LB-012
+→ G2 REVIEW_REQUIRED
+→ fresh G2 adversarial generation 9
+→ 重新执行/验收 G3
+→ fresh G3 adversarial review
+→ fresh G3→G4 human Gate
+```
+
+在此之前 G3/G4 全部保持 BLOCKED。
+
 自动重连职责：
 
 - LB-008：Tunnel reconnect primitive；

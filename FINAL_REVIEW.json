@@ -1,13 +1,13 @@
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "review_date": "2026-08-10",
   "baseline": "v15-FINAL",
   "status": "REWORK_REQUIRED",
   "phase": "PRE_CODE",
-  "current_pr": "LB-014",
+  "current_pr": "LB-006",
   "blocking_findings": [
-    "G3 schema24 UI-first startup amendment reopens strict execution from LB-014",
-    "Scrollable rounded UI surfaces must remove native top/bottom scrollbar arrow or triangle affordances while preserving scrolling and outer radii"
+    "Schema25 reopens the foundational Agent Runtime boundary at LB-006: LocalBridge must own the public stable ToolRegistry/facade rather than filtering and forwarding the upstream coding-tools-mcp tool catalog",
+    "LB-006 must add fail-closed runtime capability negotiation, stable result/error normalization, trusted ShellResolver, and direct-process-vs-shell separation; LB-007 must move PEP classification to stable LocalBridge capabilities/actions with transitive workflow enforcement"
   ],
   "dynamic_gates_owned_by_lb000": [
     "coding-tools capability surface",
@@ -18,7 +18,11 @@
     "live tunnel compatibility"
   ],
   "dynamic_gate_owned_by_lb006": [
-    "exact Python 3.12.x embedded runtime patch/layout"
+    "exact Python 3.12.x embedded runtime patch/layout",
+    "LocalBridge-owned public Agent Runtime facade and eight-tool non-privileged v1 core registry",
+    "replaceable WorkspaceRuntimeAdapter capability negotiation and stable result/error normalization",
+    "trusted semantic-version ShellResolver with PATH-hijack rejection",
+    "DirectProcessExecutor versus ShellExecutor separation"
   ],
   "current_task_status_ui": {
     "status_only": true,
@@ -49,7 +53,7 @@
     "remove_deletes_files": false,
     "active_remove_result": "NoActiveWorkspace"
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "reconnect": {
     "attempts": 5,
     "backoff_seconds": [
@@ -73,7 +77,12 @@
     "g3_to_g4_human_manual_review_required": true,
     "g3_adversarial_pass_alone_unlocks_g4": false,
     "human_review_user_and_executor_claims_are_untrusted_evidence": true,
-    "executor_pre_authorization_requires_user_audited_concrete_record": true
+    "executor_pre_authorization_requires_user_audited_concrete_record": true,
+    "schema25_reopens_g2_from_lb006": true,
+    "g2_generation_8_historical_invalidated_by_schema25": true,
+    "g3_generation_6_historical_invalidated_by_schema25": true,
+    "g3_human_gate_actionable": false,
+    "g4_blocked": true
   },
   "onboarding": {
     "screens": 5,

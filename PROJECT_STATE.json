@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,10 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "Current public MCP tools/list and tools/call semantics still depend on upstream coding-tools-mcp private tool catalog/schema instead of a LocalBridge-owned stable Agent API",
+    "LocalBridge has no trusted ShellResolver/runtime facade capability-negotiation boundary required by schema25"
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -162,7 +165,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G3 independent adversarial generation 6 PASS. Run the separate G3-to-G4 human manual/detail review generation 2 next; keep G4/LB-018 blocked until that human Gate is independently accepted as PASS."
+    "next_action": "Schema25 LocalBridge Agent Runtime facade redesign is ratified. Rework LB-006 first, then LB-007 through LB-012 in strict order, then run fresh G2 adversarial generation 9. G3 generation 6 is historical and must be rerun after the foundational G2 redesign is accepted. G4/LB-018 remains blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -223,7 +226,7 @@
     "auto_select_other_on_remove": false,
     "mcp_can_mutate_registry": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -769,5 +772,58 @@
     "g4_unlocked": false,
     "next_required_adversarial_generation": 6,
     "executor_validation": "FRESH_2026-08-14: LB-013 through LB-017 static contracts PASS; schema24 architecture and G4 human-gate regression PASS; UI language/runtime manifest PASS; frontend Vitest/build PASS; native onboarding and Dashboard WebView2 780x620 at 150% DPI PASS; Dashboard settings_replace_delta=0.00px rounded_scroll=true scrollbar_arrows=false scroll_surface=true; full cargo test PASS with 130 library tests and all integration suites; cargo clippy --all-targets -D warnings PASS; git diff --check PASS."
+  },
+  "schema25_agent_runtime_facade_ratification_2026_08_14": {
+    "status": "CONTRACT_AMENDMENT_AND_REWORK_REQUIRED",
+    "source_design": "docs/LOCALBRIDGE_TOOL_WRAPPER_AND_SHELL_RESOLVER.md",
+    "pre_amendment_commit": "667e89f037e39afc9c9c4f1df4999f3b2213dffe",
+    "audit": {
+      "accepted": [
+        "LocalBridge owns a small versioned public Agent API instead of forwarding upstream tools/list/schema",
+        "coding-tools-mcp remains an internal replaceable workspace runtime adapter",
+        "stable capability/action classification precedes PEP and high-level workflows declare transitive capabilities",
+        "runtime adapter performs mandatory capability negotiation and fails closed on incompatibility",
+        "CurrentTask execution envelope uses stable LocalBridge public identity and safe summaries",
+        "ShellResolver uses logical selectors with semantic-version preference and no command-text guessing",
+        "direct process execution is separated from shell execution",
+        "upstream results/errors are normalized at the stable adapter boundary"
+      ],
+      "corrections": [
+        "The eight listed tools define the v1 non-privileged core Registry, not an absolute global or always-visible tools/list count; actual tools/list remains the current-policy-eligible Registry subset, and existing conditional elevated_exec remains a Broker-governed privileged extension",
+        "PATH is discovery input only and never trust authority; no candidate is executed or version-probed until trusted installation or explicitly registered executable identity is independently revalidated"
+      ],
+      "deferred": [
+        "WSL/container/remote shell backends",
+        "custom shell registry",
+        "environment-manager abstraction",
+        "exact internal source directory layout"
+      ]
+    },
+    "earliest_owner_pr": "LB-006",
+    "strict_rework_sequence": [
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-009",
+      "LB-010",
+      "LB-011",
+      "LB-012"
+    ],
+    "lb006_scope": "public ToolRegistry/facade, runtime adapter/capability negotiation, ShellResolver, direct-process-vs-shell separation, result/error normalization",
+    "lb007_scope": "stable LocalBridge capability/action classification and transitive PEP enforcement",
+    "invalidated_reviews": {
+      "g2": {
+        "generation": 8,
+        "commit": "9e64c8ed9f4ffb8d4c7cdbe97ad02fa7f8cc164c"
+      },
+      "g3": {
+        "generation": 6,
+        "commit": "d3ba82ffbd8e1a42f1e9a3fb5317f77559d2aa0a"
+      }
+    },
+    "next_required_g2_adversarial_generation": 9,
+    "g3_must_be_reexecuted_after_g2_pass": true,
+    "g3_human_gate_actionable": false,
+    "g4_unlocked": false
   }
 }

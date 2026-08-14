@@ -471,6 +471,86 @@ const G3_MANUAL_REVIEW_ROUND2_2026_08_14 = Object.freeze({
   },
 });
 
+const LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14 = Object.freeze({
+  schemaVersion: 25,
+  baselineCommit: "667e89f037e39afc9c9c4f1df4999f3b2213dffe",
+  baselineSchemaVersion: 24,
+  addedRules: {
+    localbridge_agent_api_owned: true,
+    localbridge_agent_api_versioned: true,
+    upstream_tools_list_public_passthrough_forbidden: true,
+    upstream_tool_schema_public_leak_forbidden: true,
+    upstream_tool_private_error_leak_forbidden: true,
+    upstream_new_tools_auto_publication_forbidden: true,
+    localbridge_agent_api_v1_core_tools: ["workspace_context", "agent_workflow", "exec_command", "command_control", "task_control", "git_workflow", "document_workflow", "view_image"],
+    localbridge_agent_api_privileged_extensions: ["elevated_exec"],
+    elevated_exec_conditional_broker_policy_preserved: true,
+    public_tools_list_policy_filtered_subset_of_registry_required: true,
+    runtime_capability_negotiation_required: true,
+    runtime_missing_required_capability_fail_closed: true,
+    runtime_adapter_result_error_normalization_required: true,
+    policy_classifies_localbridge_capabilities_not_upstream_names: true,
+    workflow_transitive_capability_declaration_required: true,
+    upstream_runtime_internal_replaceable_backend: true,
+    execution_envelope_localbridge_tool_identity_required: true,
+    shell_resolver_owned_by_localbridge: true,
+    shell_selector_values: ["auto", "powershell", "pwsh", "windows_powershell", "cmd"],
+    shell_auto_preference: ["trusted_highest_powershell_core", "windows_powershell_5_1", "cmd"],
+    shell_text_guessing_forbidden: true,
+    shell_arbitrary_executable_from_mcp_forbidden: true,
+    shell_auto_install_or_update_forbidden: true,
+    shell_default_candidate_requires_trusted_install_or_explicit_registered_identity: true,
+    shell_path_discovery_is_not_trust_authority: true,
+    shell_probe_requires_candidate_trust_validation: true,
+    shell_version_selection_semantic_required: true,
+    direct_process_and_shell_execution_separated: true,
+    custom_shell_registry_v0_1_required: false,
+    wsl_container_remote_shell_v0_1_required: false,
+    environment_manager_abstraction_v0_1_required: false,
+  },
+  lb006: {
+    addedWritablePaths: ["tests/unit/mcp/**", "tests/integration/command/**"],
+    addedArtifacts: [
+      "LocalBridge-owned versioned public ToolRegistry and Agent Runtime facade",
+      "replaceable internal WorkspaceRuntimeAdapter or equivalent package adapter boundary",
+      "runtime capability negotiator for mandatory LocalBridge facade capabilities",
+      "LocalBridge ShellResolver using structured logical shell selectors",
+      "separate DirectProcessExecutor and ShellExecutor execution paths",
+      "stable LocalBridge result and typed-error normalization adapter",
+    ],
+    addedTests: [
+      "public ToolRegistry defines exactly the eight LocalBridge v1 non-privileged core tools; tools/list returns only the current-policy-eligible subset plus policy-eligible LocalBridge privileged extensions and never upstream private tool names",
+      "adding a fake new upstream tool or changing an upstream private tool schema does not change the public LocalBridge tool registry",
+      "missing any mandatory LocalBridge facade runtime capability or incompatible adapter schema fails closed before serving the facade",
+      "upstream private result and error shapes are normalized into stable LocalBridge result/error contracts without leaking private schema details",
+      "ShellResolver auto selects the highest compatible trusted PowerShell Core by semantic version then Windows PowerShell 5.1 then cmd",
+      "a malicious earlier PATH pwsh.exe is rejected without execution or version probing unless its executable identity independently satisfies the trusted candidate policy",
+      "logical selectors auto powershell pwsh windows_powershell cmd resolve without command-text guessing and MCP cannot supply an arbitrary shell executable path",
+      "ShellResolver never automatically installs or updates a shell",
+      "direct process execution and shell execution remain structurally separate and use structured specifications",
+    ],
+    addedNonGoals: [
+      "WSL container or remote shell backends in v0.1",
+      "custom shell registry in v0.1",
+      "environment-manager abstraction in v0.1",
+      "freezing the exact internal source directory layout",
+    ],
+  },
+  lb007: {
+    addedArtifacts: [
+      "LocalBridge stable public capability/action classifier independent of upstream tool names",
+      "transitive capability declarations for high-level LocalBridge workflows",
+    ],
+    addedTests: [
+      "PEP classifies stable LocalBridge public actions and capabilities rather than raw upstream tool names",
+      "raw upstream tool names cannot be called as a public bypass around the LocalBridge facade",
+      "unknown LocalBridge public actions or capabilities fail closed",
+      "high-level workflows declare and enforce all transitive write process network and privilege capabilities before execution",
+      "cached or stale public tools/list cannot bypass a later permission-mode or capability-policy change",
+    ],
+  },
+});
+
 const G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14 = Object.freeze({
   schemaVersion: 24,
   baselineCommit: "369b84d59d98a2ce2d2aa06ccd27d7b403a27806",
@@ -754,6 +834,46 @@ export function normalizeG3ManualReviewRound2_20260814(contractsDoc) {
   return normalized;
 }
 
+export function hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(contractsDoc) {
+  if (contractsDoc?.schema_version !== LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb006 = contractsDoc?.prs?.["LB-006"];
+  const lb007 = contractsDoc?.prs?.["LB-007"];
+  if (!lb006 || !lb007) return false;
+  const delta6 = LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.lb006;
+  const delta7 = LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.lb007;
+  return containsAll(lb006.writable_paths, delta6.addedWritablePaths)
+    && containsAll(lb006.required_artifacts, delta6.addedArtifacts)
+    && containsAll(lb006.required_tests, delta6.addedTests)
+    && containsAll(lb006.non_goals, delta6.addedNonGoals)
+    && containsAll(lb007.required_artifacts, delta7.addedArtifacts)
+    && containsAll(lb007.required_tests, delta7.addedTests);
+}
+
+export function normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.baselineSchemaVersion;
+  for (const key of Object.keys(LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.addedRules)) delete normalized.rules[key];
+  const lb006 = normalized.prs?.["LB-006"];
+  const lb007 = normalized.prs?.["LB-007"];
+  if (lb006) {
+    const delta = LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.lb006;
+    lb006.writable_paths = removeItems(lb006.writable_paths, delta.addedWritablePaths);
+    lb006.required_artifacts = removeItems(lb006.required_artifacts, delta.addedArtifacts);
+    lb006.required_tests = removeItems(lb006.required_tests, delta.addedTests);
+    lb006.non_goals = removeItems(lb006.non_goals, delta.addedNonGoals);
+  }
+  if (lb007) {
+    const delta = LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.lb007;
+    lb007.required_artifacts = removeItems(lb007.required_artifacts, delta.addedArtifacts);
+    lb007.required_tests = removeItems(lb007.required_tests, delta.addedTests);
+  }
+  return normalized;
+}
+
 export function hasExactG3UiFirstScrollbarAmendment20260814(contractsDoc) {
   if (contractsDoc?.schema_version !== G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.schemaVersion) return false;
   const rules = contractsDoc?.rules;
@@ -901,6 +1021,27 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.schemaVersion) {
+    if (!hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814(authorizationContracts)) {
+      findings.push(`${expected.id}:agent-runtime-facade-20260814-contract-amendment-drift`);
+    }
+    const baselineCommit = LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.baselineCommit;
+    const baseline = git.commitExists(baselineCommit) && git.isAncestor(baselineCommit)
+      ? git.jsonAt(baselineCommit, "PR_CONTRACTS.json")
+      : null;
+    const normalized = normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814(authorizationContracts);
+    if (baseline?.schema_version !== LOCALBRIDGE_AGENT_RUNTIME_FACADE_AMENDMENT_2026_08_14.baselineSchemaVersion) {
+      findings.push(`${expected.id}:agent-runtime-facade-20260814-baseline`);
+    } else {
+      if (JSON.stringify(normalized?.prs) !== JSON.stringify(baseline.prs)) {
+        findings.push(`${expected.id}:agent-runtime-facade-20260814-pr-drift`);
+      }
+      if (canonicalJson(normalized?.rules) !== canonicalJson(baseline.rules)) {
+        findings.push(`${expected.id}:agent-runtime-facade-20260814-rule-drift`);
+      }
+    }
+    authorizationContracts = normalized;
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= G3_UI_FIRST_SCROLLBAR_AMENDMENT_2026_08_14.schemaVersion) {
     if (!hasExactG3UiFirstScrollbarAmendment20260814(authorizationContracts)) {
       findings.push(`${expected.id}:ui-first-scrollbar-20260814-contract-amendment-drift`);

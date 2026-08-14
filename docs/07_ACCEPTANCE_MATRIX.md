@@ -127,9 +127,9 @@
 | A118 | release rollback | migration/install failure 不破坏旧配置 |
 
 | A119 | 主控界面无活动任务 | 第一行固定显示“等待命令”，不得在该行追加相对时间，无活动历史列表 |
-| A120 | read_file tools/call | 类型显示“读取文件”，任务显示安全路径摘要 |
-| A121 | search tools/call | 类型显示“搜索代码”，显示安全搜索摘要 |
-| A122 | command tools/call | 类型显示“执行命令/运行测试/构建”等稳定分类 |
+| A120 | LocalBridge 稳定读取类 public action/tool | 类型显示“读取文件”，任务显示安全路径摘要；不得依赖 raw upstream tool id 作为 UI/安全身份 |
+| A121 | LocalBridge 稳定搜索类 public action/tool | 类型显示“搜索代码”，显示安全搜索摘要；不得直接暴露 upstream private tool name |
+| A122 | `exec_command` / `agent_workflow` 等稳定执行类 public action | 类型显示“执行命令/运行测试/构建”等稳定分类，能力判定来自 LocalBridge action/capability contract |
 | A123 | policy deny | 当前任务显示“已阻止”，不得先显示“执行中” |
 | A124 | 管理员调用等待 UAC | 当前任务显示“管理员操作 / 等待授权” |
 | A125 | task terminal | 最终回到第一行“等待命令”，并保留唯一上一工具安全标签/摘要与完成时间元数据供第二行展示，不追加历史消息 |
@@ -219,3 +219,13 @@
 | A244 | 设置 Key 清除位置 | Key 已保存时 `清除` 紧邻位于 Key `更换` 左侧；两项 `更换` 仍处同一最右动作列 |
 | A245 | 设置 Key 清除语义 | `清除` 删除 Windows 安全凭据，不回显 secret，投影为未保存；active/connecting 时使用既有受控连接配置变化 lifecycle |
 | A246 | 滚动圆角 / 无箭头 | rounded sheet/dialog/card 出现纵向 overflow 时四角仍完整，scrollbar 被裁切/内缩；顶部/底部箭头、三角形或等价按钮不显示，滚轮/轨道/滑块仍可用 |
+| A247 | LocalBridge public Tool Registry | v1 非特权 core Registry 严格只有 `workspace_context / agent_workflow / exec_command / command_control / task_control / git_workflow / document_workflow / view_image`；实际 `tools/list` 只返回当前 policy 允许的 core 子集，并可附加当前 policy 允许的 LocalBridge 特权扩展；不得出现 upstream private tool name |
+| A248 | `elevated_exec` public extension | 保持现有 conditional privileged extension：Edit/Full 仍 deny，只有 Elevated + Broker Active + reviewed policy 时可用；不得伪装成普通八工具 core |
+| A249 | upstream schema 隔离 | upstream 新增 tool、修改 private schema/result/error 不会自动改变 LocalBridge public Registry/schema；private upstream error/schema 不得穿透 public API |
+| A250 | runtime facade capability negotiation | adapter 初始化必须验证全部 mandatory LocalBridge facade capability/schema；缺失能力或不兼容时在提供 public facade 前 fail-closed，不得带病降级成 upstream passthrough |
+| A251 | PEP capability/action 边界 | PEP 按稳定 LocalBridge public action/capability 分类而非 raw upstream tool id；raw upstream 名称不能成为绕过入口；高层 workflow 在执行前声明并检查全部 transitive write/process/network/privilege capability；unknown deny |
+| A252 | ShellResolver `auto` | 只在已验证可信 shell 候选中按 semantic version 选择最高兼容 PowerShell Core；没有可信 Core 时回退 Windows PowerShell 5.1，再回退 `cmd.exe` |
+| A253 | ShellResolver PATH 劫持 | PATH 仅作为候选发现线索；恶意更靠前的 `pwsh.exe` 在未通过可信安装位置或显式注册 executable identity 重新验证前，既不得执行也不得为了版本判断被 probe |
+| A254 | Shell selector 安全 | public shell selector 仅 `auto / powershell / pwsh / windows_powershell / cmd`；禁止根据 command text 猜 shell、禁止 MCP 提供任意 shell executable path、禁止 LocalBridge 自动安装/更新 shell |
+| A255 | direct process / shell 分离 | DirectProcessExecutor 与 ShellExecutor 使用不同 structured spec/执行边界；直接或 privileged process execution 不得退化成 shell string canonical representation |
+| A256 | stable adapter / execution envelope | upstream result/error 在 adapter 边界归一化为稳定 LocalBridge contract；CurrentTask/执行 envelope 使用稳定 LocalBridge public tool/capability identity + secret-redacted safe summary，禁止 raw upstream tool id/private schema 泄漏 |
