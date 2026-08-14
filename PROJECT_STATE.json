@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -175,7 +175,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-006 independent adversarial review found two blocking schema25 defects. Correct LB-006 before LB-007: strict allowlist normalization for every upstream private success result (notably git_workflow/view_image), and schema-aware mandatory capability negotiation that rejects incompatible property types/requiredness before serving the facade. LB-007 remains BLOCKED. After LB-006 through LB-012 are sequentially accepted, run fresh G2 adversarial generation 9; G3 generation 6 remains historical and schema26 remains queued for LB-015/LB-016."
+    "next_action": "LB-006 adapter schema-isolation correction is accepted: upstream Git/image success payloads are rebuilt from LocalBridge-owned typed allowlists, and mandatory runtime capability negotiation now rejects incompatible requiredness, accepted types, array item types, minLength, numeric bounds, and enum narrowing before serving the facade. Execute LB-007 next, then continue LB-008 through LB-012 in strict order and run fresh G2 adversarial generation 9. G3 generation 6 remains historical; schema26 administrator safety consent remains queued for LB-015/LB-016; G4/LB-018 remains blocked."
   },
   "current_task_ui": {
     "enabled": true,
