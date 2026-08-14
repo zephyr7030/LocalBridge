@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -66,7 +66,7 @@
     "G4 remains blocked after G3 adversarial PASS until a separate human manual/detail review is accepted as PASS",
     "Human review treats user/executor factual claims as untrusted evidence and requires user-audited concrete executor pre-authorizations"
   ],
-  "execution_plan_version": 18,
+  "execution_plan_version": 19,
   "total_prs": 20,
   "architecture_decisions_pending_lb000": [
     "Policy Enforcement implementation: upstream / adapter / Rust Guard",
@@ -175,7 +175,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-006 LocalBridge Agent Runtime facade rework is accepted. Execute LB-007 next, then continue LB-008 through LB-012 in strict order and run fresh G2 adversarial generation 9. G3 generation 6 remains historical and must be rerun after the foundational G2 redesign is accepted; schema26 administrator safety consent remains queued for LB-015/LB-016 when strict sequencing reaches them. G4/LB-018 remains blocked."
+    "next_action": "LB-006 independent adversarial review found two blocking schema25 defects. Correct LB-006 before LB-007: strict allowlist normalization for every upstream private success result (notably git_workflow/view_image), and schema-aware mandatory capability negotiation that rejects incompatible property types/requiredness before serving the facade. LB-007 remains BLOCKED. After LB-006 through LB-012 are sequentially accepted, run fresh G2 adversarial generation 9; G3 generation 6 remains historical and schema26 remains queued for LB-015/LB-016."
   },
   "current_task_ui": {
     "enabled": true,
@@ -905,5 +905,51 @@
     "pre_schema26_admin_color_or_direct_uac_text_in_historical_review_evidence_is_non_authoritative": true,
     "current_admin_mode_authority": "schema26 orange #ff9500 entry -> fixed warning -> whole-red 9000ms disabled countdown -> enabled 确认 -> backend validation -> Windows UAC -> Privileged Broker",
     "historical_evidence_must_not_override_current_contract": true
+  },
+  "lb006_independent_adversarial_review_2026_08_14": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "scope": "LB-006 scoped independent adversarial review; not G2 adversarial generation 9",
+    "baseline_implementation_commit": "18ce3b4fd2168e73033667c18c94def5b58263a9",
+    "previous_acceptance_commit": "50d96525ef54e74d3d5cb61a4db625f7602010fe",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "acceptance": [
+          "A249",
+          "A256"
+        ],
+        "summary": "upstream private success schema is not fully normalized",
+        "evidence": "CodingToolsRuntimeAdapter::git_workflow clones the full upstream structuredContent and only removes next_action/tool; inspect_image preserves complete upstream image/text content items. New private success fields therefore auto-pass into the LocalBridge public response."
+      },
+      {
+        "severity": "MAJOR",
+        "acceptance": [
+          "A250"
+        ],
+        "summary": "runtime capability negotiation accepts incompatible schemas",
+        "evidence": "validate_runtime_capabilities checks object shape and required property-name presence only; it does not validate property types/requiredness. For example exec_command.cmd can change from string to integer while negotiation still succeeds, so incompatibility is discovered only after the facade is already served."
+      }
+    ],
+    "non_blocking_observations": [
+      "Production MCP server is genuinely wired through AgentFacade; tools/list is LocalBridge-owned and raw upstream names are denied.",
+      "LB-006 implementation commit changed only declared src-tauri/src/mcp/** paths; governance acceptance commit changed only PR_INDEX.json and PROJECT_STATE.json.",
+      "agent_workflow/task_control and several document actions are advertised but currently return stable unavailable/InvalidArgument; this review does not use that as a blocker because implementation ownership is not explicit enough in the LB-006 machine contract."
+    ],
+    "verification": {
+      "cargo_test": "PASS (142 library tests plus all invoked integration/unit suites)",
+      "cargo_clippy_deny_warnings": "PASS",
+      "runtime_manifest_verify": "PASS",
+      "architecture_verify": "PASS",
+      "g4_human_gate_test": "PASS",
+      "git_diff_check": "PASS"
+    },
+    "required_corrections": [
+      "Replace upstream success passthrough with per-public-action stable allowlisted result adapters, including Git and image content fields.",
+      "Make capability negotiation validate the exact mandatory upstream schema semantics consumed by each adapter: required fields, field types/accepted unions, and other compatibility-critical constraints; add adversarial schema-mutation tests proving fail-closed before serving."
+    ],
+    "next_live_pr": "LB-006",
+    "lb007_blocked": true,
+    "g2_generation_9_consumed": false
   }
 }
