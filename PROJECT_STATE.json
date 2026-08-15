@@ -1,5 +1,5 @@
 {
-  "schema_version": 17,
+  "schema_version": 18,
   "phase": "PRE_CODE",
   "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
@@ -78,7 +78,7 @@
       "Full",
       "Elevated"
     ],
-    "internal_model": "Elevated = Full + Privileged Broker",
+    "internal_model": "Elevated = Full + Active Privileged Broker + administrator-token-wide filesystem/process/system-maintenance authority",
     "whole_app_elevation": false,
     "admin_ttl": null,
     "user_controls_enable_disable": false,
@@ -86,8 +86,8 @@
     "user_controls_broker_directly": false,
     "background_auto_uac": false,
     "generic_elevated_exec": true,
-    "generic_elevated_exec_semantics": "reviewed_structured_gateway_only",
-    "arbitrary_elevated_program_execution": false,
+    "generic_elevated_exec_semantics": "administrator_token_scoped_broker_gateway",
+    "arbitrary_elevated_program_execution": true,
     "elevated_exec_indirect_control_plane_mutation": "deny_always",
     "separate_enable_admin_button": false,
     "leaving_admin_mode_disables_broker": true,
@@ -109,7 +109,15 @@
     "warning_confirm_ready_label": "确认",
     "warning_cancel_label": "取消",
     "background_warning": false,
-    "ai_can_approve_warning": false
+    "ai_can_approve_warning": false,
+    "edit_workspace_bound": true,
+    "full_workspace_bound": true,
+    "elevated_workspace_bound": false,
+    "elevated_full_filesystem_access": true,
+    "elevated_general_admin_process_command_execution": true,
+    "elevated_system_maintenance": true,
+    "localbridge_control_plane_mcp_mutation": "deny_always",
+    "admin_mode_user_consequence_acknowledgement": true
   },
   "distribution_architecture": {
     "target": "Windows 11 x64",
@@ -231,7 +239,9 @@
     "remove_deletes_disk_files": false,
     "active_remove_result": "NoActiveWorkspace",
     "auto_select_other_on_remove": false,
-    "mcp_can_mutate_registry": false
+    "mcp_can_mutate_registry": false,
+    "edit_full_authorized_roots_at_once": 1,
+    "elevated_os_access_uses_active_workspace_as_authority": false
   },
   "current_group": "G2",
   "g3_human_review": {
@@ -324,6 +334,19 @@
       "outer_corners_preserved": true,
       "scrollbar": "clipped_or_inset_inside_rounded_shell",
       "top_bottom_arrow_or_triangle_affordances": false
+    },
+    "text_button_size_basis": {
+      "width": "maximum_visible_character_count_in_any_single_line",
+      "height": "rendered_line_count",
+      "arbitrary_fixed_geometry": false
+    },
+    "typography": {
+      "tiers": [
+        "title",
+        "secondary"
+      ],
+      "secondary_non_title_font_size_unified": true,
+      "third_font_size_tier": false
     }
   },
   "pr_group_policy": {
@@ -375,17 +398,15 @@
       "workspace_and_permission_combined": true,
       "native_windows_folder_picker": true,
       "raw_path_entry_primary": false,
-      "permission_button_content_spacing": "rendered_two_line_height_at_least_2x_single_line_at_780x620",
-      "permission_button_visual_acceptance": "PASS_HUMAN_780x620_2026-08-14",
+      "permission_button_content_spacing": "content_derived_width_by_max_line_characters_and_height_by_rendered_line_count",
+      "permission_button_visual_acceptance": "REVIEW_REQUIRED_BY_SCHEMA33",
       "permission_button_css_only_auto_pass_forbidden": true,
       "ordinary_selected_accent": "#0071e3",
       "administrator_selected_accent": "#ff9500",
       "back_action": true,
-      "permission_button_min_height_px": 80,
       "separate_enable_admin_button": false,
-      "permission_button_rendered_height_multiplier": 2,
       "permission_button_computed_geometry_gate": true,
-      "permission_button_visual_acceptance_evidence": "user manual visual approval on 2026-08-14; scoped visual acceptance only, not the separate G3-to-G4 human Gate",
+      "permission_button_visual_acceptance_evidence": "schema33 replaces the prior fixed min-height/2x geometry contract; new content-derived geometry requires fresh human review",
       "visible_admin_selection_opens_warning_gate": true,
       "warning_before_uac": true,
       "warning_countdown_ms": 9000,
@@ -669,7 +690,13 @@
         "orderly_shutdown": true
       }
     },
-    "service_control_alignment": "shared_action_left_edge"
+    "service_control_alignment": "shared_action_left_edge",
+    "elevated_project_scope": {
+      "label": "全目录访问",
+      "accent": "yellow",
+      "workspace_switch_blocked": true,
+      "switch_dialog": "管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式"
+    }
   },
   "diagnostics_ui": {
     "sections": [
@@ -2032,5 +2059,48 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "next_pr": "LB-009"
+  },
+  "schema33_elevated_scope_and_ui_contract_2026_08_15": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "source": "explicit user instruction",
+    "contract_schema_version": 33,
+    "current_execution_pointer_unchanged": "LB-009",
+    "owners": [
+      "LB-006",
+      "LB-007",
+      "LB-011",
+      "LB-012",
+      "LB-015",
+      "LB-016"
+    ],
+    "ui": [
+      "text-bearing button geometry is content-derived from maximum single-line character count and rendered line count",
+      "exactly two typography sizes: title and unified secondary/non-title; no third size"
+    ],
+    "permissions": [
+      "Edit is workspace-bound read/search/Git/reviewed write with no process execution",
+      "Full adds ordinary current-user process execution but remains workspace-bound and cannot cross admin boundary via system-management tools",
+      "Elevated after fixed warning plus 9000ms red confirm plus explicit confirmation plus UAC grants administrator-token-scoped full filesystem ordinary/admin process command and system-maintenance authority outside active workspace",
+      "LocalBridge control-plane remains deny-always to MCP/AI"
+    ],
+    "protected_system_management_programs": [
+      "reg.exe",
+      "sc.exe",
+      "schtasks.exe",
+      "netsh.exe",
+      "bcdedit.exe",
+      "dism.exe"
+    ],
+    "implementation_gaps": [
+      "current runtime-policy/elevated_exec remains reviewed whoami-only",
+      "current public facade path validation remains workspace-bound in Elevated",
+      "current debug Broker trust gate rejects the user-writable target/debug install tree before UAC",
+      "Dashboard lacks the Elevated yellow 全目录访问 project-scope projection"
+    ],
+    "scoped_review": [
+      "LB-006 REWORK_REQUIRED against schema33 mode-aware path authority",
+      "LB-007 REWORK_REQUIRED against schema33 privileged route/system-management classification",
+      "LB-008 no confirmed blocker found in current Tunnel source/tests during this scoped review; formal G2 generation20 is not consumed"
+    ]
   }
 }

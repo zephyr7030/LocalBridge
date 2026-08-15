@@ -179,7 +179,7 @@
 | A175 | 2/5 | 字段为 `Tunnel ID` / `Runtime API Key`，并有明确“返回” |
 | A176 | 2/5 | 密钥下方仅一行安全保存说明；保存失败时仍可返回，不得锁死 |
 | A177 | 3/5 | 项目与权限位于同一屏，新增项目使用原生 Windows 文件夹选择器，并有明确“返回” |
-| A178 | 3/5 权限模式 | `min-height >= 80px` 仅作最低保护；含标题+说明的两行按钮在 780×620 实机真实 rendered 高度至少为普通单行控件 2 倍，两个 line box 均完整可见；必须人工视觉验收，不能凭 CSS marker 自动 PASS；普通 selected 蓝色 `#0071e3`、管理员模式入口橙色 `#ff9500` |
+| A178 | 3/5 权限模式 | 含文字按钮宽度严格对应按钮中任一单行最大可见字数、高度严格对应实际渲染行数；标题/说明 line box 完整，必须人工视觉验收，不能凭固定 min-height/multiplier 或 CSS marker 自动 PASS；普通 selected 蓝色 `#0071e3`、管理员模式入口橙色 `#ff9500` |
 | A179 | 4/5 ChatGPT 插件设置 | 标题为“创建自定义插件”，提示为“在插件设置页面最底端，打开‘开发者模式’”；`打开 ChatGPT插件设置` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Plugins` |
 | A180 | 4/5 信息与复制 | 插件设置按钮下显示“打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件”；信息严格只有“名称 / Tunnel ID”两行，禁止“本地服务”；Tunnel ID 来自当前持久化值；两行独立复制成功绿色 `已复制` 精确 3 秒且不位移 |
 | A181 | 4/5 插件管理 | `打开插件管理页` 位于左侧操作流，只经 Rust 固定 allowlist + 系统浏览器打开 `https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins`；禁止 WebView/任意前端 URL；底部有“返回 / 继续” |
@@ -205,7 +205,7 @@
 | A201 | 窗口外框 | native `decorations=false`；仅存在一层 edge-to-edge 自定义 chrome，不出现原生标题栏/边框 + 自定义边框的双框 |
 | A202 | 自定义标题栏 | 可拖拽窗口；提供最小化与关闭；不提供最大化；chrome 从 client `(0,0)` 覆盖 100% 宽高 |
 | A203 | 首次引导整页布局 | onboarding 直接占用 custom chrome 内容区，不存在“大面积空白画布 + 居中 floating card/modal/dialog”整体向导外壳；页面级 padding 与局部分组允许；schema26 管理员安全确认只作为局部 consent dialog 例外 |
-| A204 | 3/5 权限模式按钮视觉 | 固定 780×620 下真实 computed/rendered 高度证明：含标题+说明的两行按钮至少为单行控件 2 倍且两个 line box 完整；`min-height >= 80px` 只作最低保护；该视觉项已由用户于 2026-08-14 PASS，后续若 Screen3 布局变化必须重新人工验收 |
+| A204 | 3/5 权限模式按钮视觉 | 固定 780×620 下 computed/rendered geometry 必须证明按钮尺寸来自自身文本内容：宽度跟随最大单行可见字数，高度跟随实际行数；固定 min-height/2x 历史验收被 schema33 取代，必须重新人工验收 |
 | A205 | 管理员模式选择 | 仅设置页或 onboarding 第3屏可见；Broker 未 Active 时点击/重新点击管理员模式先进入 schema26 固定安全警告，禁止直接 UAC；只有完整 9000ms 后 enabled 红色 `确认` 被用户点击，backend 安全校验通过后才可请求 UAC；无单独“启用管理员权限”按钮；后台偏好恢复无 warning/UAC |
 | A206 | 离开管理员模式 | 在设置页或 onboarding 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker；Dashboard 无模式切换入口 |
 | A207 | 前台启动顺序 | onboarding 已完成且配置有效时，先创建/显示并达到可交互 UI；前端只发送一次 typed `UI-ready`，backend 收到后才异步启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作；UI-ready 前不得提前启动服务 |
@@ -220,7 +220,7 @@
 | A216 | 设置保存 | 基础格式校验→安全写入→运行/连接中且有效连接配置变化时受控重连；Starting/connecting 且 active=false 也不得沿用旧 captured config；不存在“测试连接”按钮 |
 | A217 | 关闭窗口继续运行=开 | X 仅隐藏窗口，runtime/tray 继续 |
 | A218 | 关闭窗口继续运行=关 | X 有序关闭 privileged gate/Broker/Tunnel/PEP/MCP 后退出；偏好版本化持久化 |
-| A219 | 3/5 权限按钮结构 | `min-height >= 80px` 仅是最低保护；780×620 实际 rendered geometry 必须证明两行按钮高度至少为单行控件 2 倍且标题/说明均完整；2026-08-14 scoped 人工视觉项已 PASS，布局变化时重新验收 |
+| A219 | 3/5 权限按钮结构 | 780×620 实际 rendered geometry 必须证明含文字按钮的宽度由最大单行字数、高度由实际行数决定且标题/说明完整；不得以静态 min-height 或固定倍数替代内容尺寸合同 |
 | A220 | Onboarding backend ownership | React 不拥有 runtime start/readiness polling 状态机；backend 持有并投影；慢 backend 时 UI 仍响应 |
 | A221 | 诊断结构 | 仅运行状态/项目/日志；运行状态四行=本地运行环境/编码服务/OpenAI Tunnel/管理员权限；项目显示实际路径 |
 | A222 | 诊断日志/动作 | 最近限量脱敏日志；页面动作仅“打开日志/导出诊断/完成”，无刷新/重试连接/打开欢迎页/工程 generation 字段 |
@@ -233,17 +233,17 @@
 | A229 | 上次工具时间 | 第一行 Idle 只显示 `等待命令`；第二行上一工具相对时间覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天` 并靠右；从未执行工具时无上一工具行 |
 | A230 | workspace identity / execution / display path 边界 | `\\?\D:\project` 仅允许用于内部 filesystem identity 校验/去重/reparse/授权比较；UI 以及 MCP/Broker/sidecar/process/command/tool 的路径参数和 `cwd/workdir/current_dir` 必须使用与同一 freshly validated identity 绑定的普通 `D:\project`；execution/display 转换不得授权，identity 不一致 fail-closed |
 | A231 | 设置“更换”按钮对齐 | Tunnel ID 与 Runtime API Key 两个“更换”在 780×620 下保持同一最右动作列、几何差 ≤1 CSS px；Key“清除”位于 Key“更换”左侧且不得推移最右列 |
-| A232 | 同级按钮对齐 | 同一页面/分组 peer actions 复用统一动作列/左基线和 shared button geometry，不允许任意 offset/第二套对齐语言 |
+| A232 | 同级按钮对齐 | 同一页面/分组 peer actions 复用统一动作列/左基线和同一视觉语法；各含文字按钮自身宽高仍必须由最大单行可见字数与实际渲染行数决定，不允许任意 offset/第二套对齐语言 |
 | A233 | Dashboard 重启服务 | 显示黄色/琥珀 `重启服务`；真实服务 lifecycle 由 backend 执行，且必须满足机器合同的 single-owner/最新持久化配置语义 |
 | A234 | Dashboard 关闭服务 | 显示红色 `关闭服务`；真实服务 lifecycle 由 backend 执行并记录显式 manual-stop，Dashboard 窗口保持可用并显示停止状态 |
-| A235 | 服务按钮视觉 | `重启服务`/`关闭服务` 与现有按钮共享尺寸、字体、边界、圆角和水平对齐体系，仅逻辑色不同 |
+| A235 | 服务按钮视觉 | `重启服务`/`关闭服务` 与现有按钮共享次级字号、边界、圆角和水平对齐体系，仅逻辑色不同；按钮宽高分别按自身最大单行可见字数和实际渲染行数计算，不要求不同文字按钮同尺寸 |
 | A236 | verbatim workspace 命令回归 | 当内部 `GetFinalPathNameByHandleW` 得到 `\\?\D:\project` 时，coding-tools/`exec_command` 或等价普通命令实际收到 `D:\project` cwd/workdir 并成功执行；MCP/Broker/sidecar/ManagedProcessSpec/process/tool invocation 不得收到 `\\?\` cwd/workdir/current_dir/路径参数 |
 | A237 | 短工具调用唤醒 | 任意真实 MCP/Broker 工具调用开始/终止都通过 backend push/event 或等价唤醒路径使 Dashboard 更新；周期 polling 不得作为短任务的主要传输 |
 | A238 | 工具最低可见期 | 每个真实工具调用即使瞬时完成也至少有 500ms 可见 presentation interval；该停留只约束 UI，不得人为延迟真实工具返回/响应 |
 | A239 | 上次执行工具行 | 第一行 Idle 只显示“等待命令”；第二行固定前缀“上次执行工具：”+脱敏用户标签/安全摘要，禁止 raw MCP id；相对时间位于第二行最右并覆盖 nS前/n分钟前/大于1小时/大于n天；只保留一条上一工具元数据 |
 | A240 | 2/5 已保存连接显示 | 已有 Tunnel ID 时输入框预填当前持久化值；已有 Runtime API Key 时固定显示“已安全保存至windows安全凭据”；安全提示严格为“Runtime API Key 仅保存在 Windows 安全凭据中。” |
 | A241 | 2/5 已保存 Key 掩码 | 聚焦已保存 Runtime API Key 输入框时，只根据 backend 长度元数据显示与已存 key 字符数相同的 `*`；plaintext 永不返回前端，未真正输入新 key 时掩码不得被提交/保存为替代 key |
-| A242 | 两行权限按钮真实几何 | 780×620 下含标题+说明的权限按钮实际 rendered 高度至少为普通单行控件 2 倍，两个文本 line box 均完整可见；仅有 `min-height/padding` CSS 不构成 PASS；2026-08-14 用户已通过该 scoped 视觉验收，后续布局变化须复验 |
+| A242 | 权限按钮真实几何 | Schema33 取代旧的固定 2× 高度验收：780×620 下每个含文字权限按钮的宽度由最大单行可见字数决定、高度由实际渲染行数决定，标题/说明 line box 均完整可见；仅有 `min-height/padding` 或固定 multiplier 不构成 PASS，必须重新人工视觉验收 |
 | A243 | 固定窗口 780×620 | 主窗口 default/minimum/maximum inner size 全部严格为 780×620；`resizable=false`、`maximizable=false`、`decorations=false`、唯一 edge-to-edge custom chrome 等其余窗口语义不变 |
 | A244 | 设置 Key 清除位置 | Runtime API Key 已保存时显示“清除”，紧邻位于该行“更换”的左侧；Tunnel ID/Runtime API Key 两个“更换”仍保持同一最右动作列 |
 | A245 | 设置 Key 清除语义 | 点击“清除”真实删除 Windows 安全凭据中的 Runtime API Key，不读取/回显 secret，投影更新为“未保存”；runtime active/connecting 时按现有有效连接配置变化 lifecycle 受控处理，不允许旧 runtime 继续依赖已清除 credential |
@@ -273,7 +273,7 @@
 | A269 | public session terminal convergence | command 不依赖客户端持续 poll 也会由 backend 收敛 `running → completed/failed/timed_out/cancelled/lost`；upstream session 完成、300s pruning、runtime 重启或 private handle 丢失都不能让 public session/CurrentTask 永久 Running；未观察到 terminal outcome 即丢失时返回精确稳定错误 `SessionUnavailable` |
 | A270 | silent nonzero process exit | `cmd /c exit 7` 或任意无 stdout/stderr 的非零退出必须 public `ok=false` / `isError=true`、稳定 `ProcessFailed`、session/task=Failed；只有 `exit_code=0` 才是普通 completed success |
 | A271 | advertised public facade completeness | `tools/list` 中每个已广告 tool/action 都必须可真实执行；当前 v1 `agent_workflow` 九个 action、`task_control get/cancel`、`document_workflow inspect/create/convert/rebuild` 不得恒定返回“当前不可用”；新增 action 必须实现+分类+测试后才可进入 schema |
-| A272 | workspace-bound public path inputs | `exec_command.workdir`、`git_workflow.path/paths`、`document_workflow.path`、`view_image.path` 统一使用 active-workspace-relative 路径；drive/UNC/verbatim/POSIX absolute 与 `..` traversal 在 LocalBridge boundary typed reject，不能把 upstream `ABSOLUTE_PATH_DENIED` 私有错误直接暴露，也不能靠 normalization 扩大授权 |
+| A272 | mode-aware public path inputs | Edit/Full 与 Elevated ordinary route 的 `exec_command.workdir`、`git_workflow.path/paths`、`document_workflow.path`、`view_image.path` 保持 active-workspace-relative；只有 Elevated + Active Broker privileged route 可按管理员 Token 访问 workspace 外绝对路径，不能靠 normalization 扩大普通模式授权 |
 | A273 | mandatory private result semantic probe | adapter 读取的 private result 字段若未被 upstream `outputSchema` 精确保证，public facade 启动前必须执行 deterministic、non-destructive compatibility/result probe；至少 `get_default_cwd` 必须证明 `workspace:string(non-empty)` + `default_cwd:string`，否则 `RuntimeCapabilityMismatch` fail-closed，而不是运行后才产生错误投影 |
 | A274 | nested Git repository consistency | active workspace=`D:\project` 且 `D:\project\LocalBridge` 为 nested repo 时，`git_status/git_log/git_show/git_diff(path="LocalBridge")` 必须解析到同一 repository；`git_blame(path="LocalBridge/package.json")` 必须从文件 parent 找到同一 enclosing repo；repo discovery 不得越过 active workspace root |
 | A275 | Git resolver / diff fallback | `git_workflow` 五 action 共享一个 LocalBridge repo resolver；directory action 的 `path` 选择 repo context，action-specific `paths` 才是 path filter；resolver 已确认 Git repo 时 `git_diff` 必须使用 native Git semantics，禁止 silent `non-git diff fallback` |
@@ -300,9 +300,18 @@
 | A296 | PowerShell 静态命令发现 | `Get-Command <literal>` / `gcm <literal>` 且只有一个静态命令名参数时属于只读诊断，不因 `Get-Command` 本身进入 privilege review；动态命令名、pipeline/follow-on execution、`.ScriptBlock` 提取、subexpression、provider/command-engine mutation 等仍 fail-closed review-required |
 | A297 | PowerShell Console stdin | 精确静态根 `[Console]::In.ReadLine()` / `[Console]::In.ReadToEnd()` 为 command-session stdin 的窄安全 I/O seam，不按任意 instance-member dispatch 拦截；其他实例成员调用除非另有合同仍 review-required |
 | A298 | `cmd.exe` Unicode/code-page 边界 | public command result 必须仍是有效 UTF-8 string；`windows_powershell` 与 `auto`→PowerShell 继续要求中文精确保真；`shell=cmd` 保留原生当前代码页语义，当该代码页不能表示中文/Emoji 时不要求精确 round-trip，LocalBridge 不得为此自动注入 `chcp`、改变代码页或增加额外 shell reparse；仅 `cmd.exe` 代码页自身造成的替换/乱码不判产品失败，LocalBridge 捕获后新增的损坏仍判失败 |
-| A299 | Full system-management privileged route | Full 模式的 ordinary `exec_command` 对静态可识别的 `reg.exe` / `schtasks.exe` / `sc.exe` / `netsh.exe`（含 exact System32 path、大小写变体）必须分类为需要 privileged route，并在普通路由返回稳定的 privileged-route denial；不得直接以普通进程路径执行需要管理员权限的系统管理操作 |
-| A300 | Elevated ordinary route no admin-token bypass | `PermissionMode::Elevated` 只表示 Full + 可用的 Privileged Broker；ordinary `exec_command` 永远不继承 Broker administrator token。Broker Active 时上述系统管理目标仍不得从普通 route 直通管理员权限，必须改走 `elevated_exec` |
-| A301 | reviewed System32 administrator allow | `Elevated + Active Broker` 下，exact trusted `%SystemRoot%\System32\reg.exe`、`schtasks.exe`、`sc.exe`、`netsh.exe` 可通过 reviewed structured `elevated_exec(program,args)` 执行合同允许的 Windows system-management operation；这些程序不得因 ordinary-route privilege classification 被全局禁用 |
+| A299 | Full system-management privileged route | Full 模式 ordinary `exec_command` 对 `reg.exe / sc.exe / schtasks.exe / netsh.exe / bcdedit.exe / dism.exe` 等系统管理目标必须要求 privileged route；不得借普通进程路径越过管理员边界 |
+| A300 | Elevated dual execution routes | Elevated 的 ordinary `exec_command` 仍使用普通用户 token，不因 Broker Active 自动提权；同时必须存在独立 Broker-backed administrator route 承载管理员进程/命令、系统维护与 workspace 外特权文件访问 |
+| A301 | Elevated administrator scope | `Elevated + Active Broker` 可在管理员 Token 范围内执行 general administrator direct process、可信 shell command 与 `reg/sc/schtasks/netsh/bcdedit/dism` 系统维护，也可访问 active workspace 外文件系统；不得把管理员能力收缩成 whoami 或少量 profile |
 | A302 | system-management executable identity | reviewed elevated system-management 必须验证 exact trusted System32 executable identity；PATH 命中、workspace 同名程序、其他目录副本或身份不一致均 deny，且验证不得通过 basename/string-only 比较扩大信任 |
-| A303 | no admin shell / LocalBridge control-plane deny | reviewed elevated system-management 只接受 structured direct program/argv，不得通过 `cmd.exe`、PowerShell 或其他 interpreter/shell fallback；借 `reg/schtasks/sc/netsh` 修改 LocalBridge PermissionMode、管理员 consent/UAC/Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP config、runtime/PEP/Broker policy、LocalBridge autostart 等自身 control-plane 仍永久 deny |
-| A304 | OS system management != LocalBridge control-plane | Windows OS system-management operation 本身不等于 LocalBridge control-plane mutation：管理员模式在满足 A301–A303 的 Broker/UAC/reviewed route 后必须能够正常执行受审计系统管理操作；禁止以“control-plane”名义把 `reg.exe` / `schtasks.exe` / `sc.exe` / `netsh.exe` 全局封禁 |
+| A303 | trusted admin shell / LocalBridge control-plane deny | Elevated administrator route允许 structured direct program/argv 和可信逻辑 PowerShell/cmd selector，但 MCP 不得指定任意 shell executable path；任何管理员 route 仍不得修改 LocalBridge PermissionMode、consent/UAC、Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy 或 LocalBridge autostart |
+| A304 | OS system management != LocalBridge control-plane | Windows OS system-management 本身不等于 LocalBridge control-plane：管理员模式满足警告/UAC/Broker 后必须能执行系统管理，禁止把 `reg/sc/schtasks/netsh/bcdedit/dism` 全局封禁；LocalBridge 自身 control-plane 仍永久 deny |
+| A305 | Edit permission scope | 仅 active workspace 内 read/search/Git/reviewed 文件目录写；任何普通进程/命令、系统维护、提权和 LocalBridge control-plane 调用均 deny |
+| A306 | Full permission scope | 包含 Edit 并允许当前普通用户 token 的 workspace 相关进程/命令；文件系统仍受 active workspace 边界，不能通过系统管理工具越过管理员边界 |
+| A307 | Elevated activation order | 固定风险警告 → whole-red 9秒倒计时 → enabled 确认 → 用户明确确认 → Windows UAC → Broker Active；顺序不可跳过 |
+| A308 | Elevated filesystem scope | Broker Active 后可在管理员 Token 范围内读写/创建/修改/重命名/删除 active workspace 外对象；Edit/Full 同路径仍 fail-closed |
+| A309 | Elevated process/command scope | Broker Active 后支持 general administrator direct process 及可信 PowerShell/cmd logical selector，保留 timeout/cancel/output bound/redaction；whole app 仍非提权 |
+| A310 | Dashboard Elevated project scope | Elevated + Broker Active 时当前项目区域黄色显示 `全目录访问`；点击切换不改变 workspace，精确弹窗 `管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式` |
+| A311 | text-button geometry | 所有含文字按钮宽度由最大单行可见字数决定，高度由实际渲染行数决定；同内容指标得到一致几何，禁止与内容无关的任意固定尺寸 |
+| A312 | typography tiers | 产品字号严格只有标题与统一次级/非标题两级；正文、说明、helper、状态、元数据、字段标签和按钮文字不得产生第三级字号 |
+| A313 | administrator consequence acknowledgement | 授权前明确说明系统修改后果由用户知悉并自主承担；该确认不允许 AI/MCP 批准自身提权或修改 LocalBridge control-plane |

@@ -1,5 +1,5 @@
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "status": "ENFORCEMENT_BASELINE_LB_001",
   "rules": [
     {
@@ -209,9 +209,22 @@
     },
     {
       "id": "ARCH-026",
-      "description": "elevated_exec is a reviewed structured gateway; arbitrary programs, shells, and indirect LocalBridge control-plane mutation are denied before Broker execution",
+      "description": "Elevated administrator execution is Broker-backed after explicit user consent/UAC; it may run general administrator programs and trusted logical shells, but LocalBridge control-plane mutation remains denied",
       "severity": "error",
-      "verification": { "mode": "deferred", "activate_at_pr": "LB-012", "reason": "Reviewed elevated execution policy and Broker routing are implemented in LB-012", "type": "reviewed_elevated_exec" }
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-012", "reason": "General administrator-token execution and privileged filesystem routing are implemented in LB-012", "type": "elevated_administrator_gateway" }
+    },
+    {
+      "id": "ARCH-027",
+      "description": "Edit and Full filesystem/process authority is bounded by the active workspace; Elevated with an Active Broker may operate outside that root only within the administrator token scope",
+      "severity": "error",
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-012", "reason": "Mode-aware privileged filesystem authority is completed by LB-012", "type": "permission_scope_boundary" }
+    },
+    {
+      "id": "ARCH-028",
+      "description": "Text-bearing button geometry is content-derived and product typography has exactly title plus one unified secondary non-title font-size tier",
+      "severity": "error",
+      "applies_to": ["src/**"],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-015", "reason": "Product UI geometry and typography are implemented in LB-015", "type": "ui_content_geometry_and_typography" }
     }
   ]
 }

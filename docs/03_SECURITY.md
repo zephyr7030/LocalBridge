@@ -30,9 +30,9 @@ elevated-exec
 control-plane
 ```
 
-编辑模式：reviewed read/write。  
-完整模式：+ ordinary process execution。  
-管理员模式：+ 用户完成安全确认与 UAC 后，由 Broker 路由 reviewed elevated operations。
+编辑模式：仅 active workspace 内 reviewed read/search/Git/write；禁止普通 process exec、系统维护与提权。
+完整模式：包含 Edit；允许当前普通用户 token 的 workspace 相关 ordinary process execution；文件访问仍受 active workspace 边界，系统管理命令不能借 Full 越过管理员边界。
+管理员模式：固定风险警告 → 红色确认按钮完整 9000ms 倒计时 → 用户明确确认 → Windows UAC → Active Broker；随后在管理员 Token 范围内允许全文件系统访问、普通及管理员进程/命令与系统维护，不再受 active workspace 限制。
 
 `control-plane` 所有模式永久 deny。
 
@@ -67,7 +67,7 @@ case/separator normalization
 
 不能只做 lexical prefix/lowercase。
 
-Schema27 进一步冻结 public path 语义：LocalBridge workspace-bound MCP 参数默认都是 active-workspace-relative，而不是“任意绝对路径，只要最终看起来在 workspace 内”。`exec_command.workdir`、`git_workflow.path/paths`、`document_workflow.path`、`view_image.path` 等入口必须在 public boundary 拒绝 drive-letter absolute、UNC absolute、Win32 verbatim、POSIX-leading-slash 与 `..` traversal，并统一映射成 LocalBridge typed error；upstream `ABSOLUTE_PATH_DENIED`、private canonical path 或 private resolver 细节不得穿透。
+Schema33 按模式冻结 public path 语义：Edit/Full 以及 Elevated 的普通用户 route 仍是 active-workspace-relative，`exec_command.workdir`、`git_workflow.path/paths`、`document_workflow.path`、`view_image.path` 等普通入口拒绝 drive-letter absolute、UNC absolute、Win32 verbatim、POSIX-leading-slash 与 `..` traversal。Elevated 在 Broker Active 后另有 privileged filesystem / administrator execution route，可使用管理员 Token 可访问的 workspace 外绝对路径；该权限来自 Broker token，而不是 path normalization。
 
 唯一明确例外是 `workspace_context.workspace` 的只读信息投影：它可以显示/返回当前 active workspace 的普通 Win32 **绝对**路径，例如 `D:\project`，但必须与 freshly validated filesystem identity 绑定、非空且不得包含 `\\?\`。该绝对路径是上下文信息，不改变其他工具“输入必须相对 active workspace”的授权合同。
 
@@ -163,18 +163,19 @@ PowerShell 标准 cmdlet baseline 必须来自固定/身份验证的系统模块
 
 `agent_workflow.path` 只选择 active workspace 内 nested project context，不是 control-plane。它不得改变 active workspace；repo/project discovery 最多向上到 active workspace root，并与 `git_workflow` 使用等价 resolver 语义。
 
-### Schema32 Windows 系统管理权限边界
+### Schema33 Windows 系统管理 / 管理员 Token 权限边界
 
-Windows 操作系统级系统管理与 LocalBridge 自身 `control-plane` 是两个不同的权限域。`reg.exe`、`schtasks.exe`、`sc.exe`、`netsh.exe` 等受审计 Windows system-management program **不得被全局禁用**，但需要管理员权限的系统管理操作也不得从普通进程路由绕过管理员边界。
+Windows OS system management 与 LocalBridge 自身 `control-plane` 是两个权限域。`reg.exe`、`sc.exe`、`schtasks.exe`、`netsh.exe`、`bcdedit.exe`、`dism.exe` 等系统管理目标不得借 Full 越过管理员边界，但也不得在管理员模式被全局禁用。
 
-- `Full` 的 ordinary `exec_command` 遇到静态可识别的上述系统管理目标时必须要求 privileged route 并拒绝直接执行；
-- `Elevated` 的 ordinary `exec_command` 同样不继承 Broker administrator token，Broker Active 不能把普通进程路由隐式升级为管理员执行；
-- 管理员执行只能走 `Elevated + Active Broker + reviewed elevated_exec`，并继续经过既有安全确认 / Windows UAC / Broker 权限边界；
-- reviewed system-management program 必须绑定 exact trusted `%SystemRoot%\System32` identity，不能使用 PATH、workspace 同名程序或其他 non-System32 替代物；
-- 请求保持 structured direct `program + argv`，禁止借 `cmd.exe`、PowerShell 或其他 shell/interpreter fallback 把 Broker 退化为任意管理员 shell；
-- Windows OS system management 本身不按 LocalBridge control-plane mutation 拒绝；但任何借这些 utility 修改 LocalBridge `PermissionMode`、管理员 consent/UAC/Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP 配置、runtime/PEP/Broker policy 或 LocalBridge autostart 的请求仍永久 deny。
+- Edit/Full 始终受 active workspace 文件边界；Edit 无普通 process exec，Full 只有当前普通用户 token 的 workspace 相关 process exec；
+- Elevated 的 ordinary route 仍是普通用户 token，不能因为 Broker Active 而静默提权；
+- 用户完成固定风险警告、红色确认按钮完整 9000ms 倒计时、明确确认和 Windows UAC 后，Active Broker 提供独立 administrator route；
+- administrator route 在管理员 Token 范围内允许 workspace 外全文件系统访问、general direct program、可信逻辑 PowerShell/cmd 命令与系统维护；不再把管理员能力收缩成少量 whoami/System32 profile；
+- 对明确的 System32 system-management utility 仍要验证可信 executable identity，避免 PATH/workspace 同名程序冒充；可信 shell 通过逻辑 selector 解析，MCP 不得直接指定任意 shell executable path；
+- LocalBridge 主程序、MCP、Tunnel 与 ordinary route 仍不整体提权；
+- PermissionMode、管理员警告/UAC批准、Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy、LocalBridge autostart 等 LocalBridge control-plane 仍永久 deny。
 
-因此权限模型是：**Full 拒绝管理员系统管理直通；管理员模式通过受控 Broker reviewed route 放行；LocalBridge 自身控制面始终不可由 MCP 修改。**
+因此权限模型是：**Full = workspace-bound 普通用户执行；Elevated = 用户明确授权后的管理员 Token 范围系统能力；LocalBridge 自身控制面仍不可由 MCP/AI 修改。系统修改产生的后果必须在授权前明确知悉并由用户自主承担。**
 
 ### Schema26 管理员模式安全确认
 

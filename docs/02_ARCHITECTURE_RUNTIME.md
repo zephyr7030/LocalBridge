@@ -121,7 +121,7 @@ document_workflow: inspect / create / convert / rebuild
 
 #### Workspace-relative public path inputs
 
-除 `workspace_context.workspace` 这一只读 informational projection 外，所有 workspace-bound public path/workdir 参数采用 **active-workspace-relative** 语义。至少包括：
+Schema33 起，路径授权按模式分层。Edit/Full 的 workspace-bound public path/workdir 参数仍采用 **active-workspace-relative** 语义；Elevated 的普通用户 route 也不因 Broker Active 而静默扩大。但 Elevated 的明确 privileged filesystem / administrator execution route 可以接受管理员 Token 可访问的 workspace 外路径。至少包括：
 
 ```text
 exec_command.workdir
@@ -130,7 +130,7 @@ document_workflow.path
 view_image.path
 ```
 
-drive-letter absolute、UNC absolute、Win32 verbatim、POSIX-leading-slash 与包含 `..` traversal 的输入必须在 LocalBridge public boundary fail-closed，并映射为稳定 LocalBridge `WorkspaceDenied`/`InvalidArgument`，不得泄露 upstream `ABSOLUTE_PATH_DENIED` 等 private error。LocalBridge 不得通过“把任意绝对路径正规化成相对路径”扩大 workspace 授权。
+在 Edit/Full 与 Elevated 普通 route 中，drive-letter absolute、UNC absolute、Win32 verbatim、POSIX-leading-slash 与包含 `..` traversal 的输入继续在 LocalBridge public boundary fail-closed，并映射为稳定 LocalBridge `WorkspaceDenied`/`InvalidArgument`。只有已经满足管理员模式安全确认 + UAC + Active Broker 的 privileged route 才能使用 workspace 外绝对路径，且授权来源是管理员 Token，而不是字符串 normalization。
 
 #### Nested Git repository discovery
 
@@ -144,7 +144,7 @@ blame:
   从请求文件 parent 向上寻找最近 repository root，并保留该文件相对 repo root 的 path
 ```
 
-`path` 用于选择 repository context；action-specific `paths` 才作为 path filter/pathspec。`git_status(path="LocalBridge")` 能识别的 nested repo，`git_log/git_show/git_diff` 必须识别同一 repo，`git_blame(path="LocalBridge/package.json")` 必须识别其 enclosing repo。若 resolver 已确认 repository，`git_diff` 禁止静默降级成 `non-git diff fallback`。repository discovery 永远不能越过 active workspace root。
+`path` 用于选择 repository context；action-specific `paths` 才作为 path filter/pathspec。`git_status(path="LocalBridge")` 能识别的 nested repo，`git_log/git_show/git_diff` 必须识别同一 repo，`git_blame(path="LocalBridge/package.json")` 必须识别其 enclosing repo。若 resolver 已确认 repository，`git_diff` 禁止静默降级成 `non-git diff fallback`。Edit/Full 的 repository discovery 永远不能越过 active workspace root；Elevated 只有通过明确 privileged scope 才能解析管理员 Token 可访问的 workspace 外 repository。
 
 ### Schema28 — Public Runtime Fidelity / Testable Session Semantics
 
@@ -194,6 +194,16 @@ command state 的 start/replace/finish/clear 都必须比较 `(task_id, session_
 可信 PowerShell 启动继续在 user command 前关闭 arbitrary module autoload，但不能因此破坏正常 coding shell。LocalBridge 必须通过固定 allowlist + 可信安装身份/路径验证，预加载或等价提供最小标准 PowerShell cmdlet surface；至少 `Get-Location`、`Get-ChildItem`、`Test-Path` 在 `windows_powershell` 与 `auto`→PowerShell 下可用。用户控制的 `PSModulePath` 不得决定 preload 来源。此修复不得弱化 LB-007：`New-Item`、`Set-Content`、`Set-Item`、Alias/Function provider 等动态 provider/command-surface mutation 仍按既有 review-required 处理。
 
 active workspace 内普通文件/目录 mutation 属于 reviewed workspace write，而不是 WorkspaceRegistry/control-plane mutation。该结构化路线固定在现有 `agent_workflow` 的 optional `directory_changes` 字段：bounded array 中每项只能是 `{ action, path }`，`action` 只允许 `create_directory` / `remove_empty_directory`，`path` 必须 active-workspace-relative。它无需 process exec，可在 `D:\project` 授权下创建 `test/`，并在为空时清理该目录；Edit 与 Full 都可授权此类 reviewed write。该路线必须执行 final identity/reparse 边界验证，禁止 absolute/`..`/reparse escape；本合同不自动授权非空递归目录删除，也不增加第九个 public core tool。
+
+### Schema33 — Elevated administrator-token scope / UI geometry
+
+权限边界分为两个执行域：普通 LocalBridge/普通 command route 始终保持非提权；管理员操作由 Active Privileged Broker 单独承载。Edit/Full 继续以 active workspace 为文件授权边界，Full 只增加当前普通用户 token 的 workspace 相关 process exec。Elevated 在固定风险警告、完整 9000ms 红色确认倒计时、用户明确确认和 Windows UAC 完成后，允许 Broker 在管理员 Token 范围内访问 workspace 外文件系统、执行普通/管理员进程与可信 shell 命令、执行系统维护。
+
+`reg.exe / sc.exe / schtasks.exe / netsh.exe / bcdedit.exe / dism.exe` 是 Full 必须拦在管理员边界之外的系统管理目标；Elevated 的管理员 route 可以使用它们，也可以执行一般管理员程序/命令。ordinary `exec_command` 不得因为 Broker Active 而隐式继承管理员 token。整个 LocalBridge 主进程仍禁止整体提权。
+
+管理员范围扩大不扩大 LocalBridge control-plane：AI/MCP 仍不能修改 PermissionMode、批准警告/UAC、启停 Broker、修改 WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy 或 LocalBridge autostart。
+
+UI 同步采用两条全局规则：含文字按钮宽度由最大单行可见字数决定、高度由实际渲染行数决定；字体大小只有标题与统一次级/非标题两级，禁止第三级字号。Dashboard 在 Elevated + Active Broker 时以黄色 `全目录访问` 表示当前文件访问范围，并阻止项目切换，显示固定说明弹窗。
 
 ### Schema26 — Administrator Mode Safety Consent Gate
 

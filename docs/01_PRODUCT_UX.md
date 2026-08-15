@@ -24,6 +24,8 @@ Windows 11 x64；Tauri 2 + React/TypeScript + Rust；捆绑 Python Embedded、co
 - 不显示内部 enum、fault code、raw tool id。
 - 主控界面极简，不做工程控制台。
 - 用户只看到当前必须理解或操作的信息。
+- 所有**含文字按钮**的几何尺寸必须由按钮自身内容决定：宽度严格对应按钮中任一单行的最大可见字数，纵向尺寸严格对应实际渲染行数；禁止用与文字内容无关的任意固定宽高把不同内容强行做成同尺寸。无文字的窗口控制/纯图标控件不适用“字数”规则。
+- 产品字体大小严格只有两级：`标题` 与统一的 `次级/非标题`。正文、说明、helper、状态、元数据、字段标签和按钮文字全部使用同一个次级字号，禁止引入第三级字号。
 
 ## Apple-inspired：不增加视觉依赖
 
@@ -70,7 +72,7 @@ icon package
 当前执行状态
 ```
 
-主控界面**不得显示 `权限模式`**，也不得放置 `编辑模式 / 完整模式 / 管理员模式` 三档选择控件。权限模式可在设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏修改；后者属于允许的同一配置流程，不视为非法第二入口。主控界面的 `管理员权限实际状态` 是只读 backend `PrivilegeState` 投影，不承担 PermissionMode 修改或 UAC 触发入口。
+主控界面**不得显示 `权限模式`**，也不得放置 `编辑模式 / 完整模式 / 管理员模式` 三档选择控件。权限模式可在设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏修改；后者属于允许的同一配置流程，不视为非法第二入口。主控界面的 `管理员权限实际状态` 是只读 backend `PrivilegeState` 投影，不承担 PermissionMode 修改或 UAC 触发入口。管理员模式已经通过固定警告、9 秒红色确认、明确确认与 Windows UAC 且 Broker Active 时，当前项目区域不再暗示 active workspace 是文件访问边界，而必须以**黄色**显示 `全目录访问`。此时点击原“切换项目”入口不得切换 workspace，固定弹出：`管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式`。
 
 必要动作按状态出现：
 
@@ -254,7 +256,7 @@ Runtime API Key 仅保存在 Windows 安全凭据中。
 
 第 3 屏必须提供明确 `返回` 到第 2 屏。
 
-三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白。`min-height >= 80px` 只能作为最低防回退，不能构成 PASS；任何包含“标题 + 说明”两行文本块的按钮，在固定 780×620 实机中真实 computed/rendered 高度必须至少为普通单行控件实际高度的 2 倍，并证明标题与说明两个 line box 均完整可见、无裁切/挤压。此项仍需人工视觉 Gate。
+三个权限模式按钮的标题、说明文字与上下左右边框之间必须有清晰且均衡的视觉留白。Schema33 起不再以固定 `min-height` 或“2 倍单行控件”作为尺寸合同：每个含文字按钮的**宽度严格由该按钮任一单行的最大可见字数决定，高度严格由实际渲染行数决定**；标题与说明 line box 必须完整、无裁切/挤压。computed/rendered Gate 必须证明尺寸来自内容而不是静态 CSS marker，此项仍需人工 780×620 视觉 Gate。
 
 ### 第 4 屏
 
@@ -434,14 +436,14 @@ D:\project\LocalBridge
 ## 权限
 
 ```text
-编辑模式   → reviewed read/write；无 process exec
-完整模式   → + 当前 Windows 用户权限的普通命令
-管理员模式 → + 用户完成固定安全确认与 UAC 后激活的独立 Privileged Broker
+编辑模式   → active workspace 内 read/search/Git/reviewed 文件目录写；无普通 process exec
+完整模式   → Edit + 当前 Windows 普通用户 token 的 workspace 相关进程/命令；仍受 active workspace 文件边界
+管理员模式 → 固定风险警告 → 红色确认按钮完整 9 秒倒计时 → 用户明确确认 → Windows UAC → Active Privileged Broker；在管理员 Token 范围内获得全文件系统、普通及管理员进程/命令与系统维护能力，不再受 active workspace 限制
 ```
 
 Schema30 明确：active workspace 是 reviewed **read/write 授权根**，不是只读根。授权根内普通文件/目录创建、修改与安全清理属于编辑模式和完整模式都可使用的 workspace write。例如 active workspace=`D:\project` 时，`agent_workflow.directory_changes[]` 可用 `create_directory` 创建 `test/`，并在目录为空时用 `remove_empty_directory` 清理；这两个结构化动作不需要 process exec。该能力不允许 MCP 修改项目列表、切换 active workspace 或扩大授权根。PowerShell `New-Item` / `Set-Content` / `Set-Item` 等通用 provider mutation 因还能影响 `Alias:` / `Function:` 等命令面，仍可保持 review-required；产品必须通过结构化 workspace write 提供正常目录控制，而不是靠放宽 shell provider 安全边界。
 
-管理员模式无 TTL；9 秒只属于**每次进入管理员授权流程前的安全确认等待期**，不是管理员模式失效时长。
+管理员模式无 TTL；9 秒只属于**每次进入管理员授权流程前的安全确认等待期**，不是管理员模式失效时长。`reg / sc / schtasks / netsh / bcdedit / dism` 等系统管理目标不能借 Full 越过管理员边界；Elevated + Active Broker 才能以管理员 Token 执行系统级维护。LocalBridge 自身 PermissionMode、管理员 consent/UAC、Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy 与 LocalBridge autostart 仍属于 MCP/AI 永久不可修改的 control-plane。系统修改产生的后果必须在授权前明确告知并由用户自主承担。
 
 管理员实际状态独立于用户偏好：
 
@@ -455,7 +457,7 @@ Schema30 明确：active workspace 是 reviewed **read/write 授权根**，不�
 
 ## 项目
 
-可以记住多个项目，但同时最多一个项目获得 MCP 授权：
+可以记住多个项目；在 Edit/Full 中同时最多一个项目作为 MCP workspace 授权根。Elevated + Active Broker 的 OS 文件访问能力不以该 workspace 根为边界，但不会因此允许 MCP 修改项目 Registry/active workspace：
 
 ```text
 项目列表 ≠ 授权列表

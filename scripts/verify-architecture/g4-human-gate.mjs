@@ -644,6 +644,99 @@ const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15 = Object.freeze({
+  schemaVersion: 33,
+  baselineSchemaVersion: 32,
+  replacedRules: {
+    windows_system_management_programs: {
+      baseline: ["reg.exe", "schtasks.exe", "sc.exe", "netsh.exe"],
+      current: ["reg.exe", "schtasks.exe", "sc.exe", "netsh.exe", "bcdedit.exe", "dism.exe"],
+    },
+  },
+  removedRules: {
+    onboarding_screen_3_permission_min_height_px: 80,
+    onboarding_two_line_button_min_rendered_height_multiplier: 2,
+    reviewed_system_management_shell_interpreter_fallback_forbidden: true,
+  },
+  addedRules: {
+    ui_text_button_content_sized_required: true,
+    ui_text_button_width_basis: "maximum_visible_character_count_in_any_single_line",
+    ui_text_button_height_basis: "rendered_line_count",
+    ui_text_button_arbitrary_fixed_geometry_forbidden: true,
+    ui_typography_tiers: ["title", "secondary"],
+    ui_secondary_non_title_font_size_unified_required: true,
+    ui_third_font_size_tier_forbidden: true,
+    permission_mode_edit_workspace_bound: true,
+    permission_mode_full_workspace_bound: true,
+    permission_mode_elevated_workspace_bound: false,
+    elevated_administrator_token_scope_required: true,
+    elevated_full_filesystem_access_within_administrator_token: true,
+    elevated_ordinary_and_administrator_process_command_execution_allowed: true,
+    elevated_system_maintenance_allowed: true,
+    elevated_admin_execution_requires_active_broker: true,
+    elevated_privileged_filesystem_requires_broker_backend: true,
+    elevated_admin_shell_uses_trusted_selector_required: true,
+    elevated_arbitrary_shell_executable_path_forbidden: true,
+    localbridge_control_plane_mutation_via_elevated_route_forbidden: true,
+    dashboard_elevated_project_scope_label: "全目录访问",
+    dashboard_elevated_project_scope_accent: "yellow",
+    dashboard_elevated_project_switch_blocked: true,
+    dashboard_elevated_project_switch_dialog: "管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
+    admin_mode_user_consequence_acknowledgement_required: true,
+  },
+  lb006: {
+    artifactReplacements: [
+      ["mode-aware public path/workdir authority adapter: Edit and Full are active-workspace-relative while Elevated privileged operations may address administrator-token-scoped filesystem paths outside the active workspace", "active-workspace-relative public path/workdir validator with stable LocalBridge typed errors"],
+      ["permission-scope-aware Git repository resolver: Edit and Full stop at the active workspace root while Elevated may resolve administrator-token-accessible repositories outside that root", "shared workspace-bounded nested Git repository resolver for status diff log show and blame"],
+    ],
+    testReplacements: [
+      ["Edit and Full document image Git and exec workdir inputs remain active-workspace-relative and reject drive UNC verbatim POSIX absolute or parent traversal; Elevated privileged filesystem and administrator execution routes accept administrator-token-accessible absolute paths outside the active workspace without weakening Edit or Full", "document image Git and exec workdir workspace-bound public inputs accept active-workspace-relative paths and reject drive UNC verbatim POSIX absolute or parent traversal at the LocalBridge boundary without leaking upstream ABSOLUTE_PATH_DENIED"],
+      ["Git repository discovery never escapes the active workspace in Edit or Full; Elevated may resolve repositories outside the active workspace only through its administrator-token scope, and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository", "Git repository discovery never escapes the active workspace and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository"],
+    ],
+    addedTests: ["Elevated path authority is mode-aware rather than a lexical workspace bypass: the ordinary user route stays workspace-bound, while operations outside the active workspace are dispatched only through a Broker-backed privileged filesystem or administrator execution route and are bounded by the administrator token"],
+  },
+  lb007: {
+    testReplacements: [
+      ["Full ordinary exec_command treats static Windows system-management targets reg.exe schtasks.exe sc.exe netsh.exe bcdedit.exe and dism.exe, including exact System32 paths and case-insensitive executable names, as requiring the privileged route; ordinary execution returns PrivilegedRouteNotAvailable and cannot cross the administrator boundary", "Full and Elevated ordinary exec_command treat static Windows system-management targets reg.exe schtasks.exe sc.exe and netsh.exe, including exact System32 paths and case-insensitive executable names, as requiring the privileged route; ordinary execution returns PrivilegedRouteNotAvailable and never executes them with a Broker token"],
+      ["Elevated provides both an ordinary current-user route and a separate Active-Broker administrator route: ordinary exec_command never silently inherits the Broker token, while the administrator route may execute trusted system-management and general administrator commands without globally disabling those targets", "ordinary Elevated exec_command never inherits the Active Broker administrator token, and privilege classification of Windows system-management targets does not globally prohibit the same trusted System32 programs from the separate reviewed elevated_exec route"],
+    ],
+    addedTests: ["Edit and Full cannot obtain administrator-token filesystem process command or system-maintenance capability through workflow indirection; Elevated may declare those privileged capabilities only for the Broker-backed administrator route and LocalBridge control-plane remains deny-always"],
+  },
+  lb012: {
+    artifactReplacements: [["general Broker-backed administrator execution and privileged filesystem route for Elevated mode", "reviewed Windows system-management elevated_exec profiles"]],
+    addedArtifacts: ["Broker-backed privileged filesystem operations that are not constrained to the active workspace once Elevated is Active"],
+    testReplacements: [
+      ["Elevated plus Active Broker can execute administrator-token operations through trusted System32 reg.exe schtasks.exe sc.exe netsh.exe bcdedit.exe and dism.exe and can execute general administrator processes or commands within the administrator token scope", "Elevated plus Active Broker can execute reviewed structured operations through exact trusted System32 reg.exe schtasks.exe sc.exe and netsh.exe without globally disabling those Windows system-management programs"],
+      ["Elevated administrator execution accepts structured direct program plus argv and a separate trusted logical shell selector for administrator command text; MCP cannot supply an arbitrary shell executable path", "reviewed Windows system-management elevated_exec accepts structured program and argv only and rejects cmd PowerShell or other shell/interpreter fallback"],
+      ["Windows OS system management is not itself LocalBridge control-plane mutation, while attempts through any administrator route including reg schtasks sc netsh bcdedit dism or trusted administrator shells to mutate LocalBridge PermissionMode administrator consent UAC Broker activation WorkspaceRegistry credentials Tunnel MCP runtime PEP Broker policy or LocalBridge autostart remain denied", "Windows OS system management is not itself LocalBridge control-plane mutation, while attempts through reg.exe schtasks.exe sc.exe or netsh.exe to mutate LocalBridge PermissionMode administrator consent UAC Broker activation WorkspaceRegistry credentials Tunnel MCP runtime PEP Broker policy or LocalBridge autostart remain denied"],
+    ],
+    addedTests: [
+      "Elevated plus Active Broker can read create modify rename and delete administrator-token-accessible filesystem objects outside the active workspace through a privileged filesystem route; Edit and Full remain unable to cross the active workspace authorization root",
+      "Elevated plus Active Broker can execute a general administrator direct process and a trusted PowerShell or cmd logical selector outside the active workspace, with timeout cancellation output bounds and redaction preserved",
+      "whole-app elevation remains forbidden: LocalBridge MCP Tunnel and ordinary exec stay under the normal user token and only Broker-dispatched administrator operations receive the administrator token",
+    ],
+  },
+  lb015: {
+    addedArtifacts: [
+      "content-derived text-button geometry system whose width follows maximum visible characters per line and height follows rendered line count",
+      "two-tier typography system with exactly title and unified secondary non-title font sizes",
+      "Dashboard Elevated project-scope projection showing yellow 全目录访问 and blocking project switching with the fixed explanatory dialog",
+    ],
+    addedTests: [
+      "every text-bearing button sizes from its own content metrics: width corresponds to the maximum visible character count on any single line and height corresponds to the actual rendered line count; arbitrary fixed button geometry that ignores text content is forbidden",
+      "all non-title text uses one unified secondary font-size token across body helper status metadata labels and button text; no third font-size tier exists",
+      "when PermissionMode is Elevated and Broker is Active the Dashboard current-project area displays yellow 全目录访问 instead of implying an active-workspace access boundary; clicking the project-switch affordance does not switch workspace and shows exactly 管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
+    ],
+  },
+  lb016: {
+    testReplacements: [
+      ["screen 3 text-bearing permission buttons derive width from the maximum visible character count on any single line and height from the actual title plus description rendered line count; content must not be clipped and final visual PASS requires human inspection rather than CSS marker presence", "screen 3 permission mode buttons that contain title plus description render at least twice the actual rendered height of the ordinary single-line control at 780x620; both text line boxes are fully visible and final visual PASS requires human inspection rather than CSS marker presence"],
+      ["screen 3 permission buttons pass a computed/rendered geometry Gate proving geometry follows content metrics rather than a fixed min-height or multiplier; title and description line boxes are complete and human 780x620 visual Gate remains required", "screen 3 two-line permission buttons pass a computed/rendered geometry Gate proving actual height at least 2x a single-line control and complete title/description line boxes; human 780x620 visual Gate remains required and static min-height CSS alone cannot PASS"],
+    ],
+    addedTests: ["onboarding uses exactly two typography sizes: title and the same unified secondary size for every other text role; helper copy status labels button text and metadata cannot introduce a third font-size tier"],
+  },
+});
+
 const WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15 = Object.freeze({
   schemaVersion: 32,
   baselineSchemaVersion: 31,
@@ -1281,6 +1374,60 @@ export function hasExactLb007PolicyAndCmdCodepageAmendment20260815(contractsDoc)
     && containsAll(lb007.required_tests, LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.lb007.addedTests);
 }
 
+function hasReplacement(array, replacements) {
+  return replacements.every(([current, baseline]) => array?.includes(current) && !array?.includes(baseline));
+}
+
+function normalizeReplacements(array, replacements) {
+  return (array ?? []).map((item) => {
+    const replacement = replacements.find(([current]) => current === item);
+    return replacement ? replacement[1] : item;
+  });
+}
+
+export function hasExactElevatedScopeAndUiGeometryAmendment20260815(contractsDoc) {
+  if (contractsDoc?.schema_version !== ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const [key, replacement] of Object.entries(ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.replacedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(replacement.current)) return false;
+  }
+  for (const key of Object.keys(ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.removedRules)) {
+    if (Object.hasOwn(contractsDoc?.rules ?? {}, key)) return false;
+  }
+  const lb006=contractsDoc?.prs?.["LB-006"], lb007=contractsDoc?.prs?.["LB-007"], lb012=contractsDoc?.prs?.["LB-012"], lb015=contractsDoc?.prs?.["LB-015"], lb016=contractsDoc?.prs?.["LB-016"];
+  if (!lb006 || !lb007 || !lb012 || !lb015 || !lb016) return false;
+  return hasReplacement(lb006.required_artifacts, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb006.artifactReplacements)
+    && hasReplacement(lb006.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb006.testReplacements)
+    && containsAll(lb006.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb006.addedTests)
+    && hasReplacement(lb007.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb007.testReplacements)
+    && containsAll(lb007.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb007.addedTests)
+    && hasReplacement(lb012.required_artifacts, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb012.artifactReplacements)
+    && containsAll(lb012.required_artifacts, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb012.addedArtifacts)
+    && hasReplacement(lb012.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb012.testReplacements)
+    && containsAll(lb012.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb012.addedTests)
+    && containsAll(lb015.required_artifacts, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb015.addedArtifacts)
+    && containsAll(lb015.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb015.addedTests)
+    && hasReplacement(lb016.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb016.testReplacements)
+    && containsAll(lb016.required_tests, ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb016.addedTests);
+}
+
+export function normalizeElevatedScopeAndUiGeometryAmendment20260815(contractsDoc) {
+  const normalized=structuredClone(contractsDoc ?? null); if(!normalized) return normalized;
+  normalized.schema_version=ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.baselineSchemaVersion;
+  for (const key of Object.keys(ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.addedRules)) delete normalized.rules[key];
+  for (const [key, replacement] of Object.entries(ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.replacedRules)) normalized.rules[key]=structuredClone(replacement.baseline);
+  for (const [key, value] of Object.entries(ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.removedRules)) normalized.rules[key]=structuredClone(value);
+  const lb006=normalized.prs?.["LB-006"], lb007=normalized.prs?.["LB-007"], lb012=normalized.prs?.["LB-012"], lb015=normalized.prs?.["LB-015"], lb016=normalized.prs?.["LB-016"];
+  if(lb006){lb006.required_artifacts=normalizeReplacements(lb006.required_artifacts,ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb006.artifactReplacements);lb006.required_tests=removeItems(normalizeReplacements(lb006.required_tests,ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb006.testReplacements),ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb006.addedTests);}
+  if(lb007) lb007.required_tests=removeItems(normalizeReplacements(lb007.required_tests,ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb007.testReplacements),ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb007.addedTests);
+  if(lb012){lb012.required_artifacts=removeItems(normalizeReplacements(lb012.required_artifacts,ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb012.artifactReplacements),ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb012.addedArtifacts);lb012.required_tests=removeItems(normalizeReplacements(lb012.required_tests,ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb012.testReplacements),ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb012.addedTests);}
+  if(lb015){lb015.required_artifacts=removeItems(lb015.required_artifacts,ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb015.addedArtifacts);lb015.required_tests=removeItems(lb015.required_tests,ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb015.addedTests);}
+  if(lb016) lb016.required_tests=removeItems(normalizeReplacements(lb016.required_tests,ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb016.testReplacements),ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.lb016.addedTests);
+  return normalized;
+}
+
 export function hasExactWindowsSystemManagementPrivilegeAmendment20260815(contractsDoc) {
   if (contractsDoc?.schema_version !== WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.schemaVersion) return false;
   for (const [key, expected] of Object.entries(WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.addedRules)) {
@@ -1596,6 +1743,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.schemaVersion) {
+    if (!hasExactElevatedScopeAndUiGeometryAmendment20260815(authorizationContracts)) {
+      findings.push(`${expected.id}:elevated-scope-ui-geometry-20260815-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeElevatedScopeAndUiGeometryAmendment20260815(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.schemaVersion) {
     if (!hasExactWindowsSystemManagementPrivilegeAmendment20260815(authorizationContracts)) {
       findings.push(`${expected.id}:windows-system-management-privilege-20260815-contract-amendment-drift`);

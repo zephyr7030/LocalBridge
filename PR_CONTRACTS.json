@@ -1,5 +1,5 @@
 {
-  "schema_version": 32,
+  "schema_version": 33,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -313,8 +313,6 @@
       "完成"
     ],
     "diagnostics_engineering_generation_details_forbidden": true,
-    "onboarding_screen_3_permission_min_height_px": 80,
-    "onboarding_two_line_button_min_rendered_height_multiplier": 2,
     "onboarding_two_line_button_computed_geometry_gate_required": true,
     "onboarding_two_line_button_css_marker_only_pass_forbidden": true,
     "onboarding_saved_runtime_key_status_text": "已安全保存至windows安全凭据",
@@ -571,19 +569,47 @@
       "reg.exe",
       "schtasks.exe",
       "sc.exe",
-      "netsh.exe"
+      "netsh.exe",
+      "bcdedit.exe",
+      "dism.exe"
     ],
     "ordinary_system_management_requires_privileged_route": true,
     "elevated_ordinary_exec_never_inherits_broker_token": true,
     "reviewed_system_management_elevated_exec_allowed": true,
     "reviewed_system_management_system32_identity_required": true,
-    "reviewed_system_management_shell_interpreter_fallback_forbidden": true,
     "localbridge_control_plane_mutation_via_system_management_forbidden": true,
     "agent_workflow_structured_directory_changes_field_required": true,
     "agent_workflow_directory_change_actions": [
       "create_directory",
       "remove_empty_directory"
-    ]
+    ],
+    "ui_text_button_content_sized_required": true,
+    "ui_text_button_width_basis": "maximum_visible_character_count_in_any_single_line",
+    "ui_text_button_height_basis": "rendered_line_count",
+    "ui_text_button_arbitrary_fixed_geometry_forbidden": true,
+    "ui_typography_tiers": [
+      "title",
+      "secondary"
+    ],
+    "ui_secondary_non_title_font_size_unified_required": true,
+    "ui_third_font_size_tier_forbidden": true,
+    "permission_mode_edit_workspace_bound": true,
+    "permission_mode_full_workspace_bound": true,
+    "permission_mode_elevated_workspace_bound": false,
+    "elevated_administrator_token_scope_required": true,
+    "elevated_full_filesystem_access_within_administrator_token": true,
+    "elevated_ordinary_and_administrator_process_command_execution_allowed": true,
+    "elevated_system_maintenance_allowed": true,
+    "elevated_admin_execution_requires_active_broker": true,
+    "elevated_privileged_filesystem_requires_broker_backend": true,
+    "elevated_admin_shell_uses_trusted_selector_required": true,
+    "elevated_arbitrary_shell_executable_path_forbidden": true,
+    "localbridge_control_plane_mutation_via_elevated_route_forbidden": true,
+    "dashboard_elevated_project_scope_label": "全目录访问",
+    "dashboard_elevated_project_scope_accent": "yellow",
+    "dashboard_elevated_project_switch_blocked": true,
+    "dashboard_elevated_project_switch_dialog": "管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
+    "admin_mode_user_consequence_acknowledgement_required": true
   },
   "prs": {
     "LB-000": {
@@ -833,8 +859,8 @@
         "workspace_context stable projection plus deterministic private-result semantic compatibility probe",
         "stable process outcome normalizer that maps every nonzero ordinary exit to ProcessFailed",
         "complete executable implementations for every advertised v1 agent_workflow task_control and document_workflow action",
-        "active-workspace-relative public path/workdir validator with stable LocalBridge typed errors",
-        "shared workspace-bounded nested Git repository resolver for status diff log show and blame",
+        "mode-aware public path/workdir authority adapter: Edit and Full are active-workspace-relative while Elevated privileged operations may address administrator-token-scoped filesystem paths outside the active workspace",
+        "permission-scope-aware Git repository resolver: Edit and Full stop at the active workspace root while Elevated may resolve administrator-token-accessible repositories outside that root",
         "schema28 public command lifecycle delta/cursor state for incremental poll and stable kill terminal convergence",
         "single-parse shell invocation and UTF-8 public output normalization across trusted Windows shell selectors",
         "real image resize adapter plus inclusive line-range validation for Git blame and documents",
@@ -868,9 +894,9 @@
         "a running public session converges to completed failed timed_out cancelled or lost without requiring continued client poll; private pruning runtime restart or handle loss cannot leave permanent Running and unobserved terminal loss returns SessionUnavailable",
         "cmd /c exit 7 with empty stdout and stderr returns public ProcessFailed with ok=false isError=true and Failed CurrentTask; exit_code zero remains completed success",
         "every advertised agent_workflow task_control and document_workflow action executes its stable contract and none returns a permanent currently-unavailable response",
-        "document image Git and exec workdir workspace-bound public inputs accept active-workspace-relative paths and reject drive UNC verbatim POSIX absolute or parent traversal at the LocalBridge boundary without leaking upstream ABSOLUTE_PATH_DENIED",
+        "Edit and Full document image Git and exec workdir inputs remain active-workspace-relative and reject drive UNC verbatim POSIX absolute or parent traversal; Elevated privileged filesystem and administrator execution routes accept administrator-token-accessible absolute paths outside the active workspace without weakening Edit or Full",
         "with active workspace D:\\project and nested repo D:\\project\\LocalBridge, git status log show and diff resolve the same repository and blame of LocalBridge/package.json resolves its enclosing repository",
-        "Git repository discovery never escapes the active workspace and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository",
+        "Git repository discovery never escapes the active workspace in Edit or Full; Elevated may resolve repositories outside the active workspace only through its administrator-token scope, and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository",
         "LB-006 PR Fast Gate runs cheap deterministic unit fake and static contract checks without repeatedly invoking the complete repository Gate after each small edit",
         "LB-006 PR Runtime Gate groups heavy tests that share the bundled runtime PEP and process topology into a shared lifecycle unless isolation itself is under test; repeated runtime startup for independent assertions has an explicit isolation rationale and cheap isolated unit tests remain separate",
         "one real public command session lifecycle E2E uses a single bundled runtime and PEP lifecycle to cover exec then incremental poll then write then read then kill then terminal convergence with bounded timeout cancellation and explicit lost-session terminal handling",
@@ -893,7 +919,8 @@
         "agent_workflow project selection is workspace-relative and changes only workflow/project context: it never changes WorkspaceRegistry or the active workspace authorization root; the stable result exposes the selected path and enclosing repository/project context without raw private resolver state",
         "windows_powershell and auto resolving to PowerShell provide a trusted standard coding cmdlet baseline including Get-Location Get-ChildItem and Test-Path while keeping arbitrary module autoload disabled; the preload source is fixed or identity-validated and cannot be redirected through user-controlled PSModulePath",
         "restoring standard PowerShell cmdlets does not weaken shell review: provider mutation and dynamic command-surface operations such as New-Item Set-Content Set-Item Alias or Function provider mutation remain subject to the existing LB-007 review-required classification",
-        "agent_workflow exposes optional directory_changes as a bounded array of objects with exactly action plus path; action is only create_directory or remove_empty_directory and path is active-workspace-relative; with active workspace D:\\project, directory_changes can create D:\\project\\test and later remove that directory when empty without using process execution; Edit and Full both permit this reviewed workspace write, absolute or parent-traversal targets and reparse escapes are denied, non-empty recursive directory deletion is not implied, and the operation never mutates WorkspaceRegistry or active workspace control-plane"
+        "agent_workflow exposes optional directory_changes as a bounded array of objects with exactly action plus path; action is only create_directory or remove_empty_directory and path is active-workspace-relative; with active workspace D:\\project, directory_changes can create D:\\project\\test and later remove that directory when empty without using process execution; Edit and Full both permit this reviewed workspace write, absolute or parent-traversal targets and reparse escapes are denied, non-empty recursive directory deletion is not implied, and the operation never mutates WorkspaceRegistry or active workspace control-plane",
+        "Elevated path authority is mode-aware rather than a lexical workspace bypass: the ordinary user route stays workspace-bound, while operations outside the active workspace are dispatched only through a Broker-backed privileged filesystem or administrator execution route and are bounded by the administrator token"
       ],
       "non_goals": [
         "policy enforcement",
@@ -940,8 +967,9 @@
         "agent_workflow structured directory create or empty-directory cleanup declares transitive workspace write capability: Edit and Full may authorize it inside the active root, process execution is not required, and attempts to alter WorkspaceRegistry active workspace or escape through absolute traversal or reparse targets fail closed",
         "a standalone PowerShell Get-Command or gcm query with exactly one literal command-name argument is ordinary read-only command discovery in Full or Elevated and is not classified as privilege or review-required solely because it uses Get-Command; dynamic command names, additional pipeline or follow-on execution, ScriptBlock extraction, subexpressions, aliases functions provider mutation command-engine mutation or other runtime-selected command-resolution surfaces remain review-required and fail closed",
         "the narrow trusted PowerShell Console stdin seam permits [Console]::In.ReadLine() and [Console]::In.ReadToEnd() plus the existing Console output calls without treating those exact statically rooted calls as arbitrary instance-member dispatch; other instance-member calls remain review-required unless separately ratified",
-        "Full and Elevated ordinary exec_command treat static Windows system-management targets reg.exe schtasks.exe sc.exe and netsh.exe, including exact System32 paths and case-insensitive executable names, as requiring the privileged route; ordinary execution returns PrivilegedRouteNotAvailable and never executes them with a Broker token",
-        "ordinary Elevated exec_command never inherits the Active Broker administrator token, and privilege classification of Windows system-management targets does not globally prohibit the same trusted System32 programs from the separate reviewed elevated_exec route"
+        "Full ordinary exec_command treats static Windows system-management targets reg.exe schtasks.exe sc.exe netsh.exe bcdedit.exe and dism.exe, including exact System32 paths and case-insensitive executable names, as requiring the privileged route; ordinary execution returns PrivilegedRouteNotAvailable and cannot cross the administrator boundary",
+        "Elevated provides both an ordinary current-user route and a separate Active-Broker administrator route: ordinary exec_command never silently inherits the Broker token, while the administrator route may execute trusted system-management and general administrator commands without globally disabling those targets",
+        "Edit and Full cannot obtain administrator-token filesystem process command or system-maintenance capability through workflow indirection; Elevated may declare those privileged capabilities only for the Broker-backed administrator route and LocalBridge control-plane remains deny-always"
       ],
       "non_goals": [
         "Tunnel",
@@ -1189,7 +1217,10 @@
         "arrowless rounded-scroll presentation",
         "fixed 780x620 non-resizable non-maximizable main window shell",
         "default-centered first visible 780x620 main window creation",
-        "projection-only responsive frontend boundary"
+        "projection-only responsive frontend boundary",
+        "content-derived text-button geometry system whose width follows maximum visible characters per line and height follows rendered line count",
+        "two-tier typography system with exactly title and unified secondary non-title font sizes",
+        "Dashboard Elevated project-scope projection showing yellow 全目录访问 and blocking project switching with the fixed explanatory dialog"
       ],
       "required_tests": [
         "minimal-ui assertions",
@@ -1288,7 +1319,10 @@
         "administrator warning red confirmation button is disabled for the full monotonic 9000ms interval, labels 确认9 through 确认1, then becomes enabled with exact label 确认; pointer keyboard synthetic repeated click rerender focus change or stale frontend state cannot bypass the gate",
         "administrator warning cancel Escape close or dismiss causes no PermissionMode Broker or UAC side effect; every fresh open restarts the full nine-second countdown and no remember skip or do-not-show-again bypass exists",
         "background administrator preference restore shows no safety dialog and requests no UAC; reselecting an already-active administrator mode causes no duplicate UAC",
-        "mode-entry warning does not approve any separate High or Critical per-operation confirmation and AI/MCP cannot approve the warning or mutate PermissionMode Broker or other control-plane authority"
+        "mode-entry warning does not approve any separate High or Critical per-operation confirmation and AI/MCP cannot approve the warning or mutate PermissionMode Broker or other control-plane authority",
+        "every text-bearing button sizes from its own content metrics: width corresponds to the maximum visible character count on any single line and height corresponds to the actual rendered line count; arbitrary fixed button geometry that ignores text content is forbidden",
+        "all non-title text uses one unified secondary font-size token across body helper status metadata labels and button text; no third font-size tier exists",
+        "when PermissionMode is Elevated and Broker is Active the Dashboard current-project area displays yellow 全目录访问 instead of implying an active-workspace access boundary; clicking the project-switch affordance does not switch workspace and shows exactly 管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式"
       ],
       "non_goals": [
         "wizard",
@@ -1346,7 +1380,7 @@
         "screen 3 uses a native Windows folder picker as the primary new-project selection interaction",
         "screen 4 plugin management action opens only https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins in the system default browser through a fixed Rust allowlist",
         "screen 4 developer-mode guidance is 在插件设置页面最底端，打开“开发者模式”",
-        "screen 3 permission mode buttons that contain title plus description render at least twice the actual rendered height of the ordinary single-line control at 780x620; both text line boxes are fully visible and final visual PASS requires human inspection rather than CSS marker presence",
+        "screen 3 text-bearing permission buttons derive width from the maximum visible character count on any single line and height from the actual title plus description rendered line count; content must not be clipped and final visual PASS requires human inspection rather than CSS marker presence",
         "ordinary selected permission modes use the standard blue accent while administrator mode uses orange #ff9500 warning styling in onboarding and Settings",
         "the selected project runtime MCP and OpenAI Tunnel are all ready before screen 4 becomes reachable so plugin creation is executable rather than premature guidance",
         "onboarding never defers its only runtime startup edge until screen 5",
@@ -1370,10 +1404,11 @@
         "onboarding uses the full fixed client content area without a centered floating card modal shell or large empty surrounding canvas",
         "screen 3 visible selection or reselection of 管理员模式 opens the fixed safety warning when Broker is not Active; no UAC or permission activation may occur until the whole-red confirmation button completes its full 9000ms disabled countdown and the user clicks enabled 确认; no separate enable-admin button exists",
         "background preference restore shows neither the administrator warning nor UAC; a fresh visible warning always restarts the full nine-second countdown",
-        "screen 3 two-line permission buttons pass a computed/rendered geometry Gate proving actual height at least 2x a single-line control and complete title/description line boxes; human 780x620 visual Gate remains required and static min-height CSS alone cannot PASS",
+        "screen 3 permission buttons pass a computed/rendered geometry Gate proving geometry follows content metrics rather than a fixed min-height or multiplier; title and description line boxes are complete and human 780x620 visual Gate remains required",
         "React does not own runtime start readiness polling loop; backend owns start/readiness state and frontend only observes typed projection",
         "backend start/readiness delay does not make the onboarding UI unresponsive",
-        "administrator warning is a narrow safety consent dialog and does not permit the five-screen onboarding shell to regress into a centered card modal or dialog layout"
+        "administrator warning is a narrow safety consent dialog and does not permit the five-screen onboarding shell to regress into a centered card modal or dialog layout",
+        "onboarding uses exactly two typography sizes: title and the same unified secondary size for every other text role; helper copy status labels button text and metadata cannot introduce a third font-size tier"
       ],
       "non_goals": [
         "new dashboard pages",
@@ -1582,7 +1617,8 @@
         "privileged capability policy",
         "explicit user-controlled enable/disable semantics",
         "generic elevated_exec capability",
-        "reviewed Windows system-management elevated_exec profiles"
+        "general Broker-backed administrator execution and privileged filesystem route for Elevated mode",
+        "Broker-backed privileged filesystem operations that are not constrained to the active workspace once Elevated is Active"
       ],
       "required_tests": [
         "no TTL/expires_at behavior",
@@ -1603,10 +1639,13 @@
         "elevated denied task projects Blocked",
         "elevated task summary does not leak sensitive arguments",
         "Edit and Full cannot use reviewed Windows system-management elevated_exec profiles and Elevated requires an Active Broker before any reviewed system-management execution",
-        "Elevated plus Active Broker can execute reviewed structured operations through exact trusted System32 reg.exe schtasks.exe sc.exe and netsh.exe without globally disabling those Windows system-management programs",
+        "Elevated plus Active Broker can execute administrator-token operations through trusted System32 reg.exe schtasks.exe sc.exe netsh.exe bcdedit.exe and dism.exe and can execute general administrator processes or commands within the administrator token scope",
         "reviewed Windows system-management elevated_exec rejects same-name PATH workspace or other non-System32 executables and requires the exact trusted System32 program identity",
-        "reviewed Windows system-management elevated_exec accepts structured program and argv only and rejects cmd PowerShell or other shell/interpreter fallback",
-        "Windows OS system management is not itself LocalBridge control-plane mutation, while attempts through reg.exe schtasks.exe sc.exe or netsh.exe to mutate LocalBridge PermissionMode administrator consent UAC Broker activation WorkspaceRegistry credentials Tunnel MCP runtime PEP Broker policy or LocalBridge autostart remain denied"
+        "Elevated administrator execution accepts structured direct program plus argv and a separate trusted logical shell selector for administrator command text; MCP cannot supply an arbitrary shell executable path",
+        "Windows OS system management is not itself LocalBridge control-plane mutation, while attempts through any administrator route including reg schtasks sc netsh bcdedit dism or trusted administrator shells to mutate LocalBridge PermissionMode administrator consent UAC Broker activation WorkspaceRegistry credentials Tunnel MCP runtime PEP Broker policy or LocalBridge autostart remain denied",
+        "Elevated plus Active Broker can read create modify rename and delete administrator-token-accessible filesystem objects outside the active workspace through a privileged filesystem route; Edit and Full remain unable to cross the active workspace authorization root",
+        "Elevated plus Active Broker can execute a general administrator direct process and a trusted PowerShell or cmd logical selector outside the active workspace, with timeout cancellation output bounds and redaction preserved",
+        "whole-app elevation remains forbidden: LocalBridge MCP Tunnel and ordinary exec stay under the normal user token and only Broker-dispatched administrator operations receive the administrator token"
       ],
       "non_goals": [
         "UI",
