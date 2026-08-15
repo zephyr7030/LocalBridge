@@ -218,6 +218,14 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"$x='docker'; si Alias:lbgen12 $x; lbgen12 ps","shell":"powershell"}),
         json!({"command":"$Alias:lbgen12='docker'; lbgen12 ps","shell":"windows_powershell"}),
         json!({"command":"$ExecutionContext.InvokeCommand.CommandNotFoundAction = { param($name,$eventArgs); $eventArgs.Command = Get-Command Write-Output }; lbgen13 'hook'","shell":"windows_powershell"}),
+        json!({"command":"filter lbgen14 { Write-Output ok }; lbgen14","shell":"windows_powershell"}),
+        json!({"command":"workflow lbgen14 { Write-Output ok }; lbgen14","shell":"windows_powershell"}),
+        json!({"command":"configuration lbgen14 { Node localhost {} }","shell":"windows_powershell"}),
+        json!({"command":"$p='probe.ps1'; $sb=(Get-Command $p).ScriptBlock; 1 | ForEach-Object -Process $sb","shell":"windows_powershell"}),
+        json!({"command":"$p='probe.ps1'; $sb=(gcm $p).ScriptBlock; 1 | ForEach-Object -Process $sb","shell":"windows_powershell"}),
+        json!({"command":"$PSModuleAutoLoadingPreference='All'","shell":"windows_powershell"}),
+        json!({"command":"$n='PSModuleAutoLoadingPreference'; Set-Variable -Name $n -Value All","shell":"windows_powershell"}),
+        json!({"command":"#requires -Modules FutureModule\nWrite-Output ok","shell":"windows_powershell"}),
         json!({"command":"New-Item Function:lbgen12 -Value { Write-Output ok }; lbgen12","shell":"windows_powershell"}),
         json!({"command":"sc Function:lbgen12 -Value 'Write-Output ok'; lbgen12","shell":"powershell"}),
         json!({"command":"Set-Item Env:LB_GEN12 harmless","shell":"windows_powershell"}),
@@ -247,6 +255,7 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"$line=[System.Console]::ReadLine(); Write-Output $line","shell":"windows_powershell"}),
         json!({"command":"Write-Output '$(' ; Write-Output \"`$(`\"","shell":"windows_powershell"}),
         json!({"command":"Write-Output '$ExecutionContext is documentation text'","shell":"windows_powershell"}),
+        json!({"command":"Write-Output 'filter workflow Get-Command .ScriptBlock probe.ps1 are documentation text'","shell":"windows_powershell"}),
     ] {
         assert!(
             policy

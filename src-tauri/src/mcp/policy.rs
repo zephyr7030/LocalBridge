@@ -846,6 +846,23 @@ fn review_word(word: &str) -> bool {
             | "start-threadjob"
             | "enter-pssession"
             | "new-pssession"
+            | "import-pssession"
+            | "add-pssnapin"
+            | "new-module"
+            | "using"
+            | "requires"
+            | "get-command"
+            | "gcm"
+            | "psmoduleautoloadingpreference"
+            | "set-variable"
+            | "set"
+            | "sv"
+            | "new-variable"
+            | "nv"
+            | "remove-variable"
+            | "rv"
+            | "clear-variable"
+            | "clv"
             | "set-alias"
             | "sal"
             | "new-alias"
@@ -911,10 +928,13 @@ fn review_word(word: &str) -> bool {
             | "win32_process"
             | "alias"
             | "function"
+            | "filter"
+            | "workflow"
+            | "configuration"
             | "call"
     ) || matches!(
         lower.rsplit('.').next(),
-        Some("ps1" | "bat" | "cmd" | "vbs" | "wsf")
+        Some("ps1" | "psm1" | "psd1" | "bat" | "cmd" | "vbs" | "wsf")
     )
 }
 
@@ -1126,6 +1146,13 @@ fn powershell_member_invocation_requires_review(command: &str) -> bool {
             {
                 member_end += 1;
             }
+            let member = visible[member_start..member_end].iter().collect::<String>();
+            if member.eq_ignore_ascii_case("scriptblock") {
+                // ScriptBlock is executable code. Exposing it from CommandInfo/function
+                // metadata lets later cmdlets execute code without a call operator or an
+                // Invoke member, so the code target is no longer statically reviewable.
+                return true;
+            }
             let mut call = member_end;
             while call < visible.len() && visible[call].is_whitespace() {
                 call += 1;
@@ -1136,11 +1163,11 @@ fn powershell_member_invocation_requires_review(command: &str) -> bool {
                 // mutation grammar instead of enumerating engine property names.
                 return true;
             }
-            if call < visible.len() && visible[call] == '(' {
-                let member = visible[member_start..member_end].iter().collect::<String>();
-                if dangerous_powershell_member(&member) {
-                    return true;
-                }
+            if call < visible.len()
+                && visible[call] == '('
+                && dangerous_powershell_member(&member)
+            {
+                return true;
             }
         }
         index += 1;

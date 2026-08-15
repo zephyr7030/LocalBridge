@@ -332,6 +332,12 @@ impl DirectProcessExecutor {
     }
 }
 
+fn hardened_powershell_script(command: &str) -> String {
+    format!(
+        "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{command}"
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShellExecutionSpec {
     pub shell: ShellSelector,
@@ -384,7 +390,7 @@ where
                 OsString::from("-NoProfile"),
                 OsString::from("-NonInteractive"),
                 OsString::from("-Command"),
-                OsString::from(&spec.command),
+                OsString::from(hardened_powershell_script(&spec.command)),
             ],
             ResolvedShellKind::Cmd => vec![
                 OsString::from("/d"),
@@ -411,10 +417,7 @@ where
         let command_line = match shell.kind {
             ResolvedShellKind::Cmd => spec.command.clone(),
             ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
-                let script = format!(
-                    "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{}",
-                    spec.command
-                );
+                let script = hardened_powershell_script(&spec.command);
                 let mut utf16le = Vec::with_capacity(script.len() * 2);
                 for unit in script.encode_utf16() {
                     utf16le.extend_from_slice(&unit.to_le_bytes());
@@ -760,8 +763,47 @@ mod tests {
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect::<Vec<_>>();
         let decoded = String::from_utf16(&units).unwrap();
+        assert!(decoded.starts_with(
+            "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;"
+        ));
+        assert!(decoded.contains("PSModuleAutoLoadingPreference"));
         assert!(decoded.contains("OutputEncoding"));
         assert!(decoded.ends_with(user));
+    }
+
+    #[test]
+    fn powershell_direct_spec_locks_module_autoload_before_user_text() {
+        let win = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+        let cmd = PathBuf::from(r"C:\Windows\System32\cmd.exe");
+        let resolver = ShellResolver::new(
+            FakeDiscovery {
+                pwsh: vec![],
+                trusted: HashSet::new(),
+                windows: Some(win),
+                cmd: Some(cmd),
+            },
+            FakeProbe {
+                versions: HashMap::new(),
+                probed: Arc::new(Mutex::new(Vec::new())),
+            },
+        );
+        let executor = ShellExecutor::new(resolver);
+        let user = "Write-Output 'LB_DIRECT_USER'";
+        let direct = executor
+            .direct_spec(&ShellExecutionSpec {
+                shell: ShellSelector::WindowsPowershell,
+                command: user.into(),
+                cwd: PathBuf::from(r"C:\workspace"),
+                timeout_ms: 1_000,
+                max_output_bytes: 4_096,
+            })
+            .unwrap();
+        let script = direct.args.last().unwrap().to_string_lossy();
+        assert!(script.starts_with(
+            "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;"
+        ));
+        assert!(script.contains("OutputEncoding"));
+        assert!(script.ends_with(user));
     }
 
     #[test]

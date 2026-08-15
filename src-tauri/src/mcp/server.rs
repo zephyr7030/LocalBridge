@@ -2191,6 +2191,14 @@ mod tests {
         image::RgbaImage::from_pixel(1024, 1024, image::Rgba([19, 37, 53, 255]))
             .save(workspace.join("large.png"))
             .unwrap();
+        let module_root = workspace.join("modules");
+        let module_dir = module_root.join("Invoke-LbGen14Auto");
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(
+            module_dir.join("Invoke-LbGen14Auto.psm1"),
+            b"function Invoke-LbGen14Auto { Write-Output 'LB_GEN14_MODULE_AUTOLOAD_SENTINEL' }; Export-ModuleMember -Function Invoke-LbGen14Auto\n",
+        )
+        .unwrap();
 
         let coding = CodingToolsRuntime::start(
             CodingToolsRuntimeConfig::new(
@@ -2215,6 +2223,38 @@ mod tests {
             )
             .status,
             202
+        );
+
+        let module_root_literal = module_root.to_string_lossy().replace('\'', "''");
+        let autoload = public_tool_call(
+            pep.port(),
+            &session,
+            699,
+            "exec_command",
+            json!({
+                "command":format!("$env:PSModulePath='{module_root_literal}'; Invoke-LbGen14Auto"),
+                "shell":"windows_powershell",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(
+            autoload.body["result"]["isError"],
+            true,
+            "{:#?}",
+            autoload.body
+        );
+        assert_eq!(
+            autoload.body["result"]["structuredContent"]["error"]["code"],
+            "ProcessFailed",
+            "{:#?}",
+            autoload.body
+        );
+        assert!(
+            !serde_json::to_string(&autoload.body)
+                .unwrap()
+                .contains("LB_GEN14_MODULE_AUTOLOAD_SENTINEL"),
+            "module auto-loading escaped the trusted PowerShell prologue: {:#?}",
+            autoload.body
         );
 
         let quoted = public_tool_call(
