@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,9 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "LB-007 A251: PowerShell Alias provider mutation via Set-Item/New-Item can create a dynamic executable alias that bypasses the current static shell review classifier."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +174,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-012 reaccepted after elevated contract/E2E/privilege/policy PASS. G2 REVIEW_REQUIRED: run Group-Release then fresh independent generation12; LB-013/G3/G4 remain BLOCKED."
+    "next_action": "G2 independent adversarial review generation 12 FAIL. Rework LB-007: Alias-provider mutation and equivalent dynamic command-surface creation must be review-required/fail-closed without breaking ordinary schema28 shell semantics. Then reaccept LB-008 through LB-012, rerun G2 Group-Release, and execute fresh independent adversarial generation 13. LB-013/G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1215,6 +1217,39 @@
     ],
     "next_required_g2_adversarial_generation": 12,
     "g2_generation_11_consumed": true,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_12_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 12,
+    "baseline_commit": "246a8587f107556eb1e1743ec171f4ed9bce54a1",
+    "reopen_from_pr": "LB-007",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-007",
+        "acceptance": [
+          "A251"
+        ],
+        "summary": "PowerShell Alias-provider mutation remains a dynamic execution bypass around the fail-closed privileged-external-runtime review.",
+        "evidence": [
+          "review_word explicitly covers set-alias/new-alias but does not cover set-item/new-item Alias-provider mutation.",
+          "Non-destructive Windows PowerShell probe: Set-Item Alias:lbgen12 Write-Output; lbgen12 'ALIAS_PROVIDER_EXECUTED' produced ALIAS_PROVIDER_EXECUTED, proving an alias can be created dynamically and then invoked as an ordinary command name.",
+          "The same mechanism can bind an otherwise review-required runtime target to an unrecognized alias name after static classification, so the later invocation no longer carries the protected executable token.",
+          "runtime-policy.toml requires privileged_external_runtime=review_required, shell_invocation_review=static_target_fail_closed, and unreviewable_shell_indirection=review_required."
+        ]
+      }
+    ],
+    "verified_passes": [
+      "G2 Group-Release cargo test --locked and cargo clippy --locked --all-targets -- -D warnings: PASS.",
+      "Frontend Vitest and production build: PASS.",
+      "runtime manifest, architecture including activated ARCH-025/026, G4 human-gate regression and git diff check: PASS."
+    ],
+    "next_required_g2_adversarial_generation": 13,
+    "g2_generation_12_consumed": true,
     "g3_unlocked": false,
     "g4_unlocked": false
   }
