@@ -47,11 +47,17 @@ const launchStart = windows.indexOf("pub fn launch_broker_with_explicit_uac");
 const launchEnd = windows.indexOf("fn build_uac_parameters", launchStart);
 const launch = windows.slice(launchStart, launchEnd);
 if (!launch.includes("trusted_broker") || !launch.includes("wide_null(trusted_broker.as_os_str())")) throw new Error("LB-011 runas does not use validated canonical Broker path");
+for (const required of ["pin_development_broker", "_development_pin"]) {
+  if (!launch.includes(required)) throw new Error(`LB-011 development UAC handoff is not binary-pinned: ${required}`);
+}
 const trustStart = windows.indexOf("fn validate_broker_executable_for_current_install");
 const trustEnd = windows.indexOf("fn validate_broker_executable(", trustStart);
 const trust = windows.slice(trustStart, trustEnd);
 if (!trust.includes("verify_broker_installation_not_mutable_by_unprivileged_principal") || !trust.includes("Ok(trusted_broker)")) {
   throw new Error("LB-011 canonical Broker is returned before install ACL/mutation trust is proven");
+}
+for (const required of ["cfg(debug_assertions)", "validate_broker_executable(broker_executable, &current_executable, None)", "cfg(not(debug_assertions))"]) {
+  if (!trust.includes(required)) throw new Error(`LB-011 debug/release Broker trust split missing: ${required}`);
 }
 const objectSecurityStart = windows.indexOf("fn validate_install_object_security");
 const objectSecurityEnd = windows.indexOf("fn sid_to_string", objectSecurityStart);

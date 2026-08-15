@@ -153,6 +153,8 @@ LB-011 Broker 基础协议仅包含 `Ping` / `Shutdown`，不包含管理员执�
 
 `elevated_exec` 必须 structured program/args/workdir，no shell default，timeout/cancel/output limit/redaction。
 
+开发构建不得把 `target\\debug` 直接声明为受保护安装目录，也不得关闭 Broker trust check。`debug_assertions` 下仍只接受当前 LocalBridge 可执行文件的精确 canonical sibling `localbridge-privileged-broker.exe`；在 `runas` 前以只读且仅允许 `FILE_SHARE_READ` 的句柄 pin 住已验证 Broker，并保持该句柄跨越 `ShellExecuteExW` 返回，阻止 elevation handoff 期间的 overwrite/delete/replacement。该开发 seam 不接受 PATH 或环境变量指定任意 Broker。非 debug/release 构建完全不使用此 seam，继续要求 canonical Program Files sibling、可信 owner/DACL，以及从安装目录到受保护根祖先链上逐项拒绝当前普通用户危险写/删/改 ACL 权限。
+
 ### Schema30 workspace write 与 PowerShell capability 边界
 
 active workspace 是**授权根**，不是只读根。Edit/Full 对授权根内普通文件与目录的 reviewed read/write 都是合法能力；禁止的是改变 WorkspaceRegistry、切换 active workspace、扩大授权根或越界访问。结构化目录 mutation 固定为 `agent_workflow.directory_changes[]`，每项只有 `action/path`，action 仅 `create_directory` / `remove_empty_directory`，使目录创建与空目录清理无需借 shell/process exec 完成。所有 path 都必须 active-workspace-relative 并经过 final-identity/reparse 检查；absolute、`..`、junction/symlink/reparse escape 必须 fail-closed。

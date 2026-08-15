@@ -2,8 +2,12 @@
 use std::ffi::OsString;
 use std::ffi::{OsStr, c_void};
 use std::fmt;
+#[cfg(debug_assertions)]
+use std::fs::{File, OpenOptions};
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStrExt;
+#[cfg(debug_assertions)]
+use std::os::windows::fs::OpenOptionsExt;
 #[cfg(not(debug_assertions))]
 use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
@@ -12,27 +16,37 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_FILE_NOT_FOUND,
-    ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, GENERIC_ALL, GENERIC_READ, GENERIC_WRITE, HANDLE,
-    INVALID_HANDLE_VALUE, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY,
+    ERROR_PIPE_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
+#[cfg(any(not(debug_assertions), test))]
+use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GENERIC_ALL};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-    GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
+#[cfg(any(not(debug_assertions), test))]
+use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::Cryptography::{
     BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
 };
 use windows_sys::Win32::Security::{
-    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetTokenInformation,
-    INHERIT_ONLY_ACE, OWNER_SECURITY_INFORMATION, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
-    TokenUser,
+    GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+};
+#[cfg(any(not(debug_assertions), test))]
+use windows_sys::Win32::Security::{
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, INHERIT_ONLY_ACE,
+    OWNER_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL,
-    FILE_DELETE_CHILD, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_FIRST_PIPE_INSTANCE,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
-    FILE_WRITE_EA, FlushFileBuffers, OPEN_EXISTING, ReadFile, WriteFile,
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_SHARE_READ,
+    FlushFileBuffers, OPEN_EXISTING, ReadFile, WriteFile,
+};
+#[cfg(any(not(debug_assertions), test))]
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ADD_FILE, FILE_ADD_SUBDIRECTORY, FILE_APPEND_DATA, FILE_DELETE_CHILD,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES,
+    FILE_WRITE_DATA, FILE_WRITE_EA,
 };
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, GetNamedPipeClientProcessId,
@@ -51,11 +65,17 @@ use super::{MAX_BROKER_FRAME_BYTES, SESSION_NONCE_BYTES, SessionNonce};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PIPE_BUFFER_BYTES: u32 = MAX_BROKER_FRAME_BYTES as u32 + 4;
 const PIPE_ACCESS_DUPLEX_MODE: u32 = 0x0000_0003;
+#[cfg(any(not(debug_assertions), test))]
 const ACCESS_ALLOWED_ACE_KIND: u8 = 0x00;
+#[cfg(any(not(debug_assertions), test))]
 const ACCESS_DENIED_ACE_KIND: u8 = 0x01;
+#[cfg(any(not(debug_assertions), test))]
 const DELETE_ACCESS: u32 = 0x0001_0000;
+#[cfg(any(not(debug_assertions), test))]
 const WRITE_DAC_ACCESS: u32 = 0x0004_0000;
+#[cfg(any(not(debug_assertions), test))]
 const WRITE_OWNER_ACCESS: u32 = 0x0008_0000;
+#[cfg(any(not(debug_assertions), test))]
 const TRUSTED_INSTALL_MUTATION_SIDS: [&str; 5] = [
     "S-1-5-18",
     "S-1-5-32-544",
@@ -63,6 +83,7 @@ const TRUSTED_INSTALL_MUTATION_SIDS: [&str; 5] = [
     "S-1-3-0",
     "S-1-3-4",
 ];
+#[cfg(any(not(debug_assertions), test))]
 const INSTALL_MUTATION_MASK: u32 = GENERIC_ALL
     | GENERIC_WRITE
     | DELETE_ACCESS
@@ -216,6 +237,8 @@ pub fn launch_broker_with_explicit_uac(
     generation: u64,
 ) -> Result<ElevatedBrokerProcess, UacLaunchError> {
     let trusted_broker = validate_broker_executable_for_current_install(broker_executable)?;
+    #[cfg(debug_assertions)]
+    let _development_pin = pin_development_broker(&trusted_broker)?;
     let parameters = build_uac_parameters(pipe_name, generation)?;
     let verb = wide_null(OsStr::new("runas"));
     let executable = wide_null(trusted_broker.as_os_str());
@@ -257,26 +280,57 @@ fn validate_broker_executable_for_current_install(
     let current_executable =
         std::env::current_exe().map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
     #[cfg(debug_assertions)]
-    let protected_root: Option<PathBuf> = None;
+    {
+        validate_broker_executable(broker_executable, &current_executable, None)
+    }
     #[cfg(not(debug_assertions))]
     let protected_root = Some(protected_machine_install_root()?);
+    #[cfg(not(debug_assertions))]
     let trusted_broker = validate_broker_executable(
         broker_executable,
         &current_executable,
         protected_root.as_deref(),
     )?;
+    #[cfg(not(debug_assertions))]
     let current = current_executable
         .canonicalize()
         .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    #[cfg(not(debug_assertions))]
     let install_root = current
         .parent()
         .ok_or(UacLaunchError::InvalidBrokerExecutable)?;
+    #[cfg(not(debug_assertions))]
     verify_broker_installation_not_mutable_by_unprivileged_principal(
         install_root,
         &trusted_broker,
         protected_root.as_deref(),
     )?;
+    #[cfg(not(debug_assertions))]
     Ok(trusted_broker)
+}
+
+#[cfg(debug_assertions)]
+struct DevelopmentBrokerPin {
+    _file: File,
+}
+
+#[cfg(debug_assertions)]
+fn pin_development_broker(path: &Path) -> Result<DevelopmentBrokerPin, UacLaunchError> {
+    let expected = path
+        .canonicalize()
+        .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(&expected)
+        .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    let pinned_path = path
+        .canonicalize()
+        .map_err(|_| UacLaunchError::InvalidBrokerExecutable)?;
+    if !same_windows_path(&expected, &pinned_path) {
+        return Err(UacLaunchError::InvalidBrokerExecutable);
+    }
+    Ok(DevelopmentBrokerPin { _file: file })
 }
 
 fn validate_broker_executable(
@@ -371,6 +425,7 @@ fn windows_path_is_within(path: &Path, root: &Path) -> bool {
     path == root || path.strip_prefix(&(root + "\\")).is_some()
 }
 
+#[cfg(any(not(debug_assertions), test))]
 fn verify_broker_installation_not_mutable_by_unprivileged_principal(
     install_root: &Path,
     broker_executable: &Path,
@@ -414,6 +469,7 @@ fn verify_broker_installation_not_mutable_by_unprivileged_principal(
     Ok(())
 }
 
+#[cfg(any(not(debug_assertions), test))]
 fn validate_install_directory_security(path: &Path) -> Result<(), UacLaunchError> {
     validate_install_object_security(path)?;
     require_each_access_right_denied(
@@ -430,6 +486,7 @@ fn validate_install_directory_security(path: &Path) -> Result<(), UacLaunchError
     )
 }
 
+#[cfg(any(not(debug_assertions), test))]
 fn validate_install_object_security(path: &Path) -> Result<(), UacLaunchError> {
     let path_wide = wide_null(path.as_os_str());
     let mut owner = null_mut();
@@ -491,6 +548,7 @@ fn validate_install_object_security(path: &Path) -> Result<(), UacLaunchError> {
     validation
 }
 
+#[cfg(any(not(debug_assertions), test))]
 fn sid_to_string(sid: *mut c_void) -> Result<String, UacLaunchError> {
     let mut sid_text: *mut u16 = null_mut();
     if unsafe { ConvertSidToStringSidW(sid, &mut sid_text) } == 0 || sid_text.is_null() {
@@ -501,12 +559,14 @@ fn sid_to_string(sid: *mut c_void) -> Result<String, UacLaunchError> {
     Ok(text)
 }
 
+#[cfg(any(not(debug_assertions), test))]
 fn trusted_install_mutation_sid(sid: &str) -> bool {
     TRUSTED_INSTALL_MUTATION_SIDS
         .iter()
         .any(|trusted| sid.eq_ignore_ascii_case(trusted))
 }
 
+#[cfg(any(not(debug_assertions), test))]
 fn require_each_access_right_denied(
     path: &Path,
     mutation_rights: &[u32],
@@ -998,6 +1058,37 @@ mod tests {
             Err(UacLaunchError::InvalidBrokerExecutable),
             "a canonical Broker under a same-user-writable Program Files-shaped tree must fail ACL trust"
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn development_broker_pin_blocks_write_and_delete_during_uac_handoff() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-dev-broker-pin-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let broker = root.join("localbridge-privileged-broker.exe");
+        fs::write(&broker, b"development broker fixture").unwrap();
+
+        let pin = pin_development_broker(&broker).unwrap();
+        assert!(OpenOptions::new()
+            .write(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(&broker)
+            .is_err());
+        assert!(fs::remove_file(&broker).is_err());
+
+        drop(pin);
+        assert!(OpenOptions::new().write(true).open(&broker).is_ok());
+        fs::remove_file(&broker).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }
