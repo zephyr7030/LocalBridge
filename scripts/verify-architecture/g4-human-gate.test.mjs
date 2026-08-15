@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLb007PolicyAndCmdCodepageAmendment20260815, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLb007PolicyAndCmdCodepageAmendment20260815, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,10 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema30Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema31Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactLb007PolicyAndCmdCodepageAmendment20260815(schema31Contracts), true);
+const schema30Contracts = normalizeLb007PolicyAndCmdCodepageAmendment20260815(schema31Contracts);
+assert.equal(schema30Contracts.schema_version, 30);
 assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30Contracts), true);
 const schema29Contracts = normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30Contracts);
 assert.equal(schema29Contracts.schema_version, 29);
@@ -384,6 +387,26 @@ assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(sche
 const schema30DirectoryActionsDrift = structuredClone(schema30Contracts);
 schema30DirectoryActionsDrift.rules.agent_workflow_directory_change_actions = ["create_directory", "remove_empty_directory", "remove_tree"];
 assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30DirectoryActionsDrift), false);
+
+for (const rule of [
+  "powershell_standalone_literal_get_command_diagnostic_allowed_without_privilege_review",
+  "powershell_console_stdin_readtoend_narrow_safe_io_seam",
+  "powershell_dynamic_or_compound_command_resolution_remains_review_required",
+  "powershell_non_ascii_roundtrip_required",
+  "cmd_native_codepage_semantics_preserved",
+  "cmd_non_ascii_roundtrip_required",
+  "cmd_codepage_mutation_for_unicode_forbidden",
+]) {
+  const weakened = structuredClone(schema31Contracts);
+  weakened.rules[rule] = rule === "cmd_non_ascii_roundtrip_required" ? true : false;
+  assert.equal(hasExactLb007PolicyAndCmdCodepageAmendment20260815(weakened), false, rule);
+}
+const schema31MissingCmdBoundaryProof = structuredClone(schema31Contracts);
+schema31MissingCmdBoundaryProof.prs["LB-006"].required_tests = schema31MissingCmdBoundaryProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("cmd selector preserves native cmd.exe code-page semantics"));
+assert.equal(hasExactLb007PolicyAndCmdCodepageAmendment20260815(schema31MissingCmdBoundaryProof), false);
+const schema31MissingPolicyProof = structuredClone(schema31Contracts);
+schema31MissingPolicyProof.prs["LB-007"].required_tests = schema31MissingPolicyProof.prs["LB-007"].required_tests.filter((item) => !item.startsWith("a standalone PowerShell Get-Command or gcm query"));
+assert.equal(hasExactLb007PolicyAndCmdCodepageAmendment20260815(schema31MissingPolicyProof), false);
 
 const schema28NoFixtureCompression = structuredClone(schema28Contracts);
 schema28NoFixtureCompression.rules.test_heavy_shared_fixture_lifecycle_compression_required = false;

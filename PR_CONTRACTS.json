@@ -1,5 +1,5 @@
 {
-  "schema_version": 30,
+  "schema_version": 31,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -560,6 +560,13 @@
     "workspace_structured_directory_write_must_not_mutate_workspace_control_plane": true,
     "workspace_structured_directory_reparse_escape_forbidden": true,
     "powershell_provider_mutation_review_requirement_preserved": true,
+    "powershell_standalone_literal_get_command_diagnostic_allowed_without_privilege_review": true,
+    "powershell_console_stdin_readtoend_narrow_safe_io_seam": true,
+    "powershell_dynamic_or_compound_command_resolution_remains_review_required": true,
+    "powershell_non_ascii_roundtrip_required": true,
+    "cmd_native_codepage_semantics_preserved": true,
+    "cmd_non_ascii_roundtrip_required": false,
+    "cmd_codepage_mutation_for_unicode_forbidden": true,
     "agent_workflow_structured_directory_changes_field_required": true,
     "agent_workflow_directory_change_actions": [
       "create_directory",
@@ -862,6 +869,7 @@
         "command_control.kill on a valid running public session with a healthy runtime does not return RuntimeUnavailable and converges to a stable cancelled terminal snapshot that later poll calls keep instead of degrading to SessionUnavailable",
         "view_image auto_resize on a 1024x1024 source succeeds for maximum 512x512 and 64x64 with bounded dimensions and preserved aspect ratio while the no-resize path remains valid",
         "Windows PowerShell Write-Output 中文输出测试 round-trips exact UTF-8 under windows_powershell and under auto when auto resolves to PowerShell without mojibake or replacement characters",
+        "cmd selector preserves native cmd.exe code-page semantics: LocalBridge does not inject chcp or otherwise mutate the active code page solely to force Unicode, and exact Chinese or Emoji round-trip is not required when cmd's active code page cannot represent the characters; LocalBridge still returns a valid UTF-8 public string and must not add corruption beyond captured cmd output",
         "git_workflow blame uses one-based inclusive start_line and end_line so 5 through 5 returns exactly line 5 and 1 through 3 returns exactly three lines; start_line greater than end_line is InvalidArgument and max_lines remains bounded",
         "document_workflow line ranges are one-based inclusive and start_line greater than end_line returns LocalBridge InvalidArgument rather than a successful empty result",
         "every adapter-consumed private result field not guaranteed by upstream outputSchema has a deterministic non-destructive semantic compatibility probe or equivalent fail-closed evidence before public facade serving",
@@ -917,7 +925,9 @@
         "unknown LocalBridge public actions or capabilities fail closed",
         "high-level workflows declare and enforce all transitive write process network and privilege capabilities before execution",
         "cached or stale public tools/list cannot bypass a later permission-mode or capability-policy change",
-        "agent_workflow structured directory create or empty-directory cleanup declares transitive workspace write capability: Edit and Full may authorize it inside the active root, process execution is not required, and attempts to alter WorkspaceRegistry active workspace or escape through absolute traversal or reparse targets fail closed"
+        "agent_workflow structured directory create or empty-directory cleanup declares transitive workspace write capability: Edit and Full may authorize it inside the active root, process execution is not required, and attempts to alter WorkspaceRegistry active workspace or escape through absolute traversal or reparse targets fail closed",
+        "a standalone PowerShell Get-Command or gcm query with exactly one literal command-name argument is ordinary read-only command discovery in Full or Elevated and is not classified as privilege or review-required solely because it uses Get-Command; dynamic command names, additional pipeline or follow-on execution, ScriptBlock extraction, subexpressions, aliases functions provider mutation command-engine mutation or other runtime-selected command-resolution surfaces remain review-required and fail closed",
+        "the narrow trusted PowerShell Console stdin seam permits [Console]::In.ReadLine() and [Console]::In.ReadToEnd() plus the existing Console output calls without treating those exact statically rooted calls as arbitrary instance-member dispatch; other instance-member calls remain review-required unless separately ratified"
       ],
       "non_goals": [
         "Tunnel",

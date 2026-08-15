@@ -644,6 +644,31 @@ const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15 = Object.freeze({
+  schemaVersion: 31,
+  baselineSchemaVersion: 30,
+  addedRules: {
+    powershell_standalone_literal_get_command_diagnostic_allowed_without_privilege_review: true,
+    powershell_console_stdin_readtoend_narrow_safe_io_seam: true,
+    powershell_dynamic_or_compound_command_resolution_remains_review_required: true,
+    powershell_non_ascii_roundtrip_required: true,
+    cmd_native_codepage_semantics_preserved: true,
+    cmd_non_ascii_roundtrip_required: false,
+    cmd_codepage_mutation_for_unicode_forbidden: true,
+  },
+  lb006: {
+    addedTests: [
+      "cmd selector preserves native cmd.exe code-page semantics: LocalBridge does not inject chcp or otherwise mutate the active code page solely to force Unicode, and exact Chinese or Emoji round-trip is not required when cmd's active code page cannot represent the characters; LocalBridge still returns a valid UTF-8 public string and must not add corruption beyond captured cmd output",
+    ],
+  },
+  lb007: {
+    addedTests: [
+      "a standalone PowerShell Get-Command or gcm query with exactly one literal command-name argument is ordinary read-only command discovery in Full or Elevated and is not classified as privilege or review-required solely because it uses Get-Command; dynamic command names, additional pipeline or follow-on execution, ScriptBlock extraction, subexpressions, aliases functions provider mutation command-engine mutation or other runtime-selected command-resolution surfaces remain review-required and fail closed",
+      "the narrow trusted PowerShell Console stdin seam permits [Console]::In.ReadLine() and [Console]::In.ReadToEnd() plus the existing Console output calls without treating those exact statically rooted calls as arbitrary instance-member dispatch; other instance-member calls remain review-required unless separately ratified",
+    ],
+  },
+});
+
 const NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15 = Object.freeze({
   schemaVersion: 30,
   baselineSchemaVersion: 29,
@@ -1212,6 +1237,30 @@ export function normalizeCommandTaskStateAndWindowCenterAmendment20260815(contra
   return normalized;
 }
 
+export function hasExactLb007PolicyAndCmdCodepageAmendment20260815(contractsDoc) {
+  if (contractsDoc?.schema_version !== LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb006 = contractsDoc?.prs?.["LB-006"];
+  const lb007 = contractsDoc?.prs?.["LB-007"];
+  return Boolean(lb006 && lb007)
+    && containsAll(lb006.required_tests, LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.lb006.addedTests)
+    && containsAll(lb007.required_tests, LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.lb007.addedTests);
+}
+
+export function normalizeLb007PolicyAndCmdCodepageAmendment20260815(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.baselineSchemaVersion;
+  for (const key of Object.keys(LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.addedRules)) delete normalized.rules[key];
+  const lb006 = normalized.prs?.["LB-006"];
+  const lb007 = normalized.prs?.["LB-007"];
+  if (lb006) lb006.required_tests = removeItems(lb006.required_tests, LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.lb006.addedTests);
+  if (lb007) lb007.required_tests = removeItems(lb007.required_tests, LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.lb007.addedTests);
+  return normalized;
+}
+
 export function hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(contractsDoc) {
   if (contractsDoc?.schema_version !== NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.schemaVersion) return false;
   for (const [key, expected] of Object.entries(NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.addedRules)) {
@@ -1487,6 +1536,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.schemaVersion) {
+    if (!hasExactLb007PolicyAndCmdCodepageAmendment20260815(authorizationContracts)) {
+      findings.push(`${expected.id}:lb007-policy-cmd-codepage-20260815-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeLb007PolicyAndCmdCodepageAmendment20260815(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.schemaVersion) {
     if (!hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(authorizationContracts)) {
       findings.push(`${expected.id}:nested-project-powershell-workspace-write-20260815-contract-amendment-drift`);

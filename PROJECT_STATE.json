@@ -1867,5 +1867,32 @@
     "g2_generation_20_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "schema31_lb007_policy_and_cmd_codepage_amendment_2026_08_15": {
+    "status": "RATIFIED",
+    "ratified": true,
+    "source": "explicit user instruction after current-HEAD contract-first root-cause review",
+    "owner_prs": [
+      "LB-006",
+      "LB-007"
+    ],
+    "strict_execution_pointer_unchanged": "LB-007",
+    "requirements": [
+      "standalone literal Get-Command or gcm command discovery is not privilege-review-required solely for using Get-Command",
+      "dynamic or compound PowerShell command resolution remains review-required and fail closed",
+      "statically rooted Console.In.ReadToEnd joins ReadLine as the narrow stdin I/O seam while unrelated instance-member dispatch remains review-required",
+      "all public command strings remain valid UTF-8 projections and Windows PowerShell or auto resolving to PowerShell preserves exact non-ASCII output",
+      "shell=cmd preserves native cmd.exe active-code-page semantics and does not promise exact Chinese or Emoji round-trip when that code page cannot represent those characters",
+      "LocalBridge must not inject chcp, mutate the active cmd code page, or add another shell reparse solely to force Unicode fidelity"
+    ],
+    "evidence": [
+      "Current policy source over-classified every Get-Command/gcm token and omitted ReadToEnd from the statically rooted Console input allowlist.",
+      "Fresh current-HEAD public PEP denied Get-Command git and Console.In.ReadToEnd before the scoped LB-007 correction while adjacent safe diagnostics remained ordinary execution.",
+      "Fresh bare cmd.exe on the current host replaced or mojibaked Chinese-plus-Emoji while Windows PowerShell with UTF-8 OutputEncoding preserved the same text exactly; no LocalBridge cmd encoding change is required by this amendment."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }

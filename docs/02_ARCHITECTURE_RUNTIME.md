@@ -155,7 +155,7 @@ Schema27 的稳定 facade 只在真实 public 行为满足以下语义后才可�
 - `write` 对 exec 已返回但仍为 running 的 public session 保持有效；post-start stdin 必须真正到达进程。
 - `kill` 在 valid running session + healthy runtime 下不得误报 `RuntimeUnavailable`。成功 kill 必须收敛到稳定 `cancelled` terminal snapshot；后续 `poll` 返回同一 terminal truth，不能退化成 `SessionUnavailable`。
 - `view_image(auto_resize=true)` 在请求上限小于源图时必须执行真实 resize，保持比例并使结果 dimensions 不超过 max；需要 resize 本身不能映射为 `ProcessFailed`。
-- public command output 统一为有效 UTF-8。Windows PowerShell/`auto` 解析到 PowerShell 时，中文 `中文输出测试` 必须精确保真，不允许 mojibake/replacement characters。
+- public command output 统一投影为有效 UTF-8。Windows PowerShell/`auto` 解析到 PowerShell 时，中文 `中文输出测试` 必须精确保真，不允许 mojibake/replacement characters。`shell=cmd` 保留原生 `cmd.exe` 当前代码页语义：当代码页本身无法表示中文/Emoji 时，不要求精确 non-ASCII round-trip；LocalBridge 不得仅为强制 Unicode 而注入 `chcp`、切换代码页或增加第二层 shell reparse。`cmd.exe` 自身代码页造成的替换/乱码不单独构成 LocalBridge 缺陷，但 LocalBridge 在捕获后额外引入的损坏仍属于缺陷。
 - `git_workflow.blame start_line/end_line` 和 document line range 都是 **1-based inclusive**。`5..5` 精确一行，`1..3` 精确三行；`start_line > end_line` 在 LocalBridge boundary 返回 `InvalidArgument`，不能成功返回空结果。
 - capability negotiation 不只验证 input schema。任何 adapter 实际消费、但 upstream `outputSchema` 未精确保证的 private result field，都必须在 facade serving 前通过 deterministic、non-destructive semantic compatibility probe 或等价 fail-closed 证据验证。
 
