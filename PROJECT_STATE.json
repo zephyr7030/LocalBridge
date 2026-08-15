@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Implement schema30 A293-A295 in LB-006: agent_workflow.path nested-project context, trusted PowerShell standard cmdlet baseline without arbitrary module autoload, and process-free agent_workflow.directory_changes create_directory/remove_empty_directory inside the active workspace. Then reaccept LB-007 through LB-012 strictly and run fresh G2 adversarial generation18."
+    "next_action": "G2 schema30 rework package is complete: LB-006 through LB-012 PASS and Group/Release Gate PASS. Run fresh independent G2 adversarial review generation18 against the committed review-ready baseline. Generation18 is not consumed; LB-013/G3 remains blocked until that review passes. A292 window centering remains queued for LB-015."
   },
   "current_task_ui": {
     "enabled": true,
