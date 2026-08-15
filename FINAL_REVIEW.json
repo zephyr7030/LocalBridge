@@ -1,13 +1,14 @@
 {
   "schema_version": 11,
   "review_date": "2026-08-15",
-  "baseline": "schema29-G2-GEN17-FAIL",
+  "baseline": "schema30-LB006-REWORK",
   "status": "REWORK_REQUIRED",
   "phase": "PRE_CODE",
   "current_pr": "LB-006",
   "blocking_findings": [
     "LB-006: agent_workflow cannot select/discover D:\\project\\LocalBridge as the nested repository even though git_workflow(path=LocalBridge) resolves it correctly.",
-    "LB-006: windows_powershell/auto disables module autoload without preloading a trusted standard management cmdlet surface, causing Get-Location/Get-ChildItem to fail as CommandNotFound/ProcessFailed."
+    "LB-006: windows_powershell/auto disables module autoload without preloading a trusted standard management cmdlet surface, causing Get-Location/Get-ChildItem to fail as CommandNotFound/ProcessFailed.",
+    "LB-006/schema30: active workspace ordinary directory mutation is reviewed workspace write, but the public facade lacks process-free agent_workflow.directory_changes create_directory/remove_empty_directory semantics."
   ],
   "dynamic_gates_owned_by_lb000": [
     "coding-tools capability surface",
@@ -34,7 +35,10 @@
     "incremental public poll cursor, live write and stable kill/cancel convergence",
     "real bounded image resize and inclusive Git/document range validation",
     "tiered PR Fast / PR Runtime / Group-Release verification with compressed heavy runtime fixtures",
-    "owner-checked atomic task-state terminal finalizer with durable terminal snapshots"
+    "owner-checked atomic task-state terminal finalizer with durable terminal snapshots",
+    "agent_workflow workspace-relative nested-project selector",
+    "trusted PowerShell standard cmdlet baseline with arbitrary module autoload still disabled",
+    "process-free agent_workflow.directory_changes workspace directory mutation"
   ],
   "current_task_status_ui": {
     "status_only": true,
@@ -175,7 +179,7 @@
     "slow_backend_responsiveness_gate": true
   },
   "cloudflare_final_distribution": "forbidden_from_LB-018_bundle_manifest_launcher_and_fallback",
-  "recommended_next_step": "Ratify contract additions for agent_workflow workspace-relative nested-project selection/discovery consistency and a minimal trusted standard PowerShell cmdlet surface that preserves security hardening; then rework LB-006. LB-007 remains blocked and G2 generation18 is not consumed.",
+  "recommended_next_step": "Implement schema30 A293-A295 in LB-006, then reaccept LB-007 through LB-012 strictly and run fresh G2 adversarial generation18. LB-007 remains blocked until LB-006 passes.",
   "schema29_review": {
     "generation": 17,
     "status": "FAIL",
@@ -192,5 +196,19 @@
     ],
     "review_ready_commit": "03d0d883ecba0848f447cadcf236ff939efe6470",
     "review_decision_commit": "640b93137d2b6680f01a483acb561bea4439ec73"
+  },
+  "schema30_review": {
+    "status": "CONTRACT_RATIFIED_REWORK_REQUIRED",
+    "owner_pr": "LB-006",
+    "acceptance": [
+      "A293",
+      "A294",
+      "A295"
+    ],
+    "nested_project": "agent_workflow.path must resolve LocalBridge consistently with git_workflow without changing active workspace authority",
+    "powershell": "trusted standard cmdlets must work while arbitrary module autoload and provider-mutation review remain hardened",
+    "workspace_write": "agent_workflow.directory_changes supports create_directory/remove_empty_directory inside active workspace without process exec; control-plane remains deny",
+    "next_g2_generation": 18,
+    "generation18_consumed": false
   }
 }

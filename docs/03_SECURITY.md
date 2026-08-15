@@ -153,6 +153,16 @@ LB-011 Broker 基础协议仅包含 `Ping` / `Shutdown`，不包含管理员执�
 
 `elevated_exec` 必须 structured program/args/workdir，no shell default，timeout/cancel/output limit/redaction。
 
+### Schema30 workspace write 与 PowerShell capability 边界
+
+active workspace 是**授权根**，不是只读根。Edit/Full 对授权根内普通文件与目录的 reviewed read/write 都是合法能力；禁止的是改变 WorkspaceRegistry、切换 active workspace、扩大授权根或越界访问。结构化目录 mutation 固定为 `agent_workflow.directory_changes[]`，每项只有 `action/path`，action 仅 `create_directory` / `remove_empty_directory`，使目录创建与空目录清理无需借 shell/process exec 完成。所有 path 都必须 active-workspace-relative 并经过 final-identity/reparse 检查；absolute、`..`、junction/symlink/reparse escape 必须 fail-closed。
+
+PowerShell provider mutation 与“允许工作区写入”不是同一件事。由于 `Alias:`/`Function:` 等 provider 可改变命令解析面，`New-Item`、`Set-Item`、`Set-Content` 等通用 provider mutation 可以继续 conservative review-required；不得为了允许 `D:\project\test` 而整体放宽它们。反之，也不得因为这组 shell cmdlet 被严格审查，就让 Edit/Full 失去结构化 workspace write 能力。
+
+PowerShell 标准 cmdlet baseline 必须来自固定/身份验证的系统模块或等价可信来源；任意 module autoload 继续关闭，用户可控 `PSModulePath` 不得重定向 preload。`Get-Location`、`Get-ChildItem`、`Test-Path` 等基础能力必须可用，否则 explicit `windows_powershell`/`auto` 不能称为可用 shell backend。
+
+`agent_workflow.path` 只选择 active workspace 内 nested project context，不是 control-plane。它不得改变 active workspace；repo/project discovery 最多向上到 active workspace root，并与 `git_workflow` 使用等价 resolver 语义。
+
 ### Schema26 管理员模式安全确认
 
 所有用户可见 `管理员模式` 入口统一使用橙色 `#ff9500` 警告语义。Broker 未 Active 时，用户点击/重新点击管理员模式不能直接触发 UAC，必须先显示以下固定内容：

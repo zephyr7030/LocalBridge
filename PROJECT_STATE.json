@@ -33,7 +33,8 @@
   ],
   "known_blockers": [
     "LB-006: agent_workflow cannot select or discover the explicit nested LocalBridge project when active workspace is D:\\project; git_workflow(path=LocalBridge) reports is_repo=true while agent_workflow reports git_before/git_after is_repo=false and the public agent_workflow schema has no project path selector.",
-    "LB-006: windows_powershell and auto PowerShell execution disable module autoload before user text without preloading a trusted standard management cmdlet surface, so basic cmdlets such as Get-Location and Get-ChildItem fail as CommandNotFound/ProcessFailed."
+    "LB-006: windows_powershell and auto PowerShell execution disable module autoload before user text without preloading a trusted standard management cmdlet surface, so basic cmdlets such as Get-Location and Get-ChildItem fail as CommandNotFound/ProcessFailed.",
+    "LB-006/schema30: active workspace is a reviewed read/write authorization root, but the stable eight-tool facade lacks the required process-free agent_workflow.directory_changes route for create_directory/remove_empty_directory inside that root."
   ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
@@ -175,7 +176,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Ratify contract additions for agent_workflow workspace-relative nested-project selection/discovery consistency and a minimal trusted standard PowerShell cmdlet surface that preserves security hardening; then rework LB-006. LB-007 remains blocked. G2 generation18 is not consumed."
+    "next_action": "Implement schema30 A293-A295 in LB-006: agent_workflow.path nested-project context, trusted PowerShell standard cmdlet baseline without arbitrary module autoload, and process-free agent_workflow.directory_changes create_directory/remove_empty_directory inside the active workspace. Then reaccept LB-007 through LB-012 strictly and run fresh G2 adversarial generation18."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1500,5 +1501,53 @@
       "Schema29 command task-state targeted Rust tests 7/7 PASS."
     ],
     "next_action": "Ratify contract additions for nested-project workflow selection/discovery consistency and a minimal trusted standard PowerShell cmdlet surface; then repair LB-006. Generation18 is not consumed."
+  },
+  "schema30_nested_project_powershell_workspace_write_2026_08_15": {
+    "status": "CONTRACT_AMENDMENT_AND_REWORK_REQUIRED",
+    "ratified": true,
+    "source": "LB-006 scoped product-plugin black-box review plus permission-boundary audit",
+    "reopen_from_pr": "LB-006",
+    "acceptance": [
+      "A293",
+      "A294",
+      "A295"
+    ],
+    "owners": {
+      "LB-006": [
+        "agent_workflow.path nested-project selection and discovery",
+        "trusted PowerShell standard cmdlet baseline",
+        "agent_workflow.directory_changes structured workspace directory mutation"
+      ],
+      "LB-007": [
+        "transitive workspace-write policy classification for directory_changes"
+      ]
+    },
+    "permission_clarification": {
+      "active_workspace_is_reviewed_read_write_root": true,
+      "edit_allows_reviewed_workspace_write": true,
+      "full_allows_reviewed_workspace_write_plus_process_exec": true,
+      "workspace_registry_and_active_workspace_control_plane_mutation_by_mcp": false,
+      "generic_powershell_provider_mutation_may_remain_review_required": true
+    },
+    "public_directory_interface": {
+      "tool": "agent_workflow",
+      "field": "directory_changes",
+      "actions": [
+        "create_directory",
+        "remove_empty_directory"
+      ],
+      "path_semantics": "active-workspace-relative",
+      "process_execution_required": false,
+      "recursive_non_empty_delete_implied": false
+    },
+    "security_invariants": [
+      "nested project selection never changes WorkspaceRegistry or active authorization root",
+      "standard PowerShell cmdlet restoration does not restore arbitrary module autoload and preload identity cannot be redirected by user PSModulePath",
+      "PowerShell provider and dynamic command-surface mutation keeps existing review-required classification",
+      "structured directory mutation rejects absolute parent-traversal and reparse escape targets and never widens authority"
+    ],
+    "g2_generation_18_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }

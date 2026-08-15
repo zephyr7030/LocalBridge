@@ -439,6 +439,8 @@ D:\project\LocalBridge
 管理员模式 → + 用户完成固定安全确认与 UAC 后激活的独立 Privileged Broker
 ```
 
+Schema30 明确：active workspace 是 reviewed **read/write 授权根**，不是只读根。授权根内普通文件/目录创建、修改与安全清理属于编辑模式和完整模式都可使用的 workspace write。例如 active workspace=`D:\project` 时，`agent_workflow.directory_changes[]` 可用 `create_directory` 创建 `test/`，并在目录为空时用 `remove_empty_directory` 清理；这两个结构化动作不需要 process exec。该能力不允许 MCP 修改项目列表、切换 active workspace 或扩大授权根。PowerShell `New-Item` / `Set-Content` / `Set-Item` 等通用 provider mutation 因还能影响 `Alias:` / `Function:` 等命令面，仍可保持 review-required；产品必须通过结构化 workspace write 提供正常目录控制，而不是靠放宽 shell provider 安全边界。
+
 管理员模式无 TTL；9 秒只属于**每次进入管理员授权流程前的安全确认等待期**，不是管理员模式失效时长。
 
 管理员实际状态独立于用户偏好：

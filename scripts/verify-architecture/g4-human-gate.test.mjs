@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,10 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema29Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema30Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30Contracts), true);
+const schema29Contracts = normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30Contracts);
+assert.equal(schema29Contracts.schema_version, 29);
 assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29Contracts), true);
 const schema28Contracts = normalizeCommandTaskStateAndWindowCenterAmendment20260815(schema29Contracts);
 assert.equal(schema28Contracts.schema_version, 28);
@@ -350,6 +353,37 @@ assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29Mi
 const schema29MissingCenterProof = structuredClone(schema29Contracts);
 schema29MissingCenterProof.prs["LB-015"].required_tests = schema29MissingCenterProof.prs["LB-015"].required_tests.filter((item) => !item.startsWith("on normal foreground first visible creation"));
 assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29MissingCenterProof), false);
+
+for (const rule of [
+  "agent_workflow_workspace_relative_project_path_selector_required",
+  "agent_workflow_nested_project_discovery_consistent_with_git_workflow_required",
+  "agent_workflow_project_selector_must_not_change_active_workspace_authority",
+  "trusted_powershell_standard_cmdlet_surface_required",
+  "trusted_powershell_arbitrary_module_autoload_forbidden",
+  "trusted_powershell_standard_module_preload_identity_validation_required",
+  "workspace_structured_directory_write_required",
+  "workspace_structured_directory_write_active_root_only",
+  "workspace_structured_directory_write_must_not_mutate_workspace_control_plane",
+  "workspace_structured_directory_reparse_escape_forbidden",
+  "powershell_provider_mutation_review_requirement_preserved",
+  "agent_workflow_structured_directory_changes_field_required",
+]) {
+  const weakened = structuredClone(schema30Contracts);
+  weakened.rules[rule] = !schema30Contracts.rules[rule];
+  assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(weakened), false, rule);
+}
+const schema30MissingNestedProof = structuredClone(schema30Contracts);
+schema30MissingNestedProof.prs["LB-006"].required_tests = schema30MissingNestedProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("with active workspace D:\\project, agent_workflow path=LocalBridge"));
+assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30MissingNestedProof), false);
+const schema30MissingPowershellProof = structuredClone(schema30Contracts);
+schema30MissingPowershellProof.prs["LB-006"].required_tests = schema30MissingPowershellProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("windows_powershell and auto resolving to PowerShell"));
+assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30MissingPowershellProof), false);
+const schema30MissingWorkspaceWriteProof = structuredClone(schema30Contracts);
+schema30MissingWorkspaceWriteProof.prs["LB-006"].required_tests = schema30MissingWorkspaceWriteProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("agent_workflow exposes optional directory_changes"));
+assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30MissingWorkspaceWriteProof), false);
+const schema30DirectoryActionsDrift = structuredClone(schema30Contracts);
+schema30DirectoryActionsDrift.rules.agent_workflow_directory_change_actions = ["create_directory", "remove_empty_directory", "remove_tree"];
+assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30DirectoryActionsDrift), false);
 
 const schema28NoFixtureCompression = structuredClone(schema28Contracts);
 schema28NoFixtureCompression.rules.test_heavy_shared_fixture_lifecycle_compression_required = false;

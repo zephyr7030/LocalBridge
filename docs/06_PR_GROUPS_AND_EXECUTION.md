@@ -112,6 +112,23 @@ next G2 review    = generation 18, only after LB-006..012 are PASS again
 
 LB-006 只负责 A289–A291：terminal finally 原子提交、task-state durable terminal snapshot、`task_id+session_id` CAS/owner isolation。A292“首次前台主窗口默认居中”属于 LB-015，当前只排队，**不是 generation17 的 G2 blocker，也不得提前修改 G3 产品代码**。
 
+### Schema30 — LB-006 scoped plugin findings / contract ratification
+
+LB-006 schema29 task-state 修复被接受后，产品插件黑盒复测又确认两个实际 MAJOR，并暴露一个权限语义缺口：`workspace_context=D:\project` 且 `git_workflow(path=LocalBridge)` 能识别 nested repo，但 `agent_workflow` 无 project path selector、仍对 workspace 根执行 Git context；同时 `windows_powershell/auto` 因在 user code 前锁死 module autoload 且没有可信标准模块 preload，导致 `Get-Location/Get-ChildItem` 直接 `CommandNotFound`。此外，active workspace 内创建测试目录属于既有 reviewed workspace write 权限，但当前稳定 Public API 没有无需 process exec 的结构化目录 mutation 路线。
+
+因此 schema30 新增 A293–A295，并继续回开：
+
+```text
+current_group      = G2
+current_pr         = LB-006
+LB-006             = REWORK_REQUIRED
+LB-007..012        = BLOCKED
+G2 generation 17  = 历史 FAIL / 已消费
+G2 generation 18  = 未消费；只能在 LB-006..012 重新 PASS 后执行
+```
+
+LB-006 先实现 `agent_workflow.path` nested-project context、可信 PowerShell standard cmdlet baseline、以及 `agent_workflow.directory_changes[]`（仅 `create_directory` / `remove_empty_directory`）的 structured workspace write。LB-007 随后必须重新验收该结构化目录 mutation 的 transitive capability：Edit/Full 可作为 workspace write，不能要求 process exec，也不能因此获得 WorkspaceRegistry/control-plane 权限。禁止为了快速修复直接重新开放 arbitrary PowerShell module autoload、把 provider mutation 全部降级为 ordinary allow，或把 `remove_empty_directory` 扩成递归 tree delete。
+
 ### Schema26 管理员模式安全确认修订
 
 Schema26 是对后续 **LB-015 / LB-016** 的 UI/安全合同追加，不改变当前执行入口，也不允许跳过 G2：

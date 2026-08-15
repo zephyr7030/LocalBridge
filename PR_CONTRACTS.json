@@ -1,5 +1,5 @@
 {
-  "schema_version": 29,
+  "schema_version": 30,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -548,7 +548,23 @@
     "task_state_non_owner_overwrite_or_clear_forbidden": true,
     "task_state_duplicate_terminal_finalization_idempotent": true,
     "main_window_default_centered_required": true,
-    "existing_window_reopen_forced_recenter_forbidden": true
+    "existing_window_reopen_forced_recenter_forbidden": true,
+    "agent_workflow_workspace_relative_project_path_selector_required": true,
+    "agent_workflow_nested_project_discovery_consistent_with_git_workflow_required": true,
+    "agent_workflow_project_selector_must_not_change_active_workspace_authority": true,
+    "trusted_powershell_standard_cmdlet_surface_required": true,
+    "trusted_powershell_arbitrary_module_autoload_forbidden": true,
+    "trusted_powershell_standard_module_preload_identity_validation_required": true,
+    "workspace_structured_directory_write_required": true,
+    "workspace_structured_directory_write_active_root_only": true,
+    "workspace_structured_directory_write_must_not_mutate_workspace_control_plane": true,
+    "workspace_structured_directory_reparse_escape_forbidden": true,
+    "powershell_provider_mutation_review_requirement_preserved": true,
+    "agent_workflow_structured_directory_changes_field_required": true,
+    "agent_workflow_directory_change_actions": [
+      "create_directory",
+      "remove_empty_directory"
+    ]
   },
   "prs": {
     "LB-000": {
@@ -803,7 +819,10 @@
         "schema28 public command lifecycle delta/cursor state for incremental poll and stable kill terminal convergence",
         "single-parse shell invocation and UTF-8 public output normalization across trusted Windows shell selectors",
         "real image resize adapter plus inclusive line-range validation for Git blame and documents",
-        "owner-checked atomic task-state command finalizer with durable terminal snapshots"
+        "owner-checked atomic task-state command finalizer with durable terminal snapshots",
+        "agent_workflow workspace-relative nested-project selector with stable selected-path and enclosing-repository context",
+        "trusted PowerShell standard cmdlet baseline loaded from validated first-party/system module identity before arbitrary module autoload is disabled",
+        "agent_workflow directory_changes structured active-workspace directory create and empty-directory cleanup route without adding a ninth public core tool"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -849,7 +868,12 @@
         "every command terminal path including success nonzero-exit failure timeout cancellation kill runtime error and tool exception executes one finally or finally-equivalent unconditional finalizer that under one task-state owner transaction appends exactly one command_finished terminal event and clears current_command only when the same task_id plus session_id still owns it",
         "task-state persists a bounded redacted terminal command snapshot sufficient to recover status outcome exit or signal timeout cancellation and stable output references after the private runtime session has expired or been pruned; the approximately 300-second private session retention may support output paging but is never the source of terminal truth",
         "task-state command start replace finish and clear operations use compare-and-swap or an equivalent owner check on task_id plus session_id; a delayed finalizer from task A cannot overwrite or clear task B or a newer session and an owner mismatch is a no-op or typed conflict rather than destructive mutation",
-        "duplicate terminal callbacks for the same task_id plus session_id are idempotent: the terminal snapshot remains stable command_finished is not duplicated and current_command cannot be resurrected or clear a newer owner"
+        "duplicate terminal callbacks for the same task_id plus session_id are idempotent: the terminal snapshot remains stable command_finished is not duplicated and current_command cannot be resurrected or clear a newer owner",
+        "with active workspace D:\\project, agent_workflow path=LocalBridge resolves the explicit nested project D:\\project\\LocalBridge and git_before/git_after report the same repository identity as git_workflow path=LocalBridge; path=LocalBridge/src resolves the nearest enclosing LocalBridge repository without escaping the active workspace, while a non-repository directory may legitimately report is_repo=false",
+        "agent_workflow project selection is workspace-relative and changes only workflow/project context: it never changes WorkspaceRegistry or the active workspace authorization root; the stable result exposes the selected path and enclosing repository/project context without raw private resolver state",
+        "windows_powershell and auto resolving to PowerShell provide a trusted standard coding cmdlet baseline including Get-Location Get-ChildItem and Test-Path while keeping arbitrary module autoload disabled; the preload source is fixed or identity-validated and cannot be redirected through user-controlled PSModulePath",
+        "restoring standard PowerShell cmdlets does not weaken shell review: provider mutation and dynamic command-surface operations such as New-Item Set-Content Set-Item Alias or Function provider mutation remain subject to the existing LB-007 review-required classification",
+        "agent_workflow exposes optional directory_changes as a bounded array of objects with exactly action plus path; action is only create_directory or remove_empty_directory and path is active-workspace-relative; with active workspace D:\\project, directory_changes can create D:\\project\\test and later remove that directory when empty without using process execution; Edit and Full both permit this reviewed workspace write, absolute or parent-traversal targets and reparse escapes are denied, non-empty recursive directory deletion is not implied, and the operation never mutates WorkspaceRegistry or active workspace control-plane"
       ],
       "non_goals": [
         "policy enforcement",
@@ -876,7 +900,8 @@
         "capability policy enforcement",
         "PEP-to-current-task status integration",
         "LocalBridge stable public capability/action classifier independent of upstream tool names",
-        "transitive capability declarations for high-level LocalBridge workflows"
+        "transitive capability declarations for high-level LocalBridge workflows",
+        "structured agent_workflow directory_changes mutations classified as workspace write without granting control-plane authority"
       ],
       "required_tests": [
         "tools/call bypass",
@@ -891,7 +916,8 @@
         "raw upstream tool names cannot be called as a public bypass around the LocalBridge facade",
         "unknown LocalBridge public actions or capabilities fail closed",
         "high-level workflows declare and enforce all transitive write process network and privilege capabilities before execution",
-        "cached or stale public tools/list cannot bypass a later permission-mode or capability-policy change"
+        "cached or stale public tools/list cannot bypass a later permission-mode or capability-policy change",
+        "agent_workflow structured directory create or empty-directory cleanup declares transitive workspace write capability: Edit and Full may authorize it inside the active root, process execution is not required, and attempts to alter WorkspaceRegistry active workspace or escape through absolute traversal or reparse targets fail closed"
       ],
       "non_goals": [
         "Tunnel",

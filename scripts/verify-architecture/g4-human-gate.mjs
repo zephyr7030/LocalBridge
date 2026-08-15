@@ -644,6 +644,48 @@ const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15 = Object.freeze({
+  schemaVersion: 30,
+  baselineSchemaVersion: 29,
+  addedRules: {
+    agent_workflow_workspace_relative_project_path_selector_required: true,
+    agent_workflow_nested_project_discovery_consistent_with_git_workflow_required: true,
+    agent_workflow_project_selector_must_not_change_active_workspace_authority: true,
+    trusted_powershell_standard_cmdlet_surface_required: true,
+    trusted_powershell_arbitrary_module_autoload_forbidden: true,
+    trusted_powershell_standard_module_preload_identity_validation_required: true,
+    workspace_structured_directory_write_required: true,
+    workspace_structured_directory_write_active_root_only: true,
+    workspace_structured_directory_write_must_not_mutate_workspace_control_plane: true,
+    workspace_structured_directory_reparse_escape_forbidden: true,
+    powershell_provider_mutation_review_requirement_preserved: true,
+    agent_workflow_structured_directory_changes_field_required: true,
+    agent_workflow_directory_change_actions: ["create_directory", "remove_empty_directory"],
+  },
+  lb006: {
+    addedArtifacts: [
+      "agent_workflow workspace-relative nested-project selector with stable selected-path and enclosing-repository context",
+      "trusted PowerShell standard cmdlet baseline loaded from validated first-party/system module identity before arbitrary module autoload is disabled",
+      "agent_workflow directory_changes structured active-workspace directory create and empty-directory cleanup route without adding a ninth public core tool",
+    ],
+    addedTests: [
+      "with active workspace D:\\project, agent_workflow path=LocalBridge resolves the explicit nested project D:\\project\\LocalBridge and git_before/git_after report the same repository identity as git_workflow path=LocalBridge; path=LocalBridge/src resolves the nearest enclosing LocalBridge repository without escaping the active workspace, while a non-repository directory may legitimately report is_repo=false",
+      "agent_workflow project selection is workspace-relative and changes only workflow/project context: it never changes WorkspaceRegistry or the active workspace authorization root; the stable result exposes the selected path and enclosing repository/project context without raw private resolver state",
+      "windows_powershell and auto resolving to PowerShell provide a trusted standard coding cmdlet baseline including Get-Location Get-ChildItem and Test-Path while keeping arbitrary module autoload disabled; the preload source is fixed or identity-validated and cannot be redirected through user-controlled PSModulePath",
+      "restoring standard PowerShell cmdlets does not weaken shell review: provider mutation and dynamic command-surface operations such as New-Item Set-Content Set-Item Alias or Function provider mutation remain subject to the existing LB-007 review-required classification",
+      "agent_workflow exposes optional directory_changes as a bounded array of objects with exactly action plus path; action is only create_directory or remove_empty_directory and path is active-workspace-relative; with active workspace D:\\project, directory_changes can create D:\\project\\test and later remove that directory when empty without using process execution; Edit and Full both permit this reviewed workspace write, absolute or parent-traversal targets and reparse escapes are denied, non-empty recursive directory deletion is not implied, and the operation never mutates WorkspaceRegistry or active workspace control-plane",
+    ],
+  },
+  lb007: {
+    addedArtifacts: [
+      "structured agent_workflow directory_changes mutations classified as workspace write without granting control-plane authority",
+    ],
+    addedTests: [
+      "agent_workflow structured directory create or empty-directory cleanup declares transitive workspace write capability: Edit and Full may authorize it inside the active root, process execution is not required, and attempts to alter WorkspaceRegistry active workspace or escape through absolute traversal or reparse targets fail closed",
+    ],
+  },
+});
+
 const COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15 = Object.freeze({
   schemaVersion: 29,
   baselineSchemaVersion: 28,
@@ -1170,6 +1212,38 @@ export function normalizeCommandTaskStateAndWindowCenterAmendment20260815(contra
   return normalized;
 }
 
+export function hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(contractsDoc) {
+  if (contractsDoc?.schema_version !== NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb006 = contractsDoc?.prs?.["LB-006"];
+  const lb007 = contractsDoc?.prs?.["LB-007"];
+  if (!lb006 || !lb007) return false;
+  return containsAll(lb006.required_artifacts, NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.lb006.addedArtifacts)
+    && containsAll(lb006.required_tests, NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.lb006.addedTests)
+    && containsAll(lb007.required_artifacts, NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.lb007.addedArtifacts)
+    && containsAll(lb007.required_tests, NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.lb007.addedTests);
+}
+
+export function normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.baselineSchemaVersion;
+  for (const key of Object.keys(NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.addedRules)) delete normalized.rules[key];
+  const lb006 = normalized.prs?.["LB-006"];
+  const lb007 = normalized.prs?.["LB-007"];
+  if (lb006) {
+    lb006.required_artifacts = removeItems(lb006.required_artifacts, NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.lb006.addedArtifacts);
+    lb006.required_tests = removeItems(lb006.required_tests, NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.lb006.addedTests);
+  }
+  if (lb007) {
+    lb007.required_artifacts = removeItems(lb007.required_artifacts, NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.lb007.addedArtifacts);
+    lb007.required_tests = removeItems(lb007.required_tests, NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.lb007.addedTests);
+  }
+  return normalized;
+}
+
 export function hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(contractsDoc) {
   if (contractsDoc?.schema_version !== TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.schemaVersion) return false;
   for (const [key, expected] of Object.entries(TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.addedRules)) {
@@ -1413,6 +1487,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= NESTED_PROJECT_POWERSHELL_WORKSPACE_WRITE_AMENDMENT_2026_08_15.schemaVersion) {
+    if (!hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(authorizationContracts)) {
+      findings.push(`${expected.id}:nested-project-powershell-workspace-write-20260815-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.schemaVersion) {
     if (!hasExactCommandTaskStateAndWindowCenterAmendment20260815(authorizationContracts)) {
       findings.push(`${expected.id}:command-task-state-window-center-20260815-contract-amendment-drift`);

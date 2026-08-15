@@ -184,6 +184,18 @@ G2 owner           = 前三项归 LB-006；gen16 在 schema29 前完成，必须
 G3 owner           = 居中项归 LB-015，不得提前混入 G2 产品修改
 ```
 
+Schema30 nested-project / PowerShell / workspace-write 补充：
+
+```text
+agent_workflow.path = active-workspace-relative nested-project selector；默认 .；只改变 project context，不改变 active workspace authority
+nested repo          = path=LocalBridge 或 LocalBridge/src 时与 git_workflow 使用一致 enclosing-repo 语义，最多向上到 active workspace
+PowerShell baseline  = arbitrary module autoload 继续关闭；固定/身份验证的可信标准模块提供 Get-Location / Get-ChildItem / Test-Path 等基础 cmdlet
+provider hardening   = New-Item / Set-Content / Set-Item / Alias / Function 等动态 provider surface 继续 review-required
+workspace dir write  = agent_workflow.directory_changes[]；仅 create_directory / remove_empty_directory；active-root-relative；Edit/Full reviewed write；不依赖 process exec；absolute/../reparse escape deny
+control-plane        = WorkspaceRegistry / active workspace mutation 仍永久 deny；nested-project/path 与目录写入均不能扩大授权根
+current              = G2 / LB-006 REWORK_REQUIRED；LB-007 BLOCKED；generation18 未消费
+```
+
 Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订，**不改变当前执行入口**：当前仍为 `G2 / LB-006`，必须继续严格顺序推进，不能因本合同提前跳到 G3。
 
 ```text

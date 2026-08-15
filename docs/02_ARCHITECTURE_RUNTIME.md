@@ -187,6 +187,14 @@ finalizer 覆盖 success、nonzero exit、failure、timeout、cancel、kill、ru
 
 command state 的 start/replace/finish/clear 都必须比较 `(task_id, session_id)` owner。延迟到达的旧 task finalizer、旧 session watcher、timeout callback 或 kill callback 若 owner 已变化，不得清空/覆盖新 command；owner mismatch 只能 no-op 或返回稳定 typed conflict。相同 owner 的重复 terminal callback 幂等：保留第一份稳定 terminal snapshot、不重复 `command_finished`、不重新建立 `current_command`。
 
+### Schema30 — Nested project / trusted PowerShell / structured workspace write
+
+`agent_workflow` 增加 workspace-relative `path` 作为**项目上下文选择器**，默认 `.`。active workspace 仍是唯一授权根；`path` 只选择该授权根内的工程上下文，不得切换 WorkspaceRegistry、不得新增授权根。`path="LocalBridge"` 必须直接选择 `D:\project\LocalBridge`；若 `path` 指向 `LocalBridge/src` 等后代目录，则向上寻找最近 enclosing repository/project root，搜索上限仍是 active workspace root。workflow 的 Git before/after、默认 command workdir 与稳定结果中的 selected/project context 必须基于该选择，且与 `git_workflow` 的 nested-repository resolver 一致。
+
+可信 PowerShell 启动继续在 user command 前关闭 arbitrary module autoload，但不能因此破坏正常 coding shell。LocalBridge 必须通过固定 allowlist + 可信安装身份/路径验证，预加载或等价提供最小标准 PowerShell cmdlet surface；至少 `Get-Location`、`Get-ChildItem`、`Test-Path` 在 `windows_powershell` 与 `auto`→PowerShell 下可用。用户控制的 `PSModulePath` 不得决定 preload 来源。此修复不得弱化 LB-007：`New-Item`、`Set-Content`、`Set-Item`、Alias/Function provider 等动态 provider/command-surface mutation 仍按既有 review-required 处理。
+
+active workspace 内普通文件/目录 mutation 属于 reviewed workspace write，而不是 WorkspaceRegistry/control-plane mutation。该结构化路线固定在现有 `agent_workflow` 的 optional `directory_changes` 字段：bounded array 中每项只能是 `{ action, path }`，`action` 只允许 `create_directory` / `remove_empty_directory`，`path` 必须 active-workspace-relative。它无需 process exec，可在 `D:\project` 授权下创建 `test/`，并在为空时清理该目录；Edit 与 Full 都可授权此类 reviewed write。该路线必须执行 final identity/reparse 边界验证，禁止 absolute/`..`/reparse escape；本合同不自动授权非空递归目录删除，也不增加第九个 public core tool。
+
 ### Schema26 — Administrator Mode Safety Consent Gate
 
 管理员模式可见入口的视觉与授权状态机由 LocalBridge 自己拥有，不能由 frontend 直接跳到 UAC：
