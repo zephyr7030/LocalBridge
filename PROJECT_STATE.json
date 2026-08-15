@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -1731,5 +1731,57 @@
     "g2_generation_19_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_19_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 19,
+    "baseline_commit": "48f09a606019215d2f9453846cc88c099ec9cc75",
+    "reopen_from_pr": "LB-007",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-007",
+        "summary": "agent_workflow 最小 diagnose 被过度分类为 process_exec，导致 Edit 模式在无 commands 时也被策略层拒绝。",
+        "evidence": [
+          "src-tauri/src/mcp/policy.rs classify_public_action 将 diagnose 固定声明为 workflow(false,true,true,false,false)，即 process_exec=true。",
+          "runtime-policy.toml 明确 process_exec_in_edit=deny 且 workflow_with_process_exec_in_edit=deny。",
+          "src-tauri/src/mcp/facade.rs 仅在 commands 非空时才要求 agent_action_allows_process；无 commands 的 diagnose 本身只建立项目上下文并执行 Git status，不应被固定声明为 generic process_exec。",
+          "当前真实 schema28 bundled-runtime E2E 仅在 Full 模式验证 diagnose+command；因此使用侧在 Edit 模式报告的最小 diagnose 拒绝与当前源码策略逻辑一致，责任落在 LB-007。"
+        ]
+      }
+    ],
+    "non_blocking_observations": [
+      {
+        "severity": "CANDIDATE",
+        "area": "agent_workflow directory_changes",
+        "disposition": "未独立复现为 blocker；schema30 policy classifier 对仅 directory_changes 的 workflow 覆盖 process_exec=false，现有真实 bundled-runtime E2E 已验证 document/create/remove 在 Edit/Full 可用。"
+      },
+      {
+        "severity": "EXPECTED",
+        "area": "command_control.read",
+        "disposition": "不是缺陷；当前 Public API 明确要求 read 使用 output_ref，session_id 属于 poll/write/kill 生命周期句柄。"
+      },
+      {
+        "severity": "EXPECTED",
+        "area": "absolute path",
+        "disposition": "不是缺陷；当前合同明确 workspace-bound public path 仅允许 active-workspace-relative，绝对路径必须拒绝。"
+      },
+      {
+        "severity": "CANDIDATE",
+        "area": "Emoji UTF-8",
+        "disposition": "本轮未建立 LocalBridge 根因；当前 PowerShell facade 已显式设置 UTF-8 OutputEncoding，但没有 Emoji 专项真实 E2E，暂不升级。"
+      }
+    ],
+    "verified_passes": [
+      "Fresh current-HEAD schema28_public_runtime_behavior_is_real_end_to_end: PASS.",
+      "Fresh policy classifier test: PASS.",
+      "No product-code changes after 4a2a966; current HEAD delta is agent/governance only."
+    ],
+    "g2_generation_19_consumed": true,
+    "next_required_g2_adversarial_generation": 20,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
-}
+}\n
