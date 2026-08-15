@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,11 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "Scoped post-LB-007 review / LB-006: agent_workflow diagnose advertises commands and LB-007 PEP declares transitive process_exec, but the facade rejects diagnose+commands because agent_action_allows_process excludes diagnose.",
-    "Scoped post-LB-007 review / LB-006: successful command_control.kill converges the target to cancelled but returns the control action itself as ProcessCancelled error instead of a successful kill action with cancelled target state.",
-    "Scoped post-LB-007 review / LB-006: idle task_control.cancel returns cancel_requested with cancelled_requests=0, projecting a cancellation request when no cancellable request exists."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -176,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Scoped adversarial review after LB-007 reopened LB-006 without consuming G2 generation19. Repair the three LB-006 public-facade semantic defects: diagnose+commands cross-layer contract mismatch, successful kill action/error-envelope conflation, and idle task_control.cancel false cancel_requested projection. Then accept LB-006 and return LB-007 to READY; stop before reexecuting LB-007. Generation18 provenance remains unchanged and generation19 remains unconsumed."
+    "next_action": "LB-006 scoped post-LB-007 facade rework accepted at implementation commit 4a2a9665b5eb12ed28929c97008fe6d13165f79d. Next execute LB-007, then continue the strict G2 sequence only after each PR acceptance. G2 generation18 provenance remains unchanged; generation19 is not consumed. G3/G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1713,6 +1709,25 @@
     "non_blocking_observations": [
       "The reported directory_changes policy rejection was not reproduced and is not a blocker in this scoped review."
     ],
+    "g2_generation_19_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb006_post_lb007_scoped_rework_acceptance_2026_08_15": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "resolves_scoped_review": "lb007_post_reacceptance_scoped_adversarial_review_2026_08_15",
+    "review_baseline_commit": "fbfb75ee07692876278b1c99c2c61346c65a3690",
+    "rollback_governance_commit": "f005b4b",
+    "implementation_commit": "4a2a9665b5eb12ed28929c97008fe6d13165f79d",
+    "evidence": [
+      "agent_workflow diagnose now accepts the already-advertised commands route; focused facade contract test PASS and schema27 bundled-runtime E2E executes a real diagnose command successfully.",
+      "A successful command_control.kill now returns ok=true/isError=false with target status=cancelled, while schema28 E2E proves later poll still exposes the stable ProcessCancelled terminal snapshot and durable task truth remains cancelled.",
+      "Idle task_control.cancel now returns truthful state=idle with cancelled_requests=0; the same runtime test proves active cancellation still returns cancel_requested and interrupts the running call.",
+      "Fresh cargo test --manifest-path src-tauri/Cargo.toml --locked PASS with exit 0; cargo clippy --locked --all-targets -- -D warnings PASS.",
+      "Fresh npm test PASS, npm run build PASS, runtime-manifest verifier PASS, architecture verifier PASS, G4 human-gate regression PASS, and git diff --check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 19,
     "g2_generation_19_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
