@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-007 generation15 correction accepted at f94a725b544c920fce8fe5cab9cc6c2203e14a31 after grammar-level member dispatch review and schema28 runtime PASS. Execute LB-008 next, then LB-009 through LB-012 in strict order; G2 remains REWORK_REQUIRED/FAIL generation15 until fresh generation16."
+    "next_action": "LB-008 reaccepted after generation15 dependency correction; Tunnel contract/runtime-manifest/ARCH-016 PASS. Execute LB-009 next; generation16 remains unconsumed."
   },
   "current_task_ui": {
     "enabled": true,
