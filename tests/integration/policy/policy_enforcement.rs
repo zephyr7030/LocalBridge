@@ -276,6 +276,47 @@ fn ordinary_system_management_targets_require_the_privileged_route_in_full_and_e
 }
 
 #[test]
+fn schema33_bcdedit_and_dism_require_privileged_route_in_direct_and_workflow_paths() {
+    let policy = policy();
+    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
+        for arguments in [
+            json!({"command":"bcdedit.exe /enum","shell":"cmd"}),
+            json!({"command":"DISM.EXE /Online /Get-Features","shell":"cmd"}),
+            json!({"command":"C:\\Windows\\System32\\bcdedit.exe /enum","shell":"cmd"}),
+            json!({"command":"\"C:\\Windows\\System32\\dism.exe\" /Online /Get-Features","shell":"cmd"}),
+            json!({"command":"bcdedit /enum","shell":"cmd"}),
+            json!({"command":"dism /Online /Get-Features","shell":"cmd"}),
+            json!({"command":"echo before && dism.exe /Online /Get-Features","shell":"cmd"}),
+            json!({"command":"if 1==1 bcdedit.exe /enum","shell":"cmd"}),
+            json!({"command":"bcdedit.exe /enum","shell":"windows_powershell"}),
+            json!({"command":"C:\\Windows\\System32\\dism.exe /Online /Get-Features","shell":"powershell"}),
+        ] {
+            let decision = policy.decide_public(mode, "exec_command", &arguments);
+            assert!(!decision.allowed, "schema33 system-management target escaped: {arguments}");
+            assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+        }
+
+        for command in ["bcdedit.exe /enum", "dism.exe /Online /Get-Features"] {
+            let decision = policy.decide_public(
+                mode,
+                "agent_workflow",
+                &json!({"action":"diagnose","commands":[{"command":command,"shell":"cmd"}]}),
+            );
+            assert!(!decision.allowed, "workflow escaped privileged route: {command}");
+            assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+        }
+
+        for arguments in [
+            json!({"command":"echo dism.exe","shell":"cmd"}),
+            json!({"command":"Write-Output bcdedit.exe","shell":"windows_powershell"}),
+            json!({"command":"Get-Command dism.exe","shell":"windows_powershell"}),
+        ] {
+            assert!(policy.decide_public(mode, "exec_command", &arguments).allowed);
+        }
+    }
+}
+
+#[test]
 fn allowed_call_projects_actual_running_then_idle_and_redacts_secret_summary() {
     let calls = Rc::new(RefCell::new(Vec::new()));
     let mut guard = McpGuard::new(FakeRuntime::new(calls.clone()), policy());

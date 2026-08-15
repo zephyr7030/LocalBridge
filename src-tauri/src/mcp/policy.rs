@@ -23,8 +23,14 @@ const CONTROL_PLANE_NAMES: &[&str] = &[
     "tunnel_config_write",
     "mcp_config_write",
 ];
-const WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS: &[&str] =
-    &["reg.exe", "schtasks.exe", "sc.exe", "netsh.exe"];
+const WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS: &[&str] = &[
+    "reg.exe",
+    "schtasks.exe",
+    "sc.exe",
+    "netsh.exe",
+    "bcdedit.exe",
+    "dism.exe",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolDescriptor {

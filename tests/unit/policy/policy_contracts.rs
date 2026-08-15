@@ -387,6 +387,22 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
 }
 
 #[test]
+fn schema33_system_management_workflow_indirection_stays_broker_only() {
+    let policy = policy();
+    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
+        for command in ["bcdedit.exe /enum", "dism.exe /Online /Get-Features"] {
+            let decision = policy.decide_public(
+                mode,
+                "agent_workflow",
+                &json!({"action":"diagnose","commands":[{"command":command,"shell":"cmd"}]}),
+            );
+            assert!(!decision.allowed);
+            assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+        }
+    }
+}
+
+#[test]
 fn unknown_public_actions_and_public_policy_widening_fail_closed() {
     let policy = policy();
     let unknown = policy.decide_public(
