@@ -217,6 +217,7 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"$x='docker'; Set-Item Alias:lbgen12 $x; lbgen12 ps","shell":"windows_powershell"}),
         json!({"command":"$x='docker'; si Alias:lbgen12 $x; lbgen12 ps","shell":"powershell"}),
         json!({"command":"$Alias:lbgen12='docker'; lbgen12 ps","shell":"windows_powershell"}),
+        json!({"command":"$ExecutionContext.InvokeCommand.CommandNotFoundAction = { param($name,$eventArgs); $eventArgs.Command = Get-Command Write-Output }; lbgen13 'hook'","shell":"windows_powershell"}),
         json!({"command":"New-Item Function:lbgen12 -Value { Write-Output ok }; lbgen12","shell":"windows_powershell"}),
         json!({"command":"sc Function:lbgen12 -Value 'Write-Output ok'; lbgen12","shell":"powershell"}),
         json!({"command":"Set-Item Env:LB_GEN12 harmless","shell":"windows_powershell"}),
@@ -245,6 +246,7 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"Start-Sleep -Milliseconds 10; $line=[Console]::In.ReadLine(); Write-Output ('write:'+ $line)","shell":"auto"}),
         json!({"command":"$line=[System.Console]::ReadLine(); Write-Output $line","shell":"windows_powershell"}),
         json!({"command":"Write-Output '$(' ; Write-Output \"`$(`\"","shell":"windows_powershell"}),
+        json!({"command":"Write-Output '$ExecutionContext is documentation text'","shell":"windows_powershell"}),
     ] {
         assert!(
             policy

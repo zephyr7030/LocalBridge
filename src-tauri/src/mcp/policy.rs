@@ -981,6 +981,27 @@ fn dangerous_powershell_member(name: &str) -> bool {
     )
 }
 
+fn powershell_member_mutation_starts(chars: &[char], index: usize) -> bool {
+    if chars.get(index) == Some(&'=') {
+        return true;
+    }
+    if matches!(chars.get(index), Some('+' | '-' | '*' | '/' | '%'))
+        && chars.get(index + 1) == Some(&'=')
+    {
+        return true;
+    }
+    if chars.get(index) == Some(&'?')
+        && chars.get(index + 1) == Some(&'?')
+        && chars.get(index + 2) == Some(&'=')
+    {
+        return true;
+    }
+    matches!(
+        (chars.get(index), chars.get(index + 1)),
+        (Some('+'), Some('+')) | (Some('-'), Some('-'))
+    )
+}
+
 fn powershell_subexpression_requires_review(command: &str) -> bool {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Quote {
@@ -1108,6 +1129,12 @@ fn powershell_member_invocation_requires_review(command: &str) -> bool {
             let mut call = member_end;
             while call < visible.len() && visible[call].is_whitespace() {
                 call += 1;
+            }
+            if powershell_member_mutation_starts(&visible, call) {
+                // Member mutation can rewrite command-engine state after target review
+                // (for example InvokeCommand.CommandNotFoundAction). Fail closed for the
+                // mutation grammar instead of enumerating engine property names.
+                return true;
             }
             if call < visible.len() && visible[call] == '(' {
                 let member = visible[member_start..member_end].iter().collect::<String>();

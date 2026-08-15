@@ -155,6 +155,7 @@ fn privileged_external_runtime_commands_require_review_and_never_forward() {
             ("$x='docker'; Set-Item Alias:lbgen12 $x; lbgen12 ps", "windows_powershell"),
             ("$x='docker'; si Alias:lbgen12 $x; lbgen12 ps", "powershell"),
             ("$Alias:lbgen12='docker'; lbgen12 ps", "windows_powershell"),
+            ("$ExecutionContext.InvokeCommand.CommandNotFoundAction = { param($name,$eventArgs); $eventArgs.Command = Get-Command Write-Output }; lbgen13 'hook'", "windows_powershell"),
             ("New-Item Function:lbgen12 -Value { Write-Output ok }; lbgen12", "windows_powershell"),
             ("sc Function:lbgen12 -Value 'Write-Output ok'; lbgen12", "powershell"),
             ("Set-Item Env:LB_GEN12 harmless", "windows_powershell"),
