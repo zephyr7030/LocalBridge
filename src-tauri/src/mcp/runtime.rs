@@ -268,6 +268,7 @@ impl CodingToolsRuntime {
             ("CODING_TOOLS_MCP_ALLOWED_ORIGINS", ""),
             ("DO_NOT_TRACK", "1"),
             ("PYTHONNOUSERSITE", "1"),
+            ("PYTHONDONTWRITEBYTECODE", "1"),
         ] {
             spec = spec.env(key, value)?;
         }

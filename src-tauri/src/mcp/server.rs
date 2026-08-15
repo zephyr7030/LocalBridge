@@ -617,6 +617,26 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                     stopping.store(true, Ordering::Release);
                     break;
                 }
+                let running_command = facade.has_running_command_session();
+                match (running_command, current_task.actual_snapshot()) {
+                    (true, CurrentTaskStatus::Idle) => current_task.project(
+                        CurrentTaskStatus::project(
+                            TaskKind::ExecuteCommand,
+                            SafeTaskSummary::Omitted,
+                            TaskExecutionState::Running,
+                        )
+                        .expect("running command session is a valid projected task"),
+                    ),
+                    (
+                        false,
+                        CurrentTaskStatus::Active(CurrentTask {
+                            kind: TaskKind::ExecuteCommand,
+                            state: TaskExecutionState::Running,
+                            ..
+                        }),
+                    ) => current_task.project(CurrentTaskStatus::Idle),
+                    _ => {}
+                }
             }
             next_session_reap = Instant::now() + Duration::from_millis(100);
         }
@@ -1882,11 +1902,18 @@ mod tests {
     }
 
     fn post(port: u16, session: Option<&str>, payload: &Value) -> ClientResponse {
+        post_with_read_timeout(port, session, payload, Duration::from_secs(3))
+    }
+
+    fn post_with_read_timeout(
+        port: u16,
+        session: Option<&str>,
+        payload: &Value,
+        read_timeout: Duration,
+    ) -> ClientResponse {
         let body = serde_json::to_vec(payload).unwrap();
         let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
+        stream.set_read_timeout(Some(read_timeout)).unwrap();
         let mut request = format!(
             "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nMCP-Protocol-Version: {CURRENT_PROTOCOL_VERSION}\r\nConnection: close\r\nContent-Length: {}\r\n",
             body.len()
@@ -2330,6 +2357,68 @@ mod tests {
             .status,
             202
         );
+
+        let provenance =
+            public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
+        assert_eq!(
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 30,
+            "fresh serving instance did not identify the schema30 facade: {:#?}",
+            provenance.body
+        );
+        let served_tools = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":688,"method":"tools/list","params":{}}),
+        );
+        let served_agent = served_tools.body["result"]["tools"]
+            .as_array()
+            .and_then(|tools| tools.iter().find(|tool| tool["name"] == "agent_workflow"))
+            .expect("fresh serving instance exposes agent_workflow");
+        assert!(served_agent["inputSchema"]["properties"]["path"].is_object());
+        let directory_schema = &served_agent["inputSchema"]["properties"]["directory_changes"];
+        assert_eq!(directory_schema["type"], "array");
+        assert_eq!(
+            directory_schema["items"]["properties"]["action"]["enum"],
+            json!(["create_directory", "remove_empty_directory"])
+        );
+
+        let long_command = public_tool_call(
+            pep.port(),
+            &session,
+            689,
+            "exec_command",
+            json!({
+                "command":"Start-Sleep -Milliseconds 1800; Write-Output LB_GEN18_LONG_DONE",
+                "shell":"windows_powershell",
+                "yield_time_ms":0,
+                "timeout_ms":10000
+            }),
+        );
+        assert_eq!(
+            long_command.body["result"]["structuredContent"]["data"]["status"], "running",
+            "generation18 lifecycle fixture did not return a public running session: {:#?}",
+            long_command.body
+        );
+        thread::sleep(Duration::from_millis(650));
+        assert!(
+            matches!(
+                pep.current_task_projection().actual_snapshot(),
+                CurrentTaskStatus::Active(CurrentTask {
+                    kind: TaskKind::ExecuteCommand,
+                    state: TaskExecutionState::Running,
+                    ..
+                })
+            ),
+            "CurrentTask stopped before the public command session became terminal"
+        );
+        let lifecycle_deadline = Instant::now() + Duration::from_secs(6);
+        while pep.current_task_projection().actual_snapshot() != CurrentTaskStatus::Idle {
+            assert!(
+                Instant::now() < lifecycle_deadline,
+                "CurrentTask did not converge to Idle after public command terminal"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
 
         let nested_status = public_tool_call(
             pep.port(),
@@ -3121,7 +3210,7 @@ mod tests {
         let call_session = session.clone();
         let call_started = std::time::Instant::now();
         let call = thread::spawn(move || {
-            post(
+            post_with_read_timeout(
                 port,
                 Some(&call_session),
                 &json!({
@@ -3140,6 +3229,7 @@ mod tests {
                         }
                     }
                 }),
+                Duration::from_secs(6),
             )
         });
 
@@ -3235,7 +3325,7 @@ mod tests {
         let call_session = session.clone();
         let call_started = std::time::Instant::now();
         let call = thread::spawn(move || {
-            post(
+            post_with_read_timeout(
                 port,
                 Some(&call_session),
                 &json!({
@@ -3253,6 +3343,7 @@ mod tests {
                         }
                     }
                 }),
+                Duration::from_secs(6),
             )
         });
 

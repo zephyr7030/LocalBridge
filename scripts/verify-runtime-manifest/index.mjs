@@ -40,7 +40,7 @@ const exact = [
   'version = "0.2.2"',
   'git_commit = "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc"',
   'runtime_subset_sha256 = "cc2171854ce0035942b752ce88bb3aec2e286cdf9603dd51ad41734ea70dcda6"',
-  'payload_tree_sha256 = "2ec7c75c8f53c486fa63b6b8bf43a2539b7aa7d1ce6a9db461a29c7635bb65fe"',
+  'payload_tree_sha256 = "6d3ba92db59f9f168d6aad91832515a193914e3a2d6a039379eaf8793747013a"',
   'dependency_pyjwt_version = "2.10.1"',
   'dependency_pyjwt_wheel_sha256 = "dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb"',
   'auth_secret_injection = "child_environment:CODING_TOOLS_MCP_AUTH_TOKEN"',
@@ -79,7 +79,7 @@ for (const [path, expected] of critical) {
   if (sha(path) !== expected) throw new Error(`bundled runtime SHA256 mismatch: ${path}`);
 }
 if (treeSha("runtime/python") !== "48546587a8bb59d03016ea4edf82c292a477dec6acec530745b78c8935558682") throw new Error("Python payload tree SHA256 mismatch");
-if (treeSha("runtime/coding-tools-mcp") !== "2ec7c75c8f53c486fa63b6b8bf43a2539b7aa7d1ce6a9db461a29c7635bb65fe") throw new Error("coding-tools payload tree SHA256 mismatch");
+if (treeSha("runtime/coding-tools-mcp") !== "6d3ba92db59f9f168d6aad91832515a193914e3a2d6a039379eaf8793747013a") throw new Error("coding-tools payload tree SHA256 mismatch");
 
 const installerName = /^(?:pip|pip-[0-9].*\.dist-info|setuptools|setuptools-[0-9].*\.dist-info|wheel|wheel-[0-9].*\.dist-info)$/i;
 const scanInstallerDirs = (root) => {

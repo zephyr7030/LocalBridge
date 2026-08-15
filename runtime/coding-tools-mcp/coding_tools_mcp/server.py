@@ -1277,6 +1277,7 @@ class Runtime:
             project_context if project_context is not None else load_project_context(self.workspace.root)
         )
         self.request_sessions: dict[str | int, str] = {}
+        self.cancelled_requests: set[str | int] = set()
         self.request_sessions_lock = threading.Lock()
         self.request_context = threading.local()
         self.initialized = False
@@ -1483,6 +1484,7 @@ class Runtime:
                 if request_id is not None:
                     with self.request_sessions_lock:
                         self.request_sessions.pop(request_id, None)
+                        self.cancelled_requests.discard(request_id)
                 self.request_context.request_id = None
             payload.setdefault("ok", True)
             self.emit_tool_trace(name, args, payload, started_at)
@@ -2317,9 +2319,16 @@ class Runtime:
                     pass
         assert session is not None
         request_id = getattr(self.request_context, "request_id", None)
+        cancel_after_registration = False
         if isinstance(request_id, (str, int)) and not isinstance(request_id, bool):
             with self.request_sessions_lock:
-                self.request_sessions[request_id] = session.session_id
+                if request_id in self.cancelled_requests:
+                    self.cancelled_requests.discard(request_id)
+                    cancel_after_registration = True
+                else:
+                    self.request_sessions[request_id] = session.session_id
+        if cancel_after_registration:
+            self.cancel_session(session.session_id)
         start_reader_threads(session)
         start_session_watchdog(session)
         if stdin_text:
@@ -2933,6 +2942,8 @@ class Runtime:
     def cancel_request(self, request_id: str | int) -> None:
         with self.request_sessions_lock:
             session_id = self.request_sessions.get(request_id)
+            if session_id is None:
+                self.cancelled_requests.add(request_id)
         if session_id is not None:
             self.cancel_session(session_id)
 

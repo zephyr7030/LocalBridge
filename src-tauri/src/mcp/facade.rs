@@ -21,6 +21,7 @@ use super::task_state::{
 };
 
 pub const AGENT_API_VERSION: u32 = 1;
+pub const AGENT_API_REVISION: u32 = 30;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",
@@ -771,6 +772,7 @@ pub trait WorkspaceRuntimeAdapter {
     ) -> Result<Value, FacadeError>;
     fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError>;
     fn reap_command_sessions(&mut self) -> Result<(), FacadeError>;
+    fn has_running_command_session(&self) -> bool;
 }
 
 static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -976,27 +978,8 @@ impl PublicCommandSessions {
         let Some(session) = self.sessions.get_mut(public_session_id) else {
             return public_command_stderr(stderr);
         };
-        if session.stderr_protocol_buffer.is_empty()
-            && !stderr.trim_start().starts_with("#< CLIXML")
-        {
-            return stderr.to_string();
-        }
         session.stderr_protocol_buffer.push_str(stderr);
-        let mut visible = String::new();
-        while let Some(end_start) = session.stderr_protocol_buffer.find("</Objs>") {
-            let end = end_start + "</Objs>".len();
-            let envelope = session.stderr_protocol_buffer[..end].to_string();
-            let trailing = session.stderr_protocol_buffer[end..].to_string();
-            session.stderr_protocol_buffer.clear();
-            visible.push_str(&public_command_stderr(&envelope));
-            if trailing.trim_start().starts_with("#< CLIXML") {
-                session.stderr_protocol_buffer.push_str(&trailing);
-                continue;
-            }
-            visible.push_str(&trailing);
-            break;
-        }
-        visible
+        drain_public_stderr_protocol_buffer(&mut session.stderr_protocol_buffer)
     }
 
     fn mark_all_running_lost(
@@ -1026,6 +1009,12 @@ impl PublicCommandSessions {
                     .map(|private| (public.clone(), private.clone()))
             })
             .collect()
+    }
+
+    fn has_running_session(&self) -> bool {
+        self.sessions
+            .values()
+            .any(|session| session.terminal.is_none())
     }
 }
 
@@ -1241,6 +1230,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             .ok_or_else(runtime_capability_mismatch)?;
         let data = json!({
             "api_version": AGENT_API_VERSION,
+            "facade_revision": AGENT_API_REVISION,
             "workspace": self.workspace.to_string_lossy(),
             "default_cwd": default_cwd,
             "runtime": "ready"
@@ -1376,12 +1366,18 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 "timeout_ms": request.execution.timeout_ms,
                 "yield_time_ms": request.yield_time_ms,
                 "max_output_bytes": request.execution.max_output_bytes,
+                "verbosity":"full",
                 "env":{"COMSPEC":invocation.comspec.to_string_lossy()}
             });
             if let Some(stdin) = request.stdin {
                 private["stdin"] = Value::String(stdin);
             }
-            let raw = self.private_call("exec_command", private, request_id)?;
+            let raw = self.private_call_with_timeout(
+                "exec_command",
+                private,
+                request_id,
+                command_transport_timeout(request.yield_time_ms),
+            )?;
             if let Some(private_session_id) = raw
                 .get("structuredContent")
                 .and_then(Value::as_object)
@@ -1427,7 +1423,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 }
             }
             let raw = self.private_call("read_output", Value::Object(private), request_id)?;
-            return Ok(self.normalize_read_output(&raw, public_output_ref));
+            return Ok(Self::normalize_read_output(&raw, public_output_ref));
         }
 
         let public_session_id = required_string(object, "session_id")?.to_string();
@@ -1460,6 +1456,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                     "yield_time_ms".into(),
                     Value::from(object.get("wait_ms").and_then(Value::as_u64).unwrap_or(0)),
                 );
+                private.insert("verbosity".into(), Value::String("full".into()));
                 "write_stdin"
             }
             CommandControlAction::Write => {
@@ -1473,6 +1470,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                     "yield_time_ms".into(),
                     Value::from(object.get("wait_ms").and_then(Value::as_u64).unwrap_or(0)),
                 );
+                private.insert("verbosity".into(), Value::String("full".into()));
                 "write_stdin"
             }
             CommandControlAction::Kill => {
@@ -1482,6 +1480,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 if let Some(wait_ms) = object.get("wait_ms") {
                     private.insert("wait_ms".into(), wait_ms.clone());
                 }
+                private.insert("verbosity".into(), Value::String("full".into()));
                 "kill_session"
             }
             CommandControlAction::Read => unreachable!(),
@@ -1492,20 +1491,34 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             } else {
                 String::new()
             };
-        let call = if action == CommandControlAction::Kill {
-            let wait_ms = object
-                .get("wait_ms")
-                .and_then(Value::as_u64)
-                .unwrap_or(5_000)
-                .min(30_000);
-            self.private_call_with_timeout(
-                private_name,
-                Value::Object(private),
-                request_id,
-                std::time::Duration::from_millis(wait_ms.saturating_add(3_000)),
-            )
-        } else {
-            self.private_call(private_name, Value::Object(private), request_id)
+        let call = match action {
+            CommandControlAction::Poll | CommandControlAction::Write => {
+                let wait_ms = object
+                    .get("wait_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    .min(30_000);
+                self.private_call_with_timeout(
+                    private_name,
+                    Value::Object(private),
+                    request_id,
+                    command_transport_timeout(wait_ms),
+                )
+            }
+            CommandControlAction::Kill => {
+                let wait_ms = object
+                    .get("wait_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(5_000)
+                    .min(30_000);
+                self.private_call_with_timeout(
+                    private_name,
+                    Value::Object(private),
+                    request_id,
+                    command_transport_timeout(wait_ms),
+                )
+            }
+            CommandControlAction::Read => unreachable!(),
         };
         match call {
             Ok(raw) => {
@@ -1719,7 +1732,8 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 "session_id": private_session_id,
                 "chars": "",
                 "yield_time_ms": 0,
-                "max_output_bytes": 65536
+                "max_output_bytes": 65536,
+                "verbosity":"full"
             });
             match self.private_call("write_stdin", private, None) {
                 Ok(raw) => {
@@ -1746,6 +1760,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             }
         }
         Ok(())
+    }
+
+    fn has_running_command_session(&self) -> bool {
+        self.public_commands.has_running_session()
     }
 }
 
@@ -1844,7 +1862,7 @@ impl CodingToolsRuntimeAdapter {
             })
     }
 
-    fn normalize_read_output(&self, raw: &Value, public_output_ref: &str) -> Value {
+    fn normalize_read_output(raw: &Value, public_output_ref: &str) -> Value {
         let structured = raw.get("structuredContent").and_then(Value::as_object);
         let mut data = Map::new();
         data.insert(
@@ -1856,13 +1874,27 @@ impl CodingToolsRuntimeAdapter {
             "offset",
             "requested_offset",
             "limit",
-            "content",
             "next_offset",
             "truncated",
         ] {
             if let Some(value) = structured.and_then(|object| object.get(key)) {
                 data.insert(key.into(), value.clone());
             }
+        }
+        if let Some(content) = structured
+            .and_then(|object| object.get("content"))
+            .and_then(Value::as_str)
+        {
+            let stream = structured
+                .and_then(|object| object.get("stream"))
+                .and_then(Value::as_str)
+                .unwrap_or("stdout");
+            let content = if stream == "stderr" {
+                public_command_stderr(content)
+            } else {
+                content.to_string()
+            };
+            data.insert("content".into(), Value::String(content));
         }
         stable_success(Value::Object(data), "Command output read")
     }
@@ -1988,6 +2020,10 @@ fn command_state_internal_error() -> FacadeError {
         "命令任务状态持久化失败",
         false,
     )
+}
+
+fn command_transport_timeout(wait_ms: u64) -> std::time::Duration {
+    std::time::Duration::from_millis(wait_ms.min(30_000).saturating_add(3_000))
 }
 
 fn validate_private_command_result_semantics(
@@ -2203,6 +2239,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         self.adapter.reap_command_sessions()
     }
 
+    pub fn has_running_command_session(&self) -> bool {
+        self.adapter.has_running_command_session()
+    }
+
     pub fn authorize_public_request(
         &self,
         mode: PermissionMode,
@@ -2287,7 +2327,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             ),
             _ => {}
         }
-        project(CurrentTaskStatus::Idle);
+        let command_lifecycle_remains_running =
+            matches!(kind, TaskKind::ExecuteCommand) && self.adapter.has_running_command_session();
+        if !command_lifecycle_remains_running {
+            project(CurrentTaskStatus::Idle);
+        }
         Ok(result.unwrap_or_else(|error| error.to_mcp_result()))
     }
 
@@ -3137,17 +3181,135 @@ fn safe_command_output(raw: &Value) -> String {
 }
 
 fn public_command_stderr(stderr: &str) -> String {
-    let trimmed = stderr.trim_start();
-    if trimmed.starts_with("#< CLIXML") {
-        let lower = trimmed.to_ascii_lowercase();
-        if trimmed.trim_end().ends_with("</Objs>")
-            && lower.contains("s=\"progress\"")
-            && !lower.contains("s=\"error\"")
-        {
-            return String::new();
-        }
+    if !looks_like_clixml_protocol(stderr) {
+        return stderr.to_string();
     }
-    stderr.to_string()
+    let lower = stderr.to_ascii_lowercase();
+    if !lower.contains("s=\"error\"") {
+        return String::new();
+    }
+    extract_clixml_error_strings(stderr)
+}
+
+fn drain_public_stderr_protocol_buffer(buffer: &mut String) -> String {
+    let mut visible = String::new();
+    loop {
+        if buffer.is_empty() {
+            break;
+        }
+
+        if let Some(start) = clixml_envelope_start(buffer) {
+            if start > 0 {
+                visible.push_str(&buffer[..start]);
+                buffer.drain(..start);
+                continue;
+            }
+            let lower = buffer.to_ascii_lowercase();
+            let Some(end_start) = lower.find("</objs>") else {
+                break;
+            };
+            let end = end_start + "</objs>".len();
+            let envelope = buffer[..end].to_string();
+            visible.push_str(&public_command_stderr(&envelope));
+            buffer.drain(..end);
+            continue;
+        }
+
+        if looks_like_clixml_protocol(buffer) {
+            let fragment = std::mem::take(buffer);
+            visible.push_str(&public_command_stderr(&fragment));
+            break;
+        }
+
+        let hold = clixml_marker_prefix_suffix_len(buffer);
+        if hold > 0 {
+            let emit = buffer.len() - hold;
+            visible.push_str(&buffer[..emit]);
+            buffer.drain(..emit);
+            break;
+        }
+
+        visible.push_str(buffer);
+        buffer.clear();
+        break;
+    }
+    visible
+}
+
+fn clixml_envelope_start(value: &str) -> Option<usize> {
+    let lower = value.to_ascii_lowercase();
+    [lower.find("#< clixml"), lower.find("<objs")]
+        .into_iter()
+        .flatten()
+        .min()
+}
+
+fn clixml_marker_prefix_suffix_len(value: &str) -> usize {
+    let lower = value.to_ascii_lowercase();
+    ["#< clixml", "<objs"]
+        .into_iter()
+        .map(|marker| {
+            (1..marker.len())
+                .rev()
+                .find(|length| lower.ends_with(&marker[..*length]))
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn looks_like_clixml_protocol(stderr: &str) -> bool {
+    let lower = stderr.to_ascii_lowercase();
+    lower.contains("#< clixml")
+        || lower.contains("<objs")
+        || lower.contains("</objs>")
+        || lower.contains("<obj")
+        || lower.contains("</obj>")
+        || lower.contains("<ms")
+        || lower.contains("</ms>")
+        || lower.contains("s=\"progress\"")
+        || lower.contains("s=\"error\"")
+}
+
+fn extract_clixml_error_strings(stderr: &str) -> String {
+    let mut values = Vec::new();
+    let lower = stderr.to_ascii_lowercase();
+    let mut cursor = 0usize;
+    while cursor < lower.len() {
+        let Some(relative_start) = lower[cursor..].find("<s") else {
+            break;
+        };
+        let start = cursor + relative_start;
+        let Some(relative_open_end) = lower[start..].find('>') else {
+            break;
+        };
+        let open_end = start + relative_open_end;
+        let open = &lower[start..=open_end];
+        let Some(relative_close) = lower[open_end + 1..].find("</s>") else {
+            break;
+        };
+        let close = open_end + 1 + relative_close;
+        if open == "<s>" || open.contains("s=\"error\"") {
+            let decoded = decode_clixml_text(&stderr[open_end + 1..close]);
+            if !decoded.trim().is_empty() {
+                values.push(decoded);
+            }
+        }
+        cursor = close + "</s>".len();
+    }
+    values.join("\n")
+}
+
+fn decode_clixml_text(value: &str) -> String {
+    value
+        .replace("_x000D__x000A_", "\r\n")
+        .replace("_x000D_", "\r")
+        .replace("_x000A_", "\n")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3483,6 +3645,10 @@ mod tests {
         fn reap_command_sessions(&mut self) -> Result<(), FacadeError> {
             Ok(())
         }
+
+        fn has_running_command_session(&self) -> bool {
+            false
+        }
     }
 
     fn policy() -> CapabilityPolicy {
@@ -3794,7 +3960,7 @@ mod tests {
         assert_eq!(public_command_stderr(progress), "");
         let error =
             "#< CLIXML\r\n<Objs><Obj S=\"progress\"/><Obj S=\"Error\"><S>boom</S></Obj></Objs>";
-        assert_eq!(public_command_stderr(error), error);
+        assert_eq!(public_command_stderr(error), "boom");
         assert_eq!(public_command_stderr("plain error\r\n"), "plain error\r\n");
     }
 
@@ -3826,8 +3992,75 @@ mod tests {
             &public_error,
             "<Objs><Obj S=\"Error\"><S>boom</S></Obj></Objs>tail\r\n",
         );
-        assert!(visible.contains("S=\"Error\""));
-        assert!(visible.ends_with("tail\r\n"));
+        assert_eq!(visible, "boomtail\r\n");
+        assert!(!visible.contains("CLIXML"));
+        assert!(!visible.contains("</Obj"));
+    }
+
+    #[test]
+    fn consecutive_headerless_powershell_progress_envelopes_never_leak() {
+        let task_state = test_task_state("clixml-consecutive");
+        let mut sessions = PublicCommandSessions::default();
+        let public = bind_test_session(&mut sessions, &task_state, "PRIVATE_CLIXML_CONSECUTIVE");
+        let visible = sessions.filter_private_stderr(
+            &public,
+            "#< CLIXML\r\n<Objs><Obj S=\"progress\"><S>Preparing</S></Obj></Objs>\r\n<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><Obj S=\"progress\"><MS><S>Preparing modules for first use.</S></MS></Obj></Objs>real stderr\r\n",
+        );
+        assert!(visible.contains("real stderr"));
+        assert!(!visible.contains("CLIXML"));
+        assert!(!visible.contains("<Objs"));
+        assert!(!visible.contains("<Obj"));
+        assert!(!visible.contains("<MS"));
+        assert!(!visible.contains("</Obj"));
+    }
+
+    #[test]
+    fn retained_stderr_clixml_and_mid_envelope_pages_never_expose_private_framing() {
+        let progress =
+            "#< CLIXML\r\n<Objs><Obj S=\"progress\"><S>Preparing modules</S></Obj></Objs>";
+        assert_eq!(public_command_stderr(progress), "");
+
+        let error = "#< CLIXML\r\n<Objs><Obj S=\"Error\"><S>boom &amp; detail_x000D__x000A_next</S></Obj></Objs>";
+        assert_eq!(public_command_stderr(error), "boom & detail\r\nnext");
+
+        for page in [
+            "MS></Obj></Objs>",
+            "<MS><S>private-progress</S></MS></Obj></Objs>",
+            "m &amp; detail</S></Obj></Objs>",
+            "<Obj S=\"progress\"><S>Preparing modules</S></Obj></Objs>",
+        ] {
+            let public = public_command_stderr(page);
+            assert!(!public.contains("CLIXML"), "{public:?}");
+            assert!(!public.contains("<Obj"), "{public:?}");
+            assert!(!public.contains("</Obj"), "{public:?}");
+            assert!(!public.contains("<MS"), "{public:?}");
+            assert!(!public.contains("</MS"), "{public:?}");
+        }
+
+        for retained_content in [progress, "MS></Obj></Objs>"] {
+            let raw = json!({
+                "structuredContent":{
+                    "stream":"stderr",
+                    "offset":64,
+                    "requested_offset":64,
+                    "limit":128,
+                    "content":retained_content,
+                    "next_offset":192,
+                    "truncated":false
+                }
+            });
+            let normalized = CodingToolsRuntimeAdapter::normalize_read_output(
+                &raw,
+                "lb-output-retained-regression",
+            );
+            let content = normalized["structuredContent"]["data"]["content"]
+                .as_str()
+                .unwrap_or_default();
+            assert_eq!(content, "");
+            let rendered = serde_json::to_string(&normalized).unwrap();
+            assert!(!rendered.contains("CLIXML"));
+            assert!(!rendered.contains("</Obj"));
+        }
     }
 
     #[test]
