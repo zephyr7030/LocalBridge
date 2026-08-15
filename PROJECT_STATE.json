@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-006 generation18 rework accepted at implementation commit 07e80e06fcc2b638dfa1d742f821ce78bc23235d. Next execute LB-007, then strictly reaccept LB-008 through LB-012 sequentially; after all G2 PRs are reaccepted, run a fresh independent G2 adversarial generation19. Generation19 is not consumed. G3/G4 remain blocked. Tunnel HTTP400/network_error remains attribution-unproven and must be retested during LB-008 rather than treated as a proven root cause."
+    "next_action": "LB-007 generation18 strict-sequence reacceptance completed against baseline 270d995086f23503d37419dcb001a93f0cf370a8 with existing implementation commit 0a965fb84126c75bb108fb6cd72391ed067ca92. Next execute LB-008, then strictly reaccept LB-009 through LB-012 sequentially; after all G2 PRs are reaccepted, run a fresh independent G2 adversarial generation19. Generation19 is not consumed. G3/G4 remain blocked. Tunnel HTTP400/network_error remains attribution-unproven and must be retested during LB-008 rather than treated as a proven root cause."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1644,6 +1644,25 @@
       "Public command transport waits are bounded to the requested yield/wait plus headroom; the upstream pre-registration cancellation race is closed by durable pending cancellation intent until session registration.",
       "Bundled coding-tools integrity was rebaselined to clean payload tree SHA256 6d3ba92db59f9f168d6aad91832515a193914e3a2d6a039379eaf8793747013a; PYTHONDONTWRITEBYTECODE=1 prevents runtime tree mutation and no __pycache__ remains after full tests.",
       "Final verification: cargo test --locked 174/174 PASS; cargo clippy --locked --all-targets -- -D warnings PASS; npm test 5/5 PASS; npm run build PASS; verify:runtime-manifest PASS; verify:architecture PASS; g4-human-gate regression PASS; git diff --check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 19,
+    "g2_generation_19_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb007_generation18_reacceptance_2026_08_15": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "reacceptance_baseline_commit": "270d995086f23503d37419dcb001a93f0cf370a8",
+    "implementation_commit": "0a965fb84126c75bb108fb6cd72391ed067ca92",
+    "previous_acceptance_commit": "a4b12beca19f838619c7dae982f61c7a71cdf533",
+    "reason": "G2 generation18 reopened the strict sequence from LB-006; current LB-007 production policy already contains the schema30 transitive workspace-write correction and required PowerShell fail-closed hardening, so no new product patch was necessary.",
+    "evidence": [
+      "Current policy classifies bounded agent_workflow directory_changes as transitive workspace write with process_exec=false and control_plane=false; malformed or command-mixed requests fail closed, while protected build_release/custom capabilities are not erased.",
+      "Fresh LB-007 unit policy contract suite PASS 7/7 and integration policy enforcement suite PASS 6/6, covering unknown deny, tools/call enforcement, cached tools/list bypass, workflow indirect exec, control-plane deny, blocked/running task projection, redaction, and historical PowerShell indirection regressions.",
+      "Fresh full cargo test --locked PASS and cargo clippy --locked --all-targets -- -D warnings PASS on the current generation18-reworked baseline.",
+      "Fresh npm test PASS, npm run build PASS, runtime-manifest verifier PASS, architecture verifier PASS, G4 human-gate regression PASS, and git diff --check PASS.",
+      "Working tree had no tracked product modifications before governance transition; existing unrelated build/test artifacts remain untracked and untouched."
     ],
     "next_required_g2_adversarial_generation": 19,
     "g2_generation_19_consumed": false,
