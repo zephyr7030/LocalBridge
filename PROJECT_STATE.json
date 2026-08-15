@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,11 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "G2 generation18 / LB-006: retained command_control.read stderr can expose raw or mid-envelope PowerShell CLIXML because retained read content bypasses LocalBridge stderr normalization.",
+    "G2 generation18 / LB-006: asynchronous exec_command sessions project CurrentTask Idle when the tools/call response returns even when the public command session remains running, so long commands can be visible only for the minimum presentation interval instead of their real lifecycle.",
+    "G2 generation18 / LB-006: user black-box product evidence exposed an agent_workflow schema without schema30 path/directory_changes even though current committed source and fresh current-HEAD E2E contain and pass A293/A295; latest serving-instance provenance must be proven before acceptance."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +176,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 schema30 rework package is complete: LB-006 through LB-012 PASS and Group/Release Gate PASS. Run fresh independent G2 adversarial review generation18 against the committed review-ready baseline. Generation18 is not consumed; LB-013/G3 remains blocked until that review passes. A292 window centering remains queued for LB-015."
+    "next_action": "Repair G2 generation18 findings from LB-006: normalize retained/paginated stderr so private CLIXML framing never reaches the public API; bind CurrentTask ExecuteCommand lifetime to the public command session until terminal rather than tools/call response; and prove the actually served LocalBridge agent_workflow schema/runtime instance matches current schema30 A293/A295. Then strictly reaccept LB-007 through LB-012 and run fresh G2 adversarial generation19. Tunnel HTTP400/network_error remains an attribution-unproven observation to retest, not a standalone generation18 blocker."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1542,8 +1546,82 @@
       "PowerShell provider and dynamic command-surface mutation keeps existing review-required classification",
       "structured directory mutation rejects absolute parent-traversal and reparse escape targets and never widens authority"
     ],
-    "g2_generation_18_consumed": false,
+    "g2_generation_18_consumed": true,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_18_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 18,
+    "baseline_commit": "931e99be256013d25725f32c5259db2200875135",
+    "reopen_from_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "acceptance": [
+          "A249",
+          "A256"
+        ],
+        "summary": "Retained/paginated PowerShell stderr can leak private CLIXML protocol framing through the public output API.",
+        "evidence": [
+          "User black-box evidence observed retained stderr containing #< CLIXML and <Objs ...>, with truncated public output ending in a mid-envelope fragment such as MS></Obj></Objs>.",
+          "src-tauri/src/mcp/facade.rs normalize_read_output copies private read_output content directly into the public result and does not invoke filter_private_stderr/public_command_stderr.",
+          "The live-session filter only enters CLIXML buffering when a chunk begins with #< CLIXML or a prior protocol buffer already exists, so retained reads beginning at a nonzero offset inside an envelope are not classifiable by that path either.",
+          "Fresh existing CLIXML unit tests pass 2/2, demonstrating a coverage gap: they test start-aware live fragmentation, not retained stderr pagination/truncation."
+        ]
+      },
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "acceptance": [
+          "A210",
+          "A238",
+          "A269"
+        ],
+        "summary": "CurrentTask tracks the tools/call request lifetime instead of the full asynchronous public command-session lifecycle.",
+        "evidence": [
+          "src-tauri/src/mcp/facade.rs call_tool projects Running before dispatch but unconditionally projects Idle immediately after dispatch returns.",
+          "exec_command with yield_time_ms=0 can return a stable public status=running/session_id while the underlying process continues for many seconds; call_tool nevertheless transitions CurrentTask to Idle at that response boundary.",
+          "src-tauri/src/mcp/server.rs presentation logic then retains the completed tool only for the minimum roughly 500ms visibility window, explaining the observed long-running commands whose green status indicator only flashes briefly.",
+          "Existing long-call CurrentTask tests cover a tools/call that itself remains blocked until completion/cancellation; the schema28 asynchronous session E2E exercises yield_time_ms=0 but does not assert CurrentTask remains active until that public session becomes terminal."
+        ]
+      },
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "acceptance": [
+          "A293",
+          "A295"
+        ],
+        "summary": "Observed serving surface did not match the current committed schema30 facade, so A293/A295 deployment/runtime provenance is not acceptance-grade.",
+        "evidence": [
+          "User black-box evidence reported an agent_workflow tool schema exposing only action/objective and returning selected_path=. / is_repo=false for D:\\project\\LocalBridge.",
+          "Current committed src-tauri/src/mcp/facade.rs does expose path plus bounded directory_changes with create_directory/remove_empty_directory and implements selected project context.",
+          "Fresh current-HEAD cargo test schema28_public_runtime_behavior_is_real_end_to_end PASS proves current source/bundled-runtime E2E resolves NestedProject/src and performs schema30 structured directory create/remove safely.",
+          "Therefore this finding is a serving-instance/version/provenance mismatch or stale runtime observation, not evidence that current source lacks schema30; reacceptance requires black-box proof from the actually served latest LocalBridge instance."
+        ]
+      }
+    ],
+    "non_blocking_observations": [
+      {
+        "severity": "CANDIDATE",
+        "area": "Tunnel/transport availability",
+        "summary": "User testing saw transient HTTP 400 responses that recovered on retry and one final network_error: Connection failed; current review could not attribute these symptoms specifically to LocalBridge Tunnel.",
+        "disposition": "Retest against a provenance-verified latest LocalBridge serving instance during LB-008 reacceptance. Do not claim a Tunnel root cause without matching product logs/runtime evidence."
+      }
+    ],
+    "verified_passes": [
+      "Fresh current-HEAD cargo test schema28_public_runtime_behavior_is_real_end_to_end PASS (1/1, 12.67s), covering current bundled runtime schema30 nested-project/directory behavior plus public runtime semantics exercised by that test.",
+      "Fresh current-HEAD cargo test clixml PASS (2/2); these tests are retained as positive evidence but are insufficient for retained-output pagination.",
+      "User black-box evidence reports path escape, shell quoting, Unicode, incremental poll, concurrent sessions, post-start write, kill to cancelled, nested Git, nonzero exit and timeout PASS."
+    ],
+    "next_required_g2_adversarial_generation": 19,
+    "g2_generation_18_consumed": true,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "review_decision_commit": null
   }
 }
