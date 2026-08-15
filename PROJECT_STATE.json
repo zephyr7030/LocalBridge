@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-007 generation14 correction accepted at 3823e526db74c45a04fd85b05fcfd3b6f7b9aaa5 after PowerShell command-definition/resolution review hardening plus Constant None module-autoload lock and real schema28 E2E. Reaccept LB-008..LB-012, Group-Release, then fresh generation15. G3/G4 remain BLOCKED."
+    "next_action": "LB-008 reaccepted after generation14 correction chain with Tunnel/ARCH-016/runtime-manifest PASS. Reaccept LB-009..LB-012, Group-Release, then fresh generation15. G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
