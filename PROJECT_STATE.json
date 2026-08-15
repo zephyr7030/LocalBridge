@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2228,5 +2228,31 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "next_pr": "LB-012"
+  },
+  "lb012_schema33_administrator_gateway_acceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "implementation_commit": "038af9e00cd86b596ccdb92032014b30fe522fd2",
+    "architecture_verifier_commit": "38dad1b5d52f636628d91f14d2a80d61e70c9544",
+    "resolves_schema33_gap": "administrator-token-scoped Broker gateway for general process execution, trusted logical shells, and privileged filesystem access outside the active workspace",
+    "evidence": [
+      "elevated_exec exposes typed process, shell and filesystem administrator operations only while Elevated plus an Active Broker; the legacy trusted System32 whoami profile remains only for compatibility and does not limit schema33 administrator authority.",
+      "General direct administrator process execution uses structured absolute program plus argv; reg.exe schtasks.exe sc.exe netsh.exe bcdedit.exe and dism.exe require exact canonical trusted System32 identity, while arbitrary cmd.exe PowerShell pwsh and other shell executable paths are rejected from the direct process route.",
+      "Administrator shell execution accepts only logical auto powershell pwsh windows_powershell or cmd selectors. Broker shell resolution uses trusted installation identity and protected install-directory version ordering without executing a version probe under the ordinary LocalBridge token.",
+      "Privileged filesystem read write create-directory rename and delete use typed Broker IPC with bounded binary Base64 payloads and explicit recursive delete; the route is not implemented by cmd PowerShell or ordinary coding-tools workspace operations and can operate on administrator-token-accessible absolute paths outside the active workspace.",
+      "LocalBridge control-plane references remain denied by administrator policy; Edit and Full remain active-workspace-bound, ordinary exec_command never inherits the Broker token, whole-app elevation remains forbidden, and background startup cannot auto-trigger UAC.",
+      "Fresh typed administrator policy tests PASS; bundled MCP/PEP typed process shell filesystem routing PASS; actual separate Broker IPC PASS 6/6 including outside-workspace filesystem roundtrip, structured execution timeout cancellation output bounds redaction replay/stale-generation and peer-auth lifecycle coverage.",
+      "Fresh full serial cargo test --locked -- --test-threads=1 PASS with 184 library tests plus all invoked migration settings workspace process MCP policy privilege and doc-test targets; cargo clippy --locked --all-targets -- -D warnings PASS.",
+      "Fresh npm test PASS, production build PASS, runtime-manifest PASS, UI-language PASS, G4 human-gate regression PASS, LB-012 contract PASS, scoped rustfmt check PASS and git diff --check PASS.",
+      "ARCH-026 and ARCH-027 now each have exactly one LB-012-owned PR-scoped verifier under tests/unit/privilege; direct verifier execution PASS for Broker-backed administrator execution/control-plane deny and Edit/Full-vs-Elevated permission-scope boundaries."
+    ],
+    "group_transition": "G2_REVIEW_REQUIRED",
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "historical_g2_review_generation": 19,
+    "historical_g2_review_commit": "1b891b15de1c38e0c7fa6df2a7edbe210274c208",
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "next_action": "Run fresh independent G2 adversarial review generation 20. LB-013 and G3 remain blocked until that review passes."
   }
 }
