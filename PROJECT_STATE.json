@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,10 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "LB-006: agent_workflow cannot select or discover the explicit nested LocalBridge project when active workspace is D:\\project; git_workflow(path=LocalBridge) reports is_repo=true while agent_workflow reports git_before/git_after is_repo=false and the public agent_workflow schema has no project path selector.",
+    "LB-006: windows_powershell and auto PowerShell execution disable module autoload before user text without preloading a trusted standard management cmdlet surface, so basic cmdlets such as Get-Location and Get-ChildItem fail as CommandNotFound/ProcessFailed."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +175,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-006 schema29 A289-A291 correction accepted at 0b3e13cc0cdd819c26284809ae500fb259dbab8a. Execute LB-007 next, then strictly reaccept LB-008 through LB-012; G2 remains REWORK_REQUIRED/FAIL generation17 until fresh independent adversarial generation18. G3/LB-013 remains blocked, and A292 window centering remains queued for LB-015."
+    "next_action": "Ratify contract additions for agent_workflow workspace-relative nested-project selection/discovery consistency and a minimal trusted standard PowerShell cmdlet surface that preserves security hardening; then rework LB-006. LB-007 remains blocked. G2 generation18 is not consumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1457,5 +1460,45 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "review_decision_commit": "640b93137d2b6680f01a483acb561bea4439ec73"
+  },
+  "lb006_scoped_adversarial_review_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "scoped_independent_adversarial",
+    "group_generation_consumed": false,
+    "owner_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "summary": "agent_workflow nested-project discovery is inconsistent with git_workflow and cannot target D:\\project\\LocalBridge.",
+        "evidence": [
+          "Product workspace_context returned workspace D:\\project.",
+          "Product git_workflow status with path=LocalBridge returned is_repo=true.",
+          "Product agent_workflow diagnose for the nested LocalBridge project returned git_before.is_repo=false and git_after.is_repo=false.",
+          "Current public agent_workflow schema has no path/project selector and facade implementation calls git_workflow(Status, {}) against workspace root."
+        ]
+      },
+      {
+        "severity": "MAJOR",
+        "summary": "Trusted PowerShell selector removes basic standard cmdlet availability.",
+        "evidence": [
+          "Product exec_command windows_powershell: Get-Location returned ProcessFailed with CommandNotFoundException.",
+          "Product exec_command windows_powershell: Get-ChildItem returned ProcessFailed with CommandNotFoundException.",
+          "Product exec_command auto: Get-Location reproduced the same failure.",
+          "src-tauri/src/mcp/shell.rs hardened_powershell_script locks PSModuleAutoLoadingPreference=None before user text without a trusted management-module preload."
+        ]
+      }
+    ],
+    "verified_passes": [
+      "Product quoting Write-Output a|b and a&b PASS.",
+      "Product Windows PowerShell Chinese UTF-8 output PASS.",
+      "Product command_control post-start write PASS.",
+      "Product kill TERM converged to stable cancelled and later poll remained cancelled.",
+      "Product document start_line>end_line returned InvalidArgument.",
+      "Product git blame 5..5 returned exactly one line.",
+      "Product view_image 1024x1024 to 64x64 resize PASS.",
+      "Schema29 command task-state targeted Rust tests 7/7 PASS."
+    ],
+    "next_action": "Ratify contract additions for nested-project workflow selection/discovery consistency and a minimal trusted standard PowerShell cmdlet surface; then repair LB-006. Generation18 is not consumed."
   }
 }

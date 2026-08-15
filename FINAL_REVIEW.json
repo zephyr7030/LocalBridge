@@ -6,7 +6,8 @@
   "phase": "PRE_CODE",
   "current_pr": "LB-006",
   "blocking_findings": [
-    "LB-006/schema29: terminal command task-state is not durably and atomically finalized; terminal tasks can retain running current_command or miss command_finished, and no task_id+session_id owner CAS protects delayed finalizers."
+    "LB-006: agent_workflow cannot select/discover D:\\project\\LocalBridge as the nested repository even though git_workflow(path=LocalBridge) resolves it correctly.",
+    "LB-006: windows_powershell/auto disables module autoload without preloading a trusted standard management cmdlet surface, causing Get-Location/Get-ChildItem to fail as CommandNotFound/ProcessFailed."
   ],
   "dynamic_gates_owned_by_lb000": [
     "coding-tools capability surface",
@@ -174,7 +175,7 @@
     "slow_backend_responsiveness_gate": true
   },
   "cloudflare_final_distribution": "forbidden_from_LB-018_bundle_manifest_launcher_and_fallback",
-  "recommended_next_step": "Rework LB-006 only for schema29 A289-A291 using targeted Fast/Runtime gates; then strictly reaccept LB-007 through LB-012 and run G2 adversarial generation18. G3/LB-013 remains blocked. Implement A292 default window centering only when sequencing reaches LB-015.",
+  "recommended_next_step": "Ratify contract additions for agent_workflow workspace-relative nested-project selection/discovery consistency and a minimal trusted standard PowerShell cmdlet surface that preserves security hardening; then rework LB-006. LB-007 remains blocked and G2 generation18 is not consumed.",
   "schema29_review": {
     "generation": 17,
     "status": "FAIL",
