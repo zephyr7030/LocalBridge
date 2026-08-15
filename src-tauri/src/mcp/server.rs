@@ -2942,10 +2942,17 @@ mod tests {
             Some(&session),
             &json!({"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}),
         );
-        assert_eq!(
-            edit_tools.body["result"]["tools"].as_array().unwrap().len(),
-            4
-        );
+        let edit_tool_names = edit_tools.body["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(edit_tool_names.len(), 5);
+        assert!(edit_tool_names.contains(&"agent_workflow"));
+        for process_tool in ["exec_command", "command_control", "task_control"] {
+            assert!(!edit_tool_names.contains(&process_tool));
+        }
 
         let read_started = Instant::now();
         let read = post(
@@ -3015,6 +3022,10 @@ mod tests {
 
         let base_policy = fs::read_to_string(root.join("runtime-policy.toml")).unwrap();
         let narrowed_policy = base_policy
+            .replace(
+                "edit_tools = [\"workspace_context\", \"agent_workflow\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "edit_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            )
             .replace(
                 "full_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
                 "full_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
