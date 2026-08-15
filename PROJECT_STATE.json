@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,9 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "LB-007 A251: PowerShell filter/workflow command definitions and CommandInfo.ScriptBlock extraction allow executable command/script surfaces to be created or transferred without the current shell classifier recognizing the eventual execution target."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +174,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-012 reaccepted after generation13 correction chain. G2 REVIEW_REQUIRED: run fresh Group-Release, then fresh independent adversarial generation14. Generation14 remains unconsumed; LB-013/G3/G4 remain BLOCKED until G2 review PASS."
+    "next_action": "G2 independent adversarial review generation14 FAIL. Rework LB-007: command-definition language forms (filter/workflow/configuration) and executable ScriptBlock exposure/transfer must be review-required before execution. Then reaccept LB-008..LB-012, Group-Release, fresh generation15. G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1281,6 +1283,39 @@
     ],
     "next_required_g2_adversarial_generation": 14,
     "g2_generation_13_consumed": true,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_14_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 14,
+    "baseline_commit": "6c592c6d7d66d1c6d2e77cf9a381cc8c0a053834",
+    "reopen_from_pr": "LB-007",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-007",
+        "acceptance": [
+          "A251"
+        ],
+        "summary": "PowerShell can create command definitions or extract and execute ScriptBlock objects without using the dynamic invocation surfaces currently classified for review.",
+        "evidence": [
+          "Non-destructive Windows PowerShell probe `filter lbgen14 { Write-Output 'FILTER_DEFINITION_EXECUTED' }; lbgen14` exited 0 and produced FILTER_DEFINITION_EXECUTED; `filter` is a function-like command-definition keyword but is not classified like `function`.",
+          "Windows PowerShell probe `workflow lbgen14workflow { Write-Output 'WORKFLOW_DEFINITION_EXECUTED' }; lbgen14workflow` exited 0 and produced WORKFLOW_DEFINITION_EXECUTED; `workflow` likewise defines an invokable command.",
+          "A temporary harmless .ps1 was created outside the repository; the separate invocation `$p='<temp>\\lb-gen14-probe.ps1'; $sb=(Get-Command $p).ScriptBlock; 1 | ForEach-Object -Process $sb` exited 0 and produced GEN14_SCRIPTBLOCK_FILE_EXECUTED, then the temp file was deleted. The .ps1 path remained quoted data, no call operator or Invoke method was used.",
+          "Current member scanner allows property reads such as `.ScriptBlock`; current review_word does not classify filter/workflow. This lets executable code cross the static review boundary as data and execute later.",
+          "runtime-policy.toml requires static_target_fail_closed and unreviewable_shell_indirection=review_required."
+        ]
+      }
+    ],
+    "verified_passes": [
+      "Fresh G2 Group-Release cargo test --locked and clippy all-targets: PASS.",
+      "Frontend Vitest/build, runtime manifest, architecture, G4 gate and diff check: PASS."
+    ],
+    "next_required_g2_adversarial_generation": 15,
+    "g2_generation_14_consumed": true,
     "g3_unlocked": false,
     "g4_unlocked": false
   }
