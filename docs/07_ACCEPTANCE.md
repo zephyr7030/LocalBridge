@@ -290,3 +290,7 @@
 | A286 | PowerShell UTF-8 | `Write-Output '中文输出测试'` 在 `windows_powershell` 及 `auto`→PowerShell 时 public output 精确为 UTF-8 原文，无 `�`/mojibake |
 | A287 | Git blame inclusive range | `start_line/end_line` 为 1-based inclusive：5..5 只返回第5行，1..3 精确3行；start>end=`InvalidArgument`；`max_lines` 保持一致 bounded semantics |
 | A288 | document inclusive range | document inspect/read line range 为 1-based inclusive；同时提供 start/end 且 start>end 必须返回 LocalBridge `InvalidArgument`，不得成功返回空文本 |
+| A289 | atomic terminal finalizer | command/session 的 success、nonzero failure、timeout、cancel、kill、runtime/tool exception 等所有 terminal 路径都必须进入 `finally`/finally-equivalent unconditional finalizer；同一 owner transaction 内持久化 terminal snapshot、精确一次 `command_finished` 并清空 `current_command`，不得产生 terminal task + running current_command |
+| A290 | durable terminal snapshot independent of retention | task-state 自身保存 bounded/redacted terminal snapshot，private session 即使立即 prune 或超过约 300 秒 retention 后仍能恢复相同 terminal outcome；session retention 只能支持临时输出读取，不能作为最终结果真相源 |
+| A291 | task/session owner CAS | command start/replace/finish/clear 必须 compare-and-swap/owner-check `(task_id, session_id)`；旧 task/旧 session 的 delayed finalizer 不得覆盖或清除新 owner，owner mismatch no-op/typed conflict；相同 owner 重复 terminal callback 幂等且不重复 `command_finished` |
+| A292 | default centered main window | 正常前台首次创建/首次显示固定 780×620 主窗口时，在当前 monitor work area 居中（允许 DPI rounding）；托盘重新显示已存在且可能被用户移动的窗口时保持当前位置，不得每次 show 强制重新居中 |

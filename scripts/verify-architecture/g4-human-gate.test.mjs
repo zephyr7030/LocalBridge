@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +258,10 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema28Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema29Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29Contracts), true);
+const schema28Contracts = normalizeCommandTaskStateAndWindowCenterAmendment20260815(schema29Contracts);
+assert.equal(schema28Contracts.schema_version, 28);
 assert.equal(hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28Contracts), true);
 const schema27Contracts = normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(schema28Contracts);
 assert.equal(schema27Contracts.schema_version, 27);
@@ -315,6 +318,38 @@ assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26BackgroundW
 const schema26DuplicateUac = structuredClone(schema26Contracts);
 schema26DuplicateUac.rules.admin_mode_active_broker_reselection_duplicate_uac_forbidden = false;
 assert.equal(hasExactAdminModeSafetyWarningAmendment20260814(schema26DuplicateUac), false);
+
+for (const rule of [
+  "command_terminal_unconditional_finalizer_required",
+  "command_terminal_finalizer_must_atomically_append_finished_and_clear_current",
+  "command_terminal_finished_event_exactly_once_required",
+  "task_state_terminal_snapshot_persistence_required",
+  "task_state_terminal_truth_independent_of_private_session_retention_required",
+  "task_state_command_owner_compare_and_swap_required",
+  "task_state_non_owner_overwrite_or_clear_forbidden",
+  "task_state_duplicate_terminal_finalization_idempotent",
+  "main_window_default_centered_required",
+  "existing_window_reopen_forced_recenter_forbidden",
+]) {
+  const weakened = structuredClone(schema29Contracts);
+  weakened.rules[rule] = !schema29Contracts.rules[rule];
+  assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(weakened), false, rule);
+}
+const schema29OwnerIdentityDrift = structuredClone(schema29Contracts);
+schema29OwnerIdentityDrift.rules.task_state_command_owner_identity = ["session_id"];
+assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29OwnerIdentityDrift), false);
+const schema29MissingFinallyProof = structuredClone(schema29Contracts);
+schema29MissingFinallyProof.prs["LB-006"].required_tests = schema29MissingFinallyProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("every command terminal path"));
+assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29MissingFinallyProof), false);
+const schema29MissingRetentionProof = structuredClone(schema29Contracts);
+schema29MissingRetentionProof.prs["LB-006"].required_tests = schema29MissingRetentionProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("task-state persists a bounded redacted terminal command snapshot"));
+assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29MissingRetentionProof), false);
+const schema29MissingOwnerCasProof = structuredClone(schema29Contracts);
+schema29MissingOwnerCasProof.prs["LB-006"].required_tests = schema29MissingOwnerCasProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("task-state command start replace finish and clear operations"));
+assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29MissingOwnerCasProof), false);
+const schema29MissingCenterProof = structuredClone(schema29Contracts);
+schema29MissingCenterProof.prs["LB-015"].required_tests = schema29MissingCenterProof.prs["LB-015"].required_tests.filter((item) => !item.startsWith("on normal foreground first visible creation"));
+assert.equal(hasExactCommandTaskStateAndWindowCenterAmendment20260815(schema29MissingCenterProof), false);
 
 const schema28NoFixtureCompression = structuredClone(schema28Contracts);
 schema28NoFixtureCompression.rules.test_heavy_shared_fixture_lifecycle_compression_required = false;

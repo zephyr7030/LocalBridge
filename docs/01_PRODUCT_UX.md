@@ -367,6 +367,8 @@ Tunnel start → ready
 
 主窗口固定为 780×620。minimum inner size 与 maximum inner size 均固定为 780×620，`resizable=false`、`maximizable=false`。原生 Windows 窗口 decorations 必须关闭；LocalBridge 只允许一层自定义风格化窗口 chrome，并且外框必须从 client area 的 `(0,0)` 开始、以 100% 宽高贴合整个窗口，不能在原生边框内部再绘制一个内缩“假窗口”。自定义 chrome 必须提供窗口拖拽区、最小化和关闭；不提供最大化。Dashboard 与 onboarding 必须在该固定 client area 内完整可操作。
 
+Schema29 补充窗口默认位置：正常前台**首次创建并首次可见**主窗口时，固定 780×620 client window 默认居中于当前/目标 monitor 的 work area，允许由 DPI/物理像素换算产生的整数取整误差。该规则不是“每次 show 都居中”：如果同一个主窗口已经创建并被用户移动，托盘打开/从隐藏恢复时必须保留当前位置，不能强制把用户窗口拉回屏幕中心。
+
 ## UI / Backend 分离
 
 WebView/React 只负责展示 backend typed projection 与发送 typed user intent。runtime 启停、readiness、retry/recovery、workspace switch、credential 写入、UAC 与 CurrentTask truth 均由 Rust/backend 状态机负责；可能耗时的操作必须运行在独立 worker/async 执行上下文，禁止占用 UI/WebView 事件线程。正常 configured 前台启动严格采用 UI-first 顺序：先创建/显示窗口并达到可交互 milestone，前端仅发送一次 typed `UI-ready` intent，之后 backend 才异步启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel，并实时投影 Starting/Ready/Fault。UI-ready 之前不得提前启动这些服务；重复 ready 必须 backend 幂等且不能生成第二 runtime owner。`--background` 不等待 UI-ready；唤醒已经健康运行的后台实例不得仅为重放 UI-ready 而重启服务。

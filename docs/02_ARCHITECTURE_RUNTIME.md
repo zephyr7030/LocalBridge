@@ -171,6 +171,22 @@ failure/timeout/private-session-lost 可在 isolation 本身为被测行为时�
 
 开发/测试 harness 可以出现后台命令进程或可见 console window；这不是产品行为证据，也不构成产品缺陷。正式打包/正常 GUI 运行时，LocalBridge-owned managed children（bundled coding runtime、PEP-adjacent managed command route、Tunnel、Broker/background helper、shell/direct command）不得意外创建可见 console window，除非未来显式 interactive-terminal 合同允许。该要求必须由 release-style/packaged launcher 实测，同时保留 Job/process ownership 与最小必要进程拓扑。
 
+### Schema29 — Durable task-state terminal commit
+
+public command/session 的内存 terminal snapshot 仍然不足以承担 workflow/task-state 的最终真相。每个 command 一旦从 running 进入任一 terminal outcome，必须走一个不可跳过的 `finally`（Python/tool-host）或语义等价的 unconditional finalizer（其它实现语言）。该 finalizer 持有 task-state owner transaction/lock，并在**同一原子状态提交**中完成：
+
+```text
+verify owner == (task_id, session_id)
+→ persist bounded/redacted terminal snapshot
+→ append exactly one command_finished
+→ current_command = null
+→ commit
+```
+
+finalizer 覆盖 success、nonzero exit、failure、timeout、cancel、kill、runtime error、transport/tool exception；不得依赖调用方随后再执行 cleanup。terminal snapshot 至少能够稳定表达 terminal classification、exit/signal/timeout/cancel/error 与可安全保存的 output reference/summary，因此即使 private runtime session 被约 300 秒 retention 清理，task-state 仍能回答最终结果。private session retention 只能作为短期输出读取资源，不能成为 terminal truth source。
+
+command state 的 start/replace/finish/clear 都必须比较 `(task_id, session_id)` owner。延迟到达的旧 task finalizer、旧 session watcher、timeout callback 或 kill callback 若 owner 已变化，不得清空/覆盖新 command；owner mismatch 只能 no-op 或返回稳定 typed conflict。相同 owner 的重复 terminal callback 幂等：保留第一份稳定 terminal snapshot、不重复 `command_finished`、不重新建立 `current_command`。
+
 ### Schema26 — Administrator Mode Safety Consent Gate
 
 管理员模式可见入口的视觉与授权状态机由 LocalBridge 自己拥有，不能由 frontend 直接跳到 UAC：

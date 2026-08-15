@@ -103,6 +103,12 @@ static/source-string contract test 只适合固定文案、schema、allowlist、
 
 开发内循环不得在每个小修改后重复运行完整 `cargo test --locked` + all-target Clippy + frontend build + 历史 architecture/governance 链；先 targeted Fast Gate，准备正式接受时执行一次对应 Runtime Gate，最终 acceptance/group/release 再执行完整必需 Gate。测试优化不得删掉最终 required coverage。
 
+## Schema29 task-state terminal durability
+
+测试与实际 tool runner 都必须把 command terminal transition 当作持久状态事务，而不是 session retention 的副作用。任何 terminal exit 都由 `finally`/finally-equivalent finalizer 原子完成 terminal snapshot + 单个 `command_finished` + `current_command=null`；task-state 落盘后，即使 private command session 立即 prune，也必须能恢复同一 terminal truth。
+
+并发测试至少覆盖 delayed-finalizer race：Task A / Session A 启动，随后 Task B / Session B 成为当前 owner；A 的迟到 completion/timeout/cancel callback 必须因 `(task_id, session_id)` CAS/owner mismatch 而不能清除 B。重复 A terminal callback 也不能生成第二个 `command_finished`。持久化写仍服从项目既有 atomic-write/replace/fail-safe 规则，terminal snapshot 与 owner metadata 必须 secret-redacted/bounded。
+
 ## Release
 
 ```text

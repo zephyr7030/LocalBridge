@@ -644,6 +644,43 @@ const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15 = Object.freeze({
+  schemaVersion: 29,
+  baselineSchemaVersion: 28,
+  addedRules: {
+    command_terminal_unconditional_finalizer_required: true,
+    command_terminal_finalizer_must_atomically_append_finished_and_clear_current: true,
+    command_terminal_finished_event_exactly_once_required: true,
+    task_state_terminal_snapshot_persistence_required: true,
+    task_state_terminal_truth_independent_of_private_session_retention_required: true,
+    task_state_command_owner_compare_and_swap_required: true,
+    task_state_command_owner_identity: ["task_id", "session_id"],
+    task_state_non_owner_overwrite_or_clear_forbidden: true,
+    task_state_duplicate_terminal_finalization_idempotent: true,
+    main_window_default_centered_required: true,
+    existing_window_reopen_forced_recenter_forbidden: true,
+  },
+  lb006: {
+    addedArtifacts: [
+      "owner-checked atomic task-state command finalizer with durable terminal snapshots",
+    ],
+    addedTests: [
+      "every command terminal path including success nonzero-exit failure timeout cancellation kill runtime error and tool exception executes one finally or finally-equivalent unconditional finalizer that under one task-state owner transaction appends exactly one command_finished terminal event and clears current_command only when the same task_id plus session_id still owns it",
+      "task-state persists a bounded redacted terminal command snapshot sufficient to recover status outcome exit or signal timeout cancellation and stable output references after the private runtime session has expired or been pruned; the approximately 300-second private session retention may support output paging but is never the source of terminal truth",
+      "task-state command start replace finish and clear operations use compare-and-swap or an equivalent owner check on task_id plus session_id; a delayed finalizer from task A cannot overwrite or clear task B or a newer session and an owner mismatch is a no-op or typed conflict rather than destructive mutation",
+      "duplicate terminal callbacks for the same task_id plus session_id are idempotent: the terminal snapshot remains stable command_finished is not duplicated and current_command cannot be resurrected or clear a newer owner",
+    ],
+  },
+  lb015: {
+    addedArtifacts: [
+      "default-centered first visible 780x620 main window creation",
+    ],
+    addedTests: [
+      "on normal foreground first visible creation the fixed 780x620 main window is centered within the current monitor work area with DPI rounding tolerance; reopening an already-created hidden window preserves its user-moved position instead of forcibly recentering it",
+    ],
+  },
+});
+
 const TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14 = Object.freeze({
   schemaVersion: 28,
   baselineSchemaVersion: 27,
@@ -1101,6 +1138,38 @@ export function normalizeAdminModeSafetyWarningAmendment20260814(contractsDoc) {
   return normalized;
 }
 
+export function hasExactCommandTaskStateAndWindowCenterAmendment20260815(contractsDoc) {
+  if (contractsDoc?.schema_version !== COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb006 = contractsDoc?.prs?.["LB-006"];
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  if (!lb006 || !lb015) return false;
+  return containsAll(lb006.required_artifacts, COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.lb006.addedArtifacts)
+    && containsAll(lb006.required_tests, COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.lb006.addedTests)
+    && containsAll(lb015.required_artifacts, COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.lb015.addedArtifacts)
+    && containsAll(lb015.required_tests, COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.lb015.addedTests);
+}
+
+export function normalizeCommandTaskStateAndWindowCenterAmendment20260815(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.baselineSchemaVersion;
+  for (const key of Object.keys(COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.addedRules)) delete normalized.rules[key];
+  const lb006 = normalized.prs?.["LB-006"];
+  const lb015 = normalized.prs?.["LB-015"];
+  if (lb006) {
+    lb006.required_artifacts = removeItems(lb006.required_artifacts, COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.lb006.addedArtifacts);
+    lb006.required_tests = removeItems(lb006.required_tests, COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.lb006.addedTests);
+  }
+  if (lb015) {
+    lb015.required_artifacts = removeItems(lb015.required_artifacts, COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.lb015.addedArtifacts);
+    lb015.required_tests = removeItems(lb015.required_tests, COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.lb015.addedTests);
+  }
+  return normalized;
+}
+
 export function hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(contractsDoc) {
   if (contractsDoc?.schema_version !== TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.schemaVersion) return false;
   for (const [key, expected] of Object.entries(TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.addedRules)) {
@@ -1344,6 +1413,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= COMMAND_TASK_STATE_AND_WINDOW_CENTER_AMENDMENT_2026_08_15.schemaVersion) {
+    if (!hasExactCommandTaskStateAndWindowCenterAmendment20260815(authorizationContracts)) {
+      findings.push(`${expected.id}:command-task-state-window-center-20260815-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeCommandTaskStateAndWindowCenterAmendment20260815(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= TEST_ORCHESTRATION_AND_PUBLIC_RUNTIME_CORRECTIONS_AMENDMENT_2026_08_14.schemaVersion) {
     if (!hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814(authorizationContracts)) {
       findings.push(`${expected.id}:test-orchestration-public-runtime-corrections-20260814-contract-amendment-drift`);

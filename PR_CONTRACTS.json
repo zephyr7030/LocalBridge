@@ -1,5 +1,5 @@
 {
-  "schema_version": 28,
+  "schema_version": 29,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -534,7 +534,21 @@
     "git_blame_line_range_one_based_inclusive": true,
     "document_line_range_one_based_inclusive": true,
     "invalid_line_range_typed_invalid_argument_required": true,
-    "runtime_result_semantic_probe_all_adapter_consumed_unmodeled_fields_required": true
+    "runtime_result_semantic_probe_all_adapter_consumed_unmodeled_fields_required": true,
+    "command_terminal_unconditional_finalizer_required": true,
+    "command_terminal_finalizer_must_atomically_append_finished_and_clear_current": true,
+    "command_terminal_finished_event_exactly_once_required": true,
+    "task_state_terminal_snapshot_persistence_required": true,
+    "task_state_terminal_truth_independent_of_private_session_retention_required": true,
+    "task_state_command_owner_compare_and_swap_required": true,
+    "task_state_command_owner_identity": [
+      "task_id",
+      "session_id"
+    ],
+    "task_state_non_owner_overwrite_or_clear_forbidden": true,
+    "task_state_duplicate_terminal_finalization_idempotent": true,
+    "main_window_default_centered_required": true,
+    "existing_window_reopen_forced_recenter_forbidden": true
   },
   "prs": {
     "LB-000": {
@@ -788,7 +802,8 @@
         "shared workspace-bounded nested Git repository resolver for status diff log show and blame",
         "schema28 public command lifecycle delta/cursor state for incremental poll and stable kill terminal convergence",
         "single-parse shell invocation and UTF-8 public output normalization across trusted Windows shell selectors",
-        "real image resize adapter plus inclusive line-range validation for Git blame and documents"
+        "real image resize adapter plus inclusive line-range validation for Git blame and documents",
+        "owner-checked atomic task-state command finalizer with durable terminal snapshots"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -830,7 +845,11 @@
         "Windows PowerShell Write-Output 中文输出测试 round-trips exact UTF-8 under windows_powershell and under auto when auto resolves to PowerShell without mojibake or replacement characters",
         "git_workflow blame uses one-based inclusive start_line and end_line so 5 through 5 returns exactly line 5 and 1 through 3 returns exactly three lines; start_line greater than end_line is InvalidArgument and max_lines remains bounded",
         "document_workflow line ranges are one-based inclusive and start_line greater than end_line returns LocalBridge InvalidArgument rather than a successful empty result",
-        "every adapter-consumed private result field not guaranteed by upstream outputSchema has a deterministic non-destructive semantic compatibility probe or equivalent fail-closed evidence before public facade serving"
+        "every adapter-consumed private result field not guaranteed by upstream outputSchema has a deterministic non-destructive semantic compatibility probe or equivalent fail-closed evidence before public facade serving",
+        "every command terminal path including success nonzero-exit failure timeout cancellation kill runtime error and tool exception executes one finally or finally-equivalent unconditional finalizer that under one task-state owner transaction appends exactly one command_finished terminal event and clears current_command only when the same task_id plus session_id still owns it",
+        "task-state persists a bounded redacted terminal command snapshot sufficient to recover status outcome exit or signal timeout cancellation and stable output references after the private runtime session has expired or been pruned; the approximately 300-second private session retention may support output paging but is never the source of terminal truth",
+        "task-state command start replace finish and clear operations use compare-and-swap or an equivalent owner check on task_id plus session_id; a delayed finalizer from task A cannot overwrite or clear task B or a newer session and an owner mismatch is a no-op or typed conflict rather than destructive mutation",
+        "duplicate terminal callbacks for the same task_id plus session_id are idempotent: the terminal snapshot remains stable command_finished is not duplicated and current_command cannot be resurrected or clear a newer owner"
       ],
       "non_goals": [
         "policy enforcement",
@@ -1119,6 +1138,7 @@
         "rounded outer UI surfaces that preserve all corners while inner content scrolls",
         "arrowless rounded-scroll presentation",
         "fixed 780x620 non-resizable non-maximizable main window shell",
+        "default-centered first visible 780x620 main window creation",
         "projection-only responsive frontend boundary"
       ],
       "required_tests": [
@@ -1209,6 +1229,7 @@
         "no MCP Broker sidecar ManagedProcessSpec process launch or command tool invocation receives a workspace cwd workdir current_dir or path argument beginning with the Win32 verbatim prefix",
         "ordinary execution path is revalidated or identity-bound to the same freshly validated filesystem object and a mismatch fails closed rather than authorizing a path alias",
         "main window default minimum and maximum inner size are all exactly 780x620 while resizable false maximizable false decorations false and the existing custom chrome semantics remain unchanged",
+        "on normal foreground first visible creation the fixed 780x620 main window is centered within the current monitor work area with DPI rounding tolerance; reopening an already-created hidden window preserves its user-moved position instead of forcibly recentering it",
         "forcing Settings or another rounded sheet/dialog to overflow vertically at 780x620 preserves all four outer rounded corners; the scrollbar is clipped or inset inside the rounded shell and never flattens or cuts the outer radius",
         "vertical scrollbars on Settings and other scrollable rounded surfaces expose no top or bottom arrow button or triangle affordance at 780x620",
         "removing scrollbar arrow affordances preserves wheel track and thumb scrolling and does not flatten or cut any outer rounded corner",

@@ -173,6 +173,17 @@ result probe     = adapter 消费且 upstream outputSchema 未保证的 private 
 当前返工入口     = G2 / LB-006；schema27 acceptance 仅保留历史 provenance；generation 10 未消费
 ```
 
+Schema29 command task-state durability / window placement 补充：
+
+```text
+terminal finalizer = 每个 terminal 路径都必须进入 finally/finally-equivalent；一个 owner transaction 内原子追加且仅追加一次 command_finished + 清空 current_command
+terminal snapshot  = task-state 自己持久化 bounded/redacted terminal truth；private session 约300秒 retention 只用于临时输出读取，不能决定最终结果
+owner CAS          = command state 更新比较 (task_id, session_id)；旧 task/旧 session 不得覆盖或清除当前 owner；duplicate finalization 幂等
+窗口首次显示       = 正常前台新建 780×620 主窗口默认在当前 monitor work area 居中；托盘重新显示已存在窗口保留用户位置
+G2 owner           = 前三项归 LB-006；gen16 在 schema29 前完成，必须 fresh G2 adversarial review
+G3 owner           = 居中项归 LB-015，不得提前混入 G2 产品修改
+```
+
 Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订，**不改变当前执行入口**：当前仍为 `G2 / LB-006`，必须继续严格顺序推进，不能因本合同提前跳到 G3。
 
 ```text
