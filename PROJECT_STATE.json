@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-009",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -180,7 +180,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-008 schema32 Tunnel Runtime reacceptance is accepted with no product patch required. This user-authorized execution round stops at LB-009 READY/current; do not implement LB-009. LB-012 still owns reviewed administrator system-management elevated_exec profiles. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
+    "next_action": "Schema33 execution is explicitly reopened from LB-006 by user instruction. Execute LB-006 through LB-012 strictly and serially; preserve G2 generation19 FAIL provenance and keep generation20 unconsumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -2102,5 +2102,25 @@
       "LB-007 REWORK_REQUIRED against schema33 privileged route/system-management classification",
       "LB-008 no confirmed blocker found in current Tunnel source/tests during this scoped review; formal G2 generation20 is not consumed"
     ]
+  },
+  "schema33_execution_reopen_2026_08_16": {
+    "status": "REWORK_REQUIRED",
+    "source": "explicit user instruction to execute from LB-006 through LB-012",
+    "contract_schema_version": 33,
+    "previous_current_pr": "LB-009",
+    "reopen_from_pr": "LB-006",
+    "strict_sequence": [
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-009",
+      "LB-010",
+      "LB-011",
+      "LB-012"
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "historical_g2_review_generation": 19,
+    "historical_g2_review_commit": "1b891b15de1c38e0c7fa6df2a7edbe210274c208"
   }
 }
