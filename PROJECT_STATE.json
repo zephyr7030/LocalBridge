@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-007 generation12 correction accepted at 0eb2940c0db77b14af3e9d2d06cced3ad6d66e04 after provider-mutation and direct Alias namespace review hardening. Reaccept LB-008 through LB-012 sequentially, rerun G2 Group-Release, then fresh independent generation 13. G3/G4 remain BLOCKED."
+    "next_action": "LB-008 reaccepted after generation12 correction chain with Tunnel contract/ARCH-016/runtime-manifest PASS. Reaccept LB-009 through LB-012 sequentially, then Group-Release and fresh generation13. G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
