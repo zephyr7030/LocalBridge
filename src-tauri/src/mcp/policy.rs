@@ -23,6 +23,8 @@ const CONTROL_PLANE_NAMES: &[&str] = &[
     "tunnel_config_write",
     "mcp_config_write",
 ];
+const WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS: &[&str] =
+    &["reg.exe", "schtasks.exe", "sc.exe", "netsh.exe"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolDescriptor {
@@ -990,6 +992,283 @@ fn review_word(word: &str) -> bool {
     )
 }
 
+fn windows_system_management_program_token(token: &str) -> bool {
+    let token = token.trim_matches(['\'', '"']);
+    let basename = token.rsplit(['\\', '/']).next().unwrap_or(token);
+    WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS.iter().any(|program| {
+        basename.eq_ignore_ascii_case(program)
+            || program
+                .strip_suffix(".exe")
+                .is_some_and(|stem| basename.eq_ignore_ascii_case(stem))
+    })
+}
+
+fn powershell_static_system_management_target(command: &str) -> bool {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    fn finish_target(token: &mut String, is_target: &mut bool) -> bool {
+        let requires_privilege = *is_target && windows_system_management_program_token(token);
+        token.clear();
+        *is_target = false;
+        requires_privilege
+    }
+
+    let mut quote = Quote::None;
+    let mut token = String::new();
+    let mut token_is_target = false;
+    let mut command_boundary = true;
+    let mut comment = false;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if comment {
+            if matches!(ch, '\r' | '\n') {
+                comment = false;
+                command_boundary = true;
+            }
+            continue;
+        }
+        match quote {
+            Quote::Single => {
+                if ch == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        chars.next();
+                    } else {
+                        quote = Quote::None;
+                    }
+                }
+                continue;
+            }
+            Quote::Double => {
+                if ch == '`' {
+                    chars.next();
+                } else if ch == '"' {
+                    quote = Quote::None;
+                }
+                continue;
+            }
+            Quote::None => {}
+        }
+
+        if ch == '#' {
+            if finish_target(&mut token, &mut token_is_target) {
+                return true;
+            }
+            comment = true;
+            continue;
+        }
+        if matches!(ch, '\'' | '"') {
+            if finish_target(&mut token, &mut token_is_target) {
+                return true;
+            }
+            quote = if ch == '\'' {
+                Quote::Single
+            } else {
+                Quote::Double
+            };
+            command_boundary = false;
+            continue;
+        }
+        if ch == '`' {
+            if finish_target(&mut token, &mut token_is_target) {
+                return true;
+            }
+            chars.next();
+            command_boundary = false;
+            continue;
+        }
+        if matches!(ch, ';' | '|' | '&' | '\r' | '\n' | '{' | '}') {
+            if finish_target(&mut token, &mut token_is_target) {
+                return true;
+            }
+            command_boundary = true;
+            continue;
+        }
+        if ch.is_whitespace() {
+            if finish_target(&mut token, &mut token_is_target) {
+                return true;
+            }
+            continue;
+        }
+        if token.is_empty() {
+            token_is_target = command_boundary;
+            command_boundary = false;
+        }
+        token.push(ch);
+    }
+    finish_target(&mut token, &mut token_is_target)
+}
+
+fn cmd_static_system_management_target(command: &str) -> bool {
+    fn finish_target(token: &mut String, is_target: &mut bool) -> bool {
+        let requires_privilege = *is_target && windows_system_management_program_token(token);
+        token.clear();
+        *is_target = false;
+        requires_privilege
+    }
+
+    let mut quoted = false;
+    let mut token = String::new();
+    let mut token_is_target = false;
+    let mut command_boundary = true;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            if token.is_empty() && command_boundary {
+                token_is_target = true;
+                command_boundary = false;
+            }
+            quoted = !quoted;
+            if !quoted && finish_target(&mut token, &mut token_is_target) {
+                return true;
+            }
+            continue;
+        }
+        if quoted {
+            token.push(ch);
+            continue;
+        }
+        if ch == '^' {
+            if let Some(escaped) = chars.next() {
+                if token.is_empty() {
+                    token_is_target = command_boundary;
+                    command_boundary = false;
+                }
+                token.push(escaped);
+            }
+            continue;
+        }
+        if matches!(ch, '&' | '|' | '\r' | '\n' | '(' | ')') {
+            if finish_target(&mut token, &mut token_is_target) {
+                return true;
+            }
+            command_boundary = true;
+            continue;
+        }
+        if ch.is_whitespace() {
+            if finish_target(&mut token, &mut token_is_target) {
+                return true;
+            }
+            continue;
+        }
+        if command_boundary && ch == '@' && token.is_empty() {
+            continue;
+        }
+        if token.is_empty() {
+            token_is_target = command_boundary;
+            command_boundary = false;
+        }
+        token.push(ch);
+    }
+    finish_target(&mut token, &mut token_is_target)
+}
+
+fn cmd_if_segment_system_management_target(command: &str) -> bool {
+    fn finish_word(words: &mut Vec<String>, word: &mut String) {
+        if !word.is_empty() {
+            words.push(std::mem::take(word));
+        }
+    }
+
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if ch == '^' && !quoted {
+            if let Some(escaped) = chars.next() {
+                word.push(escaped);
+            }
+            continue;
+        }
+        if !quoted && (ch.is_whitespace() || matches!(ch, '&' | '|' | '(' | ')')) {
+            finish_word(&mut words, &mut word);
+            continue;
+        }
+        if word.is_empty() && ch == '@' {
+            continue;
+        }
+        word.push(ch);
+    }
+    finish_word(&mut words, &mut word);
+
+    if !words
+        .first()
+        .is_some_and(|word| word.eq_ignore_ascii_case("if"))
+    {
+        return false;
+    }
+    let mut condition = 1usize;
+    while words
+        .get(condition)
+        .is_some_and(|word| word.eq_ignore_ascii_case("not") || word.eq_ignore_ascii_case("/i"))
+    {
+        condition += 1;
+    }
+    let Some(first_condition) = words.get(condition) else {
+        return false;
+    };
+    let command_start = if matches!(
+        first_condition.to_ascii_lowercase().as_str(),
+        "errorlevel" | "cmdextversion" | "exist" | "defined"
+    ) {
+        condition + 2
+    } else if first_condition.contains("==") {
+        condition + 1
+    } else if words.get(condition + 1).is_some_and(|operator| {
+        matches!(
+            operator.to_ascii_lowercase().as_str(),
+            "equ" | "neq" | "lss" | "leq" | "gtr" | "geq"
+        )
+    }) {
+        condition + 3
+    } else {
+        // Unknown IF grammar stays fail-closed if a protected system-management
+        // executable appears later in the static command text.
+        condition + 1
+    };
+    words
+        .get(command_start)
+        .is_some_and(|word| windows_system_management_program_token(word))
+}
+
+fn cmd_if_system_management_target(command: &str) -> bool {
+    let mut quoted = false;
+    let mut segment = String::new();
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '^' && !quoted {
+            segment.push(ch);
+            if let Some(escaped) = chars.next() {
+                segment.push(escaped);
+            }
+            continue;
+        }
+        if ch == '"' {
+            quoted = !quoted;
+            segment.push(ch);
+            continue;
+        }
+        if !quoted && matches!(ch, '&' | '|' | '\r' | '\n') {
+            if cmd_if_segment_system_management_target(&segment) {
+                return true;
+            }
+            segment.clear();
+            continue;
+        }
+        segment.push(ch);
+    }
+    cmd_if_segment_system_management_target(&segment)
+}
+
 fn powershell_static_member_is_safe(chars: &[char], operator: usize) -> bool {
     let mut left = operator;
     while left > 0 && chars[left - 1].is_whitespace() {
@@ -1291,7 +1570,8 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
         return false;
     }
 
-    if powershell_subexpression_requires_review(command)
+    if powershell_static_system_management_target(command)
+        || powershell_subexpression_requires_review(command)
         || powershell_member_invocation_requires_review(command)
     {
         return true;
@@ -1377,6 +1657,9 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
 }
 
 fn cmd_invocation_requires_review(command: &str) -> bool {
+    if cmd_static_system_management_target(command) || cmd_if_system_management_target(command) {
+        return true;
+    }
     let mut chars = command.chars().peekable();
     let mut word = String::new();
     while let Some(ch) = chars.next() {

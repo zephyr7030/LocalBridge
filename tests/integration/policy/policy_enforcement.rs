@@ -227,6 +227,55 @@ fn public_shell_diagnostics_allow_only_narrow_static_console_and_command_discove
 }
 
 #[test]
+fn ordinary_system_management_targets_require_the_privileged_route_in_full_and_elevated() {
+    let policy = policy();
+    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
+        for arguments in [
+            json!({"command":"reg.exe query HKLM\\SOFTWARE","shell":"cmd"}),
+            json!({"command":"SCHTASKS.EXE /Query","shell":"cmd"}),
+            json!({"command":"sc.exe query","shell":"cmd"}),
+            json!({"command":"netsh.exe interface show interface","shell":"cmd"}),
+            json!({"command":"C:\\Windows\\System32\\REG.EXE query HKLM\\SOFTWARE","shell":"cmd"}),
+            json!({"command":"\"C:\\Windows\\System32\\reg.exe\" query HKLM\\SOFTWARE","shell":"cmd"}),
+            json!({"command":"reg query HKLM\\SOFTWARE","shell":"cmd"}),
+            json!({"command":"echo before && netsh.exe interface show interface","shell":"cmd"}),
+            json!({"command":"if 1==1 reg.exe query HKLM\\SOFTWARE","shell":"cmd"}),
+            json!({"command":"echo before & if 1==1 reg.exe query HKLM\\SOFTWARE","shell":"cmd"}),
+            json!({"command":"if exist C:\\Windows schtasks.exe /Query","shell":"cmd"}),
+            json!({"command":"reg.exe query HKLM:\\SOFTWARE","shell":"windows_powershell"}),
+            json!({"command":"C:\\Windows\\System32\\netsh.exe interface show interface","shell":"powershell"}),
+            json!({"command":"Write-Output before; schtasks.exe /Query","shell":"windows_powershell"}),
+        ] {
+            let decision = policy.decide_public(mode, "exec_command", &arguments);
+            assert!(
+                !decision.allowed,
+                "system-management target escaped privileged route: {arguments}"
+            );
+            assert_eq!(
+                decision.deny_reason,
+                Some(DenyReason::PrivilegedRouteNotAvailable),
+                "system-management target used wrong denial: {arguments}"
+            );
+        }
+
+        for arguments in [
+            json!({"command":"echo reg.exe","shell":"cmd"}),
+            json!({"command":"if exist reg.exe echo filename-only","shell":"cmd"}),
+            json!({"command":"if 1==1 echo reg.exe","shell":"cmd"}),
+            json!({"command":"Write-Output reg.exe","shell":"windows_powershell"}),
+            json!({"command":"Get-Command reg.exe","shell":"windows_powershell"}),
+        ] {
+            assert!(
+                policy
+                    .decide_public(mode, "exec_command", &arguments)
+                    .allowed,
+                "system-management program name used as data was globally banned: {arguments}"
+            );
+        }
+    }
+}
+
+#[test]
 fn allowed_call_projects_actual_running_then_idle_and_redacts_secret_summary() {
     let calls = Rc::new(RefCell::new(Vec::new()));
     let mut guard = McpGuard::new(FakeRuntime::new(calls.clone()), policy());
