@@ -1126,7 +1126,7 @@
     "acceptance": ["A276", "A277", "A278", "A279", "A280", "A281", "A282", "A283", "A284", "A285", "A286", "A287", "A288"],
     "reopen_from_pr": "LB-006",
     "next_required_g2_adversarial_generation": 10,
-    "g2_generation_10_consumed": true,
+    "g2_generation_10_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
   },
