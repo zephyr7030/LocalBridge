@@ -1410,7 +1410,8 @@
     "reopen_from_pr": "LB-006",
     "next_required_g2_adversarial_generation": 18,
     "g3_unlocked": false,
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "review_decision_commit": "640b93137d2b6680f01a483acb561bea4439ec73"
   },
   "g2_adversarial_review_generation_17_2026_08_15": {
     "status": "FAIL",
@@ -1456,6 +1457,7 @@
     "next_required_g2_adversarial_generation": 18,
     "g2_generation_17_consumed": true,
     "g3_unlocked": false,
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "review_decision_commit": "640b93137d2b6680f01a483acb561bea4439ec73"
   }
 }

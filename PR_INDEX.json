@@ -331,14 +331,19 @@
       "review_status": "FAIL",
       "review_generation": 17,
       "review_provenance": {
-        "generation": 16,
+        "generation": 17,
         "kind": "independent_adversarial",
-        "commit": "d2425f3c209290a7492d364e4d19961b77cb0710",
+        "commit": "640b93137d2b6680f01a483acb561bea4439ec73",
         "invalidated_generations": [
           {
             "generation": 8,
             "commit": "9e64c8ed9f4ffb8d4c7cdbe97ad02fa7f8cc164c",
             "cause": "schema25_localbridge_agent_runtime_facade_redesign"
+          },
+          {
+            "generation": 16,
+            "commit": "d2425f3c209290a7492d364e4d19961b77cb0710",
+            "cause": "schema29_command_task_state_durability_contract"
           }
         ]
       },

@@ -188,6 +188,8 @@
     ],
     "queued_g3_acceptance": [
       "A292"
-    ]
+    ],
+    "review_ready_commit": "03d0d883ecba0848f447cadcf236ff939efe6470",
+    "review_decision_commit": "640b93137d2b6680f01a483acb561bea4439ec73"
   }
 }
