@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,16 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    {
-      "severity": "MAJOR",
-      "owner_pr": "LB-007",
-      "acceptance": [
-        "A251"
-      ],
-      "summary": "PowerShell member-call review enumerates dangerous method names and misses executable InvokeScript."
-    }
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -181,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 independent adversarial generation15 FAIL. Rework LB-007 so unreviewable PowerShell member calls fail closed by grammar, preserving only the narrowly audited Console I/O seam needed by schema28. Then reaccept LB-008 through LB-012 sequentially, run Group-Release, and execute fresh generation16. LB-013/G3/G4 remain BLOCKED."
+    "next_action": "LB-007 generation15 correction accepted at f94a725b544c920fce8fe5cab9cc6c2203e14a31 after grammar-level member dispatch review and schema28 runtime PASS. Execute LB-008 next, then LB-009 through LB-012 in strict order; G2 remains REWORK_REQUIRED/FAIL generation15 until fresh generation16."
   },
   "current_task_ui": {
     "enabled": true,
