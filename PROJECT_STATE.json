@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,11 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "G2 generation18 / LB-006: retained command_control.read stderr can expose raw or mid-envelope PowerShell CLIXML because retained read content bypasses LocalBridge stderr normalization.",
-    "G2 generation18 / LB-006: asynchronous exec_command sessions project CurrentTask Idle when the tools/call response returns even when the public command session remains running, so long commands can be visible only for the minimum presentation interval instead of their real lifecycle.",
-    "G2 generation18 / LB-006: user black-box product evidence exposed an agent_workflow schema without schema30 path/directory_changes even though current committed source and fresh current-HEAD E2E contain and pass A293/A295; latest serving-instance provenance must be proven before acceptance."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -176,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Repair G2 generation18 findings from LB-006: normalize retained/paginated stderr so private CLIXML framing never reaches the public API; bind CurrentTask ExecuteCommand lifetime to the public command session until terminal rather than tools/call response; and prove the actually served LocalBridge agent_workflow schema/runtime instance matches current schema30 A293/A295. Then strictly reaccept LB-007 through LB-012 and run fresh G2 adversarial generation19. Tunnel HTTP400/network_error remains an attribution-unproven observation to retest, not a standalone generation18 blocker."
+    "next_action": "LB-006 generation18 rework accepted at implementation commit 07e80e06fcc2b638dfa1d742f821ce78bc23235d. Next execute LB-007, then strictly reaccept LB-008 through LB-012 sequentially; after all G2 PRs are reaccepted, run a fresh independent G2 adversarial generation19. Generation19 is not consumed. G3/G4 remain blocked. Tunnel HTTP400/network_error remains attribution-unproven and must be retested during LB-008 rather than treated as a proven root cause."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1623,5 +1619,35 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "review_decision_commit": "d356d65abe1de3c4bc7388ed7cd2727929cb585f"
+  },
+  "lb006_generation18_rework_acceptance_2026_08_15": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "resolves_generation": 18,
+    "implementation_commit": "07e80e06fcc2b638dfa1d742f821ce78bc23235d",
+    "acceptance": [
+      "A249",
+      "A256",
+      "A210",
+      "A238",
+      "A269",
+      "A293",
+      "A294",
+      "A295"
+    ],
+    "evidence": [
+      "Actual @测试 latest serving instance reports facade_revision=30, runtime=ready, workspace=D:\\project.",
+      "Actual @测试 exec_command returns LocalBridge-owned lb-session/lb-output handles; retained stderr command_control.read at offset 0 and nonzero mid-page offset returns no CLIXML framing.",
+      "Actual @测试 long async command remains ExecuteCommand/Running after tools/call returns and converges to durable Idle/terminal state without client poll.",
+      "The same latest LocalBridge Tunnel targets the verified loopback PEP; fresh raw MCP tools/list exposes exactly 8 tools with agent_workflow.path and directory_changes, and a nested LocalBridge create_directory/remove_empty_directory call succeeds with no residual directory.",
+      "PowerShell baseline Get-Location/Get-ChildItem/Test-Path succeeds on the actual serving instance; consecutive headered/headerless progress CLIXML is suppressed.",
+      "Public command transport waits are bounded to the requested yield/wait plus headroom; the upstream pre-registration cancellation race is closed by durable pending cancellation intent until session registration.",
+      "Bundled coding-tools integrity was rebaselined to clean payload tree SHA256 6d3ba92db59f9f168d6aad91832515a193914e3a2d6a039379eaf8793747013a; PYTHONDONTWRITEBYTECODE=1 prevents runtime tree mutation and no __pycache__ remains after full tests.",
+      "Final verification: cargo test --locked 174/174 PASS; cargo clippy --locked --all-targets -- -D warnings PASS; npm test 5/5 PASS; npm run build PASS; verify:runtime-manifest PASS; verify:architecture PASS; g4-human-gate regression PASS; git diff --check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 19,
+    "g2_generation_19_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
