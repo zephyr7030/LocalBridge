@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-013",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-012 reaccepted after generation15 correction chain. G2 REVIEW_REQUIRED: run fresh Group-Release, then fresh independent adversarial generation16. Generation16 remains unconsumed; LB-013/G3/G4 remain BLOCKED until G2 review PASS."
+    "next_action": "G2 independent adversarial generation16 PASS. G2 package is complete and G3/LB-013 is READY. Stop G2 execution here; LB-013 may be executed only as the next explicit PR task. G4 remains BLOCKED and historical G3 generation6 remains invalidated by schema25."
   },
   "current_task_ui": {
     "enabled": true,
@@ -233,7 +233,7 @@
     "auto_select_other_on_remove": false,
     "mcp_can_mutate_registry": false
   },
-  "current_group": "G2",
+  "current_group": "G3",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -1347,6 +1347,37 @@
     "next_required_g2_adversarial_generation": 16,
     "g2_generation_15_consumed": true,
     "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_16_2026_08_15": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 16,
+    "baseline_commit": "e5bc4fef4ffb98024e127bbd2387035fd542121a",
+    "finding": "No blocking G2 defect found on the committed generation16 review-ready baseline after fresh Group-Release and independent adversarial inspection.",
+    "evidence": [
+      "Fresh Group-Release cargo test --locked PASS and cargo clippy --locked --all-targets -D warnings PASS.",
+      "Frontend Vitest/build, runtime-manifest, architecture including active G2 deferred rules, G4 human-gate regression, and git diff check PASS.",
+      "Schema28 real bundled-runtime public behavior PASS for quoting, UTF-8, incremental poll, post-start write, stable kill, image resize, and document range; LocalBridge Git adapter fixture covers inclusive blame.",
+      "A273 rechecked: Git result fields are produced by LocalBridge first-party git_adapter interception before upstream MCP; document/image are local; remaining upstream cwd and command-session result seams are live semantic-probed before public listener bind.",
+      "Generation15 member-dispatch fix is grammar-level: unreviewable PowerShell instance member calls are review-required, with only the narrowly audited Console I/O seam retained.",
+      "Recovery exhaustion/manual retry and privilege/Broker adversarial tests PASS; no new concrete Tunnel secret, outage generation, Broker replay/gate, or elevated_exec bypass was found."
+    ],
+    "verified_passes": [
+      "cargo test --locked",
+      "cargo clippy --locked --all-targets -- -D warnings",
+      "npm test",
+      "npm run build",
+      "npm run verify:runtime-manifest",
+      "npm run verify:architecture",
+      "g4-human-gate.test.mjs",
+      "schema28 public runtime E2E",
+      "recovery exhaustion/manual retry",
+      "privilege tests"
+    ],
+    "g2_generation_16_consumed": true,
+    "g3_unlocked": true,
     "g4_unlocked": false
   }
 }
