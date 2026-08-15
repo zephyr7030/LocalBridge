@@ -1959,5 +1959,36 @@
     "g2_generation_20_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "schema32_windows_system_management_privilege_amendment_2026_08_15": {
+    "status": "RATIFIED",
+    "ratified": true,
+    "source": "explicit user correction of the Windows system-management privilege boundary",
+    "owner_prs": [
+      "LB-007",
+      "LB-012"
+    ],
+    "strict_execution_pointer_unchanged": "LB-007",
+    "requirements": [
+      "reg.exe schtasks.exe sc.exe and netsh.exe are reviewed Windows system-management targets rather than globally forbidden executables",
+      "Full and Elevated ordinary exec_command must require the privileged route for those static system-management targets; an Active Broker never upgrades the ordinary exec_command token",
+      "administrator system-management execution is available only through Elevated plus Active Broker plus reviewed structured elevated_exec",
+      "reviewed system-management programs are exact trusted System32 identities; same-name PATH workspace and non-System32 binaries are denied",
+      "reviewed elevated system-management remains structured direct program and argv with no cmd PowerShell or interpreter fallback",
+      "Windows OS system management is distinct from the LocalBridge control plane",
+      "LocalBridge PermissionMode administrator consent UAC approval Broker activation WorkspaceRegistry active workspace credentials Tunnel MCP runtime PEP Broker policy and LocalBridge autostart remain permanently denied to MCP even through reviewed system-management utilities"
+    ],
+    "acceptance": [
+      "A299",
+      "A300",
+      "A301",
+      "A302",
+      "A303",
+      "A304"
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }

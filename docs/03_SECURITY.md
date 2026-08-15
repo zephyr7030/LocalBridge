@@ -163,6 +163,19 @@ PowerShell 标准 cmdlet baseline 必须来自固定/身份验证的系统模块
 
 `agent_workflow.path` 只选择 active workspace 内 nested project context，不是 control-plane。它不得改变 active workspace；repo/project discovery 最多向上到 active workspace root，并与 `git_workflow` 使用等价 resolver 语义。
 
+### Schema32 Windows 系统管理权限边界
+
+Windows 操作系统级系统管理与 LocalBridge 自身 `control-plane` 是两个不同的权限域。`reg.exe`、`schtasks.exe`、`sc.exe`、`netsh.exe` 等受审计 Windows system-management program **不得被全局禁用**，但需要管理员权限的系统管理操作也不得从普通进程路由绕过管理员边界。
+
+- `Full` 的 ordinary `exec_command` 遇到静态可识别的上述系统管理目标时必须要求 privileged route 并拒绝直接执行；
+- `Elevated` 的 ordinary `exec_command` 同样不继承 Broker administrator token，Broker Active 不能把普通进程路由隐式升级为管理员执行；
+- 管理员执行只能走 `Elevated + Active Broker + reviewed elevated_exec`，并继续经过既有安全确认 / Windows UAC / Broker 权限边界；
+- reviewed system-management program 必须绑定 exact trusted `%SystemRoot%\System32` identity，不能使用 PATH、workspace 同名程序或其他 non-System32 替代物；
+- 请求保持 structured direct `program + argv`，禁止借 `cmd.exe`、PowerShell 或其他 shell/interpreter fallback 把 Broker 退化为任意管理员 shell；
+- Windows OS system management 本身不按 LocalBridge control-plane mutation 拒绝；但任何借这些 utility 修改 LocalBridge `PermissionMode`、管理员 consent/UAC/Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP 配置、runtime/PEP/Broker policy 或 LocalBridge autostart 的请求仍永久 deny。
+
+因此权限模型是：**Full 拒绝管理员系统管理直通；管理员模式通过受控 Broker reviewed route 放行；LocalBridge 自身控制面始终不可由 MCP 修改。**
+
 ### Schema26 管理员模式安全确认
 
 所有用户可见 `管理员模式` 入口统一使用橙色 `#ff9500` 警告语义。Broker 未 Active 时，用户点击/重新点击管理员模式不能直接触发 UAC，必须先显示以下固定内容：

@@ -644,6 +644,38 @@ const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15 = Object.freeze({
+  schemaVersion: 32,
+  baselineSchemaVersion: 31,
+  addedRules: {
+    windows_system_management_programs: ["reg.exe", "schtasks.exe", "sc.exe", "netsh.exe"],
+    ordinary_system_management_requires_privileged_route: true,
+    elevated_ordinary_exec_never_inherits_broker_token: true,
+    reviewed_system_management_elevated_exec_allowed: true,
+    reviewed_system_management_system32_identity_required: true,
+    reviewed_system_management_shell_interpreter_fallback_forbidden: true,
+    localbridge_control_plane_mutation_via_system_management_forbidden: true,
+  },
+  lb007: {
+    addedTests: [
+      "Full and Elevated ordinary exec_command treat static Windows system-management targets reg.exe schtasks.exe sc.exe and netsh.exe, including exact System32 paths and case-insensitive executable names, as requiring the privileged route; ordinary execution returns PrivilegedRouteNotAvailable and never executes them with a Broker token",
+      "ordinary Elevated exec_command never inherits the Active Broker administrator token, and privilege classification of Windows system-management targets does not globally prohibit the same trusted System32 programs from the separate reviewed elevated_exec route",
+    ],
+  },
+  lb012: {
+    addedArtifacts: [
+      "reviewed Windows system-management elevated_exec profiles",
+    ],
+    addedTests: [
+      "Edit and Full cannot use reviewed Windows system-management elevated_exec profiles and Elevated requires an Active Broker before any reviewed system-management execution",
+      "Elevated plus Active Broker can execute reviewed structured operations through exact trusted System32 reg.exe schtasks.exe sc.exe and netsh.exe without globally disabling those Windows system-management programs",
+      "reviewed Windows system-management elevated_exec rejects same-name PATH workspace or other non-System32 executables and requires the exact trusted System32 program identity",
+      "reviewed Windows system-management elevated_exec accepts structured program and argv only and rejects cmd PowerShell or other shell/interpreter fallback",
+      "Windows OS system management is not itself LocalBridge control-plane mutation, while attempts through reg.exe schtasks.exe sc.exe or netsh.exe to mutate LocalBridge PermissionMode administrator consent UAC Broker activation WorkspaceRegistry credentials Tunnel MCP runtime PEP Broker policy or LocalBridge autostart remain denied",
+    ],
+  },
+});
+
 const LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15 = Object.freeze({
   schemaVersion: 31,
   baselineSchemaVersion: 30,
@@ -1249,6 +1281,34 @@ export function hasExactLb007PolicyAndCmdCodepageAmendment20260815(contractsDoc)
     && containsAll(lb007.required_tests, LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.lb007.addedTests);
 }
 
+export function hasExactWindowsSystemManagementPrivilegeAmendment20260815(contractsDoc) {
+  if (contractsDoc?.schema_version !== WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb007 = contractsDoc?.prs?.["LB-007"];
+  const lb012 = contractsDoc?.prs?.["LB-012"];
+  return Boolean(lb007 && lb012)
+    && containsAll(lb007.required_tests, WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.lb007.addedTests)
+    && containsAll(lb012.required_artifacts, WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.lb012.addedArtifacts)
+    && containsAll(lb012.required_tests, WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.lb012.addedTests);
+}
+
+export function normalizeWindowsSystemManagementPrivilegeAmendment20260815(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.baselineSchemaVersion;
+  for (const key of Object.keys(WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.addedRules)) delete normalized.rules[key];
+  const lb007 = normalized.prs?.["LB-007"];
+  const lb012 = normalized.prs?.["LB-012"];
+  if (lb007) lb007.required_tests = removeItems(lb007.required_tests, WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.lb007.addedTests);
+  if (lb012) {
+    lb012.required_artifacts = removeItems(lb012.required_artifacts, WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.lb012.addedArtifacts);
+    lb012.required_tests = removeItems(lb012.required_tests, WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.lb012.addedTests);
+  }
+  return normalized;
+}
+
 export function normalizeLb007PolicyAndCmdCodepageAmendment20260815(contractsDoc) {
   const normalized = structuredClone(contractsDoc ?? null);
   if (!normalized) return normalized;
@@ -1536,6 +1596,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= WINDOWS_SYSTEM_MANAGEMENT_PRIVILEGE_AMENDMENT_2026_08_15.schemaVersion) {
+    if (!hasExactWindowsSystemManagementPrivilegeAmendment20260815(authorizationContracts)) {
+      findings.push(`${expected.id}:windows-system-management-privilege-20260815-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeWindowsSystemManagementPrivilegeAmendment20260815(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= LB007_POLICY_AND_CMD_CODEPAGE_AMENDMENT_2026_08_15.schemaVersion) {
     if (!hasExactLb007PolicyAndCmdCodepageAmendment20260815(authorizationContracts)) {
       findings.push(`${expected.id}:lb007-policy-cmd-codepage-20260815-contract-amendment-drift`);

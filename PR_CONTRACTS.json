@@ -1,5 +1,5 @@
 {
-  "schema_version": 31,
+  "schema_version": 32,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -567,6 +567,18 @@
     "cmd_native_codepage_semantics_preserved": true,
     "cmd_non_ascii_roundtrip_required": false,
     "cmd_codepage_mutation_for_unicode_forbidden": true,
+    "windows_system_management_programs": [
+      "reg.exe",
+      "schtasks.exe",
+      "sc.exe",
+      "netsh.exe"
+    ],
+    "ordinary_system_management_requires_privileged_route": true,
+    "elevated_ordinary_exec_never_inherits_broker_token": true,
+    "reviewed_system_management_elevated_exec_allowed": true,
+    "reviewed_system_management_system32_identity_required": true,
+    "reviewed_system_management_shell_interpreter_fallback_forbidden": true,
+    "localbridge_control_plane_mutation_via_system_management_forbidden": true,
     "agent_workflow_structured_directory_changes_field_required": true,
     "agent_workflow_directory_change_actions": [
       "create_directory",
@@ -927,7 +939,9 @@
         "cached or stale public tools/list cannot bypass a later permission-mode or capability-policy change",
         "agent_workflow structured directory create or empty-directory cleanup declares transitive workspace write capability: Edit and Full may authorize it inside the active root, process execution is not required, and attempts to alter WorkspaceRegistry active workspace or escape through absolute traversal or reparse targets fail closed",
         "a standalone PowerShell Get-Command or gcm query with exactly one literal command-name argument is ordinary read-only command discovery in Full or Elevated and is not classified as privilege or review-required solely because it uses Get-Command; dynamic command names, additional pipeline or follow-on execution, ScriptBlock extraction, subexpressions, aliases functions provider mutation command-engine mutation or other runtime-selected command-resolution surfaces remain review-required and fail closed",
-        "the narrow trusted PowerShell Console stdin seam permits [Console]::In.ReadLine() and [Console]::In.ReadToEnd() plus the existing Console output calls without treating those exact statically rooted calls as arbitrary instance-member dispatch; other instance-member calls remain review-required unless separately ratified"
+        "the narrow trusted PowerShell Console stdin seam permits [Console]::In.ReadLine() and [Console]::In.ReadToEnd() plus the existing Console output calls without treating those exact statically rooted calls as arbitrary instance-member dispatch; other instance-member calls remain review-required unless separately ratified",
+        "Full and Elevated ordinary exec_command treat static Windows system-management targets reg.exe schtasks.exe sc.exe and netsh.exe, including exact System32 paths and case-insensitive executable names, as requiring the privileged route; ordinary execution returns PrivilegedRouteNotAvailable and never executes them with a Broker token",
+        "ordinary Elevated exec_command never inherits the Active Broker administrator token, and privilege classification of Windows system-management targets does not globally prohibit the same trusted System32 programs from the separate reviewed elevated_exec route"
       ],
       "non_goals": [
         "Tunnel",
@@ -1567,7 +1581,8 @@
         "PrivilegeState",
         "privileged capability policy",
         "explicit user-controlled enable/disable semantics",
-        "generic elevated_exec capability"
+        "generic elevated_exec capability",
+        "reviewed Windows system-management elevated_exec profiles"
       ],
       "required_tests": [
         "no TTL/expires_at behavior",
@@ -1586,7 +1601,12 @@
         "Full mode elevated_exec denied",
         "elevated task awaiting UAC projects waiting authorization",
         "elevated denied task projects Blocked",
-        "elevated task summary does not leak sensitive arguments"
+        "elevated task summary does not leak sensitive arguments",
+        "Edit and Full cannot use reviewed Windows system-management elevated_exec profiles and Elevated requires an Active Broker before any reviewed system-management execution",
+        "Elevated plus Active Broker can execute reviewed structured operations through exact trusted System32 reg.exe schtasks.exe sc.exe and netsh.exe without globally disabling those Windows system-management programs",
+        "reviewed Windows system-management elevated_exec rejects same-name PATH workspace or other non-System32 executables and requires the exact trusted System32 program identity",
+        "reviewed Windows system-management elevated_exec accepts structured program and argv only and rejects cmd PowerShell or other shell/interpreter fallback",
+        "Windows OS system management is not itself LocalBridge control-plane mutation, while attempts through reg.exe schtasks.exe sc.exe or netsh.exe to mutate LocalBridge PermissionMode administrator consent UAC Broker activation WorkspaceRegistry credentials Tunnel MCP runtime PEP Broker policy or LocalBridge autostart remain denied"
       ],
       "non_goals": [
         "UI",

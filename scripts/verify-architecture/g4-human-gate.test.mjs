@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLb007PolicyAndCmdCodepageAmendment20260815, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLb007PolicyAndCmdCodepageAmendment20260815, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
+import { hasExactWindowsSystemManagementPrivilegeAmendment20260815, normalizeWindowsSystemManagementPrivilegeAmendment20260815 } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -258,7 +259,10 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema31Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema32Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactWindowsSystemManagementPrivilegeAmendment20260815(schema32Contracts), true);
+const schema31Contracts = normalizeWindowsSystemManagementPrivilegeAmendment20260815(schema32Contracts);
+assert.equal(schema31Contracts.schema_version, 31);
 assert.equal(hasExactLb007PolicyAndCmdCodepageAmendment20260815(schema31Contracts), true);
 const schema30Contracts = normalizeLb007PolicyAndCmdCodepageAmendment20260815(schema31Contracts);
 assert.equal(schema30Contracts.schema_version, 30);
@@ -387,6 +391,29 @@ assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(sche
 const schema30DirectoryActionsDrift = structuredClone(schema30Contracts);
 schema30DirectoryActionsDrift.rules.agent_workflow_directory_change_actions = ["create_directory", "remove_empty_directory", "remove_tree"];
 assert.equal(hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815(schema30DirectoryActionsDrift), false);
+
+for (const rule of [
+  "windows_system_management_programs",
+  "ordinary_system_management_requires_privileged_route",
+  "elevated_ordinary_exec_never_inherits_broker_token",
+  "reviewed_system_management_elevated_exec_allowed",
+  "reviewed_system_management_system32_identity_required",
+  "reviewed_system_management_shell_interpreter_fallback_forbidden",
+  "localbridge_control_plane_mutation_via_system_management_forbidden",
+]) {
+  const weakened = structuredClone(schema32Contracts);
+  weakened.rules[rule] = rule === "windows_system_management_programs" ? ["reg.exe"] : false;
+  assert.equal(hasExactWindowsSystemManagementPrivilegeAmendment20260815(weakened), false, rule);
+}
+const schema32MissingOrdinaryRouteProof = structuredClone(schema32Contracts);
+schema32MissingOrdinaryRouteProof.prs["LB-007"].required_tests = schema32MissingOrdinaryRouteProof.prs["LB-007"].required_tests.filter((item) => !item.startsWith("Full and Elevated ordinary exec_command treat static Windows system-management targets"));
+assert.equal(hasExactWindowsSystemManagementPrivilegeAmendment20260815(schema32MissingOrdinaryRouteProof), false);
+const schema32MissingReviewedAdminArtifact = structuredClone(schema32Contracts);
+schema32MissingReviewedAdminArtifact.prs["LB-012"].required_artifacts = schema32MissingReviewedAdminArtifact.prs["LB-012"].required_artifacts.filter((item) => item !== "reviewed Windows system-management elevated_exec profiles");
+assert.equal(hasExactWindowsSystemManagementPrivilegeAmendment20260815(schema32MissingReviewedAdminArtifact), false);
+const schema32MissingReviewedAdminProof = structuredClone(schema32Contracts);
+schema32MissingReviewedAdminProof.prs["LB-012"].required_tests = schema32MissingReviewedAdminProof.prs["LB-012"].required_tests.filter((item) => !item.startsWith("Elevated plus Active Broker can execute reviewed structured operations"));
+assert.equal(hasExactWindowsSystemManagementPrivilegeAmendment20260815(schema32MissingReviewedAdminProof), false);
 
 for (const rule of [
   "powershell_standalone_literal_get_command_diagnostic_allowed_without_privilege_review",
