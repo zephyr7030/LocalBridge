@@ -96,6 +96,22 @@ Group/Release   → 全组/发布完整 regression
 
 重型 fixture 不得为独立 assertion 无理由重复启动；cheap unit 保持独立。source-string marker 不得替代行为测试。每个 runner 有 bounded timeout/cancel，lost session 必须终态结束。开发/测试 console window 不影响本 PR 判定；最终 packaged GUI managed-child no-visible-console 由 LB-018/LB-019 release-style/clean-machine Gate 证明。
 
+### Schema29 — task-state durability 回开 G2 / generation 17 FAIL
+
+Schema29 合同基线 `003e85ed5da5944fba8bc89ba7051e55f23333a1` 加入 A289–A292 后，对当前已提交 G2 package 执行 independent adversarial generation 17。审查不是因为“新增合同自然失败”，而是发现了真实现存状态不一致：最近 100 个 terminal task-history 中有 52 个出现 `command_started` 无匹配 `command_finished`，或 task 已 terminal 但仍保存 running `current_command`；当前 LocalBridge `task_control`/public session terminal truth 仍是进程内投影/HashMap，没有 schema29 所要求的 durable task-state atomic finalizer 与 `(task_id, session_id)` owner CAS。
+
+```text
+G2 generation 17 = FAIL / REWORK_REQUIRED / CONSUMED
+current_group     = G2
+current_pr        = LB-006
+LB-006            = REWORK_REQUIRED
+LB-007..012       = BLOCKED pending strict reacceptance
+G3 / LB-013..017  = BLOCKED
+next G2 review    = generation 18, only after LB-006..012 are PASS again
+```
+
+LB-006 只负责 A289–A291：terminal finally 原子提交、task-state durable terminal snapshot、`task_id+session_id` CAS/owner isolation。A292“首次前台主窗口默认居中”属于 LB-015，当前只排队，**不是 generation17 的 G2 blocker，也不得提前修改 G3 产品代码**。
+
 ### Schema26 管理员模式安全确认修订
 
 Schema26 是对后续 **LB-015 / LB-016** 的 UI/安全合同追加，不改变当前执行入口，也不允许跳过 G2：

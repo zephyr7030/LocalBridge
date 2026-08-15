@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": "LB-013",
+    "current_pr": "LB-006",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -41,7 +41,7 @@
     ],
     "advance_only_after_acceptance": true,
     "governance_transition_updates_current_pr": true,
-    "current_group": "G3",
+    "current_group": "G2",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
     "pre_g4_human_review_gate_required": true,
@@ -125,7 +125,7 @@
         "LB-004"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-007",
@@ -135,7 +135,7 @@
         "LB-006"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-008",
@@ -147,7 +147,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-009",
@@ -159,7 +159,7 @@
         "LB-008"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-010",
@@ -169,7 +169,7 @@
         "LB-009"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-011",
@@ -181,7 +181,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-012",
@@ -192,7 +192,7 @@
         "LB-011"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-013",
@@ -202,7 +202,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "READY"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-014",
@@ -327,9 +327,9 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
-      "review_generation": 16,
+      "status": "REWORK_REQUIRED",
+      "review_status": "FAIL",
+      "review_generation": 17,
       "review_provenance": {
         "generation": 16,
         "kind": "independent_adversarial",
@@ -341,7 +341,8 @@
             "cause": "schema25_localbridge_agent_runtime_facade_redesign"
           }
         ]
-      }
+      },
+      "reopen_from_pr": "LB-006"
     },
     {
       "id": "G3",
@@ -353,7 +354,7 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "READY",
+      "status": "BLOCKED",
       "review_status": "BLOCKED",
       "review_generation": 6,
       "human_review_status": "BLOCKED",
@@ -383,5 +384,5 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-013"
+  "current_pr": "LB-006"
 }

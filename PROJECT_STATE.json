@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,9 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "LB-006/schema29: terminal command task-state is not durably and atomically finalized; terminal tasks can retain running current_command or miss command_finished, and no task_id+session_id owner CAS protects delayed finalizers."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +174,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 independent adversarial generation16 PASS. G2 package is complete and G3/LB-013 is READY. Stop G2 execution here; LB-013 may be executed only as the next explicit PR task. G4 remains BLOCKED and historical G3 generation6 remains invalidated by schema25."
+    "next_action": "G2 independent adversarial generation17 FAIL under schema29. Rework LB-006 for A289-A291 first, then strictly reaccept LB-007 through LB-012 and run fresh G2 adversarial generation18. G3/LB-013 is blocked again. A292 window centering remains queued for LB-015 after G2 passes."
   },
   "current_task_ui": {
     "enabled": true,
@@ -233,7 +235,7 @@
     "auto_select_other_on_remove": false,
     "mcp_can_mutate_registry": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -1378,6 +1380,81 @@
     ],
     "g2_generation_16_consumed": true,
     "g3_unlocked": true,
+    "g4_unlocked": false
+  },
+  "schema29_command_task_state_and_window_center_amendment_2026_08_15": {
+    "status": "CONTRACT_AMENDMENT_AND_REWORK_REQUIRED",
+    "ratified": true,
+    "baseline_commit": "003e85ed5da5944fba8bc89ba7051e55f23333a1",
+    "owners": {
+      "lb006": [
+        "A289",
+        "A290",
+        "A291"
+      ],
+      "lb015": [
+        "A292"
+      ]
+    },
+    "task_history_evidence": {
+      "sample_size": 100,
+      "terminal_inconsistent_tasks": 52,
+      "examples": [
+        "a5db555fe5e548a1a6e94a6155dca3e4",
+        "d193c1531a994e51932854014dbe4224",
+        "da517387f34041a3b7d58c57b3bdc16f",
+        "d5796e2436d8426ea4525ff31445e9ff"
+      ]
+    },
+    "g2_generation16_invalidated_by_schema29": true,
+    "reopen_from_pr": "LB-006",
+    "next_required_g2_adversarial_generation": 18,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_17_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 17,
+    "baseline_commit": "003e85ed5da5944fba8bc89ba7051e55f23333a1",
+    "reopen_from_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "acceptance": [
+          "A289",
+          "A290",
+          "A291"
+        ],
+        "summary": "Command terminal task-state is not durably closed under one owner-checked atomic finalizer.",
+        "evidence": [
+          "Empirical task-history scan: 52 of the latest 100 terminal tasks had command_started without matching command_finished or still retained a running current_command after the task itself was terminal.",
+          "Concrete completed-task examples retained running current_command sessions: a5db555fe5e548a1a6e94a6155dca3e4 / KsFp0pZ6Ujg1wvlH6aDkGcbc, d193c1531a994e51932854014dbe4224 / RVh7rzO09785WGMG5KBLbbjY, and da517387f34041a3b7d58c57b3bdc16f / FRjirPGRBMa_KQUxEnwphmMK.",
+          "src-tauri/src/mcp/server.rs task_control reads the in-memory CurrentTaskStatus projection and active request cancellation state; it does not persist a task-state terminal command journal.",
+          "src-tauri/src/mcp/facade.rs stores PublicCommandSession.terminal as Option<Value> inside in-memory HashMaps; this is not a durable task-state snapshot independent of private session retention.",
+          "Focused source search found no task-state.json/task-history command_finished persistence or task_id+session_id CAS finalizer in the LocalBridge MCP/runtime implementation."
+        ]
+      }
+    ],
+    "non_blocking_queued_g3": [
+      {
+        "owner_pr": "LB-015",
+        "acceptance": [
+          "A292"
+        ],
+        "summary": "First visible 780x620 main-window creation is not explicitly centered; current builder sets size/decorations then show/focus with no center call. This is queued G3 UI work and is not a G2 blocker."
+      }
+    ],
+    "verified_passes": [
+      "schema29 fail-closed contract verifier PASS",
+      "architecture verifier PASS on schema29 contract baseline",
+      "schema29 contract JSON parse and diff check PASS before review transition"
+    ],
+    "next_required_g2_adversarial_generation": 18,
+    "g2_generation_17_consumed": true,
+    "g3_unlocked": false,
     "g4_unlocked": false
   }
 }

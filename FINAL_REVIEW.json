@@ -1,23 +1,12 @@
 {
   "schema_version": 11,
-  "review_date": "2026-08-14",
-  "baseline": "schema28-G2-LB006-REWORK",
+  "review_date": "2026-08-15",
+  "baseline": "schema29-G2-GEN17-FAIL",
   "status": "REWORK_REQUIRED",
   "phase": "PRE_CODE",
   "current_pr": "LB-006",
   "blocking_findings": [
-    "LB-006/schema28: shell invocation adds an extra reparse that breaks double-quoted PowerShell pipe/ampersand literals",
-    "LB-006/schema28: command_control poll/write/kill does not satisfy live incremental and stable-session semantics; poll loses/replays output, write becomes SessionUnavailable, and kill can RuntimeUnavailable then lose the session",
-    "LB-006/schema28: view_image actual auto-resize fails and Windows PowerShell Chinese output is not preserved as UTF-8",
-    "LB-006/schema28: git blame inclusive line ranges and document invalid-range validation are incorrect",
-    "LB-006/schema28: result semantic negotiation must cover every adapter-consumed private field not guaranteed by upstream outputSchema",
-    "LB-006: public command/session lifecycle is not LocalBridge-owned; command_control poll is miswired to retained-output read and private session pruning can leave stale Running truth",
-    "LB-006: workspace_context can project workspace=\"\" because adapter reads the wrong private result fields and lacks a deterministic semantic result probe",
-    "LB-006: agent_workflow/task_control and advertised document_workflow actions are present in public schema while remaining unavailable",
-    "LB-006: silent nonzero process exits such as cmd /c exit 7 are normalized as public success instead of ProcessFailed",
-    "LB-006: nested Git repository discovery is inconsistent across status/diff/log/show/blame and git_diff can silently use non-git fallback after the repo is actually discoverable",
-    "LB-006: trusted ShellResolver must not trust/probe arbitrary non-system PowerShell candidates when executable identity trust cannot be established",
-    "LB-007: privileged external runtime review remains bypassable when docker/podman/wsl executable identity is constructed at shell runtime rather than appearing lexically in command text"
+    "LB-006/schema29: terminal command task-state is not durably and atomically finalized; terminal tasks can retain running current_command or miss command_finished, and no task_id+session_id owner CAS protects delayed finalizers."
   ],
   "dynamic_gates_owned_by_lb000": [
     "coding-tools capability surface",
@@ -43,7 +32,8 @@
     "single-parse shell quoting plus UTF-8 public output normalization",
     "incremental public poll cursor, live write and stable kill/cancel convergence",
     "real bounded image resize and inclusive Git/document range validation",
-    "tiered PR Fast / PR Runtime / Group-Release verification with compressed heavy runtime fixtures"
+    "tiered PR Fast / PR Runtime / Group-Release verification with compressed heavy runtime fixtures",
+    "owner-checked atomic task-state terminal finalizer with durable terminal snapshots"
   ],
   "current_task_status_ui": {
     "status_only": true,
@@ -103,11 +93,13 @@
     "schema27_extends_lb006_rework": true,
     "schema28_reopens_lb006_after_plugin_runtime_findings": true,
     "g2_generation_9_consumed_fail": true,
-    "next_required_g2_adversarial_generation": 10,
+    "next_required_g2_adversarial_generation": 18,
     "g2_generation_8_historical_invalidated_by_schema25": true,
     "g3_generation_6_historical_invalidated_by_schema25": true,
     "g3_human_gate_actionable": false,
-    "g4_blocked": true
+    "g4_blocked": true,
+    "schema29_reopens_g2_from_lb006": true,
+    "g2_generation_17_consumed_fail": true
   },
   "onboarding": {
     "screens": 5,
@@ -182,5 +174,20 @@
     "slow_backend_responsiveness_gate": true
   },
   "cloudflare_final_distribution": "forbidden_from_LB-018_bundle_manifest_launcher_and_fallback",
-  "recommended_next_step": "Commit the schema28 contract baseline, then rework LB-006 only. Use PR Fast Gate during edits, one compressed PR Runtime Gate for the shared public command/runtime lifecycle, and the complete required Gate only for formal acceptance. LB-007 through LB-012 remain blocked; generation 10 is not consumed; G3/G4 remain blocked."
+  "recommended_next_step": "Rework LB-006 only for schema29 A289-A291 using targeted Fast/Runtime gates; then strictly reaccept LB-007 through LB-012 and run G2 adversarial generation18. G3/LB-013 remains blocked. Implement A292 default window centering only when sequencing reaches LB-015.",
+  "schema29_review": {
+    "generation": 17,
+    "status": "FAIL",
+    "baseline_commit": "003e85ed5da5944fba8bc89ba7051e55f23333a1",
+    "task_history_terminal_inconsistent": "52/100",
+    "owner_pr": "LB-006",
+    "acceptance": [
+      "A289",
+      "A290",
+      "A291"
+    ],
+    "queued_g3_acceptance": [
+      "A292"
+    ]
+  }
 }
