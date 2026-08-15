@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,9 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "LB-007 A251: PowerShell $ExecutionContext.InvokeCommand.CommandNotFoundAction can dynamically replace command resolution after static review, allowing an unknown ordinary command name to resolve to a runtime-selected CommandInfo."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +174,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-012 reaccepted after generation12 correction chain. G2 REVIEW_REQUIRED: run fresh Group-Release, then fresh independent adversarial generation 13. Generation 13 remains unconsumed; LB-013/G3/G4 remain BLOCKED until G2 review PASS."
+    "next_action": "G2 independent adversarial review generation 13 FAIL. Rework LB-007 by treating PowerShell ExecutionContext/command-engine state access as unreviewable at the shell boundary, add real regression for CommandNotFoundAction rebinding, then reaccept LB-008..LB-012, Group-Release, and fresh generation14. G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1248,6 +1250,39 @@
     ],
     "next_required_g2_adversarial_generation": 13,
     "g2_generation_12_consumed": true,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_13_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 13,
+    "baseline_commit": "1d60cd1d808b9235d3201a7ff7fabc6dc9b03a13",
+    "reopen_from_pr": "LB-007",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-007",
+        "acceptance": [
+          "A251"
+        ],
+        "summary": "PowerShell command-resolution engine state can be mutated after static review, so an unknown ordinary command name can be dynamically rebound to a runtime-selected CommandInfo.",
+        "evidence": [
+          "Non-destructive Windows PowerShell probe `$ExecutionContext.InvokeCommand.CommandNotFoundAction = { param($name,$eventArgs); $eventArgs.Command = Get-Command Write-Output }; lbgen13 'COMMAND_NOT_FOUND_HOOK_EXECUTED'` exited 0 and produced COMMAND_NOT_FOUND_HOOK_EXECUTED.",
+          "Current review_word does not classify ExecutionContext, CommandNotFoundAction, or Get-Command; powershell_member_invocation_requires_review only rejects dangerous member calls and therefore does not reject assignment to the CommandNotFoundAction property chain.",
+          "The hook can select a CommandInfo at runtime before the later unknown command token is resolved, so protected target identity need not appear in that invocation.",
+          "runtime-policy.toml requires privileged_external_runtime=review_required, shell_invocation_review=static_target_fail_closed, and unreviewable_shell_indirection=review_required."
+        ]
+      }
+    ],
+    "verified_passes": [
+      "Fresh G2 Group-Release cargo test --locked and cargo clippy --locked --all-targets -- -D warnings: PASS.",
+      "Frontend Vitest and production build: PASS.",
+      "runtime manifest, architecture, G4 human-gate regression, and git diff check: PASS."
+    ],
+    "next_required_g2_adversarial_generation": 14,
+    "g2_generation_13_consumed": true,
     "g3_unlocked": false,
     "g4_unlocked": false
   }
