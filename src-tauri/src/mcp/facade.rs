@@ -21,7 +21,7 @@ use super::task_state::{
 };
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 30;
+pub const AGENT_API_REVISION: u32 = 31;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",
@@ -210,20 +210,52 @@ fn public_tool_schema(name: &str) -> Value {
         "command_control" => (
             "Read, write, poll, or terminate an existing LocalBridge command session.",
             json!({
-                "type":"object",
-                "properties":{
-                    "action":{"type":"string","enum":["poll","read","write","kill"]},
-                    "session_id":{"type":"string"},
-                    "output_ref":{"type":"string"},
-                    "stream":{"type":"string","enum":["stdout","stderr"]},
-                    "offset":{"type":"integer","minimum":0},
-                    "limit":{"type":"integer","minimum":1,"maximum":1048576},
-                    "chars":{"type":"string"},
-                    "signal":{"type":"string","enum":["TERM","KILL","INT"]},
-                    "wait_ms":{"type":"integer","minimum":0,"maximum":30000}
-                },
-                "required":["action"],
-                "additionalProperties":false
+                "oneOf":[
+                    {
+                        "type":"object",
+                        "properties":{
+                            "action":{"const":"poll"},
+                            "session_id":{"type":"string","minLength":1},
+                            "wait_ms":{"type":"integer","minimum":0,"maximum":30000}
+                        },
+                        "required":["action","session_id"],
+                        "additionalProperties":false
+                    },
+                    {
+                        "type":"object",
+                        "properties":{
+                            "action":{"const":"read"},
+                            "output_ref":{"type":"string","minLength":1},
+                            "stream":{"type":"string","enum":["stdout","stderr"]},
+                            "offset":{"type":"integer","minimum":0},
+                            "limit":{"type":"integer","minimum":1,"maximum":1048576}
+                        },
+                        "required":["action","output_ref"],
+                        "additionalProperties":false
+                    },
+                    {
+                        "type":"object",
+                        "properties":{
+                            "action":{"const":"write"},
+                            "session_id":{"type":"string","minLength":1},
+                            "chars":{"type":"string","minLength":1},
+                            "wait_ms":{"type":"integer","minimum":0,"maximum":30000}
+                        },
+                        "required":["action","session_id","chars"],
+                        "additionalProperties":false
+                    },
+                    {
+                        "type":"object",
+                        "properties":{
+                            "action":{"const":"kill"},
+                            "session_id":{"type":"string","minLength":1},
+                            "signal":{"type":"string","enum":["TERM","KILL","INT"]},
+                            "wait_ms":{"type":"integer","minimum":0,"maximum":30000}
+                        },
+                        "required":["action","session_id"],
+                        "additionalProperties":false
+                    }
+                ]
             }),
         ),
         "task_control" => (
@@ -3085,14 +3117,25 @@ fn normalize_private_error(raw: &Value) -> FacadeError {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_ascii_uppercase();
+    let permission = raw
+        .pointer("/structuredContent/error/details/permission")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let public = if code.contains("SESSION_NOT_FOUND") || code.contains("SESSION_CLOSED") {
         FacadeErrorCode::SessionUnavailable
     } else if code.contains("INVALID") {
         FacadeErrorCode::InvalidArgument
     } else if code.contains("NOT_FOUND") || code.contains("MISSING") {
         FacadeErrorCode::NotFound
-    } else if code.contains("OUTSIDE_WORKSPACE") || code.contains("WORKSPACE_DENIED") {
+    } else if code.contains("OUTSIDE_WORKSPACE")
+        || code.contains("WORKSPACE_DENIED")
+        || code.contains("ABSOLUTE_PATH_DENIED")
+        || code.contains("SYMLINK_ESCAPE")
+        || permission == "filesystem_escape"
+    {
         FacadeErrorCode::WorkspaceDenied
+    } else if code.contains("PERMISSION") || code.contains("CAPABILITY") {
+        FacadeErrorCode::CapabilityDenied
     } else if code.contains("TIMEOUT") {
         FacadeErrorCode::ProcessTimedOut
     } else if code.contains("CANCEL") {
@@ -3201,7 +3244,41 @@ fn public_command_stderr(stderr: &str) -> String {
     if !lower.contains("s=\"error\"") {
         return String::new();
     }
-    extract_clixml_error_strings(stderr)
+    strip_private_powershell_prologue(&extract_clixml_error_strings(stderr))
+}
+
+fn strip_private_powershell_prologue(value: &str) -> String {
+    let contains_private_prologue = value.contains("PSModuleAutoLoadingPreference")
+        || value.contains("Microsoft.PowerShell.Management.psd1")
+        || value.contains("System.Text.UTF8Encoding")
+        || value.contains("[Console]::OutputEncoding");
+    if !contains_private_prologue {
+        return value.to_string();
+    }
+    const END: &str = "$OutputEncoding=[Console]::OutputEncoding;";
+    let Some(end) = find_ignoring_line_breaks(value, END) else {
+        return String::new();
+    };
+    value[end..].trim_start_matches(['\r', '\n']).to_string()
+}
+
+fn find_ignoring_line_breaks(value: &str, needle: &str) -> Option<usize> {
+    let expected = needle.as_bytes();
+    let mut matched = 0usize;
+    for (index, ch) in value.char_indices() {
+        if matches!(ch, '\r' | '\n') {
+            continue;
+        }
+        if ch.is_ascii() && expected.get(matched).copied() == Some(ch as u8) {
+            matched += 1;
+            if matched == expected.len() {
+                return Some(index + ch.len_utf8());
+            }
+        } else {
+            matched = usize::from(ch.is_ascii() && expected.first().copied() == Some(ch as u8));
+        }
+    }
+    None
 }
 
 fn drain_public_stderr_protocol_buffer(buffer: &mut String) -> String {
@@ -3310,19 +3387,56 @@ fn extract_clixml_error_strings(stderr: &str) -> String {
         }
         cursor = close + "</s>".len();
     }
-    values.join("\n")
+    values.concat()
 }
 
 fn decode_clixml_text(value: &str) -> String {
-    value
-        .replace("_x000D__x000A_", "\r\n")
-        .replace("_x000D_", "\r")
-        .replace("_x000A_", "\n")
+    let xml = value
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
-        .replace("&amp;", "&")
+        .replace("&amp;", "&");
+    decode_clixml_utf16_escapes(&xml)
+}
+
+fn decode_clixml_utf16_escapes(value: &str) -> String {
+    fn escaped_unit(value: &str, index: usize) -> Option<u16> {
+        let token = value.get(index..index + 7)?;
+        (token.starts_with("_x") && token.ends_with('_'))
+            .then(|| u16::from_str_radix(&token[2..6], 16).ok())
+            .flatten()
+    }
+
+    let mut decoded = String::with_capacity(value.len());
+    let mut index = 0usize;
+    while index < value.len() {
+        if let Some(unit) = escaped_unit(value, index) {
+            if (0xD800..=0xDBFF).contains(&unit) {
+                if let Some(low) = escaped_unit(value, index + 7) {
+                    if (0xDC00..=0xDFFF).contains(&low) {
+                        let scalar =
+                            0x10000 + (((unit as u32 - 0xD800) << 10) | (low as u32 - 0xDC00));
+                        if let Some(ch) = char::from_u32(scalar) {
+                            decoded.push(ch);
+                            index += 14;
+                            continue;
+                        }
+                    }
+                }
+            } else if !(0xDC00..=0xDFFF).contains(&unit) {
+                if let Some(ch) = char::from_u32(unit as u32) {
+                    decoded.push(ch);
+                    index += 7;
+                    continue;
+                }
+            }
+        }
+        let ch = value[index..].chars().next().expect("valid UTF-8 boundary");
+        decoded.push(ch);
+        index += ch.len_utf8();
+    }
+    decoded
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3936,6 +4050,87 @@ mod tests {
         assert!(rendered.contains("WorkspaceDenied"));
         assert!(!rendered.contains("SECRET_PRIVATE_RUNTIME_DETAIL"));
         assert!(!rendered.contains("private"));
+
+        let filesystem_permission = json!({
+            "structuredContent":{
+                "ok":false,
+                "error":{
+                    "code":"PERMISSION_REQUIRED",
+                    "message":"SECRET_PRIVATE_RUNTIME_DETAIL",
+                    "details":{"permission":"filesystem_escape","path":"C:\\private"}
+                }
+            },
+            "isError":true
+        });
+        assert_eq!(
+            normalize_private_error(&filesystem_permission).code,
+            FacadeErrorCode::WorkspaceDenied
+        );
+        let generic_permission = json!({
+            "structuredContent":{
+                "ok":false,
+                "error":{"code":"PERMISSION_REQUIRED","details":{"permission":"network"}}
+            },
+            "isError":true
+        });
+        assert_eq!(
+            normalize_private_error(&generic_permission).code,
+            FacadeErrorCode::CapabilityDenied
+        );
+    }
+
+    #[test]
+    fn command_control_schema_encodes_action_specific_handles() {
+        let schema = public_tool_schema("command_control")["inputSchema"].clone();
+        let variants = schema["oneOf"].as_array().expect("command_control oneOf");
+        assert_eq!(variants.len(), 4);
+        let branch = |action: &str| {
+            variants
+                .iter()
+                .find(|variant| variant["properties"]["action"]["const"] == action)
+                .expect("action branch")
+        };
+        let read = branch("read");
+        assert!(
+            read["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("output_ref"))
+        );
+        assert!(read["properties"].get("session_id").is_none());
+        let poll = branch("poll");
+        assert!(
+            poll["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("session_id"))
+        );
+        assert!(poll["properties"].get("output_ref").is_none());
+        let write = branch("write");
+        assert!(
+            write["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("session_id"))
+        );
+        assert!(
+            write["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("chars"))
+        );
+        let kill = branch("kill");
+        assert!(
+            kill["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("session_id"))
+        );
+        assert!(
+            variants
+                .iter()
+                .all(|variant| variant["additionalProperties"] == false)
+        );
     }
 
     #[test]
@@ -3975,6 +4170,20 @@ mod tests {
             "#< CLIXML\r\n<Objs><Obj S=\"progress\"/><Obj S=\"Error\"><S>boom</S></Obj></Objs>";
         assert_eq!(public_command_stderr(error), "boom");
         assert_eq!(public_command_stderr("plain error\r\n"), "plain error\r\n");
+
+        let wrapped_error = "#< CLIXML\r\n<Objs><S S=\"Error\">Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;Import-Module -Name 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Management\\Microsoft.PowerShell.Management.psd1' -ErrorAction Stop;[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncodi_x000D__x000A_</S><S S=\"Error\">ng;Write-Error 'READERR _xD83D__xDE80_' : READERR _xD83D__xDE80__x000D__x000A_</S><S S=\"Error\">    + CategoryInfo : NotSpecified_x000D__x000A_</S></Objs>";
+        let public = public_command_stderr(wrapped_error);
+        assert!(public.contains("READERR 🚀"), "{public:?}");
+        assert!(public.contains("Write-Error"), "{public:?}");
+        for private in [
+            "PSModuleAutoLoadingPreference",
+            "Microsoft.PowerShell.Management",
+            "OutputEncoding",
+            "_xD83D_",
+            "_xDE80_",
+        ] {
+            assert!(!public.contains(private), "{public:?}");
+        }
     }
 
     #[test]

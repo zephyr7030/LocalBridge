@@ -3367,6 +3367,8 @@ def find_literal(line: str, needle: str, case_sensitive: bool) -> int:
 def shlex_split(command: str) -> list[str]:
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
+    if os.name == "nt":
+        lexer.escape = ""
     return list(lexer)
 
 
@@ -3562,7 +3564,10 @@ def command_argument_path_candidates(command: str | None, args: list[str]) -> li
             candidates.extend(command_argument_path_candidates(wrapped_command, wrapped_args))
         return candidates
     if name in PATH_ARGUMENT_COMMANDS:
-        return [arg for arg in args if is_inspectable_path_argument(arg)]
+        inspected_args = args
+        if os.name == "nt" and name in {"cd", "chdir"}:
+            inspected_args = [arg for arg in args if arg.lower() != "/d"]
+        return [arg for arg in inspected_args if is_inspectable_path_argument(arg)]
     if name in PATTERN_THEN_PATH_COMMANDS:
         return pattern_command_path_candidates(args)
     if name == "find":

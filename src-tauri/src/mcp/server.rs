@@ -2396,8 +2396,8 @@ mod tests {
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 30,
-            "fresh serving instance did not identify the schema30 facade: {:#?}",
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 31,
+            "fresh serving instance did not identify the revision31 facade: {:#?}",
             provenance.body
         );
         let served_tools = post(
@@ -2410,6 +2410,24 @@ mod tests {
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "agent_workflow"))
             .expect("fresh serving instance exposes agent_workflow");
         assert!(served_agent["inputSchema"]["properties"]["path"].is_object());
+        let served_command_control = served_tools.body["result"]["tools"]
+            .as_array()
+            .and_then(|tools| tools.iter().find(|tool| tool["name"] == "command_control"))
+            .expect("fresh serving instance exposes command_control");
+        let command_control_variants = served_command_control["inputSchema"]["oneOf"]
+            .as_array()
+            .expect("command_control action-discriminated schema");
+        let read_variant = command_control_variants
+            .iter()
+            .find(|variant| variant["properties"]["action"]["const"] == "read")
+            .expect("command_control read schema");
+        assert!(
+            read_variant["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("output_ref"))
+        );
+        assert!(read_variant["properties"].get("session_id").is_none());
         let directory_schema = &served_agent["inputSchema"]["properties"]["directory_changes"];
         assert_eq!(directory_schema["type"], "array");
         assert_eq!(
@@ -2688,6 +2706,119 @@ mod tests {
                 "missing {literal:?}: {quoted_output:?}"
             );
         }
+
+        let powershell_error = public_tool_call(
+            pep.port(),
+            &session,
+            7011,
+            "exec_command",
+            json!({
+                "command":"Write-Error \"READERR 🚀\"",
+                "shell":"windows_powershell",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(
+            powershell_error.body["result"]["isError"], true,
+            "{:#?}",
+            powershell_error.body
+        );
+        let powershell_error_data = &powershell_error.body["result"]["structuredContent"]["data"];
+        let powershell_error_output = powershell_error_data["output"].as_str().unwrap_or_default();
+        assert!(
+            powershell_error_output.contains("READERR 🚀"),
+            "{powershell_error_output:?}"
+        );
+        for private in [
+            "PSModuleAutoLoadingPreference",
+            "Microsoft.PowerShell.Management",
+            "OutputEncoding",
+            "_xD83D_",
+            "_xDE80_",
+        ] {
+            assert!(
+                !powershell_error_output.contains(private),
+                "{powershell_error_output:?}"
+            );
+        }
+        let stderr_ref = powershell_error_data["output_refs"]["stderr"]
+            .as_str()
+            .expect("PowerShell failure exposes public retained stderr handle");
+        let retained_error = public_tool_call(
+            pep.port(),
+            &session,
+            7012,
+            "command_control",
+            json!({"action":"read","output_ref":stderr_ref,"stream":"stderr","offset":0,"limit":1048576}),
+        );
+        assert_eq!(
+            retained_error.body["result"]["isError"], false,
+            "{:#?}",
+            retained_error.body
+        );
+        let retained_content =
+            retained_error.body["result"]["structuredContent"]["data"]["content"]
+                .as_str()
+                .unwrap_or_default();
+        assert!(
+            retained_content.contains("READERR 🚀"),
+            "{retained_content:?}"
+        );
+        for private in [
+            "PSModuleAutoLoadingPreference",
+            "Microsoft.PowerShell.Management",
+            "OutputEncoding",
+            "_xD83D_",
+            "_xDE80_",
+        ] {
+            assert!(!retained_content.contains(private), "{retained_content:?}");
+        }
+
+        let cmd_cd_switch = public_tool_call(
+            pep.port(),
+            &session,
+            7013,
+            "exec_command",
+            json!({
+                "command":"cd /d . && echo LB_CMD_D_OK",
+                "shell":"cmd",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(
+            cmd_cd_switch.body["result"]["isError"], false,
+            "{:#?}",
+            cmd_cd_switch.body
+        );
+        assert!(
+            cmd_cd_switch.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("LB_CMD_D_OK"),
+            "{:#?}",
+            cmd_cd_switch.body
+        );
+        let cmd_escape = public_tool_call(
+            pep.port(),
+            &session,
+            7014,
+            "exec_command",
+            json!({
+                "command":"cd /d C:\\Windows",
+                "shell":"cmd",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(
+            cmd_escape.body["result"]["isError"], true,
+            "{:#?}",
+            cmd_escape.body
+        );
+        assert_eq!(
+            cmd_escape.body["result"]["structuredContent"]["error"]["code"], "WorkspaceDenied",
+            "{:#?}",
+            cmd_escape.body
+        );
 
         let auto_utf8 = public_tool_call(
             pep.port(),
