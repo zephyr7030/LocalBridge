@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-010 Recovery + Workspace Switch reaccepted after recovery 15/15, workspace control 6/6, and ARCH-018/020/022 PASS. Reaccept LB-011 and LB-012 sequentially; then run the G2 Group-Release gate and fresh independent adversarial generation 10. Generation 10 remains unconsumed; G3/G4 remain blocked."
+    "next_action": "LB-011 Privileged Broker IPC Foundation reaccepted after privilege 21/21 and real broker IPC 5/5 verification. Reaccept LB-012 next; then run the G2 Group-Release gate and fresh independent adversarial generation 10. Generation 10 remains unconsumed; G3/G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
