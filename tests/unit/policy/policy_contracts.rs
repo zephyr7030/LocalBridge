@@ -218,6 +218,11 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"$t=[type]::GetType('System.Diagnostics.Process'); $t::Start($x,'ps')","shell":"powershell"}),
         json!({"command":"$sh=New-Object -ComObject Shell.Application; $sh.ShellExecute($x)","shell":"powershell"}),
         json!({"command":"$w=[wmiclass]'Win32_Process'; $w.Create($x)","shell":"windows_powershell"}),
+        json!({"command":"$x='C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'; Write-Output \"$([System.Diagnostics.Process]::Start($x,'ps'))\"","shell":"windows_powershell"}),
+        json!({"command":"Write-Output \"value=$(1+1)\"","shell":"powershell"}),
+        json!({"command":"$x='C:\\tools\\runtime.exe'; start $x","shell":"windows_powershell"}),
+        json!({"command":"$x='C:\\tools\\runtime.exe'; ii $x","shell":"powershell"}),
+        json!({"command":"Sta`rt-Process $x","shell":"powershell"}),
     ] {
         let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
         assert!(!decision.allowed, "shell indirection unexpectedly allowed: {arguments}");
@@ -231,6 +236,7 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"Write-Output \"a|b\"; Write-Output \"a&b\"; Write-Output 'docker is text'","shell":"windows_powershell"}),
         json!({"command":"Start-Sleep -Milliseconds 10; $line=[Console]::In.ReadLine(); Write-Output ('write:'+ $line)","shell":"auto"}),
         json!({"command":"$line=[System.Console]::ReadLine(); Write-Output $line","shell":"windows_powershell"}),
+        json!({"command":"Write-Output '$(' ; Write-Output \"`$(`\"","shell":"windows_powershell"}),
     ] {
         assert!(
             policy

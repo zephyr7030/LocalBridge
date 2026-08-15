@@ -155,6 +155,11 @@ fn privileged_external_runtime_commands_require_review_and_never_forward() {
             ("$t=[type]::GetType('System.Diagnostics.Process'); $t::Start($x,'ps')", "powershell"),
             ("$sh=New-Object -ComObject Shell.Application; $sh.ShellExecute($x)", "powershell"),
             ("$w=[wmiclass]'Win32_Process'; $w.Create($x)", "windows_powershell"),
+            ("$x='C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'; Write-Output \"$([System.Diagnostics.Process]::Start($x,'ps'))\"", "windows_powershell"),
+            ("Write-Output \"value=$(1+1)\"", "powershell"),
+            ("$x='C:\\tools\\runtime.exe'; start $x", "windows_powershell"),
+            ("$x='C:\\tools\\runtime.exe'; ii $x", "powershell"),
+            ("Sta`rt-Process $x", "powershell"),
         ] {
             let calls = Rc::new(RefCell::new(Vec::new()));
             let mut guard = McpGuard::new(FakeRuntime::new(calls.clone()), policy());

@@ -837,6 +837,9 @@ fn review_word(word: &str) -> bool {
             | "iex"
             | "start-process"
             | "saps"
+            | "start"
+            | "invoke-item"
+            | "ii"
             | "invoke-command"
             | "icm"
             | "start-job"
@@ -939,6 +942,50 @@ fn dangerous_powershell_member(name: &str) -> bool {
             | "getmethods"
             | "getconstructor"
     )
+}
+
+fn powershell_subexpression_requires_review(command: &str) -> bool {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut quote = Quote::None;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match quote {
+            Quote::None => match ch {
+                '\'' => quote = Quote::Single,
+                '"' => quote = Quote::Double,
+                '`' => {
+                    chars.next();
+                }
+                '$' if chars.peek() == Some(&'(') => return true,
+                _ => {}
+            },
+            Quote::Single => {
+                if ch == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        chars.next();
+                    } else {
+                        quote = Quote::None;
+                    }
+                }
+            }
+            Quote::Double => {
+                if ch == '`' {
+                    chars.next();
+                } else if ch == '"' {
+                    quote = Quote::None;
+                } else if ch == '$' && chars.peek() == Some(&'(') {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn powershell_member_invocation_requires_review(command: &str) -> bool {
@@ -1054,7 +1101,9 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
         Double,
     }
 
-    if powershell_member_invocation_requires_review(command) {
+    if powershell_subexpression_requires_review(command)
+        || powershell_member_invocation_requires_review(command)
+    {
         return true;
     }
 
@@ -1100,15 +1149,10 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
             continue;
         }
         if ch == '`' {
-            if let Some(escaped) = chars.next() {
-                if escaped.is_ascii_alphanumeric() || matches!(escaped, '_' | '-' | '.') {
-                    word.push(escaped);
-                    command_boundary = false;
-                } else if flush_review_word(&mut word) {
-                    return true;
-                }
-            }
-            continue;
+            // Outside quotes, backtick escaping can reconstruct command/cmdlet names at
+            // parse time (including Unicode escape forms in newer PowerShell). Treat the
+            // invocation grammar as unreviewable instead of approximating the final token.
+            return true;
         }
         if ch == '&' {
             if flush_review_word(&mut word) {
