@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,9 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "LB-007/generation10: fail-closed privileged-external-runtime shell review is bypassable through PowerShell .NET process-launch APIs such as System.Diagnostics.Process.Start over a runtime-resolved executable path"
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +174,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-012 Elevated Permission Mode reaccepted after LB012 contract, real elevated_exec E2E, privilege 21/21 and policy 7/7 verification. G2 is now REVIEW_REQUIRED. Run the G2 Group-Release gate, then fresh independent adversarial generation 10. Generation 10 remains unconsumed; G3/LB-013 and G4 remain BLOCKED until review PASS."
+    "next_action": "G2 independent adversarial review generation 10 FAIL. Rework LB-007 first: PowerShell process-launch/reflection/COM/WMI surfaces that can choose an executable at runtime must be review-required instead of ordinary Full execution. Then reaccept LB-008 through LB-012 sequentially, rerun the G2 Group-Release gate, and execute fresh independent adversarial generation 11. LB-013/G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1124,7 +1126,42 @@
     "acceptance": ["A276", "A277", "A278", "A279", "A280", "A281", "A282", "A283", "A284", "A285", "A286", "A287", "A288"],
     "reopen_from_pr": "LB-006",
     "next_required_g2_adversarial_generation": 10,
-    "g2_generation_10_consumed": false,
+    "g2_generation_10_consumed": true,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_10_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 10,
+    "baseline_commit": "ea081b48ddfbbef511244d554a047c587e505450",
+    "reopen_from_pr": "LB-007",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-007",
+        "acceptance": ["A251"],
+        "summary": "The generation-9 shell-indirection correction remains bypassable through PowerShell .NET process-launch APIs, so privileged-external-runtime review is not fail-closed.",
+        "evidence": [
+          "powershell_invocation_requires_review ignores contents inside single/double quoted strings and escalates only specific lexical words, a single call operator &, dot-source, or cmd-style expansion.",
+          "review_word includes Start-Process/CreateProcess/Win32_Process and explicit docker/podman/wsl tokens but does not include System.Diagnostics.Process, Diagnostics.Process, Process.Start, ProcessStartInfo, Shell.Application/ShellExecute, reflection type resolution, or equivalent .NET process-launch surfaces.",
+          "A command shaped as $x='<runtime executable path>'; $p=[System.Diagnostics.Process]::Start($x,'ps'); $p.WaitForExit() therefore contains no reviewed executable token outside quotes and no blocked call-operator/Start-Process token, while the shell API still chooses the process target at runtime.",
+          "A non-destructive environment probe confirmed System.Diagnostics.Process exposes 6 Start overloads on this Windows host; actual process spawning was deliberately not executed during read-only adversarial review.",
+          "Existing LB-007 regression tests cover dynamic &: $x=('do'+'cker'); & $x, Start-Process, Set-Alias, a secondary cmd, and cmd variable expansion, but do not cover .NET/COM/WMI/reflection process-launch surfaces.",
+          "runtime-policy.toml requires privileged_external_runtime=review_required, shell_invocation_review=static_target_fail_closed, and unreviewable_shell_indirection=review_required."
+        ]
+      }
+    ],
+    "verified_passes": [
+      "G2 Group-Release cargo test --locked and cargo clippy --locked --all-targets -- -D warnings: PASS.",
+      "Frontend Vitest 5/5 and production build: PASS.",
+      "verify:runtime-manifest and verify:architecture including activated ARCH-025/026: PASS.",
+      "g4-human-gate.test.mjs and git diff --check: PASS.",
+      "No equally strong new counterexample was found in LB-006 public command-session lifecycle, LB-008 Tunnel secret/readiness boundaries, LB-010 recovery ownership, LB-011 Broker install/IPC trust, or LB-012 exact elevated_exec review during this generation."
+    ],
+    "next_required_g2_adversarial_generation": 11,
+    "g2_generation_10_consumed": true,
     "g3_unlocked": false,
     "g4_unlocked": false
   }
