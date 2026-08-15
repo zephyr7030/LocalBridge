@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -180,7 +180,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Schema33 execution is explicitly reopened from LB-006 by user instruction. Execute LB-006 through LB-012 strictly and serially; preserve G2 generation19 FAIL provenance and keep generation20 unconsumed."
+    "next_action": "LB-006 schema33 path-authority rework is accepted. Continue strictly with LB-007 schema33 privileged classification; preserve G2 generation19 FAIL provenance and keep generation20 unconsumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -2122,5 +2122,23 @@
     "g2_generation_20_consumed": false,
     "historical_g2_review_generation": 19,
     "historical_g2_review_commit": "1b891b15de1c38e0c7fa6df2a7edbe210274c208"
+  },
+  "lb006_schema33_path_authority_acceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "implementation_commit": "a325e13ce9751eaa3fcd445ca28521e7b2a19d5f",
+    "evidence": [
+      "LocalBridge now owns an explicit ActiveWorkspace versus BrokerAdministrator path-authority abstraction; ordinary facade document/image/workspace path resolution continues to use ActiveWorkspace and rejects absolute/traversal inputs.",
+      "BrokerAdministrator path authority accepts ordinary absolute dispatch paths but does not become an ordinary core-tool bypass; whole-app and coding-tools runtime execution remain under the normal user token.",
+      "GitRepositoryResolver now carries explicit path authority: ordinary handle_git_tool constructs ActiveWorkspace and rejects absolute inputs at the resolver layer, while an explicit BrokerAdministrator resolver can discover a repository outside an unrelated workspace fixture.",
+      "Windows canonical verbatim paths are converted only for ordinary display/execution projection in the BrokerAdministrator seam; normalization itself is not authorization.",
+      "Fresh path-authority tests PASS; workspace path contract regression PASS; Git authority separation and full git_adapter tests PASS.",
+      "Fresh full serial cargo test --locked -- --test-threads=1 PASS; cargo clippy --locked --all-targets -- -D warnings PASS; npm test/build, runtime-manifest, architecture, UI-language, G4 regression and git diff check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-007"
   }
 }
