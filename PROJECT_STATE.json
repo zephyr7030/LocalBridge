@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-007 schema31 shell-policy reacceptance is complete at implementation commit 1558adb37ac674fc6f473ce91dcd0e65498b2884. Strict sequence is advanced to LB-008 READY/current and execution stops here. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
+    "next_action": "Scoped privilege review reopened G2 at LB-007. First repair ordinary Full/Elevated exec classification so Windows system-management commands cannot bypass the administrator boundary; then continue strict sequence. Administrator execution for reviewed system-management operations remains Broker/UAC-only. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1929,5 +1929,35 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "next_pr": "LB-008"
+  },
+  "lb007_lb012_system_management_privilege_scoped_review_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "scoped_independent_adversarial",
+    "group_generation_consumed": false,
+    "reopen_from_pr": "LB-007",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-007",
+        "summary": "Windows system-management executables can bypass the administrator boundary through the ordinary process route because the shell privilege classifier does not consistently recognize reg.exe, schtasks.exe, sc.exe and netsh.exe as privileged system-management targets.",
+        "required_semantics": "Full and Elevated ordinary exec_command must deny these system-management targets and require the privileged route; Elevated mode must not turn the ordinary process path into an administrator-token path."
+      },
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-012",
+        "summary": "The reviewed elevated_exec profile is hard-pinned to trusted System32 whoami.exe and current regressions explicitly reject reg.exe, so administrator mode cannot execute reviewed Windows system-management operations through the existing Active Broker/UAC route.",
+        "required_semantics": "Administrator mode may execute reviewed trusted System32 system-management programs only through structured elevated_exec plus Active Broker; Edit and Full elevated_exec remain denied."
+      }
+    ],
+    "clarifications": [
+      "Windows OS system management is not itself the LocalBridge control plane.",
+      "LocalBridge PermissionMode, administrator consent, UAC approval, Broker activation, WorkspaceRegistry/active workspace, credentials, Tunnel/MCP configuration, runtime/PEP/Broker policy and LocalBridge autostart control remain permanently denied to MCP in every mode.",
+      "Reviewed administrator system-management execution remains structured direct program/args through Broker with no shell or interpreter fallback."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
