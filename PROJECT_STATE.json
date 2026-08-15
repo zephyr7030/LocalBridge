@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-011 reaccepted after generation12 correction chain with privilege and real Broker IPC PASS. Reaccept LB-012, then Group-Release and fresh generation13. G3/G4 remain BLOCKED."
+    "next_action": "LB-012 reaccepted after generation12 correction chain. G2 REVIEW_REQUIRED: run fresh Group-Release, then fresh independent adversarial generation 13. Generation 13 remains unconsumed; LB-013/G3/G4 remain BLOCKED until G2 review PASS."
   },
   "current_task_ui": {
     "enabled": true,
