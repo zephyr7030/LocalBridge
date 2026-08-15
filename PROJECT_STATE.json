@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,9 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "LB-006/schema29: terminal command task-state is not durably and atomically finalized; terminal tasks can retain running current_command or miss command_finished, and no task_id+session_id owner CAS protects delayed finalizers."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -174,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 independent adversarial generation17 FAIL under schema29. Rework LB-006 for A289-A291 first, then strictly reaccept LB-007 through LB-012 and run fresh G2 adversarial generation18. G3/LB-013 is blocked again. A292 window centering remains queued for LB-015 after G2 passes."
+    "next_action": "LB-006 schema29 A289-A291 correction accepted at 0b3e13cc0cdd819c26284809ae500fb259dbab8a. Execute LB-007 next, then strictly reaccept LB-008 through LB-012; G2 remains REWORK_REQUIRED/FAIL generation17 until fresh independent adversarial generation18. G3/LB-013 remains blocked, and A292 window centering remains queued for LB-015."
   },
   "current_task_ui": {
     "enabled": true,
