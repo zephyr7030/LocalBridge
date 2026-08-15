@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,11 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "Scoped LB-006 rework: PowerShell stderr/retained stderr exposes LocalBridge injected prologue and CLIXML surrogate escapes are not decoded to Unicode.",
+    "Scoped LB-006 rework: command_control.read public schema permits session_id-only calls although implementation requires output_ref.",
+    "Scoped LB-006 rework: bundled Windows command path validation treats cmd cd /d switch as an absolute POSIX path and the facade loses the typed policy failure."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +176,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-006 scoped post-LB-007 facade rework accepted at implementation commit 4a2a9665b5eb12ed28929c97008fe6d13165f79d. Next execute LB-007, then continue the strict G2 sequence only after each PR acceptance. G2 generation18 provenance remains unchanged; generation19 is not consumed. G3/G4 remain blocked."
+    "next_action": "Scoped post-generation19 review reopened LB-006 without consuming G2 generation20. Repair PowerShell stderr normalization/Unicode, command_control read schema invariants, and Windows cmd cd /d path parsing/error normalization; accept LB-006, then return LB-007 to READY and stop."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1798,6 +1802,50 @@
       "The actual mcp::server bundled-runtime group PASSed serially; the complete cargo test --locked suite PASSed with --test-threads=1 and cargo clippy --locked --all-targets -- -D warnings PASSed. The initial default-parallel full run had four WinSock 10060 connection timeouts in existing runtime E2E tests, with no policy assertion failure; the same runtime tests then PASSed serially.",
       "Fresh npm test PASS, npm run build PASS, runtime-manifest verifier PASS, architecture verifier PASS, G4 human-gate regression PASS, and git diff --check PASS."
     ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb006_post_generation19_scoped_review_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "scoped_independent_adversarial",
+    "group_generation_consumed": false,
+    "baseline_commit": "4d844d16d12d6dc6e274c9fc19cfbd342feba988",
+    "reopen_from_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "summary": "PowerShell stderr public contract leaks injected prologue and does not decode CLIXML UTF-16 surrogate escapes.",
+        "evidence": [
+          "Current hardened PowerShell script injects Management-module import and OutputEncoding setup before user text.",
+          "Both live stderr and retained stderr pass through LocalBridge CLIXML normalization, whose decoder currently handles XML entities/newline escapes but not surrogate escape pairs such as _xD83D__xDE80_.",
+          "The retained read path is therefore subject to the same public stderr normalization defect."
+        ]
+      },
+      {
+        "severity": "MEDIUM",
+        "owner_pr": "LB-006",
+        "summary": "command_control.read schema does not encode its output_ref-only action invariant.",
+        "evidence": [
+          "Public schema currently requires only action while exposing both session_id and output_ref.",
+          "Facade control_command requires output_ref for Read and session_id for Poll/Write/Kill."
+        ]
+      },
+      {
+        "severity": "MEDIUM",
+        "owner_pr": "LB-006",
+        "summary": "Windows cmd cd /d is rejected by bundled path inspection and private policy failure is normalized too generically.",
+        "evidence": [
+          "Bundled runtime classifies cd/chdir as path-argument commands and its generic absolute-path guard treats leading slash as POSIX absolute.",
+          "The exact cmd switch /d therefore enters path validation as data instead of a Windows option.",
+          "LocalBridge private-error normalization must retain stable policy/workspace semantics rather than collapse such failures into ProcessFailed."
+        ]
+      }
+    ],
+    "g2_generation_19_consumed": true,
     "next_required_g2_adversarial_generation": 20,
     "g2_generation_20_consumed": false,
     "g3_unlocked": false,
