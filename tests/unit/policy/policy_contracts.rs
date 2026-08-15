@@ -147,6 +147,62 @@ fn malformed_or_semantically_widened_policy_is_rejected() {
 #[test]
 fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
     let policy = policy();
+    let directory_only = json!({
+        "action":"document",
+        "directory_changes":[
+            {"action":"create_directory","path":"test"},
+            {"action":"remove_empty_directory","path":"test"}
+        ]
+    });
+    let directory_descriptor = policy
+        .classify_public_action("agent_workflow", &directory_only)
+        .expect("schema30 structured directory workflow");
+    assert!(directory_descriptor.transitive.read);
+    assert!(directory_descriptor.transitive.write);
+    assert!(directory_descriptor.transitive.git);
+    assert!(!directory_descriptor.transitive.process_exec);
+    assert!(!directory_descriptor.transitive.network);
+    assert!(!directory_descriptor.transitive.privilege);
+    assert!(!directory_descriptor.transitive.control_plane);
+    assert!(
+        policy
+            .decide_public(PermissionMode::Edit, "agent_workflow", &directory_only)
+            .allowed
+    );
+    assert!(
+        policy
+            .decide_public(PermissionMode::Full, "agent_workflow", &directory_only)
+            .allowed
+    );
+
+    for malformed in [
+        json!({"action":"document","directory_changes":[]}),
+        json!({"action":"document","directory_changes":[{"action":"create_directory","path":"test","extra":true}]}),
+        json!({"action":"document","directory_changes":[{"action":"recursive_delete","path":"test"}]}),
+        json!({"action":"document","directory_changes":[{"action":"create_directory","path":"test"}],"commands":[{"command":"echo process"}]}),
+    ] {
+        let decision = policy.decide_public(PermissionMode::Edit, "agent_workflow", &malformed);
+        assert!(
+            !decision.allowed,
+            "malformed/mixed request widened Edit: {malformed:#?}"
+        );
+    }
+
+    for protected_action in ["build_release", "custom"] {
+        let decision = policy.decide_public(
+            PermissionMode::Full,
+            "agent_workflow",
+            &json!({
+                "action":protected_action,
+                "directory_changes":[{"action":"create_directory","path":"test"}]
+            }),
+        );
+        assert!(
+            !decision.allowed,
+            "directory_changes removed protected capability for {protected_action}"
+        );
+    }
+
     let workflow = policy
         .classify_public_action(
             "agent_workflow",
@@ -244,7 +300,10 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"Sta`rt-Process $x","shell":"powershell"}),
     ] {
         let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
-        assert!(!decision.allowed, "shell indirection unexpectedly allowed: {arguments}");
+        assert!(
+            !decision.allowed,
+            "shell indirection unexpectedly allowed: {arguments}"
+        );
         assert_eq!(
             decision.deny_reason,
             Some(DenyReason::PrivilegedRouteNotAvailable)
@@ -297,6 +356,10 @@ fn unknown_public_actions_and_public_policy_widening_fail_closed() {
     let base = include_str!("../../../runtime-policy.toml");
     let narrowed = base
         .replace(
+            "edit_tools = [\"workspace_context\", \"agent_workflow\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            "edit_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+        )
+        .replace(
             "full_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
             "full_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
         )
@@ -317,8 +380,8 @@ fn unknown_public_actions_and_public_policy_widening_fail_closed() {
     );
 
     let widened = base.replace(
-        "edit_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
-        "edit_tools = [\"workspace_context\", \"exec_command\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+        "edit_tools = [\"workspace_context\", \"agent_workflow\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+        "edit_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
     );
     assert!(CapabilityPolicy::from_toml(&widened).is_err());
     let unknown_tool = base.replace(

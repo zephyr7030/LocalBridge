@@ -109,6 +109,7 @@ const PUBLIC_CORE_TOOLS: &[&str] = &[
 ];
 const PUBLIC_EDIT_MAX: &[&str] = &[
     "workspace_context",
+    "agent_workflow",
     "git_workflow",
     "document_workflow",
     "view_image",
@@ -585,18 +586,16 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             TaskKind::ReadFile,
             PublicCapabilityDeclaration::READ,
         )),
-        "exec_command" if action.is_none() => {
-            Some(public_descriptor(
-                "exec_command",
-                "execute",
-                Capability::ProcessExec,
-                TaskKind::ExecuteCommand,
-                PublicCapabilityDeclaration {
-                    privilege: shell_request_requires_review(arguments),
-                    ..PublicCapabilityDeclaration::PROCESS
-                },
-            ))
-        }
+        "exec_command" if action.is_none() => Some(public_descriptor(
+            "exec_command",
+            "execute",
+            Capability::ProcessExec,
+            TaskKind::ExecuteCommand,
+            PublicCapabilityDeclaration {
+                privilege: shell_request_requires_review(arguments),
+                ..PublicCapabilityDeclaration::PROCESS
+            },
+        )),
         "command_control" => match action? {
             "poll" => Some(public_descriptor(
                 "command_control",
@@ -723,7 +722,10 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
         )),
         "agent_workflow" => {
             let shell_review_required = workflow_commands_require_review(arguments);
-            let (name, declaration) = match action? {
+            let workflow_action = action?;
+            let directory_changes_only = workflow_directory_changes_only(arguments)?
+                && !matches!(workflow_action, "build_release" | "custom");
+            let (name, declaration) = match workflow_action {
                 "diagnose" => (
                     "diagnose",
                     PublicCapabilityDeclaration::workflow(false, true, true, false, false),
@@ -762,6 +764,11 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                 ),
                 _ => return None,
             };
+            let declaration = if directory_changes_only {
+                PublicCapabilityDeclaration::workflow(true, false, true, false, false)
+            } else {
+                declaration
+            };
             let declaration = PublicCapabilityDeclaration {
                 privilege: declaration.privilege || shell_review_required,
                 ..declaration
@@ -776,6 +783,41 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
         }
         _ => None,
     }
+}
+
+fn workflow_directory_changes_only(arguments: &Value) -> Option<bool> {
+    let object = arguments.as_object()?;
+    let Some(changes) = object.get("directory_changes") else {
+        return Some(false);
+    };
+    let changes = changes.as_array()?;
+    if changes.is_empty() || changes.len() > 32 {
+        return None;
+    }
+    for change in changes {
+        let change = change.as_object()?;
+        if change.len() != 2 || !change.contains_key("action") || !change.contains_key("path") {
+            return None;
+        }
+        if !matches!(
+            change.get("action").and_then(Value::as_str),
+            Some("create_directory" | "remove_empty_directory")
+        ) || change
+            .get("path")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            return None;
+        }
+    }
+    let patch_present = object.get("patch").is_some();
+    let commands_present = object
+        .get("commands")
+        .is_some_and(|value| value.as_array().is_none_or(|commands| !commands.is_empty()));
+    if patch_present || commands_present {
+        return None;
+    }
+    Some(true)
 }
 
 fn workflow_commands_require_review(arguments: &Value) -> bool {
@@ -996,9 +1038,7 @@ fn powershell_console_instance_member_is_safe(
         .collect::<String>()
         .to_ascii_lowercase();
     match member.to_ascii_lowercase().as_str() {
-        "readline" => {
-            prefix.ends_with("[console]::in") || prefix.ends_with("[system.console]::in")
-        }
+        "readline" => prefix.ends_with("[console]::in") || prefix.ends_with("[system.console]::in"),
         "write" | "writeline" => {
             prefix.ends_with("[console]::out")
                 || prefix.ends_with("[system.console]::out")

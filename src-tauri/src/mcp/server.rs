@@ -2448,6 +2448,41 @@ mod tests {
             escaped_directory.body
         );
 
+        pep.set_permission_mode(PermissionMode::Edit);
+        let edit_mkdir = public_tool_call(
+            pep.port(),
+            &session,
+            698,
+            "agent_workflow",
+            json!({
+                "action":"document",
+                "directory_changes":[{"action":"create_directory","path":"schema30-edit-dir"}]
+            }),
+        );
+        assert_eq!(
+            edit_mkdir.body["result"]["isError"], false,
+            "{:#?}",
+            edit_mkdir.body
+        );
+        assert!(workspace.join("schema30-edit-dir").is_dir());
+        let edit_rmdir = public_tool_call(
+            pep.port(),
+            &session,
+            6981,
+            "agent_workflow",
+            json!({
+                "action":"document",
+                "directory_changes":[{"action":"remove_empty_directory","path":"schema30-edit-dir"}]
+            }),
+        );
+        assert_eq!(
+            edit_rmdir.body["result"]["isError"], false,
+            "{:#?}",
+            edit_rmdir.body
+        );
+        assert!(!workspace.join("schema30-edit-dir").exists());
+        pep.set_permission_mode(PermissionMode::Full);
+
         for (id, shell) in [(696u64, "windows_powershell"), (697u64, "auto")] {
             let baseline = public_tool_call(
                 pep.port(),
