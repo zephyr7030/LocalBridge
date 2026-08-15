@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-009",
+  "current_pr": "LB-010",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-008 reaccepted after generation15 dependency correction; Tunnel contract/runtime-manifest/ARCH-016 PASS. Execute LB-009 next; generation16 remains unconsumed."
+    "next_action": "LB-009 reaccepted after generation15 dependency correction; orchestrator and architecture PASS. Execute LB-010 next; generation16 remains unconsumed."
   },
   "current_task_ui": {
     "enabled": true,
