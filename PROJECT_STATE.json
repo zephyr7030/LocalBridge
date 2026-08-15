@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,9 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "LB-007/generation10: fail-closed privileged-external-runtime shell review is bypassable through PowerShell .NET process-launch APIs such as System.Diagnostics.Process.Start over a runtime-resolved executable path"
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -174,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 independent adversarial review generation 10 FAIL. Rework LB-007 first: PowerShell process-launch/reflection/COM/WMI surfaces that can choose an executable at runtime must be review-required instead of ordinary Full execution. Then reaccept LB-008 through LB-012 sequentially, rerun the G2 Group-Release gate, and execute fresh independent adversarial generation 11. LB-013/G3/G4 remain BLOCKED."
+    "next_action": "LB-007 generation10 correction accepted at 491a341c8861863b4e2788477810ff39ade41779 after direct .NET Process.Start/reflection/COM/WMI regressions, full policy suites, real schema28 runtime E2E, full cargo test and Clippy PASS. Reaccept LB-008 through LB-012 sequentially, rerun G2 Group-Release, then execute fresh independent adversarial generation 11. LB-013/G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
