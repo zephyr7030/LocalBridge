@@ -1783,6 +1783,6 @@
     "next_required_g2_adversarial_generation": 20,
     "g3_unlocked": false,
     "g4_unlocked": false,
-    "review_decision_commit": null
+    "review_decision_commit": "1b891b15de1c38e0c7fa6df2a7edbe210274c208"
   }
 }
