@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,11 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "G2 generation20 / LB-006: Full shell execution is only workdir/path-parameter bounded; PowerShell -EncodedCommand and cmd built-ins can access filesystem paths outside the active workspace, and agent_workflow.commands shares the same route.",
+    "G2 generation20 / LB-007: policy denials collapse to generic JSON-RPC -32001 instead of preserving stable typed denial reasons such as capability/privilege/elevation distinctions.",
+    "G2 generation20 / LB-007: the fail-closed review_word extension rule blanket-classifies ordinary .ps1/.cmd/.bat script invocation as review-required, so Full lacks the expected ordinary workspace script execution path."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -180,7 +184,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-011 schema33 development Broker handoff repair is accepted. Continue strictly with LB-012 general Broker-backed administrator capability implementation; preserve ordinary-route boundaries, G2 generation19 FAIL provenance and generation20 unconsumed."
+    "next_action": "Repair G2 generation20 from LB-006: make Full shell/process filesystem authority actually active-workspace-contained rather than workdir-only, including PowerShell/cmd and agent_workflow.commands. Then repair LB-007 typed policy denial projection and ordinary workspace script execution without weakening shell-indirection safety. Strictly reaccept LB-007 through LB-012 and run fresh G2 adversarial generation21; G3 remains blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -2254,5 +2258,88 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "next_action": "Run fresh independent G2 adversarial review generation 20. LB-013 and G3 remain blocked until that review passes."
+  },
+  "g2_adversarial_review_generation_20_2026_08_16": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 20,
+    "baseline_commit": "60839b008ec6fde277eda5ea47e2069e7748c076",
+    "reopen_from_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "summary": "Full shell/process filesystem authority is not contained to the active workspace; command text can access paths outside the workspace even though structured path/workdir inputs are bounded.",
+        "evidence": [
+          "src-tauri/src/mcp/path_authority.rs protects structured ActiveWorkspace path inputs, while exec_command and agent_workflow.commands ultimately execute user shell text through ShellExecutor; validating workdir does not constrain shell filesystem I/O.",
+          "src-tauri/src/mcp/shell.rs converts the full PowerShell user script into -EncodedCommand before handing it to the bundled coding-tools runtime.",
+          "runtime/coding-tools-mcp/coding_tools_mcp/server.py _check_command_paths inspects only the outer command tokens; it cannot see absolute paths hidden inside LocalBridge EncodedCommand.",
+          "The bundled Windows path-command list does not cover cmd built-ins such as dir/type, so those built-ins can carry absolute path operands without becoming explicit path candidates.",
+          "The user black-box report independently observed Full reading outside-workspace files and listing D:\\ through cmd/PowerShell/agent_workflow, matching the current source chain."
+        ],
+        "reproduction": [
+          "In Full, invoke a PowerShell read-only command whose file operand is an absolute path outside the active workspace; the LocalBridge outer runtime sees EncodedCommand rather than the file path.",
+          "In Full, invoke a cmd built-in such as dir against an outside-workspace absolute directory; the built-in is not covered by the bundled explicit path-command candidate set.",
+          "Repeat through agent_workflow.commands; it shares the same ShellExecutor path."
+        ],
+        "required_correction": "Filesystem confinement for Edit/Full must cover the actual process/shell filesystem effects, not only public path/workdir fields. Do not solve this by globally disabling shell development capability; provide a workspace-contained ordinary execution route and retain the separate BrokerAdministrator route for Elevated."
+      },
+      {
+        "severity": "MEDIUM",
+        "owner_pr": "LB-007",
+        "summary": "PEP policy denials lose stable typed reason and collapse to generic JSON-RPC -32001.",
+        "evidence": [
+          "src-tauri/src/mcp/server.rs maps GuardError::Denied to fixed JSON-RPC code -32001 with Tool call denied by LocalBridge policy.",
+          "Existing policy server tests assert the same -32001 transport behavior.",
+          "Broker unavailable/non-Active paths can separately return ElevationRequired, proving the public surface already has reason-specific semantics that ordinary PEP denial currently discards."
+        ],
+        "required_correction": "Project stable LocalBridge typed deny reasons through the public MCP error contract, distinguishing capability/policy denial from privileged-route/elevation requirements without leaking private policy internals."
+      },
+      {
+        "severity": "MEDIUM",
+        "owner_pr": "LB-007",
+        "summary": "Ordinary workspace .ps1/.cmd/.bat script invocation is blanket review-required in Full, over-restricting normal development execution.",
+        "evidence": [
+          "src-tauri/src/mcp/policy.rs review_word treats any token whose final extension is ps1/psm1/psd1/bat/cmd/vbs/wsf as review-required.",
+          "Full has no ordinary approval path for that classification, so normal workspace scripts are rejected instead of running with the current-user token.",
+          "The user black-box report observed ordinary .cmd/.ps1 scripts broadly rejected."
+        ],
+        "required_correction": "After real workspace filesystem confinement exists, distinguish a validated in-workspace script target from unreviewable/dynamic script indirection; do not simply remove script review hardening before containment is established."
+      }
+    ],
+    "black_box_dispositions": [
+      {
+        "area": "pnputil/wevtutil/powercfg in Full",
+        "status": "NOT_CONFIRMED_AS_DEFECT",
+        "reason": "The current schema33 contract forbids crossing the administrator boundary, not merely starting every Windows maintenance-named executable. The supplied evidence shows these programs can execute under the ordinary Medium/current-user token but does not demonstrate an administrator-only mutation succeeding. A global privilege-route list expansion would require additional contract intent/evidence."
+      },
+      {
+        "area": "Elevated ordinary exec remains Medium and six protected system tools are denied",
+        "status": "EXPECTED_SCHEMA33",
+        "reason": "Ordinary Elevated exec_command intentionally never inherits the Broker token; reg/sc/schtasks/netsh/bcdedit/dism use the separate administrator route."
+      },
+      {
+        "area": "Elevated ordinary document/path tools remain WorkspaceDenied outside active root",
+        "status": "EXPECTED_SCHEMA33",
+        "reason": "Ordinary core path tools remain workspace-bound; outside-workspace access is through elevated_exec operation=filesystem / BrokerAdministrator."
+      },
+      {
+        "area": "Dedicated Broker-backed administrator route is absent",
+        "status": "NOT_REPRODUCED_CURRENT_HEAD",
+        "reason": "Current production background composition injects PrivilegeController.gateway into the PEP, explicit permission activation calls enable_from_explicit_user_action, and fresh real separate-Broker tests pass structured administrator execution plus outside-workspace filesystem roundtrip."
+      }
+    ],
+    "fresh_review_evidence": [
+      "Fresh actual separate Broker test target passed both structured administrator execution and outside-workspace filesystem roundtrip.",
+      "Fresh PEP typed administrator process/shell/filesystem Broker-only route test passed.",
+      "Fresh development Broker pin/UAC handoff security test passed.",
+      "Current tracked review-ready baseline was clean at 60839b008ec6fde277eda5ea47e2069e7748c076 before governance transition."
+    ],
+    "next_required_g2_adversarial_generation": 21,
+    "g2_generation_20_consumed": true,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "review_decision_commit": null
   }
 }
