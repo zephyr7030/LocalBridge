@@ -1048,7 +1048,9 @@ fn powershell_console_instance_member_is_safe(
         .collect::<String>()
         .to_ascii_lowercase();
     match member.to_ascii_lowercase().as_str() {
-        "readline" => prefix.ends_with("[console]::in") || prefix.ends_with("[system.console]::in"),
+        "readline" | "readtoend" => {
+            prefix.ends_with("[console]::in") || prefix.ends_with("[system.console]::in")
+        }
         "write" | "writeline" => {
             prefix.ends_with("[console]::out")
                 || prefix.ends_with("[system.console]::out")
@@ -1247,12 +1249,46 @@ fn flush_review_word(word: &mut String) -> bool {
     requires_review
 }
 
+fn powershell_simple_get_command_diagnostic(command: &str) -> bool {
+    if command
+        .chars()
+        .any(|ch| ch.is_whitespace() && !matches!(ch, ' ' | '\t'))
+    {
+        return false;
+    }
+    let mut words = command.split_ascii_whitespace();
+    let Some(verb) = words.next() else {
+        return false;
+    };
+    if !verb.eq_ignore_ascii_case("get-command") && !verb.eq_ignore_ascii_case("gcm") {
+        return false;
+    }
+    let Some(target) = words.next() else {
+        return false;
+    };
+    if words.next().is_some() {
+        return false;
+    }
+    !target.is_empty()
+        && target
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+}
+
 fn powershell_invocation_requires_review(command: &str) -> bool {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Quote {
         None,
         Single,
         Double,
+    }
+
+    // A standalone command-discovery query does not execute the discovered target. Keep this
+    // exception deliberately narrower than the general Get-Command surface so pipelines,
+    // ScriptBlock extraction, dynamic names, assignments, and follow-on invocation continue to
+    // flow through the fail-closed grammar below.
+    if powershell_simple_get_command_diagnostic(command) {
+        return false;
     }
 
     if powershell_subexpression_requires_review(command)

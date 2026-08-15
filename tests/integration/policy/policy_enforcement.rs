@@ -200,6 +200,33 @@ fn privileged_external_runtime_commands_require_review_and_never_forward() {
 }
 
 #[test]
+fn public_shell_diagnostics_allow_only_narrow_static_console_and_command_discovery_seams() {
+    let policy = policy();
+    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
+        for arguments in [
+            json!({"command":"Get-Command git","shell":"windows_powershell"}),
+            json!({"command":"gcm git.exe","shell":"powershell"}),
+            json!({"command":"[Console]::In.ReadToEnd()","shell":"windows_powershell","stdin":"probe\n"}),
+        ] {
+            let decision = policy.decide_public(mode, "exec_command", &arguments);
+            assert!(decision.allowed, "ordinary diagnostic was over-classified: {arguments}");
+        }
+    }
+
+    for arguments in [
+        json!({"command":"Get-Command $dynamicName","shell":"windows_powershell"}),
+        json!({"command":"Get-Command\r\ngit","shell":"windows_powershell"}),
+        json!({"command":"Get-Command git | ForEach-Object { $_.ScriptBlock }","shell":"windows_powershell"}),
+        json!({"command":"$p='probe.ps1'; $sb=(Get-Command $p).ScriptBlock; 1 | ForEach-Object -Process $sb","shell":"windows_powershell"}),
+        json!({"command":"$ExecutionContext.InvokeCommand.CommandNotFoundAction = { param($name,$eventArgs); $eventArgs.Command = Get-Command Write-Output }; lbgen13 'hook'","shell":"windows_powershell"}),
+        json!({"command":"$value='abc'; $value.Trim()","shell":"windows_powershell"}),
+    ] {
+        let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
+        assert!(!decision.allowed, "dynamic PowerShell surface escaped review: {arguments}");
+    }
+}
+
+#[test]
 fn allowed_call_projects_actual_running_then_idle_and_redacts_secret_summary() {
     let calls = Rc::new(RefCell::new(Vec::new()));
     let mut guard = McpGuard::new(FakeRuntime::new(calls.clone()), policy());
