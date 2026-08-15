@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-011 Privileged Broker IPC Foundation reaccepted after privilege 21/21 and real broker IPC 5/5 verification. Reaccept LB-012 next; then run the G2 Group-Release gate and fresh independent adversarial generation 10. Generation 10 remains unconsumed; G3/G4 remain blocked."
+    "next_action": "LB-012 Elevated Permission Mode reaccepted after LB012 contract, real elevated_exec E2E, privilege 21/21 and policy 7/7 verification. G2 is now REVIEW_REQUIRED. Run the G2 Group-Release gate, then fresh independent adversarial generation 10. Generation 10 remains unconsumed; G3/LB-013 and G4 remain BLOCKED until review PASS."
   },
   "current_task_ui": {
     "enabled": true,
