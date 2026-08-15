@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,9 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "LB-007 A251: PowerShell $ExecutionContext.InvokeCommand.CommandNotFoundAction can dynamically replace command resolution after static review, allowing an unknown ordinary command name to resolve to a runtime-selected CommandInfo."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -174,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 independent adversarial review generation 13 FAIL. Rework LB-007 by treating PowerShell ExecutionContext/command-engine state access as unreviewable at the shell boundary, add real regression for CommandNotFoundAction rebinding, then reaccept LB-008..LB-012, Group-Release, and fresh generation14. G3/G4 remain BLOCKED."
+    "next_action": "LB-007 generation13 correction accepted at ffb72b67fae9d8772cef602321b57e7cf9adb317 after generic PowerShell member-mutation review hardening. Reaccept LB-008..LB-012, Group-Release, then fresh generation14. G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
