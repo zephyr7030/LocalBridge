@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -180,7 +180,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-006 schema33 path-authority rework is accepted. Continue strictly with LB-007 schema33 privileged classification; preserve G2 generation19 FAIL provenance and keep generation20 unconsumed."
+    "next_action": "LB-007 schema33 privileged classification is accepted. Continue strictly with LB-008 Tunnel Runtime revalidation; schema33 must not redesign Tunnel. Preserve G2 generation19 FAIL provenance and keep generation20 unconsumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -2140,5 +2140,23 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "next_pr": "LB-007"
+  },
+  "lb007_schema33_system_management_acceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "implementation_commit": "9b15fad24c1b86c6885a49ec44a4acfee02f48ac",
+    "evidence": [
+      "WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS now includes schema33 bcdedit.exe and dism.exe in addition to reg.exe schtasks.exe sc.exe and netsh.exe.",
+      "Full and Elevated ordinary exec_command classify direct case-insensitive System32 extensionless cmd-compound IF and PowerShell bcdedit/dism targets as PrivilegedRouteNotAvailable; an Active Broker does not upgrade the ordinary route token.",
+      "agent_workflow.commands applies the same transitive privilege classification, so workflow indirection cannot execute bcdedit/dism through the normal user-token route.",
+      "Program names used only as data or the narrow literal Get-Command diagnostic remain ordinary and are not globally banned.",
+      "LB-007 does not widen elevated_exec or implement Broker execution; the separate administrator route remains LB-012-owned.",
+      "Fresh targeted policy tests PASS; full serial cargo test PASS; cargo clippy PASS; npm test/build, runtime-manifest, architecture, UI-language, G4 regression and git diff check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-008"
   }
 }
