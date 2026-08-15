@@ -3,6 +3,7 @@ mod facade;
 mod git_adapter;
 mod guard;
 mod http;
+mod path_authority;
 mod policy;
 mod runtime;
 mod server;
@@ -16,6 +17,7 @@ pub use facade::{
     validate_runtime_capabilities,
 };
 pub use guard::{GuardError, GuardRuntime, McpGuard, PolicyDenied, ToolCallRequest};
+pub use path_authority::{PathAuthority, PathAuthorityError, PathAuthorityScope};
 pub use policy::{
     CapabilityPolicy, DenyReason, PolicyDecision, PolicyError, PublicActionDescriptor,
     PublicCapabilityDeclaration, ToolDescriptor, reviewed_elevated_program,

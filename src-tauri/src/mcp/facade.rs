@@ -12,6 +12,7 @@ use crate::state::{
 };
 
 use super::http::McpCancellationClient;
+use super::path_authority::{PathAuthority, PathAuthorityError, workspace_relative_path_valid};
 use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use super::shell::{ShellExecutionSpec, ShellExecutor, ShellResolveError, ShellSelector};
@@ -1087,18 +1088,10 @@ impl CodingToolsRuntimeAdapter {
     }
 
     fn stable_workspace_relative_path(&self, absolute: &Path) -> Result<String, FacadeError> {
-        let root = std::fs::canonicalize(&self.workspace).map_err(|_| {
-            FacadeError::new(FacadeErrorCode::WorkspaceDenied, "工作区不可用", false)
-        })?;
-        let relative = absolute.strip_prefix(&root).map_err(|_| {
-            FacadeError::new(FacadeErrorCode::WorkspaceDenied, "工作区路径越界", false)
-        })?;
-        let display = relative.to_string_lossy().replace('\\', "/");
-        Ok(if display.is_empty() {
-            ".".into()
-        } else {
-            display
-        })
+        PathAuthority::active_workspace(&self.workspace)
+            .map_err(normalize_path_authority_error)?
+            .display_path(absolute)
+            .map_err(normalize_path_authority_error)
     }
 
     fn private_call(
@@ -1147,26 +1140,10 @@ impl CodingToolsRuntimeAdapter {
     }
 
     fn resolve_existing_workspace_path(&self, relative: &str) -> Result<PathBuf, FacadeError> {
-        if !workspace_relative_path_valid(relative) {
-            return Err(FacadeError::new(
-                FacadeErrorCode::WorkspaceDenied,
-                "工作区路径参数无效",
-                false,
-            ));
-        }
-        let root = std::fs::canonicalize(&self.workspace).map_err(|_| {
-            FacadeError::new(FacadeErrorCode::WorkspaceDenied, "工作区不可用", false)
-        })?;
-        let candidate = std::fs::canonicalize(self.workspace.join(relative))
-            .map_err(|_| FacadeError::new(FacadeErrorCode::NotFound, "工作区文件不存在", false))?;
-        if !candidate.starts_with(&root) {
-            return Err(FacadeError::new(
-                FacadeErrorCode::WorkspaceDenied,
-                "工作区路径越界",
-                false,
-            ));
-        }
-        Ok(candidate)
+        PathAuthority::active_workspace(&self.workspace)
+            .map_err(normalize_path_authority_error)?
+            .resolve_existing(relative)
+            .map_err(normalize_path_authority_error)
     }
 
     fn probe_private_result_semantics(&mut self) -> Result<(), FacadeError> {
@@ -2998,28 +2975,6 @@ fn agent_action_allows_process(action: &str) -> bool {
     )
 }
 
-fn workspace_relative_path_valid(value: &str) -> bool {
-    if value.is_empty()
-        || value.contains(['\0', '\n', '\r', ':'])
-        || value.starts_with('/')
-        || value.starts_with('\\')
-        || value.starts_with("//")
-        || value.starts_with(r"\\?\")
-        || value.starts_with("//?/")
-        || value
-            .as_bytes()
-            .get(1)
-            .is_some_and(|separator| *separator == b':')
-        || Path::new(value).is_absolute()
-    {
-        return false;
-    }
-    !value
-        .replace('\\', "/")
-        .split('/')
-        .any(|component| component == "..")
-}
-
 fn public_patch_targets_valid(patch: &str) -> bool {
     let mut lines = patch.lines();
     if lines.next() != Some("*** Begin Patch") {
@@ -3105,6 +3060,21 @@ fn normalize_runtime_error(error: CodingToolsRuntimeError) -> FacadeError {
             FacadeErrorCode::RuntimeUnavailable,
             "编码运行时不可用",
             true,
+        ),
+    }
+}
+
+fn normalize_path_authority_error(error: PathAuthorityError) -> FacadeError {
+    match error {
+        PathAuthorityError::InvalidPath | PathAuthorityError::OutsideAuthority => FacadeError::new(
+            FacadeErrorCode::WorkspaceDenied,
+            "工作区路径参数无效",
+            false,
+        ),
+        PathAuthorityError::NotFound => FacadeError::new(
+            FacadeErrorCode::NotFound,
+            "工作区文件不存在",
+            false,
         ),
     }
 }

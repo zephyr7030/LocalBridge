@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
 use crate::runtime::run_bounded_command;
 use crate::workspace::WorkspaceValidator;
+
+use super::path_authority::{PathAuthority, PathAuthorityError};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
@@ -70,21 +72,17 @@ struct ResolvedRepositoryLocation {
 }
 
 pub(crate) struct GitRepositoryResolver {
-    workspace: PathBuf,
-    canonical_workspace: PathBuf,
+    authority: PathAuthority,
 }
 
 impl GitRepositoryResolver {
     fn new(workspace: &Path) -> Result<Self, ResolveError> {
-        if !workspace.is_absolute() || is_verbatim_path(workspace) || !workspace.is_dir() {
-            return Err(ResolveError::InvalidPath);
-        }
-        let canonical_workspace =
-            fs::canonicalize(workspace).map_err(|_| ResolveError::InvalidPath)?;
-        Ok(Self {
-            workspace: workspace.to_path_buf(),
-            canonical_workspace,
-        })
+        let authority = PathAuthority::active_workspace(workspace).map_err(authority_error)?;
+        Ok(Self::from_authority(authority))
+    }
+
+    fn from_authority(authority: PathAuthority) -> Self {
+        Self { authority }
     }
 
     fn resolve_existing(&self, raw: &str) -> Result<ResolvedLocation, ResolveError> {
@@ -96,31 +94,14 @@ impl GitRepositoryResolver {
     }
 
     fn resolve(&self, raw: &str, allow_missing: bool) -> Result<ResolvedLocation, ResolveError> {
-        if raw.is_empty() || raw.contains('\0') || raw.starts_with(r"\\?\") {
-            return Err(ResolveError::InvalidPath);
-        }
-        let supplied = Path::new(raw);
-        if supplied
-            .components()
-            .any(|component| matches!(component, Component::ParentDir))
-        {
-            return Err(ResolveError::InvalidPath);
-        }
-        let candidate = if supplied.is_absolute() {
-            supplied.to_path_buf()
-        } else {
-            self.workspace.join(supplied)
-        };
-        if is_verbatim_path(&candidate) {
-            return Err(ResolveError::InvalidPath);
-        }
+        let candidate = self.authority.input_path(raw).map_err(authority_error)?;
 
         let (existing, suffix, full_exists) = nearest_existing_ancestor(&candidate)?;
         if !allow_missing && !full_exists {
             return Err(ResolveError::NotFound);
         }
         let canonical_existing = fs::canonicalize(&existing).map_err(|_| ResolveError::NotFound)?;
-        if !canonical_existing.starts_with(&self.canonical_workspace) {
+        if !self.authority.allows_canonical(&canonical_existing) {
             return Err(ResolveError::OutsideWorkspace);
         }
         let metadata = fs::metadata(&existing).map_err(|_| ResolveError::NotFound)?;
@@ -130,7 +111,7 @@ impl GitRepositoryResolver {
         let canonical = suffix
             .iter()
             .fold(canonical_existing.clone(), |path, part| path.join(part));
-        if !canonical.starts_with(&self.canonical_workspace) {
+        if !self.authority.allows_canonical(&canonical) {
             return Err(ResolveError::OutsideWorkspace);
         }
         let full_metadata = if full_exists {
@@ -153,10 +134,10 @@ impl GitRepositoryResolver {
         } else {
             return Err(ResolveError::NotFound);
         };
-        let display = canonical
-            .strip_prefix(&self.canonical_workspace)
-            .map(path_to_slashes)
-            .unwrap_or_else(|_| raw.replace('\\', "/"));
+        let display = self
+            .authority
+            .display_path(&canonical)
+            .map_err(authority_error)?;
         Ok(ResolvedLocation {
             canonical,
             discovery_dir,
@@ -191,12 +172,12 @@ impl GitRepositoryResolver {
     fn discover_repository(&self, start: &Path) -> Result<Option<GitRepository>, ResolveError> {
         let mut current = start.to_path_buf();
         loop {
-            if !current.starts_with(&self.canonical_workspace) {
+            if !self.authority.allows_canonical(&current) {
                 return Err(ResolveError::OutsideWorkspace);
             }
             let marker = current.join(".git");
             if fs::symlink_metadata(&marker).is_ok() {
-                validate_git_marker(&marker, &current, &self.canonical_workspace)?;
+                validate_git_marker(&marker, &current, &self.authority)?;
                 let validated = WorkspaceValidator
                     .validate(&current)
                     .map_err(|_| ResolveError::InvalidRepository)?;
@@ -207,7 +188,7 @@ impl GitRepositoryResolver {
                 let canonical_execution = fs::canonicalize(&execution_root)
                     .map_err(|_| ResolveError::InvalidRepository)?;
                 if canonical_execution != current
-                    || !canonical_execution.starts_with(&self.canonical_workspace)
+                    || !self.authority.allows_canonical(&canonical_execution)
                 {
                     return Err(ResolveError::ReparseEscape);
                 }
@@ -216,7 +197,7 @@ impl GitRepositoryResolver {
                     execution_root,
                 }));
             }
-            if current == self.canonical_workspace {
+            if self.authority.discovery_stops_at(&current) {
                 return Ok(None);
             }
             if !current.pop() {
@@ -251,7 +232,7 @@ fn nearest_existing_ancestor(
 fn validate_git_marker(
     marker: &Path,
     repository: &Path,
-    workspace: &Path,
+    authority: &PathAuthority,
 ) -> Result<(), ResolveError> {
     let metadata = fs::symlink_metadata(marker).map_err(|_| ResolveError::InvalidRepository)?;
     if metadata.file_type().is_symlink() {
@@ -259,8 +240,8 @@ fn validate_git_marker(
     }
     if metadata.is_dir() {
         let canonical = fs::canonicalize(marker).map_err(|_| ResolveError::InvalidRepository)?;
-        return canonical
-            .starts_with(workspace)
+        return authority
+            .allows_canonical(&canonical)
             .then_some(())
             .ok_or(ResolveError::ReparseEscape);
     }
@@ -280,8 +261,8 @@ fn validate_git_marker(
         repository.join(target)
     };
     let canonical = fs::canonicalize(target).map_err(|_| ResolveError::InvalidRepository)?;
-    canonical
-        .starts_with(workspace)
+    authority
+        .allows_canonical(&canonical)
         .then_some(())
         .ok_or(ResolveError::ReparseEscape)
 }
@@ -347,11 +328,9 @@ fn git_status(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) 
     .map(|output| String::from_utf8_lossy(&output.output).trim().to_string())
     .filter(|value| !value.is_empty());
     let clean = entries.is_empty();
-    let repository_root = resolved
-        .repository
-        .canonical_root
-        .strip_prefix(&resolver.canonical_workspace)
-        .map(path_to_slashes)
+    let repository_root = resolver
+        .authority
+        .display_path(&resolved.repository.canonical_root)
         .unwrap_or_else(|_| ".".to_string());
     let payload = json!({
         "is_repo": true,
@@ -677,6 +656,14 @@ fn resolve_error(error: ResolveError) -> Value {
         }
         ResolveError::InvalidRepository => tool_error("GIT_ERROR", "Git 仓库元数据无效"),
         ResolveError::InvalidPath => tool_error("INVALID_ARGUMENT", "Git 路径无效"),
+    }
+}
+
+fn authority_error(error: PathAuthorityError) -> ResolveError {
+    match error {
+        PathAuthorityError::InvalidPath => ResolveError::InvalidPath,
+        PathAuthorityError::NotFound => ResolveError::NotFound,
+        PathAuthorityError::OutsideAuthority => ResolveError::OutsideWorkspace,
     }
 }
 
@@ -1083,6 +1070,45 @@ mod tests {
             args,
             String::from_utf8_lossy(&output.output)
         );
+    }
+
+    #[test]
+    fn schema33_git_resolver_keeps_workspace_and_broker_path_domains_separate() {
+        let base = temp_repo();
+        let workspace = base.join("workspace");
+        let outside_repo = base.join("outside-repo");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&outside_repo).unwrap();
+        git(&outside_repo, &["init"]);
+
+        let workspace_resolver = GitRepositoryResolver::new(&workspace).unwrap();
+        assert!(matches!(
+            workspace_resolver.resolve_existing(outside_repo.to_string_lossy().as_ref()),
+            Err(ResolveError::InvalidPath)
+        ));
+
+        let broker_resolver =
+            GitRepositoryResolver::from_authority(PathAuthority::broker_administrator());
+        let location = broker_resolver
+            .resolve_existing(outside_repo.to_string_lossy().as_ref())
+            .unwrap();
+        let resolved = broker_resolver
+            .repository_for(location)
+            .unwrap()
+            .expect("outside repository");
+        assert_eq!(
+            resolved.repository.canonical_root,
+            fs::canonicalize(&outside_repo).unwrap()
+        );
+        assert!(
+            broker_resolver
+                .authority
+                .display_path(&resolved.repository.canonical_root)
+                .unwrap()
+                .contains("outside-repo")
+        );
+
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
