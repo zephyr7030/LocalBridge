@@ -196,6 +196,20 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                     }
                 }
             }
+            BrokerRequest::Filesystem { spec } => {
+                if spec.validate().is_err() {
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::Malformed,
+                    }
+                } else {
+                    match super::run_privileged_filesystem(spec) {
+                        Ok(filesystem) => BrokerResponse::FilesystemCompleted { filesystem },
+                        Err(()) => BrokerResponse::Rejected {
+                            code: BrokerRejectCode::ExecutionFailed,
+                        },
+                    }
+                }
+            }
         };
         let shutdown = matches!(response, BrokerResponse::ShutdownAck);
         pipe.write_frame(&encode_frame(&BrokerResponseEnvelope {
@@ -312,6 +326,16 @@ impl BrokerClientSession {
     pub fn cancel_exec(&mut self, request_id: String) -> Result<(), BrokerRunError> {
         match self.request(BrokerRequest::CancelExec { request_id })? {
             BrokerResponse::CancelAck => Ok(()),
+            _ => Err(BrokerRunError::UnexpectedResponse),
+        }
+    }
+
+    pub fn filesystem(
+        &mut self,
+        spec: super::PrivilegedFilesystemSpec,
+    ) -> Result<super::PrivilegedFilesystemResult, BrokerRunError> {
+        match self.request(BrokerRequest::Filesystem { spec })? {
+            BrokerResponse::FilesystemCompleted { filesystem } => Ok(filesystem),
             _ => Err(BrokerRunError::UnexpectedResponse),
         }
     }

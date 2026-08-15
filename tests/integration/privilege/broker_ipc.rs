@@ -8,7 +8,8 @@ use localbridge_lib::privilege::{
     BROKER_PROTOCOL_VERSION, BrokerClientSession, BrokerReady, BrokerRejectCode, BrokerRequest,
     BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, ElevatedExecOutcome,
     ElevatedExecResult, ElevatedExecSpec, NamedPipeClient, NamedPipeServer, PrivilegeIpcError,
-    ServerHello, decode_frame, encode_frame, random_session_nonce,
+    PrivilegedFilesystemAction, PrivilegedFilesystemSpec, ServerHello, decode_frame, encode_frame,
+    random_session_nonce,
 };
 
 const BROKER_EXE: &str = env!("CARGO_BIN_EXE_localbridge-privileged-broker");
@@ -233,6 +234,74 @@ fn actual_broker_structured_execution_supports_completion_timeout_cancel_limit_a
     let redacted = poll_until_complete(&mut session, "redact", Duration::from_secs(5));
     assert_eq!(redacted.output, "[REDACTED]");
     assert!(!redacted.output.contains(secret));
+
+    session.shutdown().unwrap();
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn actual_broker_structured_filesystem_roundtrips_outside_workspace_without_shell() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "localbridge-lb012-broker-fs-{}-{nonce}",
+        std::process::id()
+    ));
+    let source = root.join("source.bin");
+    let renamed = root.join("renamed.bin");
+    let (mut child, mut session) = authenticated_broker(42);
+
+    session
+        .filesystem(PrivilegedFilesystemSpec {
+            action: PrivilegedFilesystemAction::CreateDirectory,
+            path: root.to_string_lossy().into_owned(),
+            destination: None,
+            content_base64: None,
+            recursive: false,
+        })
+        .unwrap();
+    session
+        .filesystem(PrivilegedFilesystemSpec {
+            action: PrivilegedFilesystemAction::WriteFile,
+            path: source.to_string_lossy().into_owned(),
+            destination: None,
+            content_base64: Some("TEIwMTI=".to_string()),
+            recursive: false,
+        })
+        .unwrap();
+    let read = session
+        .filesystem(PrivilegedFilesystemSpec {
+            action: PrivilegedFilesystemAction::ReadFile,
+            path: source.to_string_lossy().into_owned(),
+            destination: None,
+            content_base64: None,
+            recursive: false,
+        })
+        .unwrap();
+    assert_eq!(read.content_base64.as_deref(), Some("TEIwMTI="));
+    assert_eq!(read.bytes, 5);
+    session
+        .filesystem(PrivilegedFilesystemSpec {
+            action: PrivilegedFilesystemAction::Rename,
+            path: source.to_string_lossy().into_owned(),
+            destination: Some(renamed.to_string_lossy().into_owned()),
+            content_base64: None,
+            recursive: false,
+        })
+        .unwrap();
+    assert!(renamed.is_file());
+    session
+        .filesystem(PrivilegedFilesystemSpec {
+            action: PrivilegedFilesystemAction::Delete,
+            path: root.to_string_lossy().into_owned(),
+            destination: None,
+            content_base64: None,
+            recursive: true,
+        })
+        .unwrap();
+    assert!(!root.exists());
 
     session.shutdown().unwrap();
     assert!(child.wait().unwrap().success());

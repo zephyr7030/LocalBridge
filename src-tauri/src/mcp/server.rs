@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, TryLockError, mpsc};
 use std::thread::{self, JoinHandle};
@@ -9,8 +10,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+#[cfg(test)]
+use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
     ElevatedExecOutcome, ElevatedExecSpec, PrivilegedExecError, PrivilegedExecution,
+    PrivilegedFilesystemSpec,
 };
 use crate::state::{
     Capability, CurrentTask, CurrentTaskStatus, CurrentTaskTiming, LastToolTiming, PermissionMode,
@@ -21,6 +25,7 @@ use super::facade::{AgentFacade, CodingToolsRuntimeAdapter, FacadeCallError};
 use super::http::McpCancellationClient;
 use super::policy::CapabilityPolicy;
 use super::runtime::CodingToolsRuntime;
+use super::shell::{ShellExecutionSpec, ShellExecutor, ShellSelector};
 use super::task_state::CommandTaskStateStore;
 
 const CURRENT_PROTOCOL_VERSION: &str = "2025-11-25";
@@ -1230,18 +1235,61 @@ fn append_elevated_exec_tool(result: &mut Value) {
     }
     tools.push(json!({
         "name": "elevated_exec",
-        "description": "Run a reviewed structured program through the active LocalBridge privileged broker.",
+        "description": "Run a reviewed administrator operation through the active LocalBridge privileged broker.",
         "inputSchema": {
-            "type": "object",
-            "properties": {
-                "program": {"type": "string"},
-                "args": {"type": "array", "items": {"type": "string"}},
-                "workdir": {"type": ["string", "null"]},
-                "timeout_ms": {"type": "integer", "minimum": 1},
-                "max_output_bytes": {"type": "integer", "minimum": 1}
-            },
-            "required": ["program", "args", "timeout_ms", "max_output_bytes"],
-            "additionalProperties": false
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "program": {"type": "string"},
+                        "args": {"type": "array", "items": {"type": "string"}},
+                        "workdir": {"type": ["string", "null"]},
+                        "timeout_ms": {"type": "integer", "minimum": 1},
+                        "max_output_bytes": {"type": "integer", "minimum": 1}
+                    },
+                    "required": ["program", "args", "timeout_ms", "max_output_bytes"],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "operation": {"const": "process"},
+                        "program": {"type": "string"},
+                        "args": {"type": "array", "items": {"type": "string"}},
+                        "workdir": {"type": ["string", "null"]},
+                        "timeout_ms": {"type": "integer", "minimum": 1},
+                        "max_output_bytes": {"type": "integer", "minimum": 1}
+                    },
+                    "required": ["operation", "program", "args", "timeout_ms", "max_output_bytes"],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "operation": {"const": "shell"},
+                        "shell": {"enum": ["auto", "powershell", "pwsh", "windows_powershell", "cmd"]},
+                        "command": {"type": "string"},
+                        "workdir": {"type": "string"},
+                        "timeout_ms": {"type": "integer", "minimum": 1},
+                        "max_output_bytes": {"type": "integer", "minimum": 1}
+                    },
+                    "required": ["operation", "shell", "command", "workdir", "timeout_ms", "max_output_bytes"],
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "properties": {
+                        "operation": {"const": "filesystem"},
+                        "action": {"enum": ["read_file", "write_file", "create_directory", "rename", "delete"]},
+                        "path": {"type": "string"},
+                        "destination": {"type": ["string", "null"]},
+                        "content_base64": {"type": ["string", "null"]},
+                        "recursive": {"type": "boolean"}
+                    },
+                    "required": ["operation", "action", "path", "destination", "content_base64", "recursive"],
+                    "additionalProperties": false
+                }
+            ]
         }
     }));
 }
@@ -1285,10 +1333,77 @@ fn finish_elevated_task(
     current_task.project(CurrentTaskStatus::Idle);
 }
 
-fn elevated_exec_spec(arguments: Value) -> Result<ElevatedExecSpec, ()> {
-    let spec: ElevatedExecSpec = serde_json::from_value(arguments).map_err(|_| ())?;
-    spec.validate().map_err(|_| ())?;
-    Ok(spec)
+enum ElevatedExecRoute {
+    Execute(ElevatedExecSpec),
+    Filesystem(PrivilegedFilesystemSpec),
+}
+
+fn elevated_exec_spec(arguments: Value) -> Result<ElevatedExecRoute, ()> {
+    let operation = arguments.get("operation").and_then(Value::as_str);
+    match operation {
+        None => {
+            let spec: ElevatedExecSpec = serde_json::from_value(arguments).map_err(|_| ())?;
+            spec.validate().map_err(|_| ())?;
+            Ok(ElevatedExecRoute::Execute(spec))
+        }
+        Some("process") => {
+            let mut object = arguments.as_object().cloned().ok_or(())?;
+            object.remove("operation");
+            let spec: ElevatedExecSpec =
+                serde_json::from_value(Value::Object(object)).map_err(|_| ())?;
+            spec.validate().map_err(|_| ())?;
+            Ok(ElevatedExecRoute::Execute(spec))
+        }
+        Some("shell") => {
+            let object = arguments.as_object().ok_or(())?;
+            if object.len() != 6 {
+                return Err(());
+            }
+            let shell: ShellSelector =
+                serde_json::from_value(object.get("shell").cloned().ok_or(())?).map_err(|_| ())?;
+            let command = object.get("command").and_then(Value::as_str).ok_or(())?;
+            let workdir = object.get("workdir").and_then(Value::as_str).ok_or(())?;
+            let timeout_ms = object.get("timeout_ms").and_then(Value::as_u64).ok_or(())?;
+            let max_output_bytes = object
+                .get("max_output_bytes")
+                .and_then(Value::as_u64)
+                .ok_or(())?;
+            let shell_spec = ShellExecutionSpec {
+                shell,
+                command: command.to_string(),
+                cwd: PathBuf::from(workdir),
+                timeout_ms,
+                max_output_bytes: usize::try_from(max_output_bytes).map_err(|_| ())?,
+            };
+            let direct = ShellExecutor::default()
+                .broker_direct_spec(&shell_spec)
+                .map_err(|_| ())?;
+            let timeout_ms = u32::try_from(direct.timeout.as_millis()).map_err(|_| ())?;
+            let max_output_bytes = u32::try_from(direct.max_output_bytes).map_err(|_| ())?;
+            let spec = ElevatedExecSpec {
+                program: direct.program.to_string_lossy().into_owned(),
+                args: direct
+                    .args
+                    .into_iter()
+                    .map(|arg| arg.into_string().map_err(|_| ()))
+                    .collect::<Result<Vec<_>, _>>()?,
+                workdir: Some(direct.cwd.to_string_lossy().into_owned()),
+                timeout_ms,
+                max_output_bytes,
+            };
+            spec.validate().map_err(|_| ())?;
+            Ok(ElevatedExecRoute::Execute(spec))
+        }
+        Some("filesystem") => {
+            let mut object = arguments.as_object().cloned().ok_or(())?;
+            object.remove("operation");
+            let spec: PrivilegedFilesystemSpec =
+                serde_json::from_value(Value::Object(object)).map_err(|_| ())?;
+            spec.validate().map_err(|_| ())?;
+            Ok(ElevatedExecRoute::Filesystem(spec))
+        }
+        Some(_) => Err(()),
+    }
 }
 
 fn handle_elevated_exec(
@@ -1337,8 +1452,8 @@ fn handle_elevated_exec(
         );
         return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
     }
-    let spec = match elevated_exec_spec(arguments) {
-        Ok(spec) => spec,
+    let route = match elevated_exec_spec(arguments) {
+        Ok(route) => route,
         Err(()) => {
             finish_elevated_task(current_task, Some(TaskExecutionState::Blocked));
             return write_rpc_error(
@@ -1349,6 +1464,45 @@ fn handle_elevated_exec(
                 Some(session),
             );
         }
+    };
+
+    if let ElevatedExecRoute::Filesystem(spec) = route {
+        project_elevated_task(current_task, TaskExecutionState::Running);
+        let filesystem = match privileged.filesystem(spec) {
+            Ok(filesystem) => filesystem,
+            Err(PrivilegedExecError::GateClosed(_)) => {
+                finish_elevated_task(
+                    current_task,
+                    Some(TaskExecutionState::AwaitingAuthorization),
+                );
+                return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
+            }
+            Err(PrivilegedExecError::Broker(_)) => {
+                finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
+                return write_rpc_error(
+                    stream,
+                    id,
+                    -32603,
+                    "Privileged broker filesystem operation failed",
+                    Some(session),
+                );
+            }
+        };
+        let response = json!({
+            "content": [{"type":"text","text":"Privileged filesystem operation completed"}],
+            "structuredContent": {
+                "operation":"filesystem",
+                "result": serde_json::to_value(filesystem).map_err(|_| ())?
+            },
+            "isError": false
+        });
+        finish_elevated_task(current_task, None);
+        let result = write_rpc_result(stream, id, response, Some(session));
+        drop(execution_guard);
+        return result;
+    }
+    let ElevatedExecRoute::Execute(spec) = route else {
+        unreachable!("filesystem route returned above");
     };
 
     let generation = PRIVILEGED_REQUEST_GENERATION.fetch_add(1, Ordering::Relaxed);
@@ -1853,6 +2007,23 @@ mod tests {
         fn cancel_execute(&self, _request_id: String) -> Result<(), PrivilegedExecError> {
             self.cancelled.store(true, Ordering::Release);
             Ok(())
+        }
+
+        fn filesystem(
+            &self,
+            spec: PrivilegedFilesystemSpec,
+        ) -> Result<PrivilegedFilesystemResult, PrivilegedExecError> {
+            let state = self.state();
+            if !state.accepts_privileged_calls() {
+                return Err(PrivilegedExecError::GateClosed(state));
+            }
+            Ok(PrivilegedFilesystemResult {
+                action: spec.action,
+                path: spec.path,
+                destination: spec.destination,
+                content_base64: spec.content_base64,
+                bytes: 0,
+            })
         }
     }
 
@@ -3974,6 +4145,149 @@ mod tests {
 
         let mut coding = pep.stop().expect("PEP stop after privileged routing");
         coding.stop().expect("MCP stop after privileged routing");
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn typed_administrator_process_shell_and_filesystem_routes_are_broker_only() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let fake = Arc::new(FakePrivilegedExecution::active());
+        fake.complete.store(true, Ordering::Release);
+        let privileged: Arc<dyn PrivilegedExecution> = fake.clone();
+        let pep = PolicyEnforcementRuntime::start_with_privilege(
+            coding,
+            policy(&root),
+            PermissionMode::Elevated,
+            privileged,
+        )
+        .expect("PEP with typed administrator route ready");
+        let initialized = initialize(pep.port(), 500);
+        let session = initialized.session.expect("downstream MCP session");
+
+        let tools = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":501,"method":"tools/list","params":{}}),
+        );
+        let schema = &tools.body["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "elevated_exec")
+            .unwrap()["inputSchema"];
+        assert_eq!(schema["oneOf"].as_array().unwrap().len(), 4);
+
+        let reviewed_program = super::super::policy::reviewed_elevated_program()
+            .expect("trusted System32 diagnostic exists")
+            .to_string_lossy()
+            .into_owned();
+        let process = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":502,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "operation":"process","program":reviewed_program,"args":["/user"],
+                    "workdir":null,"timeout_ms":1000,"max_output_bytes":4096
+                }}
+            }),
+        );
+        assert_eq!(
+            process.body["result"]["structuredContent"]["outcome"],
+            "completed"
+        );
+        assert_eq!(fake.start_count(), 1);
+
+        let shell = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":503,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "operation":"shell","shell":"cmd","command":"whoami /user",
+                    "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
+                }}
+            }),
+        );
+        assert_eq!(
+            shell.body["result"]["structuredContent"]["outcome"],
+            "completed"
+        );
+        assert_eq!(fake.start_count(), 2);
+
+        let shell_path_denied = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":504,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "operation":"process","program":"C:\\Windows\\System32\\cmd.exe",
+                    "args":["/c","whoami"],"workdir":null,
+                    "timeout_ms":1000,"max_output_bytes":4096
+                }}
+            }),
+        );
+        assert_eq!(shell_path_denied.body["error"]["code"], -32001);
+        assert_eq!(fake.start_count(), 2);
+
+        let filesystem = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":505,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "operation":"filesystem","action":"read_file","path":"C:\\Windows\\win.ini",
+                    "destination":null,"content_base64":null,"recursive":false
+                }}
+            }),
+        );
+        assert_eq!(
+            filesystem.body["result"]["structuredContent"]["operation"],
+            "filesystem"
+        );
+        assert_eq!(
+            filesystem.body["result"]["structuredContent"]["result"]["path"],
+            "C:\\Windows\\win.ini"
+        );
+        assert_eq!(
+            fake.start_count(),
+            2,
+            "filesystem incorrectly used process execution"
+        );
+
+        let control_plane_denied = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":506,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "operation":"filesystem","action":"delete","path":"C:\\ProgramData\\LocalBridge",
+                    "destination":null,"content_base64":null,"recursive":true
+                }}
+            }),
+        );
+        assert_eq!(control_plane_denied.body["error"]["code"], -32001);
+        assert_eq!(fake.start_count(), 2);
+
+        let mut coding = pep
+            .stop()
+            .expect("PEP stop after typed administrator routing");
+        coding
+            .stop()
+            .expect("MCP stop after typed administrator routing");
         drop(coding);
         cleanup_test_directory(&workspace);
     }

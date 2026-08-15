@@ -9,8 +9,13 @@ use serde::Deserialize;
 use serde_json::Value;
 use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
 
-use crate::privilege::ElevatedExecSpec;
+use crate::privilege::{
+    ElevatedExecSpec, MAX_ELEVATED_OUTPUT_BYTES, MAX_ELEVATED_STRING_BYTES,
+    MAX_ELEVATED_TIMEOUT_MS, PrivilegedFilesystemSpec,
+};
 use crate::state::{Capability, PermissionMode, TaskKind};
+
+use super::shell::ShellSelector;
 
 const PINNED_RUNTIME_VERSION: &str = "0.2.2";
 const CONTROL_PLANE_NAMES: &[&str] = &[
@@ -291,6 +296,7 @@ struct PolicyDocument {
     upstream_coding_tools: UpstreamSection,
     workspace_registry: WorkspaceSection,
     elevated_exec: ElevatedExecSection,
+    administrator_gateway: AdministratorGatewaySection,
     localbridge_public: LocalBridgePublicSection,
 }
 
@@ -335,6 +341,29 @@ struct ElevatedExecSection {
     control_plane_mutation: String,
     workdir_policy: String,
     reviewed_actions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdministratorGatewaySection {
+    route: String,
+    token_scope: String,
+    direct_process: String,
+    shell: String,
+    filesystem: String,
+    system_management_identity: String,
+    arbitrary_shell_executable_path: String,
+    control_plane_mutation: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AdministratorShellRequest {
+    operation: String,
+    shell: ShellSelector,
+    command: String,
+    workdir: String,
+    timeout_ms: u32,
+    max_output_bytes: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1845,6 +1874,20 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
     {
         return Err(PolicyError::ContractMismatch("elevated_exec"));
     }
+    if document.administrator_gateway.route != "broker_only"
+        || document.administrator_gateway.token_scope != "administrator_token"
+        || document.administrator_gateway.direct_process != "structured_absolute_program_argv"
+        || document.administrator_gateway.shell != "trusted_logical_selector_only"
+        || document.administrator_gateway.filesystem != "structured_absolute_path_broker"
+        || document.administrator_gateway.system_management_identity != "exact_system32"
+        || document
+            .administrator_gateway
+            .arbitrary_shell_executable_path
+            != "deny"
+        || document.administrator_gateway.control_plane_mutation != "deny_always"
+    {
+        return Err(PolicyError::ContractMismatch("administrator_gateway"));
+    }
     if document.enforcement.tools_list_filter != "ux_only"
         || document.enforcement.tools_call_check != "mandatory"
         || document.enforcement.implementation != "first_party_rust_mcp_guard"
@@ -1885,6 +1928,18 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
 }
 
 fn reviewed_elevated_exec(arguments: &Value) -> bool {
+    let Some(operation) = arguments.get("operation").and_then(Value::as_str) else {
+        return reviewed_legacy_elevated_exec(arguments);
+    };
+    match operation {
+        "process" => reviewed_administrator_process(arguments),
+        "shell" => reviewed_administrator_shell(arguments),
+        "filesystem" => reviewed_administrator_filesystem(arguments),
+        _ => false,
+    }
+}
+
+fn reviewed_legacy_elevated_exec(arguments: &Value) -> bool {
     let Ok(spec) = serde_json::from_value::<ElevatedExecSpec>(arguments.clone()) else {
         return false;
     };
@@ -1917,22 +1972,196 @@ fn reviewed_elevated_exec(arguments: &Value) -> bool {
         )
 }
 
-pub fn reviewed_elevated_program() -> Option<PathBuf> {
+fn reviewed_administrator_process(arguments: &Value) -> bool {
+    let Some(mut object) = arguments.as_object().cloned() else {
+        return false;
+    };
+    if object.remove("operation").as_ref().and_then(Value::as_str) != Some("process") {
+        return false;
+    }
+    let Ok(spec) = serde_json::from_value::<ElevatedExecSpec>(Value::Object(object)) else {
+        return false;
+    };
+    if spec.validate().is_err()
+        || explicit_control_plane_reference(&spec.program)
+        || spec
+            .args
+            .iter()
+            .any(|arg| explicit_control_plane_reference(arg))
+        || spec
+            .workdir
+            .as_deref()
+            .is_some_and(explicit_control_plane_reference)
+    {
+        return false;
+    }
+    let Some(requested) = canonical_regular_file(Path::new(&spec.program)) else {
+        return false;
+    };
+    let Some(basename) = requested.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if administrator_shell_executable(basename) {
+        return false;
+    }
+    if windows_system_management_program_token(basename) {
+        return trusted_system_program(basename)
+            .and_then(|path| canonical_regular_file(&path))
+            .is_some_and(|trusted| same_windows_path(&requested, &trusted));
+    }
+    true
+}
+
+fn reviewed_administrator_shell(arguments: &Value) -> bool {
+    let Ok(request) = serde_json::from_value::<AdministratorShellRequest>(arguments.clone()) else {
+        return false;
+    };
+    if request.operation != "shell"
+        || request.command.is_empty()
+        || request.command.len() > MAX_ELEVATED_STRING_BYTES
+        || request.command.as_bytes().contains(&0)
+        || request.timeout_ms == 0
+        || request.timeout_ms > MAX_ELEVATED_TIMEOUT_MS
+        || request.max_output_bytes == 0
+        || request.max_output_bytes > MAX_ELEVATED_OUTPUT_BYTES
+        || explicit_control_plane_reference(&request.command)
+        || explicit_control_plane_reference(&request.workdir)
+    {
+        return false;
+    }
+    let workdir = Path::new(&request.workdir);
+    if !workdir.is_absolute()
+        || !workdir.is_dir()
+        || request.workdir.starts_with(r"\\?\")
+        || request.workdir.contains(['\n', '\r'])
+        || request.workdir.as_bytes().contains(&0)
+    {
+        return false;
+    }
+    let _trusted_logical_selector = request.shell;
+    true
+}
+
+fn reviewed_administrator_filesystem(arguments: &Value) -> bool {
+    let Some(mut object) = arguments.as_object().cloned() else {
+        return false;
+    };
+    if object.remove("operation").as_ref().and_then(Value::as_str) != Some("filesystem") {
+        return false;
+    }
+    let Ok(spec) = serde_json::from_value::<PrivilegedFilesystemSpec>(Value::Object(object)) else {
+        return false;
+    };
+    spec.validate().is_ok()
+        && !explicit_control_plane_reference(&spec.path)
+        && !spec
+            .destination
+            .as_deref()
+            .is_some_and(explicit_control_plane_reference)
+}
+
+fn administrator_shell_executable(basename: &str) -> bool {
+    matches!(
+        basename.to_ascii_lowercase().as_str(),
+        "cmd.exe"
+            | "powershell.exe"
+            | "pwsh.exe"
+            | "wscript.exe"
+            | "cscript.exe"
+            | "mshta.exe"
+            | "rundll32.exe"
+            | "regsvr32.exe"
+    )
+}
+
+fn explicit_control_plane_reference(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    [
+        "localbridge",
+        "com.localbridge.desktop",
+        "runtime-policy.toml",
+        "runtime-manifest.toml",
+        "startup-profile.json",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn canonical_regular_file(path: &Path) -> Option<PathBuf> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return None;
+    }
+    path.canonicalize().ok()
+}
+
+fn trusted_system_program(name: &str) -> Option<PathBuf> {
     let mut buffer = [0u16; 32768];
     let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
     if length == 0 || length >= buffer.len() {
         return None;
     }
     let root = PathBuf::from(OsString::from_wide(&buffer[..length]));
-    let program = root.join("whoami.exe");
-    let metadata = fs::symlink_metadata(&program).ok()?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return None;
-    }
-    Some(program)
+    let program = root.join(name);
+    canonical_regular_file(&program).map(|_| program)
+}
+
+pub fn reviewed_elevated_program() -> Option<PathBuf> {
+    // Legacy profile retained for schema32/architecture compatibility; schema33 typed routes use
+    // the administrator gateway above rather than expanding this diagnostic allowlist.
+    trusted_system_program("whoami.exe")
 }
 
 fn same_windows_path(left: &Path, right: &Path) -> bool {
     left.to_string_lossy()
         .eq_ignore_ascii_case(&right.to_string_lossy())
+}
+
+#[cfg(test)]
+mod administrator_gateway_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn typed_routes_allow_administrator_os_scope_and_deny_localbridge_control_plane() {
+        let whoami = reviewed_elevated_program()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(reviewed_elevated_exec(&json!({
+            "operation":"process","program":whoami,"args":["/user"],"workdir":null,
+            "timeout_ms":1000,"max_output_bytes":4096
+        })));
+        assert!(reviewed_elevated_exec(&json!({
+            "operation":"shell","shell":"cmd","command":"whoami /user",
+            "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
+        })));
+        assert!(reviewed_elevated_exec(&json!({
+            "operation":"filesystem","action":"read_file","path":"C:\\Windows\\win.ini",
+            "destination":null,"content_base64":null,"recursive":false
+        })));
+        assert!(!reviewed_elevated_exec(&json!({
+            "operation":"shell","shell":"powershell",
+            "command":"Set-Content C:/ProgramData/LocalBridge/settings.json x",
+            "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
+        })));
+        assert!(!reviewed_elevated_exec(&json!({
+            "operation":"filesystem","action":"delete","path":"C:\\ProgramData\\LocalBridge",
+            "destination":null,"content_base64":null,"recursive":true
+        })));
+    }
+
+    #[test]
+    fn direct_process_rejects_shell_path_and_system_management_requires_system32_identity() {
+        assert!(!reviewed_elevated_exec(&json!({
+            "operation":"process","program":"C:\\Windows\\System32\\cmd.exe",
+            "args":["/c","whoami"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096
+        })));
+        let system_reg = trusted_system_program("reg.exe").unwrap();
+        assert!(reviewed_elevated_exec(&json!({
+            "operation":"process","program":system_reg.to_string_lossy(),
+            "args":["query","HKLM\\Software\\Microsoft"],"workdir":null,
+            "timeout_ms":1000,"max_output_bytes":4096
+        })));
+    }
 }

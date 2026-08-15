@@ -11,6 +11,7 @@ pub const MAX_ELEVATED_STRING_BYTES: usize = 32 * 1024;
 pub const MAX_ELEVATED_TIMEOUT_MS: u32 = 120_000;
 pub const MAX_ELEVATED_OUTPUT_BYTES: u32 = 1024 * 1024;
 pub const MAX_ELEVATED_REQUEST_ID_BYTES: usize = 128;
+pub const MAX_PRIVILEGED_FILE_BYTES: usize = 24 * 1024;
 const BROKER_PIPE_PREFIX: &str = r"\\.\pipe\LocalBridge-Privileged-";
 
 fn is_windows_verbatim_path(value: &str) -> bool {
@@ -82,6 +83,9 @@ pub enum BrokerRequest {
     CancelExec {
         request_id: String,
     },
+    Filesystem {
+        spec: PrivilegedFilesystemSpec,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,9 +118,16 @@ pub enum BrokerResponse {
     ShutdownAck,
     ExecAccepted,
     ExecPending,
-    ExecCompleted { execution: ElevatedExecResult },
+    ExecCompleted {
+        execution: ElevatedExecResult,
+    },
+    FilesystemCompleted {
+        filesystem: PrivilegedFilesystemResult,
+    },
     CancelAck,
-    Rejected { code: BrokerRejectCode },
+    Rejected {
+        code: BrokerRejectCode,
+    },
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +197,86 @@ pub struct ElevatedExecResult {
     pub exit_code: Option<u32>,
     pub output: String,
     pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivilegedFilesystemAction {
+    ReadFile,
+    WriteFile,
+    CreateDirectory,
+    Rename,
+    Delete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PrivilegedFilesystemSpec {
+    pub action: PrivilegedFilesystemAction,
+    pub path: String,
+    pub destination: Option<String>,
+    pub content_base64: Option<String>,
+    #[serde(default)]
+    pub recursive: bool,
+}
+
+impl PrivilegedFilesystemSpec {
+    pub fn validate(&self) -> Result<(), BrokerProtocolError> {
+        if !valid_privileged_absolute_path(&self.path)
+            || self
+                .destination
+                .as_deref()
+                .is_some_and(|value| !valid_privileged_absolute_path(value))
+            || self.content_base64.as_ref().is_some_and(|value| {
+                value.len() > MAX_PRIVILEGED_FILE_BYTES.div_ceil(3) * 4
+                    || value.as_bytes().contains(&0)
+            })
+        {
+            return Err(BrokerProtocolError::MalformedFrame);
+        }
+        let valid_shape = match self.action {
+            PrivilegedFilesystemAction::ReadFile | PrivilegedFilesystemAction::CreateDirectory => {
+                self.destination.is_none() && self.content_base64.is_none() && !self.recursive
+            }
+            PrivilegedFilesystemAction::WriteFile => {
+                self.destination.is_none() && self.content_base64.is_some() && !self.recursive
+            }
+            PrivilegedFilesystemAction::Rename => {
+                self.destination.is_some() && self.content_base64.is_none() && !self.recursive
+            }
+            PrivilegedFilesystemAction::Delete => {
+                self.destination.is_none() && self.content_base64.is_none()
+            }
+        };
+        valid_shape
+            .then_some(())
+            .ok_or(BrokerProtocolError::MalformedFrame)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrivilegedFilesystemResult {
+    pub action: PrivilegedFilesystemAction,
+    pub path: String,
+    pub destination: Option<String>,
+    pub content_base64: Option<String>,
+    pub bytes: u32,
+}
+
+fn valid_privileged_absolute_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > MAX_ELEVATED_STRING_BYTES
+        || value.as_bytes().contains(&0)
+        || value.contains(['\n', '\r'])
+        || is_windows_verbatim_path(value)
+    {
+        return false;
+    }
+    let path = Path::new(value);
+    path.is_absolute()
+        && !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
 }
 
 pub fn valid_elevated_request_id(value: &str) -> bool {

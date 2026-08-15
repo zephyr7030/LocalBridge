@@ -7,7 +7,9 @@ const policyToml = read("runtime-policy.toml");
 const policy = read("src-tauri/src/mcp/policy.rs");
 const guard = read("src-tauri/src/mcp/guard.rs");
 const server = read("src-tauri/src/mcp/server.rs");
+const shell = read("src-tauri/src/mcp/shell.rs");
 const execution = read("src-tauri/src/privilege/execution.rs");
+const filesystem = read("src-tauri/src/privilege/filesystem.rs");
 const orchestrator = read("src-tauri/src/runtime/orchestrator.rs");
 const main = read("src-tauri/src/main.rs");
 const lib = read("src-tauri/src/lib.rs");
@@ -39,7 +41,7 @@ const disable = control.slice(disableStart, disableEnd);
 const closeGate = disable.indexOf("gate_open.store(false");
 const shutdown = disable.indexOf("session.shutdown");
 if (!(closeGate >= 0 && shutdown > closeGate)) throw new Error("LB-012 disable does not close call gate before Broker shutdown");
-for (const method of ["start_execute", "poll_execute", "cancel_execute"]) {
+for (const method of ["start_execute", "poll_execute", "cancel_execute", "filesystem"]) {
   const start = control.indexOf(`fn ${method}`, control.indexOf("impl PrivilegedExecution for PrivilegedExecutionGateway"));
   if (start < 0 || !control.slice(start, start + 700).includes("require_gate()?")) throw new Error(`LB-012 ${method} does not re-check Active gate`);
 }
@@ -56,9 +58,22 @@ for (const required of [
   'shells_and_interpreters = "deny"',
   'control_plane_mutation = "deny_always"',
 ]) if (!policyToml.includes(required)) throw new Error(`LB-012 runtime policy missing: ${required}`);
+for (const required of [
+  '[administrator_gateway]',
+  'route = "broker_only"',
+  'token_scope = "administrator_token"',
+  'direct_process = "structured_absolute_program_argv"',
+  'shell = "trusted_logical_selector_only"',
+  'filesystem = "structured_absolute_path_broker"',
+  'system_management_identity = "exact_system32"',
+  'arbitrary_shell_executable_path = "deny"',
+]) if (!policyToml.includes(required)) throw new Error(`LB-012 administrator gateway policy missing: ${required}`);
 if (!policy.includes('if name == "elevated_exec"') || !policy.includes("Capability::ElevatedExec")) throw new Error("LB-012 elevated_exec capability classification missing");
 for (const required of ["decide_request", "reviewed_elevated_exec", "reviewed_elevated_program", "GetSystemDirectoryW", "whoami.exe", "ElevatedExecNotReviewed"]) {
   if (!policy.includes(required)) throw new Error(`LB-012 reviewed elevated_exec enforcement missing: ${required}`);
+}
+for (const required of ["reviewed_administrator_process", "reviewed_administrator_shell", "reviewed_administrator_filesystem", "trusted_system_program", "administrator_shell_executable", "explicit_control_plane_reference"]) {
+  if (!policy.includes(required)) throw new Error(`LB-012 schema33 administrator review missing: ${required}`);
 }
 if (!guard.includes('name != "elevated_exec"') || !guard.includes("PrivilegedRouteNotAvailable")) throw new Error("LB-012 ordinary upstream route does not reserve elevated_exec");
 
@@ -73,6 +88,18 @@ if (!(reviewSnapshot >= 0 && realArgumentDecision > reviewSnapshot && structured
   throw new Error("LB-012 policy decision does not consume real elevated_exec arguments before structured dispatch");
 }
 if (!handler.includes("let execution_guard = guard") || !handler.includes("drop(execution_guard)")) throw new Error("LB-012 elevated execution is not serialized by the Guard execution mutex");
+for (const required of ['"oneOf"', '"const": "process"', '"const": "shell"', '"const": "filesystem"']) {
+  if (!server.includes(required)) throw new Error(`LB-012 typed elevated_exec schema missing: ${required}`);
+}
+if (!handler.includes("privileged.filesystem(spec)")) throw new Error("LB-012 privileged filesystem does not dispatch directly to Broker gateway");
+if (!server.includes("broker_direct_spec(&shell_spec)")) throw new Error("LB-012 shell route does not use Broker-only trusted shell preparation");
+if (!shell.includes("resolve_for_broker") || !shell.includes("highest_core_for_broker")) throw new Error("LB-012 Broker shell resolver missing");
+const brokerResolverStart = shell.indexOf("pub fn resolve_for_broker");
+const ordinaryHighestCoreStart = shell.indexOf("fn highest_core(", brokerResolverStart);
+if (brokerResolverStart < 0 || ordinaryHighestCoreStart <= brokerResolverStart || shell.slice(brokerResolverStart, ordinaryHighestCoreStart).includes("probe_powershell_core")) {
+  throw new Error("LB-012 Broker shell resolver executes a version probe under the ordinary token");
+}
+if (/Command::new|powershell\.exe|cmd\.exe/i.test(filesystem)) throw new Error("LB-012 privileged filesystem is shell/process backed");
 const toolsListStart = server.indexOf('"tools/list" =>');
 const toolsCallStart = server.indexOf('"tools/call" =>', toolsListStart);
 if (toolsListStart < 0 || toolsCallStart <= toolsListStart) throw new Error("LB-012 tools/list branch missing");
@@ -105,4 +132,4 @@ if (!(assign >= 0 && resume > assign)) throw new Error("LB-012 elevated process 
 if (execution.includes("std::process::Command") || execution.includes("Command::new(")) throw new Error("LB-012 elevated execution has process/shell fallback");
 if (/requireAdministrator|highestAvailable/i.test(tauri)) throw new Error("LB-012 whole LocalBridge app requests elevation");
 
-console.log("LB012_CONTRACT=PASS no_ttl=true explicit_uac=true active_gate=true broker_only=true structured_exec=true no_auto_uac=true");
+console.log("LB012_CONTRACT=PASS no_ttl=true explicit_uac=true active_gate=true broker_only=true administrator_gateway=true privileged_filesystem=true trusted_shell=true structured_exec=true no_auto_uac=true");

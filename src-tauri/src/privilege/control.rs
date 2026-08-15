@@ -9,8 +9,8 @@ use crate::state::{GenerationId, PrivilegeFault, PrivilegeState};
 
 use super::{
     BrokerClientSession, BrokerRunError, ElevatedBrokerProcess, ElevatedExecResult,
-    ElevatedExecSpec, NamedPipeServer, PrivilegeIpcError, UacLaunchError,
-    launch_broker_with_explicit_uac,
+    ElevatedExecSpec, NamedPipeServer, PrivilegeIpcError, PrivilegedFilesystemResult,
+    PrivilegedFilesystemSpec, UacLaunchError, launch_broker_with_explicit_uac,
 };
 
 const BROKER_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -239,6 +239,10 @@ pub trait PrivilegedExecution: Send + Sync {
         request_id: String,
     ) -> Result<Option<ElevatedExecResult>, PrivilegedExecError>;
     fn cancel_execute(&self, request_id: String) -> Result<(), PrivilegedExecError>;
+    fn filesystem(
+        &self,
+        spec: PrivilegedFilesystemSpec,
+    ) -> Result<PrivilegedFilesystemResult, PrivilegedExecError>;
 }
 
 #[derive(Clone)]
@@ -344,6 +348,14 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
     fn cancel_execute(&self, request_id: String) -> Result<(), PrivilegedExecError> {
         self.require_gate()?;
         self.with_session(|session| session.cancel_exec(request_id))
+    }
+
+    fn filesystem(
+        &self,
+        spec: PrivilegedFilesystemSpec,
+    ) -> Result<PrivilegedFilesystemResult, PrivilegedExecError> {
+        self.require_gate()?;
+        self.with_session(|session| session.filesystem(spec))
     }
 }
 

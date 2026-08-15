@@ -78,6 +78,16 @@ control_plane_mutation = "deny_always"
 workdir_policy = "deny_unless_reviewed"
 reviewed_actions = ["windows_whoami_identity"]
 
+[administrator_gateway]
+route = "broker_only"
+token_scope = "administrator_token"
+direct_process = "structured_absolute_program_argv"
+shell = "trusted_logical_selector_only"
+filesystem = "structured_absolute_path_broker"
+system_management_identity = "exact_system32"
+arbitrary_shell_executable_path = "deny"
+control_plane_mutation = "deny_always"
+
 
 [credentials]
 plaintext_persistence = "deny_always"

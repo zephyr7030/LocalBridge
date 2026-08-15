@@ -53,6 +53,27 @@ impl SemanticVersion {
             revision: values[3],
         })
     }
+
+    fn parse_installation_directory(value: &str) -> Option<Self> {
+        let mut values = [0u64; 4];
+        let mut count = 0usize;
+        for part in value.trim().split('.') {
+            if count >= values.len()
+                || part.is_empty()
+                || !part.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                return None;
+            }
+            values[count] = part.parse().ok()?;
+            count += 1;
+        }
+        (count > 0).then_some(Self {
+            major: values[0],
+            minor: values[1],
+            patch: values[2],
+            revision: values[3],
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,6 +311,33 @@ where
         }
     }
 
+    /// Resolve a trusted shell for the privileged Broker without launching candidates under the
+    /// ordinary LocalBridge token. PowerShell Core ordering comes from the protected install
+    /// directory version rather than a process probe.
+    pub fn resolve_for_broker(
+        &self,
+        selector: ShellSelector,
+    ) -> Result<ResolvedShell, ShellResolveError> {
+        match selector {
+            ShellSelector::Auto => self
+                .highest_core_for_broker()
+                .or_else(|| self.windows_powershell())
+                .or_else(|| self.cmd())
+                .ok_or(ShellResolveError::NoShellAvailable),
+            ShellSelector::Powershell => self
+                .highest_core_for_broker()
+                .or_else(|| self.windows_powershell())
+                .ok_or(ShellResolveError::NoShellAvailable),
+            ShellSelector::Pwsh => self
+                .highest_core_for_broker()
+                .ok_or(ShellResolveError::NoShellAvailable),
+            ShellSelector::WindowsPowershell => self
+                .windows_powershell()
+                .ok_or(ShellResolveError::NoShellAvailable),
+            ShellSelector::Cmd => self.cmd().ok_or(ShellResolveError::NoShellAvailable),
+        }
+    }
+
     fn highest_core(&self) -> Option<ResolvedShell> {
         self.discovery
             .pwsh_candidates()
@@ -297,6 +345,28 @@ where
             .filter(|candidate| self.discovery.trusted_pwsh(candidate))
             .filter_map(|candidate| {
                 let version = self.probe.probe_powershell_core(&candidate)?;
+                Some(ResolvedShell {
+                    kind: ResolvedShellKind::PowerShellCore,
+                    management_module: self.discovery.trusted_management_module(&candidate),
+                    executable: candidate,
+                    version: Some(version),
+                })
+            })
+            .filter(|shell| shell.management_module.is_some())
+            .max_by_key(|shell| shell.version)
+    }
+
+    fn highest_core_for_broker(&self) -> Option<ResolvedShell> {
+        self.discovery
+            .pwsh_candidates()
+            .into_iter()
+            .filter(|candidate| self.discovery.trusted_pwsh(candidate))
+            .filter_map(|candidate| {
+                let version = candidate
+                    .parent()?
+                    .file_name()?
+                    .to_str()
+                    .and_then(SemanticVersion::parse_installation_directory)?;
                 Some(ResolvedShell {
                     kind: ResolvedShellKind::PowerShellCore,
                     management_module: self.discovery.trusted_management_module(&candidate),
@@ -423,6 +493,21 @@ where
         spec: &ShellExecutionSpec,
     ) -> Result<DirectProcessSpec, ShellResolveError> {
         let shell = self.resolver.resolve(spec.shell)?;
+        Self::direct_spec_for_resolved_shell(spec, shell)
+    }
+
+    pub fn broker_direct_spec(
+        &self,
+        spec: &ShellExecutionSpec,
+    ) -> Result<DirectProcessSpec, ShellResolveError> {
+        let shell = self.resolver.resolve_for_broker(spec.shell)?;
+        Self::direct_spec_for_resolved_shell(spec, shell)
+    }
+
+    fn direct_spec_for_resolved_shell(
+        spec: &ShellExecutionSpec,
+        shell: ResolvedShell,
+    ) -> Result<DirectProcessSpec, ShellResolveError> {
         let args = match shell.kind {
             ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
                 let management_module = shell
@@ -629,6 +714,44 @@ mod tests {
         let resolved = resolver.resolve(ShellSelector::Auto).unwrap();
         assert_eq!(resolved.executable, core8);
         assert!(!probed.lock().unwrap().contains(&malicious));
+    }
+
+    #[test]
+    fn broker_shell_preparation_never_runs_version_probe_under_ordinary_token() {
+        let core7 = PathBuf::from(r"C:\Program Files\PowerShell\7\pwsh.exe");
+        let core81 = PathBuf::from(r"C:\Program Files\PowerShell\8.1\pwsh.exe");
+        let probed = Arc::new(Mutex::new(Vec::new()));
+        let resolver = ShellResolver::new(
+            FakeDiscovery {
+                pwsh: vec![core7.clone(), core81.clone()],
+                trusted: [core7, core81.clone()].into_iter().collect(),
+                windows: None,
+                cmd: Some(PathBuf::from(r"C:\Windows\System32\cmd.exe")),
+            },
+            FakeProbe {
+                versions: HashMap::new(),
+                probed: Arc::clone(&probed),
+            },
+        );
+        let direct = ShellExecutor::new(resolver)
+            .broker_direct_spec(&ShellExecutionSpec {
+                shell: ShellSelector::Pwsh,
+                command: "Write-Output LB012_BROKER_SHELL".into(),
+                cwd: PathBuf::from(r"C:\Windows\Temp"),
+                timeout_ms: 1_000,
+                max_output_bytes: 4_096,
+            })
+            .unwrap();
+        assert_eq!(direct.program, core81);
+        assert!(probed.lock().unwrap().is_empty());
+        assert!(
+            direct
+                .args
+                .last()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with("Write-Output LB012_BROKER_SHELL")
+        );
     }
 
     #[test]
