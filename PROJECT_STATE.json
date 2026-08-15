@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -1784,5 +1784,23 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "review_decision_commit": "1b891b15de1c38e0c7fa6df2a7edbe210274c208"
+  },
+  "lb007_generation19_rework_acceptance_2026_08_15": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "resolves_generation": 19,
+    "review_decision_commit": "1b891b15de1c38e0c7fa6df2a7edbe210274c208",
+    "implementation_commit": "8273822f4e1465309800482cde402b665a69c1f4",
+    "evidence": [
+      "agent_workflow diagnose now declares transitive process_exec only when commands is a non-empty array; minimal diagnose and an empty commands array do not claim process execution.",
+      "Fresh LB-007 regression proves Edit allows minimal diagnose, Edit denies diagnose with commands as IndirectProcessExecInEdit, Full allows ordinary diagnose with commands, and malformed commands fail closed.",
+      "Fresh lb007_policy_contracts targeted regression PASS and full lb007_policy_enforcement integration suite PASS.",
+      "The actual mcp::server bundled-runtime group PASSed serially; the complete cargo test --locked suite PASSed with --test-threads=1 and cargo clippy --locked --all-targets -- -D warnings PASSed. The initial default-parallel full run had four WinSock 10060 connection timeouts in existing runtime E2E tests, with no policy assertion failure; the same runtime tests then PASSed serially.",
+      "Fresh npm test PASS, npm run build PASS, runtime-manifest verifier PASS, architecture verifier PASS, G4 human-gate regression PASS, and git diff --check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
