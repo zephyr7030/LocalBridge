@@ -67,6 +67,7 @@ pub struct ResolvedShell {
     pub kind: ResolvedShellKind,
     pub executable: PathBuf,
     pub version: Option<SemanticVersion>,
+    pub management_module: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +82,7 @@ pub trait ShellDiscovery {
     fn trusted_pwsh(&self, candidate: &Path) -> bool;
     fn trusted_windows_powershell(&self, candidate: &Path) -> bool;
     fn trusted_cmd(&self, candidate: &Path) -> bool;
+    fn trusted_management_module(&self, candidate: &Path) -> Option<PathBuf>;
 }
 
 pub trait ShellVersionProbe {
@@ -128,6 +130,25 @@ impl SystemShellDiscovery {
         candidate
             .to_string_lossy()
             .eq_ignore_ascii_case(&expected.to_string_lossy())
+    }
+
+    fn validated_management_module(candidate: &Path) -> Option<PathBuf> {
+        if !Self::trusted_regular_file(candidate) {
+            return None;
+        }
+        let shell_home = candidate.parent()?;
+        let manifest = shell_home
+            .join("Modules")
+            .join("Microsoft.PowerShell.Management")
+            .join("Microsoft.PowerShell.Management.psd1");
+        if !Self::trusted_regular_file(&manifest) {
+            return None;
+        }
+        let canonical_home = fs::canonicalize(shell_home).ok()?;
+        let canonical_manifest = fs::canonicalize(&manifest).ok()?;
+        canonical_manifest
+            .starts_with(&canonical_home)
+            .then_some(manifest)
     }
 }
 
@@ -190,6 +211,14 @@ impl ShellDiscovery for SystemShellDiscovery {
     fn trusted_cmd(&self, candidate: &Path) -> bool {
         self.cmd_candidate()
             .is_some_and(|expected| Self::same_file_path(candidate, &expected))
+    }
+
+    fn trusted_management_module(&self, candidate: &Path) -> Option<PathBuf> {
+        let trusted_shell =
+            self.trusted_pwsh(candidate) || self.trusted_windows_powershell(candidate);
+        trusted_shell
+            .then(|| Self::validated_management_module(candidate))
+            .flatten()
     }
 }
 
@@ -270,10 +299,12 @@ where
                 let version = self.probe.probe_powershell_core(&candidate)?;
                 Some(ResolvedShell {
                     kind: ResolvedShellKind::PowerShellCore,
+                    management_module: self.discovery.trusted_management_module(&candidate),
                     executable: candidate,
                     version: Some(version),
                 })
             })
+            .filter(|shell| shell.management_module.is_some())
             .max_by_key(|shell| shell.version)
     }
 
@@ -281,8 +312,9 @@ where
         let candidate = self.discovery.windows_powershell_candidate()?;
         self.discovery
             .trusted_windows_powershell(&candidate)
-            .then_some(ResolvedShell {
+            .then(|| ResolvedShell {
                 kind: ResolvedShellKind::WindowsPowerShell,
+                management_module: self.discovery.trusted_management_module(&candidate),
                 executable: candidate,
                 version: Some(SemanticVersion {
                     major: 5,
@@ -291,6 +323,7 @@ where
                     revision: 0,
                 }),
             })
+            .filter(|shell| shell.management_module.is_some())
     }
 
     fn cmd(&self) -> Option<ResolvedShell> {
@@ -301,6 +334,7 @@ where
                 kind: ResolvedShellKind::Cmd,
                 executable: candidate,
                 version: None,
+                management_module: None,
             })
     }
 }
@@ -332,9 +366,14 @@ impl DirectProcessExecutor {
     }
 }
 
-fn hardened_powershell_script(command: &str) -> String {
+fn powershell_single_quoted_literal(value: &Path) -> String {
+    value.to_string_lossy().replace('\'', "''")
+}
+
+fn hardened_powershell_script(command: &str, management_module: &Path) -> String {
+    let management_module = powershell_single_quoted_literal(management_module);
     format!(
-        "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{command}"
+        "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;Import-Module -Name '{management_module}' -ErrorAction Stop;[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{command}"
     )
 }
 
@@ -385,13 +424,19 @@ where
     ) -> Result<DirectProcessSpec, ShellResolveError> {
         let shell = self.resolver.resolve(spec.shell)?;
         let args = match shell.kind {
-            ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => vec![
-                OsString::from("-NoLogo"),
-                OsString::from("-NoProfile"),
-                OsString::from("-NonInteractive"),
-                OsString::from("-Command"),
-                OsString::from(hardened_powershell_script(&spec.command)),
-            ],
+            ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
+                let management_module = shell
+                    .management_module
+                    .as_deref()
+                    .ok_or(ShellResolveError::NoShellAvailable)?;
+                vec![
+                    OsString::from("-NoLogo"),
+                    OsString::from("-NoProfile"),
+                    OsString::from("-NonInteractive"),
+                    OsString::from("-Command"),
+                    OsString::from(hardened_powershell_script(&spec.command, management_module)),
+                ]
+            }
             ResolvedShellKind::Cmd => vec![
                 OsString::from("/d"),
                 OsString::from("/s"),
@@ -417,7 +462,11 @@ where
         let command_line = match shell.kind {
             ResolvedShellKind::Cmd => spec.command.clone(),
             ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
-                let script = hardened_powershell_script(&spec.command);
+                let management_module = shell
+                    .management_module
+                    .as_deref()
+                    .ok_or(ShellResolveError::NoShellAvailable)?;
+                let script = hardened_powershell_script(&spec.command, management_module);
                 let mut utf16le = Vec::with_capacity(script.len() * 2);
                 for unit in script.encode_utf16() {
                     utf16le.extend_from_slice(&unit.to_le_bytes());
@@ -514,6 +563,18 @@ mod tests {
         }
         fn trusted_cmd(&self, candidate: &Path) -> bool {
             self.cmd.as_deref() == Some(candidate)
+        }
+        fn trusted_management_module(&self, candidate: &Path) -> Option<PathBuf> {
+            (self.trusted.contains(candidate) || self.windows.as_deref() == Some(candidate)).then(
+                || {
+                    candidate
+                        .parent()
+                        .unwrap_or_else(|| Path::new(r"C:\\trusted"))
+                        .join("Modules")
+                        .join("Microsoft.PowerShell.Management")
+                        .join("Microsoft.PowerShell.Management.psd1")
+                },
+            )
         }
     }
 
@@ -767,6 +828,8 @@ mod tests {
             "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;"
         ));
         assert!(decoded.contains("PSModuleAutoLoadingPreference"));
+        assert!(decoded.contains("Microsoft.PowerShell.Management.psd1"));
+        assert!(decoded.contains("Import-Module -Name '"));
         assert!(decoded.contains("OutputEncoding"));
         assert!(decoded.ends_with(user));
     }
@@ -802,6 +865,8 @@ mod tests {
         assert!(script.starts_with(
             "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;"
         ));
+        assert!(script.contains("Microsoft.PowerShell.Management.psd1"));
+        assert!(script.contains("Import-Module -Name '"));
         assert!(script.contains("OutputEncoding"));
         assert!(script.ends_with(user));
     }

@@ -2280,6 +2280,15 @@ mod tests {
 
         let root = repo_root();
         let workspace = temp_workspace();
+        let nested_project = workspace.join("NestedProject");
+        fs::create_dir_all(nested_project.join("src")).unwrap();
+        let git_init = std::process::Command::new("git")
+            .arg("init")
+            .arg("--quiet")
+            .current_dir(&nested_project)
+            .status()
+            .expect("git is available for nested-project schema30 fixture");
+        assert!(git_init.success());
         fs::write(
             workspace.join("range.txt"),
             b"line1\nline2\nline3\nline4\nline5\nline6\n",
@@ -2321,6 +2330,149 @@ mod tests {
             .status,
             202
         );
+
+        let nested_status = public_tool_call(
+            pep.port(),
+            &session,
+            690,
+            "git_workflow",
+            json!({"action":"status","path":"NestedProject"}),
+        );
+        assert_eq!(
+            nested_status.body["result"]["isError"], false,
+            "{:#?}",
+            nested_status.body
+        );
+        assert_eq!(
+            nested_status.body["result"]["structuredContent"]["data"]["repository_root"],
+            "NestedProject"
+        );
+        let nested_workflow = public_tool_call(
+            pep.port(),
+            &session,
+            691,
+            "agent_workflow",
+            json!({
+                "action":"bugfix",
+                "path":"NestedProject/src",
+                "commands":[{"command":"cd","shell":"cmd","yield_time_ms":10000}]
+            }),
+        );
+        assert_eq!(
+            nested_workflow.body["result"]["isError"], false,
+            "{:#?}",
+            nested_workflow.body
+        );
+        let workflow_data = &nested_workflow.body["result"]["structuredContent"]["data"];
+        assert_eq!(
+            workflow_data["project"]["selected_path"],
+            "NestedProject/src"
+        );
+        assert_eq!(workflow_data["project"]["repository_root"], "NestedProject");
+        assert_eq!(
+            workflow_data["git_before"]["repository_root"],
+            "NestedProject"
+        );
+        assert_eq!(
+            workflow_data["git_after"]["repository_root"],
+            "NestedProject"
+        );
+        let nested_command_output = workflow_data["commands"][0]["output"]
+            .as_str()
+            .unwrap_or_default()
+            .replace('/', "\\");
+        assert!(
+            nested_command_output
+                .to_ascii_lowercase()
+                .contains("nestedproject\\src"),
+            "default workflow command workdir ignored selected project: {nested_command_output:?}"
+        );
+
+        let mkdir = public_tool_call(
+            pep.port(),
+            &session,
+            692,
+            "agent_workflow",
+            json!({
+                "action":"document",
+                "directory_changes":[{"action":"create_directory","path":"schema30-dir"}]
+            }),
+        );
+        assert_eq!(mkdir.body["result"]["isError"], false, "{:#?}", mkdir.body);
+        assert!(workspace.join("schema30-dir").is_dir());
+        let rmdir = public_tool_call(
+            pep.port(),
+            &session,
+            693,
+            "agent_workflow",
+            json!({
+                "action":"document",
+                "directory_changes":[{"action":"remove_empty_directory","path":"schema30-dir"}]
+            }),
+        );
+        assert_eq!(rmdir.body["result"]["isError"], false, "{:#?}", rmdir.body);
+        assert!(!workspace.join("schema30-dir").exists());
+
+        fs::create_dir(workspace.join("schema30-nonempty")).unwrap();
+        fs::write(workspace.join("schema30-nonempty/keep.txt"), b"keep").unwrap();
+        let nonempty = public_tool_call(
+            pep.port(),
+            &session,
+            694,
+            "agent_workflow",
+            json!({
+                "action":"document",
+                "directory_changes":[{"action":"remove_empty_directory","path":"schema30-nonempty"}]
+            }),
+        );
+        assert_eq!(
+            nonempty.body["result"]["structuredContent"]["error"]["code"], "InvalidArgument",
+            "{:#?}",
+            nonempty.body
+        );
+        assert!(workspace.join("schema30-nonempty/keep.txt").is_file());
+        let escaped_directory = public_tool_call(
+            pep.port(),
+            &session,
+            695,
+            "agent_workflow",
+            json!({
+                "action":"document",
+                "directory_changes":[{"action":"create_directory","path":"../escape"}]
+            }),
+        );
+        assert_eq!(
+            escaped_directory.body["result"]["structuredContent"]["error"]["code"],
+            "WorkspaceDenied",
+            "{:#?}",
+            escaped_directory.body
+        );
+
+        for (id, shell) in [(696u64, "windows_powershell"), (697u64, "auto")] {
+            let baseline = public_tool_call(
+                pep.port(),
+                &session,
+                id,
+                "exec_command",
+                json!({
+                    "command":"$loc=(Get-Location).Path; $exists=Test-Path -LiteralPath '.'; $count=@(Get-ChildItem -LiteralPath '.').Count; Write-Output ('SCHEMA30_BASELINE '+$exists+' '+$count+' '+$loc)",
+                    "shell":shell,
+                    "yield_time_ms":10000
+                }),
+            );
+            assert_eq!(
+                baseline.body["result"]["isError"], false,
+                "shell={shell}: {:#?}",
+                baseline.body
+            );
+            let output = baseline.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .unwrap_or_default();
+            assert!(
+                output.contains("SCHEMA30_BASELINE True"),
+                "shell={shell}: {output:?}"
+            );
+        }
 
         let module_root_literal = module_root.to_string_lossy().replace('\'', "''");
         let autoload = public_tool_call(

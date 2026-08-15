@@ -347,8 +347,16 @@ fn git_status(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) 
     .map(|output| String::from_utf8_lossy(&output.output).trim().to_string())
     .filter(|value| !value.is_empty());
     let clean = entries.is_empty();
+    let repository_root = resolved
+        .repository
+        .canonical_root
+        .strip_prefix(&resolver.canonical_workspace)
+        .map(path_to_slashes)
+        .unwrap_or_else(|_| ".".to_string());
     let payload = json!({
         "is_repo": true,
+        "path": resolved.location.display,
+        "repository_root": if repository_root.is_empty() { "." } else { repository_root.as_str() },
         "branch": branch,
         "head": head,
         "upstream": upstream,

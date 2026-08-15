@@ -153,7 +153,20 @@ fn public_tool_schema(name: &str) -> Value {
                 "properties":{
                     "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"]},
                     "objective":{"type":"string"},
+                    "path":{"type":"string","default":"."},
                     "patch":{"type":"string","minLength":1},
+                    "directory_changes":{
+                        "type":"array","maxItems":32,
+                        "items":{
+                            "type":"object",
+                            "properties":{
+                                "action":{"type":"string","enum":["create_directory","remove_empty_directory"]},
+                                "path":{"type":"string","minLength":1}
+                            },
+                            "required":["action","path"],
+                            "additionalProperties":false
+                        }
+                    },
                     "commands":{
                         "type":"array","maxItems":8,
                         "items":{
@@ -722,6 +735,8 @@ pub struct ShellCommandRequest {
 pub trait WorkspaceRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError>;
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError>;
+    fn project_context(&self, path: &str) -> Result<Value, FacadeError>;
+    fn apply_directory_change(&mut self, action: &str, path: &str) -> Result<Value, FacadeError>;
     fn execute_shell(
         &mut self,
         request: ShellCommandRequest,
@@ -1050,6 +1065,21 @@ impl CodingToolsRuntimeAdapter {
         self.runtime
     }
 
+    fn stable_workspace_relative_path(&self, absolute: &Path) -> Result<String, FacadeError> {
+        let root = std::fs::canonicalize(&self.workspace).map_err(|_| {
+            FacadeError::new(FacadeErrorCode::WorkspaceDenied, "工作区不可用", false)
+        })?;
+        let relative = absolute.strip_prefix(&root).map_err(|_| {
+            FacadeError::new(FacadeErrorCode::WorkspaceDenied, "工作区路径越界", false)
+        })?;
+        let display = relative.to_string_lossy().replace('\\', "/");
+        Ok(if display.is_empty() {
+            ".".into()
+        } else {
+            display
+        })
+    }
+
     fn private_call(
         &mut self,
         name: &str,
@@ -1216,6 +1246,117 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             "runtime": "ready"
         });
         Ok(stable_success(data, "LocalBridge workspace context ready"))
+    }
+
+    fn project_context(&self, path: &str) -> Result<Value, FacadeError> {
+        let selected = self.resolve_existing_workspace_path(path)?;
+        if !selected.is_dir() {
+            return Err(FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "项目路径必须是目录",
+                false,
+            ));
+        }
+        Ok(json!({"selected_path":self.stable_workspace_relative_path(&selected)?}))
+    }
+
+    fn apply_directory_change(&mut self, action: &str, path: &str) -> Result<Value, FacadeError> {
+        if !workspace_relative_path_valid(path) || path == "." {
+            return Err(FacadeError::new(
+                FacadeErrorCode::WorkspaceDenied,
+                "目录路径必须位于当前工作区内",
+                false,
+            ));
+        }
+        let root = std::fs::canonicalize(&self.workspace).map_err(|_| {
+            FacadeError::new(FacadeErrorCode::WorkspaceDenied, "工作区不可用", false)
+        })?;
+        let target = self.workspace.join(path);
+        let public_path = path.replace('\\', "/");
+        match action {
+            "create_directory" => {
+                if std::fs::symlink_metadata(&target).is_ok() {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::InvalidArgument,
+                        "目标目录已存在",
+                        false,
+                    ));
+                }
+                let parent = target.parent().ok_or_else(invalid_argument)?;
+                let canonical_parent = std::fs::canonicalize(parent).map_err(|_| {
+                    FacadeError::new(FacadeErrorCode::NotFound, "父目录不存在", false)
+                })?;
+                if !canonical_parent.starts_with(&root) || !canonical_parent.is_dir() {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::WorkspaceDenied,
+                        "目录路径越出当前工作区",
+                        false,
+                    ));
+                }
+                std::fs::create_dir(&target).map_err(|_| {
+                    FacadeError::new(FacadeErrorCode::Internal, "创建目录失败", false)
+                })?;
+                let canonical_target = match std::fs::canonicalize(&target) {
+                    Ok(value) if value.starts_with(&root) && value != root => value,
+                    _ => {
+                        let _ = std::fs::remove_dir(&target);
+                        return Err(FacadeError::new(
+                            FacadeErrorCode::WorkspaceDenied,
+                            "目录路径越出当前工作区",
+                            false,
+                        ));
+                    }
+                };
+                if !canonical_target.is_dir() {
+                    let _ = std::fs::remove_dir(&target);
+                    return Err(invalid_argument());
+                }
+                Ok(json!({"action":action,"path":public_path,"changed":true}))
+            }
+            "remove_empty_directory" => {
+                let metadata = std::fs::symlink_metadata(&target).map_err(|_| {
+                    FacadeError::new(FacadeErrorCode::NotFound, "目录不存在", false)
+                })?;
+                if metadata.file_type().is_symlink() {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::WorkspaceDenied,
+                        "拒绝清理重解析目录",
+                        false,
+                    ));
+                }
+                let canonical_target = std::fs::canonicalize(&target).map_err(|_| {
+                    FacadeError::new(FacadeErrorCode::NotFound, "目录不存在", false)
+                })?;
+                if !canonical_target.starts_with(&root) || canonical_target == root {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::WorkspaceDenied,
+                        "目录路径越出当前工作区",
+                        false,
+                    ));
+                }
+                if !canonical_target.is_dir() {
+                    return Err(invalid_argument());
+                }
+                if std::fs::read_dir(&canonical_target)
+                    .map_err(|_| {
+                        FacadeError::new(FacadeErrorCode::Internal, "读取目录失败", false)
+                    })?
+                    .next()
+                    .is_some()
+                {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::InvalidArgument,
+                        "仅允许删除空目录",
+                        false,
+                    ));
+                }
+                std::fs::remove_dir(&canonical_target).map_err(|_| {
+                    FacadeError::new(FacadeErrorCode::Internal, "删除空目录失败", false)
+                })?;
+                Ok(json!({"action":action,"path":public_path,"changed":true}))
+            }
+            _ => Err(invalid_argument()),
+        }
     }
 
     fn execute_shell(
@@ -2202,6 +2343,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             return Err(invalid_argument());
         }
         let patch = object.get("patch").and_then(Value::as_str);
+        let project_path = match object.get("path") {
+            Some(value) => value.as_str().ok_or_else(invalid_argument)?,
+            None => ".",
+        };
+        let mut project = self.adapter.project_context(project_path)?;
+        let selected_path = project
+            .get("selected_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| FacadeError::new(FacadeErrorCode::Internal, "项目上下文无效", false))?
+            .to_string();
+        let directory_changes = parse_directory_changes(object)?;
         let commands = object
             .get("commands")
             .map(|value| value.as_array().ok_or_else(invalid_argument))
@@ -2215,9 +2367,36 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             return Err(invalid_argument());
         }
         let workspace = self.adapter.workspace_context(request_id)?;
-        let git_before =
-            self.adapter
-                .git_workflow(GitWorkflowAction::Status, json!({}), request_id)?;
+        let git_before = self.adapter.git_workflow(
+            GitWorkflowAction::Status,
+            json!({"path":selected_path}),
+            request_id,
+        )?;
+        if let Some(project_object) = project.as_object_mut() {
+            let git_data = stable_data(&git_before);
+            project_object.insert(
+                "is_repo".into(),
+                git_data
+                    .get("is_repo")
+                    .cloned()
+                    .unwrap_or(Value::Bool(false)),
+            );
+            project_object.insert(
+                "repository_root".into(),
+                git_data
+                    .get("repository_root")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            );
+        }
+
+        let mut directory_results = Vec::with_capacity(directory_changes.len());
+        for (directory_action, directory_path) in &directory_changes {
+            directory_results.push(
+                self.adapter
+                    .apply_directory_change(directory_action, directory_path)?,
+            );
+        }
 
         let mut applied_patch = false;
         if let Some(patch) = patch {
@@ -2255,12 +2434,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     false,
                 ));
             }
+            let effective_workdir = join_project_workdir(&selected_path, workdir)?;
             let result = self.adapter.execute_shell(
                 ShellCommandRequest {
                     execution: ShellExecutionSpec {
                         shell,
                         command: text.to_string(),
-                        cwd: Path::new(workdir).to_path_buf(),
+                        cwd: effective_workdir,
                         timeout_ms: command
                             .get("timeout_ms")
                             .and_then(Value::as_u64)
@@ -2294,8 +2474,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         "objective":object.get("objective").and_then(Value::as_str),
                         "state":"running",
                         "workspace":stable_data(&workspace),
+                        "project":project,
                         "git_before":stable_data(&git_before),
                         "patch_applied":applied_patch,
+                        "directory_changes":directory_results,
                         "commands":command_results
                     }),
                     "Agent workflow command is running",
@@ -2303,10 +2485,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             }
         }
 
-        let git_after =
-            self.adapter
-                .git_workflow(GitWorkflowAction::Status, json!({}), request_id)?;
-        let state = if applied_patch || !command_results.is_empty() {
+        let git_after = self.adapter.git_workflow(
+            GitWorkflowAction::Status,
+            json!({"path":selected_path}),
+            request_id,
+        )?;
+        let state = if applied_patch || !directory_results.is_empty() || !command_results.is_empty()
+        {
             "completed"
         } else {
             "context_ready"
@@ -2317,9 +2502,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 "objective":object.get("objective").and_then(Value::as_str),
                 "state":state,
                 "workspace":stable_data(&workspace),
+                "project":project,
                 "git_before":stable_data(&git_before),
                 "git_after":stable_data(&git_after),
                 "patch_applied":applied_patch,
+                "directory_changes":directory_results,
                 "commands":command_results
             }),
             "Agent workflow completed",
@@ -2604,6 +2791,7 @@ fn public_workspace_paths_valid(name: &str, arguments: &Value) -> bool {
         "exec_command" => &["workdir"],
         "git_workflow" | "view_image" => &["path"],
         "document_workflow" => &["path", "source"],
+        "agent_workflow" => &["path"],
         _ => &[],
     };
     if keys.iter().any(|key| {
@@ -2628,7 +2816,83 @@ fn public_workspace_paths_valid(name: &str, arguments: &Value) -> bool {
     {
         return false;
     }
+    if name == "agent_workflow"
+        && object
+            .get("directory_changes")
+            .and_then(Value::as_array)
+            .is_some_and(|changes| {
+                changes.iter().any(|change| {
+                    change
+                        .as_object()
+                        .and_then(|change| change.get("path"))
+                        .and_then(Value::as_str)
+                        .is_none_or(|path| !workspace_relative_path_valid(path))
+                })
+            })
+    {
+        return false;
+    }
     true
+}
+
+fn parse_directory_changes(
+    object: &Map<String, Value>,
+) -> Result<Vec<(String, String)>, FacadeError> {
+    let Some(value) = object.get("directory_changes") else {
+        return Ok(Vec::new());
+    };
+    let changes = value.as_array().ok_or_else(invalid_argument)?;
+    if changes.len() > 32 {
+        return Err(invalid_argument());
+    }
+    changes
+        .iter()
+        .map(|change| {
+            let change = change.as_object().ok_or_else(invalid_argument)?;
+            if change.len() != 2 || !change.contains_key("action") || !change.contains_key("path") {
+                return Err(invalid_argument());
+            }
+            let action = required_string(change, "action")?;
+            if !matches!(action, "create_directory" | "remove_empty_directory") {
+                return Err(invalid_argument());
+            }
+            let path = required_string(change, "path")?;
+            if !workspace_relative_path_valid(path) || path == "." {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::WorkspaceDenied,
+                    "目录路径必须位于当前工作区内",
+                    false,
+                ));
+            }
+            Ok((action.to_string(), path.to_string()))
+        })
+        .collect()
+}
+
+fn join_project_workdir(project: &str, workdir: &str) -> Result<PathBuf, FacadeError> {
+    if !workspace_relative_path_valid(project) || !workspace_relative_path_valid(workdir) {
+        return Err(FacadeError::new(
+            FacadeErrorCode::WorkspaceDenied,
+            "工作区路径参数无效",
+            false,
+        ));
+    }
+    let combined = match (project, workdir) {
+        (".", ".") => PathBuf::from("."),
+        (".", workdir) => PathBuf::from(workdir),
+        (project, ".") => PathBuf::from(project),
+        (project, workdir) => Path::new(project).join(workdir),
+    };
+    let rendered = combined.to_string_lossy();
+    workspace_relative_path_valid(&rendered)
+        .then_some(combined)
+        .ok_or_else(|| {
+            FacadeError::new(
+                FacadeErrorCode::WorkspaceDenied,
+                "工作区路径参数无效",
+                false,
+            )
+        })
 }
 
 fn agent_action_allows_write(action: &str) -> bool {
@@ -2907,6 +3171,8 @@ fn normalize_git_success(action: GitWorkflowAction, raw: &Value) -> Value {
             &source,
             &[
                 ("is_repo", PublicFieldKind::Boolean),
+                ("path", PublicFieldKind::String),
+                ("repository_root", PublicFieldKind::NullableString),
                 ("branch", PublicFieldKind::NullableString),
                 ("head", PublicFieldKind::NullableString),
                 ("upstream", PublicFieldKind::NullableString),
@@ -3146,6 +3412,18 @@ mod tests {
 
         fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {
             Ok(stable_success(json!({}), "ok"))
+        }
+
+        fn project_context(&self, path: &str) -> Result<Value, FacadeError> {
+            Ok(json!({"selected_path":path}))
+        }
+
+        fn apply_directory_change(
+            &mut self,
+            action: &str,
+            path: &str,
+        ) -> Result<Value, FacadeError> {
+            Ok(json!({"action":action,"path":path,"changed":true}))
         }
 
         fn execute_shell(
