@@ -156,6 +156,8 @@ fn privileged_external_runtime_commands_require_review_and_never_forward() {
             ("$x='docker'; si Alias:lbgen12 $x; lbgen12 ps", "powershell"),
             ("$Alias:lbgen12='docker'; lbgen12 ps", "windows_powershell"),
             ("$ExecutionContext.InvokeCommand.CommandNotFoundAction = { param($name,$eventArgs); $eventArgs.Command = Get-Command Write-Output }; lbgen13 'hook'", "windows_powershell"),
+            ("$ExecutionContext.InvokeCommand.InvokeScript('Write-Output should-not-run')", "windows_powershell"),
+            ("$value='abc'; $value.Trim()", "windows_powershell"),
             ("filter lbgen14 { Write-Output ok }; lbgen14", "windows_powershell"),
             ("workflow lbgen14 { Write-Output ok }; lbgen14", "windows_powershell"),
             ("configuration lbgen14 { Node localhost {} }", "windows_powershell"),

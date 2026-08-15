@@ -981,24 +981,32 @@ fn powershell_static_member_is_safe(chars: &[char], operator: usize) -> bool {
         )
 }
 
-fn dangerous_powershell_member(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "start"
-            | "run"
-            | "exec"
-            | "create"
-            | "createprocess"
-            | "createinstance"
-            | "shellexecute"
-            | "invoke"
-            | "invokemember"
-            | "dynamicinvoke"
-            | "gettype"
-            | "getmethod"
-            | "getmethods"
-            | "getconstructor"
-    )
+fn powershell_console_instance_member_is_safe(
+    chars: &[char],
+    operator: usize,
+    member: &str,
+) -> bool {
+    let mut left = operator;
+    while left > 0 && chars[left - 1].is_whitespace() {
+        left -= 1;
+    }
+    let prefix = chars[..left]
+        .iter()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    match member.to_ascii_lowercase().as_str() {
+        "readline" => {
+            prefix.ends_with("[console]::in") || prefix.ends_with("[system.console]::in")
+        }
+        "write" | "writeline" => {
+            prefix.ends_with("[console]::out")
+                || prefix.ends_with("[system.console]::out")
+                || prefix.ends_with("[console]::error")
+                || prefix.ends_with("[system.console]::error")
+        }
+        _ => false,
+    }
 }
 
 fn powershell_member_mutation_starts(chars: &[char], index: usize) -> bool {
@@ -1165,8 +1173,13 @@ fn powershell_member_invocation_requires_review(command: &str) -> bool {
             }
             if call < visible.len()
                 && visible[call] == '('
-                && dangerous_powershell_member(&member)
+                && !powershell_console_instance_member_is_safe(&visible, index, &member)
             {
+                // Instance-member invocation is a dynamic dispatch surface. The runtime
+                // type and selected implementation cannot be proven from the public
+                // request; fail closed by grammar instead of method-name deny lists. The
+                // only instance-call exception is the statically rooted Console I/O chain
+                // required by LocalBridge's public session protocol.
                 return true;
             }
         }

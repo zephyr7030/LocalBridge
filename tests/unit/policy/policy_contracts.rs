@@ -218,6 +218,8 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"$x='docker'; si Alias:lbgen12 $x; lbgen12 ps","shell":"powershell"}),
         json!({"command":"$Alias:lbgen12='docker'; lbgen12 ps","shell":"windows_powershell"}),
         json!({"command":"$ExecutionContext.InvokeCommand.CommandNotFoundAction = { param($name,$eventArgs); $eventArgs.Command = Get-Command Write-Output }; lbgen13 'hook'","shell":"windows_powershell"}),
+        json!({"command":"$ExecutionContext.InvokeCommand.InvokeScript('Write-Output should-not-run')","shell":"windows_powershell"}),
+        json!({"command":"$value='abc'; $value.Trim()","shell":"windows_powershell"}),
         json!({"command":"filter lbgen14 { Write-Output ok }; lbgen14","shell":"windows_powershell"}),
         json!({"command":"workflow lbgen14 { Write-Output ok }; lbgen14","shell":"windows_powershell"}),
         json!({"command":"configuration lbgen14 { Node localhost {} }","shell":"windows_powershell"}),
