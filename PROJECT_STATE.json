@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-007 generation11 correction accepted at ce59151b1a86374cce050e04c832fc555289e45d after executable PowerShell $() review, start/Invoke-Item aliases, unquoted backtick hardening, full policy/schema28/full cargo/Clippy PASS. Reaccept LB-008 through LB-012, rerun G2 Group-Release, then execute fresh independent adversarial generation 12. LB-013/G3/G4 remain BLOCKED."
+    "next_action": "LB-008 reaccepted after Tunnel 17/17, contract, ARCH-016 and runtime-manifest PASS. Continue LB-009 through LB-012, Group-Release, then generation12."
   },
   "current_task_ui": {
     "enabled": true,
