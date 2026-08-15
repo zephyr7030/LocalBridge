@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-010 reaccepted after recovery 15/15, workspace 6/6 and ARCH-018/020/022 PASS. Continue LB-011/LB-012, Group-Release, then generation12."
+    "next_action": "LB-011 reaccepted after privilege 21/21 and real broker IPC 5/5 PASS. Continue LB-012, Group-Release, then generation12."
   },
   "current_task_ui": {
     "enabled": true,
