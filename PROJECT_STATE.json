@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": "LB-011",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-009 Orchestrator Core reaccepted after targeted start/stop/cleanup/CurrentTask/outage-generation verification. Reaccept LB-010 through LB-012 sequentially using PR-targeted verification; then run the G2 Group-Release gate and fresh independent adversarial generation 10. Generation 10 remains unconsumed; G3/G4 remain blocked."
+    "next_action": "LB-010 Recovery + Workspace Switch reaccepted after recovery 15/15, workspace control 6/6, and ARCH-018/020/022 PASS. Reaccept LB-011 and LB-012 sequentially; then run the G2 Group-Release gate and fresh independent adversarial generation 10. Generation 10 remains unconsumed; G3/G4 remain blocked."
   },
   "current_task_ui": {
     "enabled": true,
