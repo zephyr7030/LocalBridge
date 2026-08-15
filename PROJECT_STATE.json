@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Scoped privilege review reopened G2 at LB-007. First repair ordinary Full/Elevated exec classification so Windows system-management commands cannot bypass the administrator boundary; then continue strict sequence. Administrator execution for reviewed system-management operations remains Broker/UAC-only. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
+    "next_action": "LB-007 schema32 ordinary-route system-management privilege rework is accepted. Continue this user-authorized execution round with LB-008 only, then pause. LB-012 still owns reviewed administrator system-management elevated_exec profiles. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1990,5 +1990,27 @@
     "g2_generation_20_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "lb007_schema32_system_management_privilege_acceptance_2026_08_15": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "resolves_scoped_review": "lb007_lb012_system_management_privilege_scoped_review_2026_08_15",
+    "review_reopen_commit": "d089576607c3727c4ef6613ae5a6e919022c56ac",
+    "contract_amendment_commit": "cd5195b2ac9f954032fa15e79fab05285e7c73b8",
+    "implementation_commit": "ffebcbcab907793b73774608921abc95168cc582",
+    "scope_disposition": "LB-007 portion resolved; LB-012 reviewed administrator system-management route remains queued for its strict-sequence owner PR.",
+    "evidence": [
+      "Full and Elevated ordinary exec_command now classify static reg.exe schtasks.exe sc.exe and netsh.exe targets as privilege-required and return PrivilegedRouteNotAvailable instead of executing through the ordinary route.",
+      "Classification covers case-insensitive names, PATHEXT-equivalent extensionless names, exact System32 paths, quoted cmd targets, compound cmd segments and IF command targets while leaving data-only text such as echo reg.exe, if ... echo reg.exe and standalone Get-Command reg.exe unblocked.",
+      "The change does not modify elevated_exec or Broker routing; an Active Broker still never upgrades ordinary exec_command, and LB-012 remains the owner of exact trusted System32 reviewed administrator profiles.",
+      "Fresh LB-007 integration suite PASS 8/8 and policy contract suite PASS 7/7; focused adversarial system-management regression PASS.",
+      "Fresh full serial cargo test --locked -- --test-threads=1 PASS with 175 library tests and all invoked integration/unit/doc-test suites; cargo clippy --locked --all-targets -- -D warnings PASS.",
+      "Fresh npm test PASS, npm run build PASS, verify:runtime-manifest PASS, verify:architecture PASS, verify:ui-language PASS, G4 human-gate regression PASS, rustfmt touched-file check PASS and git diff --check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-008"
   }
 }
