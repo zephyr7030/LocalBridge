@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,11 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "Scoped post-LB-007 review / LB-006: agent_workflow diagnose advertises commands and LB-007 PEP declares transitive process_exec, but the facade rejects diagnose+commands because agent_action_allows_process excludes diagnose.",
+    "Scoped post-LB-007 review / LB-006: successful command_control.kill converges the target to cancelled but returns the control action itself as ProcessCancelled error instead of a successful kill action with cancelled target state.",
+    "Scoped post-LB-007 review / LB-006: idle task_control.cancel returns cancel_requested with cancelled_requests=0, projecting a cancellation request when no cancellable request exists."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +176,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-007 generation18 strict-sequence reacceptance completed against baseline 270d995086f23503d37419dcb001a93f0cf370a8 with existing implementation commit 0a965fb84126c75bb108fb6cd72391ed067ca92. Next execute LB-008, then strictly reaccept LB-009 through LB-012 sequentially; after all G2 PRs are reaccepted, run a fresh independent G2 adversarial generation19. Generation19 is not consumed. G3/G4 remain blocked. Tunnel HTTP400/network_error remains attribution-unproven and must be retested during LB-008 rather than treated as a proven root cause."
+    "next_action": "Scoped adversarial review after LB-007 reopened LB-006 without consuming G2 generation19. Repair the three LB-006 public-facade semantic defects: diagnose+commands cross-layer contract mismatch, successful kill action/error-envelope conflation, and idle task_control.cancel false cancel_requested projection. Then accept LB-006 and return LB-007 to READY; stop before reexecuting LB-007. Generation18 provenance remains unchanged and generation19 remains unconsumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1665,6 +1669,50 @@
       "Working tree had no tracked product modifications before governance transition; existing unrelated build/test artifacts remain untracked and untouched."
     ],
     "next_required_g2_adversarial_generation": 19,
+    "g2_generation_19_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb007_post_reacceptance_scoped_adversarial_review_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "scoped_independent_adversarial",
+    "group_generation_consumed": false,
+    "baseline_commit": "fbfb75ee07692876278b1c99c2c61346c65a3690",
+    "reopen_from_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "summary": "agent_workflow diagnose + commands cross-layer stable API contract is inconsistent",
+        "evidence": [
+          "Actual rev30 serving surface succeeds for diagnose alone but returns InvalidArgument when a minimal commands entry is added.",
+          "Public agent_workflow schema advertises commands for the shared action surface and LB-007 policy declares diagnose with transitive process_exec=true.",
+          "src-tauri/src/mcp/facade.rs agent_action_allows_process excludes diagnose and rejects the request before execution."
+        ]
+      },
+      {
+        "severity": "MINOR",
+        "owner_pr": "LB-006",
+        "summary": "command_control.kill conflates successful control action with cancelled target outcome",
+        "evidence": [
+          "Actual long-running command converges to cancelled and durable task truth is cancelled, while the kill tools/call response itself is ok=false/isError=true/ProcessCancelled.",
+          "normalize_command_result forces Kill public_status=cancelled and maps every cancelled result to stable_command_error."
+        ]
+      },
+      {
+        "severity": "MINOR",
+        "owner_pr": "LB-006",
+        "summary": "idle task_control.cancel projects a false cancel_requested state",
+        "evidence": [
+          "Actual idle cancel returns ok=true, state=cancel_requested, cancelled_requests=0.",
+          "handle_task_control unconditionally returns cancel_requested after iterating active requests even when none were cancelled."
+        ]
+      }
+    ],
+    "non_blocking_observations": [
+      "The reported directory_changes policy rejection was not reproduced and is not a blocker in this scoped review."
+    ],
     "g2_generation_19_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
