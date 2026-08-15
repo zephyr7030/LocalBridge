@@ -1121,7 +1121,16 @@ fn handle_task_control(
                     cancelled = cancelled.saturating_add(1);
                 }
             }
-            json!({"state":"cancel_requested","cancelled_requests":cancelled})
+            if cancelled > 0 {
+                json!({"state":"cancel_requested","cancelled_requests":cancelled})
+            } else {
+                let after = current_task.actual_snapshot();
+                let mut data = task_control_snapshot_with_terminal(&after, task_state);
+                if let Some(object) = data.as_object_mut() {
+                    object.insert("cancelled_requests".into(), Value::from(0));
+                }
+                data
+            }
         }
         _ => {
             return write_rpc_error(
@@ -2273,10 +2282,36 @@ mod tests {
             "{:#?}",
             diagnose.body
         );
-        let executable_workflow = public_tool_call(
+        let diagnose_command = public_tool_call(
             pep.port(),
             &session,
             616,
+            "agent_workflow",
+            json!({
+                "action":"diagnose",
+                "objective":"schema27 diagnose command",
+                "commands":[{"command":"echo LB_SCHEMA27_DIAGNOSE","shell":"cmd","workdir":".","yield_time_ms":10000}]
+            }),
+        );
+        assert_eq!(
+            diagnose_command.body["result"]["isError"], false,
+            "{:#?}",
+            diagnose_command.body
+        );
+        assert_eq!(
+            diagnose_command.body["result"]["structuredContent"]["data"]["state"],
+            "completed"
+        );
+        assert!(
+            diagnose_command.body["result"]["structuredContent"]["data"]["commands"][0]["output"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("LB_SCHEMA27_DIAGNOSE")
+        );
+        let executable_workflow = public_tool_call(
+            pep.port(),
+            &session,
+            617,
             "agent_workflow",
             json!({
                 "action":"bugfix",
@@ -2787,10 +2822,11 @@ mod tests {
             json!({"action":"kill","session_id":public_session,"signal":"TERM","wait_ms":1000}),
         );
         assert_eq!(
-            killed.body["result"]["structuredContent"]["error"]["code"], "ProcessCancelled",
+            killed.body["result"]["isError"], false,
             "healthy kill regressed: {:#?}",
             killed.body
         );
+        assert_eq!(killed.body["result"]["structuredContent"]["ok"], true);
         assert_eq!(
             killed.body["result"]["structuredContent"]["data"]["status"],
             "cancelled"
@@ -3321,6 +3357,23 @@ mod tests {
             202
         );
 
+        let idle_cancel = public_tool_call(
+            pep.port(),
+            &session,
+            31,
+            "task_control",
+            json!({"action":"cancel"}),
+        );
+        assert_eq!(
+            idle_cancel.body["result"]["structuredContent"]["data"]["state"], "idle",
+            "{:#?}",
+            idle_cancel.body
+        );
+        assert_eq!(
+            idle_cancel.body["result"]["structuredContent"]["data"]["cancelled_requests"],
+            0
+        );
+
         let port = pep.port();
         let call_session = session.clone();
         let call_started = std::time::Instant::now();
@@ -3363,7 +3416,7 @@ mod tests {
         let cancel = public_tool_call(
             pep.port(),
             &session,
-            31,
+            32,
             "task_control",
             json!({"action":"cancel"}),
         );

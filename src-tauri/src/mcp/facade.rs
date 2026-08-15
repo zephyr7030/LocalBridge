@@ -1816,6 +1816,9 @@ impl CodingToolsRuntimeAdapter {
         data.insert("output".into(), Value::String(output));
         self.map_private_output_refs(structured, &mut data);
 
+        let successful_kill_data = (action == Some(CommandControlAction::Kill)
+            && public_status == "cancelled")
+            .then(|| data.clone());
         let result = match public_status {
             "failed" => stable_command_error(FacadeErrorCode::ProcessFailed, "命令执行失败", data),
             "timed_out" => {
@@ -1832,6 +1835,9 @@ impl CodingToolsRuntimeAdapter {
                 result.clone(),
                 &self.task_state,
             )?;
+        }
+        if let Some(data) = successful_kill_data {
+            return Ok(stable_success(Value::Object(data), "Command terminated"));
         }
         Ok(result)
     }
@@ -2949,7 +2955,14 @@ fn agent_action_allows_write(action: &str) -> bool {
 fn agent_action_allows_process(action: &str) -> bool {
     matches!(
         action,
-        "bugfix" | "feature" | "refactor" | "test_failure" | "build_release" | "resume" | "custom"
+        "diagnose"
+            | "bugfix"
+            | "feature"
+            | "refactor"
+            | "test_failure"
+            | "build_release"
+            | "resume"
+            | "custom"
     )
 }
 
@@ -4196,6 +4209,21 @@ mod tests {
                 "action={action}"
             );
         }
+        let diagnose_command = facade
+            .dispatch(
+                "agent_workflow",
+                json!({
+                    "action":"diagnose",
+                    "commands":[{"command":"echo diagnose","shell":"cmd"}]
+                }),
+                None,
+            )
+            .unwrap();
+        assert_eq!(diagnose_command["isError"], false, "{diagnose_command:#?}");
+        assert_eq!(
+            diagnose_command["structuredContent"]["data"]["state"],
+            "completed"
+        );
         for (action, arguments) in [
             ("inspect", json!({"action":"inspect","path":"doc.txt"})),
             (
