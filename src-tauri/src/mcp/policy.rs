@@ -849,6 +849,13 @@ fn review_word(word: &str) -> bool {
             | "ipmo"
             | "invoke-cimmethod"
             | "invoke-wmimethod"
+            | "get-wmiobject"
+            | "gwmi"
+            | "new-object"
+            | "add-type"
+            | "comobject"
+            | "wmiclass"
+            | "managementclass"
             | "wmic"
             | "rundll32"
             | "rundll32.exe"
@@ -871,6 +878,165 @@ fn review_word(word: &str) -> bool {
     )
 }
 
+fn powershell_static_member_is_safe(chars: &[char], operator: usize) -> bool {
+    let mut left = operator;
+    while left > 0 && chars[left - 1].is_whitespace() {
+        left -= 1;
+    }
+    if left == 0 || chars[left - 1] != ']' {
+        return false;
+    }
+    let mut type_start = left - 1;
+    while type_start > 0 && chars[type_start] != '[' {
+        type_start -= 1;
+    }
+    if chars.get(type_start) != Some(&'[') || type_start + 1 >= left - 1 {
+        return false;
+    }
+    let type_name = chars[type_start + 1..left - 1]
+        .iter()
+        .collect::<String>()
+        .trim()
+        .to_ascii_lowercase();
+
+    let mut member_start = operator + 2;
+    while member_start < chars.len() && chars[member_start].is_whitespace() {
+        member_start += 1;
+    }
+    let mut member_end = member_start;
+    while member_end < chars.len()
+        && (chars[member_end].is_ascii_alphanumeric() || chars[member_end] == '_')
+    {
+        member_end += 1;
+    }
+    let member = chars[member_start..member_end]
+        .iter()
+        .collect::<String>()
+        .to_ascii_lowercase();
+
+    matches!(type_name.as_str(), "console" | "system.console")
+        && matches!(
+            member.as_str(),
+            "in" | "out" | "error" | "readline" | "write" | "writeline"
+        )
+}
+
+fn dangerous_powershell_member(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "start"
+            | "run"
+            | "exec"
+            | "create"
+            | "createprocess"
+            | "createinstance"
+            | "shellexecute"
+            | "invoke"
+            | "invokemember"
+            | "dynamicinvoke"
+            | "gettype"
+            | "getmethod"
+            | "getmethods"
+            | "getconstructor"
+    )
+}
+
+fn powershell_member_invocation_requires_review(command: &str) -> bool {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+
+    let mut visible = Vec::with_capacity(command.chars().count());
+    let mut quote = Quote::None;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match quote {
+            Quote::None => match ch {
+                '\'' => {
+                    quote = Quote::Single;
+                    visible.push(' ');
+                }
+                '"' => {
+                    quote = Quote::Double;
+                    visible.push(' ');
+                }
+                '`' => {
+                    visible.push(' ');
+                    if chars.next().is_some() {
+                        visible.push(' ');
+                    }
+                }
+                _ => visible.push(ch),
+            },
+            Quote::Single => {
+                visible.push(' ');
+                if ch == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        chars.next();
+                        visible.push(' ');
+                    } else {
+                        quote = Quote::None;
+                    }
+                }
+            }
+            Quote::Double => {
+                visible.push(' ');
+                if ch == '`' {
+                    if chars.next().is_some() {
+                        visible.push(' ');
+                    }
+                } else if ch == '"' {
+                    quote = Quote::None;
+                }
+            }
+        }
+    }
+
+    let mut index = 0usize;
+    while index < visible.len() {
+        if visible[index] == ':'
+            && visible.get(index + 1) == Some(&':')
+            && !powershell_static_member_is_safe(&visible, index)
+        {
+            // Static .NET dispatch can select a process target through Process.Start,
+            // reflection/Activator, P/Invoke helpers, or equivalent runtime APIs. The
+            // only static exception is narrow Console I/O required by public sessions.
+            return true;
+        }
+
+        if visible[index] == '.' {
+            let mut member_start = index + 1;
+            while member_start < visible.len() && visible[member_start].is_whitespace() {
+                member_start += 1;
+            }
+            if visible.get(member_start) == Some(&'$') {
+                return true;
+            }
+            let mut member_end = member_start;
+            while member_end < visible.len()
+                && (visible[member_end].is_ascii_alphanumeric() || visible[member_end] == '_')
+            {
+                member_end += 1;
+            }
+            let mut call = member_end;
+            while call < visible.len() && visible[call].is_whitespace() {
+                call += 1;
+            }
+            if call < visible.len() && visible[call] == '(' {
+                let member = visible[member_start..member_end].iter().collect::<String>();
+                if dangerous_powershell_member(&member) {
+                    return true;
+                }
+            }
+        }
+        index += 1;
+    }
+    false
+}
+
 fn flush_review_word(word: &mut String) -> bool {
     if word.is_empty() {
         return false;
@@ -886,6 +1052,10 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
         None,
         Single,
         Double,
+    }
+
+    if powershell_member_invocation_requires_review(command) {
+        return true;
     }
 
     let mut quote = Quote::None;

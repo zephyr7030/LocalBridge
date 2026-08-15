@@ -214,6 +214,10 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"Set-Alias d docker; d ps","shell":"pwsh"}),
         json!({"command":"cmd /c echo safe","shell":"windows_powershell"}),
         json!({"command":"set x=docker & %x% ps","shell":"cmd"}),
+        json!({"command":"$x='C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'; $p=[System.Diagnostics.Process]::Start($x,'ps'); $p.WaitForExit()","shell":"windows_powershell"}),
+        json!({"command":"$t=[type]::GetType('System.Diagnostics.Process'); $t::Start($x,'ps')","shell":"powershell"}),
+        json!({"command":"$sh=New-Object -ComObject Shell.Application; $sh.ShellExecute($x)","shell":"powershell"}),
+        json!({"command":"$w=[wmiclass]'Win32_Process'; $w.Create($x)","shell":"windows_powershell"}),
     ] {
         let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
         assert!(!decision.allowed, "shell indirection unexpectedly allowed: {arguments}");
@@ -226,6 +230,7 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
     for arguments in [
         json!({"command":"Write-Output \"a|b\"; Write-Output \"a&b\"; Write-Output 'docker is text'","shell":"windows_powershell"}),
         json!({"command":"Start-Sleep -Milliseconds 10; $line=[Console]::In.ReadLine(); Write-Output ('write:'+ $line)","shell":"auto"}),
+        json!({"command":"$line=[System.Console]::ReadLine(); Write-Output $line","shell":"windows_powershell"}),
     ] {
         assert!(
             policy
