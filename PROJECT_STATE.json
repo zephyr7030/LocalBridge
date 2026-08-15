@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,9 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "LB-007/generation11: PowerShell expandable double-quoted strings execute $() subexpressions, but the fail-closed shell review currently ignores the entire double-quoted region, allowing dynamic process-launch APIs to be hidden inside interpolation"
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -172,7 +174,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-012 Elevated Permission Mode reaccepted after LB012 contract, real elevated_exec E2E, privilege 21/21 and policy 7/7 PASS. G2 is REVIEW_REQUIRED. Run the G2 Group-Release gate, then execute fresh independent adversarial generation 11. LB-013/G3/G4 remain BLOCKED until review PASS."
+    "next_action": "G2 independent adversarial review generation 11 FAIL. Rework LB-007: executable PowerShell $() subexpressions inside expandable double-quoted strings must be recursively reviewed while ordinary quoted metacharacters remain allowed. Then reaccept LB-008 through LB-012, rerun G2 Group-Release, and execute fresh independent adversarial generation 12. LB-013/G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1096,7 +1098,11 @@
     },
     "source": "public plugin runtime testing plus independent test-orchestration review",
     "test_orchestration": {
-      "tiers": ["pr_fast", "pr_runtime", "group_release"],
+      "tiers": [
+        "pr_fast",
+        "pr_runtime",
+        "group_release"
+      ],
       "heavy_shared_fixture_lifecycle_compression_required": true,
       "repeated_heavy_runtime_start_requires_isolation_rationale": true,
       "cheap_unit_tests_forced_merge": false,
@@ -1121,7 +1127,21 @@
       "git_workflow.blame end_line is off by one",
       "document_workflow invalid start_line greater than end_line returns empty success"
     ],
-    "acceptance": ["A276", "A277", "A278", "A279", "A280", "A281", "A282", "A283", "A284", "A285", "A286", "A287", "A288"],
+    "acceptance": [
+      "A276",
+      "A277",
+      "A278",
+      "A279",
+      "A280",
+      "A281",
+      "A282",
+      "A283",
+      "A284",
+      "A285",
+      "A286",
+      "A287",
+      "A288"
+    ],
     "reopen_from_pr": "LB-006",
     "next_required_g2_adversarial_generation": 10,
     "g2_generation_10_consumed": false,
@@ -1139,7 +1159,9 @@
       {
         "severity": "MAJOR",
         "owner_pr": "LB-007",
-        "acceptance": ["A251"],
+        "acceptance": [
+          "A251"
+        ],
         "summary": "The generation-9 shell-indirection correction remains bypassable through PowerShell .NET process-launch APIs, so privileged-external-runtime review is not fail-closed.",
         "evidence": [
           "powershell_invocation_requires_review ignores contents inside single/double quoted strings and escalates only specific lexical words, a single call operator &, dot-source, or cmd-style expansion.",
@@ -1160,6 +1182,41 @@
     ],
     "next_required_g2_adversarial_generation": 11,
     "g2_generation_10_consumed": true,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_11_2026_08_15": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "kind": "independent_adversarial",
+    "generation": 11,
+    "baseline_commit": "6de158d2dde326f5d976355bb66541f6d64ab9bc",
+    "reopen_from_pr": "LB-007",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-007",
+        "acceptance": [
+          "A251"
+        ],
+        "summary": "PowerShell expandable double-quoted strings hide executable $() subexpressions from the generation10 fail-closed process-target review.",
+        "evidence": [
+          "powershell_member_invocation_requires_review replaces every character inside Quote::Double with spaces, so static/member launch analysis never sees an expression embedded in a double-quoted string.",
+          "powershell_invocation_requires_review likewise skips every character while Quote::Double is active, so its lexical &, Start-Process, docker/podman/wsl and indirection checks also never inspect the embedded expression.",
+          "Non-destructive Windows PowerShell probe: $v=\"prefix $(1+1) suffix\"; Write-Output $v produced prefix 2 suffix, proving $() is executed inside expandable double-quoted strings.",
+          "Therefore a shape such as $x='<runtime path>'; Write-Output \"$([System.Diagnostics.Process]::Start($x,'ps'))\" can hide the generation10-blocked .NET process-launch surface inside executable interpolation while the current classifier treats the quoted region as inert data.",
+          "Current LB-007 regression tests cover direct .NET Process.Start, reflection, COM, WMI and ordinary quoted metacharacters but contain no expandable-string $() adversarial case.",
+          "runtime-policy.toml requires shell_invocation_review=static_target_fail_closed and unreviewable_shell_indirection=review_required."
+        ]
+      }
+    ],
+    "verified_passes": [
+      "G2 Group-Release cargo test --locked and cargo clippy --locked --all-targets -D warnings: PASS.",
+      "Frontend Vitest 5/5 and production build: PASS.",
+      "runtime manifest, architecture including activated ARCH-025/026, G4 human-gate regression and git diff check: PASS."
+    ],
+    "next_required_g2_adversarial_generation": 12,
+    "g2_generation_11_consumed": true,
     "g3_unlocked": false,
     "g4_unlocked": false
   }
