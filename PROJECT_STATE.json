@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,11 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "Scoped LB-006 rework: PowerShell stderr/retained stderr exposes LocalBridge injected prologue and CLIXML surrogate escapes are not decoded to Unicode.",
-    "Scoped LB-006 rework: command_control.read public schema permits session_id-only calls although implementation requires output_ref.",
-    "Scoped LB-006 rework: bundled Windows command path validation treats cmd cd /d switch as an absolute POSIX path and the facade loses the typed policy failure."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -176,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Scoped post-generation19 review reopened LB-006 without consuming G2 generation20. Repair PowerShell stderr normalization/Unicode, command_control read schema invariants, and Windows cmd cd /d path parsing/error normalization; accept LB-006, then return LB-007 to READY and stop."
+    "next_action": "LB-006 post-generation19 scoped runtime rework accepted at implementation commit 7078363fb1ca0e48c63f1240d656631bef66aaf0. Next reaccept LB-007 on this new LB-006 baseline, then stop after advancing strict sequence. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1846,6 +1842,27 @@
       }
     ],
     "g2_generation_19_consumed": true,
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb006_post_generation19_scoped_rework_acceptance_2026_08_15": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "resolves_scoped_review": "lb006_post_generation19_scoped_review_2026_08_15",
+    "review_baseline_commit": "4d844d16d12d6dc6e274c9fc19cfbd342feba988",
+    "rollback_governance_commit": "f481ced4df1db3de242050765bcdc889280e072a",
+    "implementation_commit": "7078363fb1ca0e48c63f1240d656631bef66aaf0",
+    "evidence": [
+      "Public Agent API revision31 exposes an action-discriminated command_control schema: read requires output_ref and does not expose session_id, while poll/write/kill use session_id.",
+      "PowerShell CLIXML stderr normalization now decodes UTF-16 _xHHHH_ escapes including surrogate pairs and strips the LocalBridge-injected Management/OutputEncoding prologue; real bundled-runtime Write-Error READERR 🚀 and retained command_control.read(stderr) both preserve the user error and expose no private prologue or surrogate escape tokens.",
+      "Windows safety tokenization preserves backslashes; cd/chdir recognize only the exact /d switch as a switch. Real bundled-runtime cd /d . succeeds, while cd /d C:\\Windows remains blocked as WorkspaceDenied.",
+      "Private PERMISSION_REQUIRED/filesystem_escape and absolute/symlink workspace violations normalize to WorkspaceDenied; other permission/capability failures normalize to CapabilityDenied without leaking private shape.",
+      "Bundled coding-tools patched payload tree was rebaselined to SHA256 19b04a473a0536f51124e967ca8721f12f1320be503e124895a0a2b9add38fcf while upstream version 0.2.2 git commit/tree/archive/subset provenance stayed unchanged.",
+      "Fresh targeted facade regressions PASS; real schema28 bundled-runtime E2E PASS; full serial cargo test PASS with 175 library tests plus all integration/unit suites; cargo clippy --locked --all-targets -D warnings PASS.",
+      "Fresh npm test 5/5 PASS, production build PASS, runtime-manifest PASS, architecture PASS, UI-language PASS, G4 human-gate regression PASS, rustfmt touched-file check PASS, and git diff --check PASS."
+    ],
     "next_required_g2_adversarial_generation": 20,
     "g2_generation_20_consumed": false,
     "g3_unlocked": false,
