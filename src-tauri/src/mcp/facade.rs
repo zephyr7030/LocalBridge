@@ -15,6 +15,10 @@ use super::http::McpCancellationClient;
 use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use super::shell::{ShellExecutionSpec, ShellExecutor, ShellResolveError, ShellSelector};
+use super::task_state::{
+    CommandOwner, CommandTaskStateError, CommandTaskStateStore, CommandTerminalStatus,
+    TerminalCommandSnapshot,
+};
 
 pub const AGENT_API_VERSION: u32 = 1;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
@@ -751,14 +755,24 @@ pub trait WorkspaceRuntimeAdapter {
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError>;
     fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError>;
-    fn reap_command_sessions(&mut self);
+    fn reap_command_sessions(&mut self) -> Result<(), FacadeError>;
 }
 
 static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
 
+fn next_public_handle(prefix: &str) -> String {
+    let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{prefix}-{:x}-{nonce:x}-{generation:x}", std::process::id())
+}
+
 #[derive(Debug, Clone)]
 struct PublicCommandSession {
-    private_session_id: String,
+    owner: CommandOwner,
+    private_session_id: Option<String>,
     terminal: Option<Value>,
     pending_output: String,
     stderr_protocol_buffer: String,
@@ -778,32 +792,61 @@ struct PublicCommandSessions {
 }
 
 impl PublicCommandSessions {
-    fn public_session_for_private(&mut self, private_session_id: &str) -> String {
-        if let Some(public) = self.private_sessions.get(private_session_id) {
-            return public.clone();
-        }
-        let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
-        let public = format!("lb-session-{generation:x}");
-        self.private_sessions
-            .insert(private_session_id.to_string(), public.clone());
+    fn start_session(&mut self, task_state: &CommandTaskStateStore) -> Result<String, FacadeError> {
+        let public = next_public_handle("lb-session");
+        let owner = CommandOwner::new(next_public_handle("lb-task"), public.clone());
+        task_state
+            .begin(owner.clone())
+            .map_err(normalize_task_state_error)?;
         self.sessions.insert(
             public.clone(),
             PublicCommandSession {
-                private_session_id: private_session_id.to_string(),
+                owner,
+                private_session_id: None,
                 terminal: None,
                 pending_output: String::new(),
                 stderr_protocol_buffer: String::new(),
             },
         );
-        public
+        Ok(public)
+    }
+
+    fn bind_private_session(
+        &mut self,
+        public_session_id: &str,
+        private_session_id: &str,
+    ) -> Result<(), FacadeError> {
+        if self
+            .private_sessions
+            .get(private_session_id)
+            .is_some_and(|existing| existing != public_session_id)
+        {
+            return Err(command_state_internal_error());
+        }
+        let session = self
+            .sessions
+            .get_mut(public_session_id)
+            .ok_or_else(session_unavailable)?;
+        if session
+            .private_session_id
+            .as_deref()
+            .is_some_and(|existing| existing != private_session_id)
+        {
+            return Err(command_state_internal_error());
+        }
+        session.private_session_id = Some(private_session_id.to_string());
+        self.private_sessions.insert(
+            private_session_id.to_string(),
+            public_session_id.to_string(),
+        );
+        Ok(())
     }
 
     fn public_output_for_private(&mut self, private_output_ref: &str) -> String {
         if let Some(public) = self.private_outputs.get(private_output_ref) {
             return public.clone();
         }
-        let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
-        let public = format!("lb-output-{generation:x}");
+        let public = next_public_handle("lb-output");
         self.private_outputs
             .insert(private_output_ref.to_string(), public.clone());
         self.outputs.insert(
@@ -824,7 +867,7 @@ impl PublicCommandSessions {
     fn private_session(&self, public_session_id: &str) -> Option<String> {
         self.sessions
             .get(public_session_id)
-            .map(|session| session.private_session_id.clone())
+            .and_then(|session| session.private_session_id.clone())
     }
 
     fn private_output(&self, public_output_ref: &str) -> Option<String> {
@@ -833,12 +876,43 @@ impl PublicCommandSessions {
             .map(|output| output.private_output_ref.clone())
     }
 
-    fn mark_terminal(&mut self, public_session_id: &str, result: Value) {
+    fn mark_terminal(
+        &mut self,
+        public_session_id: &str,
+        result: Value,
+        task_state: &CommandTaskStateStore,
+    ) -> Result<(), FacadeError> {
+        let owner = self
+            .sessions
+            .get(public_session_id)
+            .ok_or_else(session_unavailable)?
+            .owner
+            .clone();
+        if self
+            .sessions
+            .get(public_session_id)
+            .is_some_and(|session| session.terminal.is_some())
+        {
+            return Ok(());
+        }
+        task_state
+            .finalize(terminal_snapshot_from_result(owner, &result))
+            .map_err(normalize_task_state_error)?;
         if let Some(session) = self.sessions.get_mut(public_session_id) {
             if session.terminal.is_none() {
                 session.terminal = Some(command_result_with_output(result, String::new()));
             }
         }
+        Ok(())
+    }
+
+    fn mark_error_terminal(
+        &mut self,
+        public_session_id: &str,
+        error: &FacadeError,
+        task_state: &CommandTaskStateStore,
+    ) -> Result<(), FacadeError> {
+        self.mark_terminal(public_session_id, error.to_mcp_result(), task_state)
     }
 
     fn append_pending(&mut self, public_session_id: &str, output: &str) {
@@ -910,20 +984,32 @@ impl PublicCommandSessions {
         visible
     }
 
-    fn mark_all_running_lost(&mut self) {
-        let terminal = session_unavailable().to_mcp_result();
-        for session in self.sessions.values_mut() {
-            if session.terminal.is_none() {
-                session.terminal = Some(terminal.clone());
-            }
+    fn mark_all_running_lost(
+        &mut self,
+        task_state: &CommandTaskStateStore,
+    ) -> Result<(), FacadeError> {
+        let running = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.terminal.is_none())
+            .map(|(public, _)| public.clone())
+            .collect::<Vec<_>>();
+        for public in running {
+            self.mark_terminal(&public, session_unavailable().to_mcp_result(), task_state)?;
         }
+        Ok(())
     }
 
     fn running_sessions(&self) -> Vec<(String, String)> {
         self.sessions
             .iter()
             .filter(|(_, session)| session.terminal.is_none())
-            .map(|(public, session)| (public.clone(), session.private_session_id.clone()))
+            .filter_map(|(public, session)| {
+                session
+                    .private_session_id
+                    .as_ref()
+                    .map(|private| (public.clone(), private.clone()))
+            })
             .collect()
     }
 }
@@ -933,23 +1019,31 @@ pub struct CodingToolsRuntimeAdapter {
     workspace: PathBuf,
     shell_executor: ShellExecutor,
     public_commands: PublicCommandSessions,
+    task_state: CommandTaskStateStore,
 }
 
 impl CodingToolsRuntimeAdapter {
-    fn new(runtime: CodingToolsRuntime) -> Self {
+    fn new(runtime: CodingToolsRuntime) -> Result<Self, FacadeError> {
         let workspace = runtime.workspace().to_path_buf();
-        Self {
+        let task_state =
+            CommandTaskStateStore::for_workspace(&workspace).map_err(normalize_task_state_error)?;
+        Ok(Self {
             runtime,
             workspace,
             shell_executor: ShellExecutor::default(),
             public_commands: PublicCommandSessions::default(),
-        }
+            task_state,
+        })
     }
 
     pub(crate) fn cancellation_client(
         &self,
     ) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
         self.runtime.cancellation_client()
+    }
+
+    pub(crate) fn command_task_state(&self) -> CommandTaskStateStore {
+        self.task_state.clone()
     }
 
     pub fn into_runtime(self) -> CodingToolsRuntime {
@@ -1129,23 +1223,46 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         request: ShellCommandRequest,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
-        let invocation = self
-            .shell_executor
-            .runtime_invocation(&request.execution)
-            .map_err(normalize_shell_error)?;
-        let mut private = json!({
-            "cmd": invocation.command_line,
-            "workdir": request.execution.cwd,
-            "timeout_ms": request.execution.timeout_ms,
-            "yield_time_ms": request.yield_time_ms,
-            "max_output_bytes": request.execution.max_output_bytes,
-            "env":{"COMSPEC":invocation.comspec.to_string_lossy()}
-        });
-        if let Some(stdin) = request.stdin {
-            private["stdin"] = Value::String(stdin);
+        let public_session_id = self.public_commands.start_session(&self.task_state)?;
+        let outcome = (|| {
+            let invocation = self
+                .shell_executor
+                .runtime_invocation(&request.execution)
+                .map_err(normalize_shell_error)?;
+            let mut private = json!({
+                "cmd": invocation.command_line,
+                "workdir": request.execution.cwd,
+                "timeout_ms": request.execution.timeout_ms,
+                "yield_time_ms": request.yield_time_ms,
+                "max_output_bytes": request.execution.max_output_bytes,
+                "env":{"COMSPEC":invocation.comspec.to_string_lossy()}
+            });
+            if let Some(stdin) = request.stdin {
+                private["stdin"] = Value::String(stdin);
+            }
+            let raw = self.private_call("exec_command", private, request_id)?;
+            if let Some(private_session_id) = raw
+                .get("structuredContent")
+                .and_then(Value::as_object)
+                .and_then(|object| object.get("session_id"))
+                .and_then(Value::as_str)
+            {
+                self.public_commands
+                    .bind_private_session(&public_session_id, private_session_id)?;
+            }
+            self.normalize_command_result(&raw, &public_session_id, None)
+        })();
+        match outcome {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                self.public_commands.mark_error_terminal(
+                    &public_session_id,
+                    &error,
+                    &self.task_state,
+                )?;
+                Err(error)
+            }
         }
-        let raw = self.private_call("exec_command", private, request_id)?;
-        Ok(self.normalize_command_result(&raw, None, None))
     }
 
     fn control_command(
@@ -1252,19 +1369,17 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         match call {
             Ok(raw) => {
                 let result =
-                    self.normalize_command_result(&raw, Some(&public_session_id), Some(action));
+                    self.normalize_command_result(&raw, &public_session_id, Some(action))?;
                 Ok(command_result_prepend_output(result, pending))
-            }
-            Err(error) if error.code == FacadeErrorCode::SessionUnavailable => {
-                self.public_commands
-                    .append_pending(&public_session_id, &pending);
-                self.public_commands
-                    .mark_terminal(&public_session_id, session_unavailable().to_mcp_result());
-                Err(session_unavailable())
             }
             Err(error) => {
                 self.public_commands
                     .append_pending(&public_session_id, &pending);
+                self.public_commands.mark_error_terminal(
+                    &public_session_id,
+                    &error,
+                    &self.task_state,
+                )?;
                 Err(error)
             }
         }
@@ -1448,12 +1563,13 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         self.runtime.root_is_running().map(Some)
     }
 
-    fn reap_command_sessions(&mut self) {
+    fn reap_command_sessions(&mut self) -> Result<(), FacadeError> {
         match self.runtime.root_is_running() {
             Ok(true) => {}
             Ok(false) | Err(_) => {
-                self.public_commands.mark_all_running_lost();
-                return;
+                self.public_commands
+                    .mark_all_running_lost(&self.task_state)?;
+                return Ok(());
             }
         }
         let running = self.public_commands.running_sessions();
@@ -1468,9 +1584,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 Ok(raw) => {
                     let normalized = self.normalize_command_result(
                         &raw,
-                        Some(&public_session_id),
+                        &public_session_id,
                         Some(CommandControlAction::Poll),
-                    );
+                    )?;
                     let delta = normalized
                         .pointer("/structuredContent/data/output")
                         .and_then(Value::as_str)
@@ -1479,18 +1595,16 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                     self.public_commands
                         .append_pending(&public_session_id, &delta);
                 }
-                Err(error) if error.code == FacadeErrorCode::SessionUnavailable => {
-                    self.public_commands
-                        .mark_terminal(&public_session_id, session_unavailable().to_mcp_result());
+                Err(error) => {
+                    self.public_commands.mark_error_terminal(
+                        &public_session_id,
+                        &error,
+                        &self.task_state,
+                    )?;
                 }
-                Err(_) => match self.runtime.root_is_running() {
-                    Ok(true) => {}
-                    Ok(false) | Err(_) => self
-                        .public_commands
-                        .mark_terminal(&public_session_id, session_unavailable().to_mcp_result()),
-                },
             }
         }
+        Ok(())
     }
 }
 
@@ -1498,17 +1612,10 @@ impl CodingToolsRuntimeAdapter {
     fn normalize_command_result(
         &mut self,
         raw: &Value,
-        existing_public_session: Option<&str>,
+        public_session_id: &str,
         action: Option<CommandControlAction>,
-    ) -> Value {
+    ) -> Result<Value, FacadeError> {
         let structured = raw.get("structuredContent").and_then(Value::as_object);
-        let private_session_id = structured
-            .and_then(|object| object.get("session_id"))
-            .and_then(Value::as_str);
-        let public_session_id = existing_public_session.map(str::to_string).or_else(|| {
-            private_session_id
-                .map(|private| self.public_commands.public_session_for_private(private))
-        });
         let private_status = structured
             .and_then(|object| object.get("status"))
             .and_then(Value::as_str)
@@ -1531,19 +1638,22 @@ impl CodingToolsRuntimeAdapter {
         if let Some(exit_code) = exit_code {
             data.insert("exit_code".into(), Value::from(exit_code));
         }
-        if let Some(session_id) = public_session_id.as_ref() {
-            data.insert("session_id".into(), Value::String(session_id.clone()));
+        if let Some(signal) = structured
+            .and_then(|object| object.get("signal"))
+            .and_then(Value::as_str)
+        {
+            data.insert("signal".into(), Value::String(signal.to_string()));
         }
+        data.insert(
+            "session_id".into(),
+            Value::String(public_session_id.to_string()),
+        );
         if let Some(value) = structured.and_then(|object| object.get("truncated")) {
             if value.is_boolean() {
                 data.insert("truncated".into(), value.clone());
             }
         }
-        let output = if let Some(public_session_id) = public_session_id.as_deref() {
-            self.safe_command_output_for_session(raw, public_session_id)
-        } else {
-            safe_command_output(raw)
-        };
+        let output = self.safe_command_output_for_session(raw, public_session_id);
         data.insert("output".into(), Value::String(output));
         self.map_private_output_refs(structured, &mut data);
 
@@ -1558,12 +1668,13 @@ impl CodingToolsRuntimeAdapter {
             _ => stable_success(Value::Object(data), "Command completed"),
         };
         if public_status != "running" {
-            if let Some(session_id) = public_session_id {
-                self.public_commands
-                    .mark_terminal(&session_id, result.clone());
-            }
+            self.public_commands.mark_terminal(
+                public_session_id,
+                result.clone(),
+                &self.task_state,
+            )?;
         }
-        result
+        Ok(result)
     }
 
     fn safe_command_output_for_session(&mut self, raw: &Value, public_session_id: &str) -> String {
@@ -1662,6 +1773,80 @@ fn command_public_status(
     } else {
         "completed"
     }
+}
+
+fn terminal_snapshot_from_result(owner: CommandOwner, result: &Value) -> TerminalCommandSnapshot {
+    let data = result
+        .pointer("/structuredContent/data")
+        .and_then(Value::as_object);
+    let error_code = result
+        .pointer("/structuredContent/error/code")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let status = match data
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str)
+    {
+        Some("completed") => CommandTerminalStatus::Completed,
+        Some("timed_out") => CommandTerminalStatus::TimedOut,
+        Some("cancelled") => CommandTerminalStatus::Cancelled,
+        Some("failed") => CommandTerminalStatus::Failed,
+        _ => match error_code.as_deref() {
+            Some("ProcessTimedOut") => CommandTerminalStatus::TimedOut,
+            Some("ProcessCancelled") => CommandTerminalStatus::Cancelled,
+            Some(
+                "SessionUnavailable"
+                | "RuntimeUnavailable"
+                | "RuntimeProtocolMismatch"
+                | "RuntimeCapabilityMismatch",
+            ) => CommandTerminalStatus::Lost,
+            _ => CommandTerminalStatus::Failed,
+        },
+    };
+    let mut output_refs = Vec::new();
+    if let Some(value) = data
+        .and_then(|value| value.get("output_ref"))
+        .and_then(Value::as_str)
+    {
+        output_refs.push(value.to_string());
+    }
+    if let Some(values) = data
+        .and_then(|value| value.get("output_refs"))
+        .and_then(Value::as_object)
+    {
+        for stream in ["stdout", "stderr"] {
+            if let Some(value) = values.get(stream).and_then(Value::as_str) {
+                if !output_refs.iter().any(|existing| existing == value) {
+                    output_refs.push(value.to_string());
+                }
+            }
+        }
+    }
+    TerminalCommandSnapshot::new(
+        owner,
+        status,
+        data.and_then(|value| value.get("exit_code"))
+            .and_then(Value::as_i64),
+        data.and_then(|value| value.get("signal"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        status == CommandTerminalStatus::TimedOut,
+        status == CommandTerminalStatus::Cancelled,
+        output_refs,
+        error_code,
+    )
+}
+
+fn normalize_task_state_error(_error: CommandTaskStateError) -> FacadeError {
+    command_state_internal_error()
+}
+
+fn command_state_internal_error() -> FacadeError {
+    FacadeError::new(
+        FacadeErrorCode::RuntimeUnavailable,
+        "命令任务状态持久化失败",
+        false,
+    )
 }
 
 fn validate_private_command_result_semantics(
@@ -1818,13 +2003,18 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
         runtime: CodingToolsRuntime,
         policy: CapabilityPolicy,
     ) -> Result<Self, FacadeError> {
-        Self::with_adapter(CodingToolsRuntimeAdapter::new(runtime), policy)
+        let adapter = CodingToolsRuntimeAdapter::new(runtime)?;
+        Self::with_adapter(adapter, policy)
     }
 
     pub(crate) fn cancellation_client(
         &self,
     ) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
         self.adapter.cancellation_client()
+    }
+
+    pub(crate) fn command_task_state(&self) -> CommandTaskStateStore {
+        self.adapter.command_task_state()
     }
 
     pub fn into_runtime(self) -> CodingToolsRuntime {
@@ -1868,8 +2058,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         self.adapter.root_is_running()
     }
 
-    pub fn reap_command_sessions(&mut self) {
-        self.adapter.reap_command_sessions();
+    pub fn reap_command_sessions(&mut self) -> Result<(), FacadeError> {
+        self.adapter.reap_command_sessions()
     }
 
     pub fn authorize_public_request(
@@ -2649,6 +2839,7 @@ fn command_result_prepend_output(result: Value, prefix: String) -> Value {
     command_result_with_output(result, format!("{prefix}{suffix}"))
 }
 
+#[cfg(test)]
 fn safe_command_output(raw: &Value) -> String {
     let Some(structured) = raw.get("structuredContent").and_then(Value::as_object) else {
         return String::new();
@@ -2922,6 +3113,28 @@ fn sanitize_object_array(
 mod tests {
     use super::*;
 
+    fn test_task_state(label: &str) -> CommandTaskStateStore {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        CommandTaskStateStore::open_at(std::env::temp_dir().join(format!(
+            "localbridge-facade-task-state-{label}-{}-{nonce}.json",
+            std::process::id()
+        )))
+        .unwrap()
+    }
+
+    fn bind_test_session(
+        sessions: &mut PublicCommandSessions,
+        task_state: &CommandTaskStateStore,
+        private: &str,
+    ) -> String {
+        let public = sessions.start_session(task_state).unwrap();
+        sessions.bind_private_session(&public, private).unwrap();
+        public
+    }
+
     struct FakeAdapter {
         catalog: Value,
     }
@@ -2989,7 +3202,9 @@ mod tests {
             Ok(Some(true))
         }
 
-        fn reap_command_sessions(&mut self) {}
+        fn reap_command_sessions(&mut self) -> Result<(), FacadeError> {
+            Ok(())
+        }
     }
 
     fn policy() -> CapabilityPolicy {
@@ -3283,8 +3498,10 @@ mod tests {
         assert!(!rendered.contains("SECRET_PRIVATE_RENDERED_TEXT"));
         assert!(!rendered.contains("SECRET_PRIVATE_SCHEMA_VALUE"));
 
+        let task_state = test_task_state("success-allowlist");
         let mut sessions = PublicCommandSessions::default();
-        let public_session = sessions.public_session_for_private("PRIVATE_SESSION_SECRET");
+        let public_session =
+            bind_test_session(&mut sessions, &task_state, "PRIVATE_SESSION_SECRET");
         let public_output = sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET");
         assert!(public_session.starts_with("lb-session-"));
         assert!(public_output.starts_with("lb-output-"));
@@ -3305,8 +3522,9 @@ mod tests {
 
     #[test]
     fn fragmented_powershell_progress_clixml_is_buffered_until_safely_classified() {
+        let task_state = test_task_state("clixml");
         let mut sessions = PublicCommandSessions::default();
-        let public = sessions.public_session_for_private("PRIVATE_CLIXML");
+        let public = bind_test_session(&mut sessions, &task_state, "PRIVATE_CLIXML");
         assert_eq!(sessions.filter_private_stderr(&public, "#< CLIXML\r\n"), "");
         assert_eq!(
             sessions.filter_private_stderr(
@@ -3321,7 +3539,7 @@ mod tests {
             "real stderr\r\n"
         );
 
-        let public_error = sessions.public_session_for_private("PRIVATE_CLIXML_ERROR");
+        let public_error = bind_test_session(&mut sessions, &task_state, "PRIVATE_CLIXML_ERROR");
         assert_eq!(
             sessions.filter_private_stderr(&public_error, "#< CLIXML\r\n"),
             ""
@@ -3491,23 +3709,31 @@ mod tests {
 
     #[test]
     fn session_handles_are_opaque_terminal_monotonic_and_runtime_loss_is_stable() {
+        let task_state = test_task_state("terminal-monotonic");
         let mut sessions = PublicCommandSessions::default();
-        let public = sessions.public_session_for_private("PRIVATE_SESSION");
+        let public = bind_test_session(&mut sessions, &task_state, "PRIVATE_SESSION");
         assert!(public.starts_with("lb-session-"));
         assert_ne!(public, "PRIVATE_SESSION");
         let completed = stable_success(json!({"status":"completed"}), "done");
-        sessions.mark_terminal(&public, completed.clone());
-        sessions.mark_terminal(
-            &public,
-            stable_command_error(FacadeErrorCode::ProcessFailed, "failed", Map::new()),
-        );
-        let terminal = sessions.terminal(&public).expect("completed terminal snapshot");
+        sessions
+            .mark_terminal(&public, completed.clone(), &task_state)
+            .unwrap();
+        sessions
+            .mark_terminal(
+                &public,
+                stable_command_error(FacadeErrorCode::ProcessFailed, "failed", Map::new()),
+                &task_state,
+            )
+            .unwrap();
+        let terminal = sessions
+            .terminal(&public)
+            .expect("completed terminal snapshot");
         assert_eq!(terminal["isError"], false);
         assert_eq!(terminal["structuredContent"]["data"]["status"], "completed");
         assert_eq!(terminal["structuredContent"]["data"]["output"], "");
 
-        let lost = sessions.public_session_for_private("PRIVATE_LOST");
-        sessions.mark_all_running_lost();
+        let lost = bind_test_session(&mut sessions, &task_state, "PRIVATE_LOST");
+        sessions.mark_all_running_lost(&task_state).unwrap();
         let terminal = sessions.terminal(&lost).expect("lost terminal snapshot");
         assert_eq!(terminal["isError"], true);
         assert_eq!(
@@ -3518,8 +3744,9 @@ mod tests {
 
     #[test]
     fn public_session_pending_output_is_incremental_and_terminal_does_not_replay() {
+        let task_state = test_task_state("incremental");
         let mut sessions = PublicCommandSessions::default();
-        let public = sessions.public_session_for_private("PRIVATE_INCREMENTAL");
+        let public = bind_test_session(&mut sessions, &task_state, "PRIVATE_INCREMENTAL");
         sessions.append_pending(&public, "poll-1\n");
         let first = sessions.running_with_pending(&public).unwrap();
         assert_eq!(first["structuredContent"]["data"]["output"], "poll-1\n");
@@ -3531,17 +3758,20 @@ mod tests {
         assert!(sessions.running_with_pending(&public).is_none());
 
         sessions.append_pending(&public, "tail\n");
-        sessions.mark_terminal(
-            &public,
-            stable_command_error(
-                FacadeErrorCode::ProcessCancelled,
-                "命令已取消",
-                Map::from_iter([
-                    ("status".into(), Value::String("cancelled".into())),
-                    ("output".into(), Value::String("private-final".into())),
-                ]),
-            ),
-        );
+        sessions
+            .mark_terminal(
+                &public,
+                stable_command_error(
+                    FacadeErrorCode::ProcessCancelled,
+                    "命令已取消",
+                    Map::from_iter([
+                        ("status".into(), Value::String("cancelled".into())),
+                        ("output".into(), Value::String("private-final".into())),
+                    ]),
+                ),
+                &task_state,
+            )
+            .unwrap();
         let terminal = sessions.terminal_with_pending(&public).unwrap();
         assert_eq!(terminal["structuredContent"]["data"]["output"], "tail\n");
         let replay = sessions.terminal_with_pending(&public).unwrap();
@@ -3550,6 +3780,28 @@ mod tests {
             replay["structuredContent"]["error"]["code"],
             "ProcessCancelled"
         );
+    }
+
+    #[test]
+    fn stable_runtime_and_session_errors_persist_as_lost_terminal_snapshots() {
+        let owner = CommandOwner::new("task-runtime-loss", "lb-session-runtime-loss");
+        for error in [
+            session_unavailable(),
+            FacadeError::new(
+                FacadeErrorCode::RuntimeUnavailable,
+                "runtime unavailable",
+                true,
+            ),
+            FacadeError::new(
+                FacadeErrorCode::RuntimeProtocolMismatch,
+                "protocol mismatch",
+                false,
+            ),
+        ] {
+            let snapshot = terminal_snapshot_from_result(owner.clone(), &error.to_mcp_result());
+            assert_eq!(snapshot.status, CommandTerminalStatus::Lost);
+            assert_eq!(snapshot.owner, owner);
+        }
     }
 
     #[test]

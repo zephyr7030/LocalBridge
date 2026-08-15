@@ -21,6 +21,7 @@ use super::facade::{AgentFacade, CodingToolsRuntimeAdapter, FacadeCallError};
 use super::http::McpCancellationClient;
 use super::policy::CapabilityPolicy;
 use super::runtime::CodingToolsRuntime;
+use super::task_state::CommandTaskStateStore;
 
 const CURRENT_PROTOCOL_VERSION: &str = "2025-11-25";
 const COMPATIBLE_PROTOCOL_VERSION: &str = "2025-06-18";
@@ -39,6 +40,7 @@ struct ConnectionContext<'a> {
     cancellation: &'a McpCancellationClient,
     permission_mode: &'a RwLock<PermissionMode>,
     current_task: &'a CurrentTaskProjection,
+    task_state: &'a CommandTaskStateStore,
     sessions: &'a Mutex<HashMap<String, String>>,
     active_requests: &'a Mutex<Vec<Value>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
@@ -59,6 +61,7 @@ struct TaskControlContext<'a> {
     public_policy: &'a RwLock<CapabilityPolicy>,
     cancellation: &'a McpCancellationClient,
     current_task: &'a CurrentTaskProjection,
+    task_state: &'a CommandTaskStateStore,
     active_requests: &'a Mutex<Vec<Value>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
     privileged_requests: &'a Mutex<Vec<(Value, String)>>,
@@ -70,6 +73,7 @@ struct ServeContext {
     cancellation: McpCancellationClient,
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
+    task_state: CommandTaskStateStore,
     privileged: Option<Arc<dyn PrivilegedExecution>>,
     shutdown: mpsc::Receiver<()>,
 }
@@ -451,6 +455,7 @@ impl PolicyEnforcementRuntime {
         let public_policy = Arc::new(RwLock::new(policy.clone()));
         let guard = AgentFacade::from_coding_runtime(coding_runtime, policy)
             .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
+        let task_state = guard.command_task_state();
         let cancellation = guard
             .cancellation_client()
             .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
@@ -482,6 +487,7 @@ impl PolicyEnforcementRuntime {
                         cancellation,
                         permission_mode: thread_mode,
                         current_task: thread_task,
+                        task_state,
                         privileged,
                         shutdown: shutdown_rx,
                     },
@@ -590,6 +596,7 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         cancellation,
         permission_mode,
         current_task,
+        task_state,
         privileged,
         shutdown,
     } = context;
@@ -606,7 +613,10 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         }
         if Instant::now() >= next_session_reap {
             if let Ok(mut facade) = guard.try_lock() {
-                facade.reap_command_sessions();
+                if facade.reap_command_sessions().is_err() {
+                    stopping.store(true, Ordering::Release);
+                    break;
+                }
             }
             next_session_reap = Instant::now() + Duration::from_millis(100);
         }
@@ -628,6 +638,7 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                 let worker_policy = Arc::clone(&public_policy);
                 let worker_mode = Arc::clone(&permission_mode);
                 let worker_task = current_task.clone();
+                let worker_task_state = task_state.clone();
                 let worker_sessions = Arc::clone(&sessions);
                 let worker_active = Arc::clone(&active_requests);
                 let worker_privileged = privileged.as_ref().map(Arc::clone);
@@ -643,6 +654,7 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                             cancellation: &worker_cancellation,
                             permission_mode: &worker_mode,
                             current_task: &worker_task,
+                            task_state: &worker_task_state,
                             sessions: &worker_sessions,
                             active_requests: &worker_active,
                             privileged: worker_privileged.as_ref(),
@@ -709,6 +721,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         cancellation,
         permission_mode,
         current_task,
+        task_state,
         sessions,
         active_requests,
         privileged,
@@ -984,6 +997,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         public_policy,
                         cancellation,
                         current_task,
+                        task_state,
                         active_requests,
                         privileged,
                         privileged_requests,
@@ -1032,6 +1046,7 @@ fn handle_task_control(
         public_policy,
         cancellation,
         current_task,
+        task_state,
         active_requests,
         privileged,
         privileged_requests,
@@ -1064,7 +1079,7 @@ fn handle_task_control(
     let action = arguments.get("action").and_then(Value::as_str).ok_or(())?;
     let before = current_task.actual_snapshot();
     let data = match action {
-        "get" => task_control_snapshot(&before),
+        "get" => task_control_snapshot_with_terminal(&before, task_state),
         "cancel" => {
             let active = active_requests
                 .lock()
@@ -1108,6 +1123,33 @@ fn handle_task_control(
         }),
         Some(session),
     )
+}
+
+fn task_control_snapshot_with_terminal(
+    status: &CurrentTaskStatus,
+    task_state: &CommandTaskStateStore,
+) -> Value {
+    let mut data = task_control_snapshot(status);
+    if let Some(object) = data.as_object_mut() {
+        let terminal = task_state.latest_terminal().map(|terminal| {
+            json!({
+                "task_id": terminal.owner.task_id,
+                "session_id": terminal.owner.session_id,
+                "status": terminal.status.as_str(),
+                "exit_code": terminal.exit_code,
+                "signal": terminal.signal,
+                "timed_out": terminal.timed_out,
+                "cancelled": terminal.cancelled,
+                "output_refs": terminal.output_refs,
+                "error_code": terminal.error_code
+            })
+        });
+        object.insert(
+            "last_terminal_command".into(),
+            terminal.unwrap_or(Value::Null),
+        );
+    }
+    data
 }
 
 fn task_control_snapshot(status: &CurrentTaskStatus) -> Value {
@@ -1581,8 +1623,45 @@ mod tests {
     use super::super::runtime::{
         CodingToolsPermissionMode, CodingToolsRuntimeConfig, InternalBearer,
     };
+    use super::super::task_state::{CommandOwner, CommandTerminalStatus, TerminalCommandSnapshot};
 
     const SYNTHETIC_BEARER: &str = "LB009_PEP_INTERNAL_BEARER_SYNTHETIC_DO_NOT_LEAK";
+
+    #[test]
+    fn task_control_get_reads_durable_terminal_without_private_session() {
+        let workspace = temp_workspace();
+        let path = workspace.join("durable-command-state.json");
+        let owner = CommandOwner::new("task-durable", "lb-session-durable");
+        {
+            let store = CommandTaskStateStore::open_at(path.clone()).unwrap();
+            store.begin(owner.clone()).unwrap();
+            store
+                .finalize(TerminalCommandSnapshot::new(
+                    owner.clone(),
+                    CommandTerminalStatus::TimedOut,
+                    Some(124),
+                    Some("TERM".to_string()),
+                    true,
+                    false,
+                    vec!["lb-output-durable".to_string()],
+                    Some("ProcessTimedOut".to_string()),
+                ))
+                .unwrap();
+        }
+
+        // Reopen from disk: there is deliberately no private runtime/session object here.
+        let reopened = CommandTaskStateStore::open_at(path).unwrap();
+        let data = task_control_snapshot_with_terminal(&CurrentTaskStatus::Idle, &reopened);
+        let terminal = &data["last_terminal_command"];
+        assert_eq!(terminal["task_id"], owner.task_id);
+        assert_eq!(terminal["session_id"], owner.session_id);
+        assert_eq!(terminal["status"], "timed_out");
+        assert_eq!(terminal["exit_code"], 124);
+        assert_eq!(terminal["timed_out"], true);
+        assert_eq!(terminal["output_refs"][0], "lb-output-durable");
+        assert_eq!(terminal["error_code"], "ProcessTimedOut");
+        cleanup_test_directory(&workspace);
+    }
 
     #[test]
     fn current_task_projection_retains_fast_call_for_minimum_visibility_without_delaying_finish() {
@@ -2015,24 +2094,42 @@ mod tests {
         );
         assert!(polled.body.get("error").is_none(), "{:#?}", polled.body);
 
-        thread::sleep(Duration::from_millis(1200));
-        let terminal = public_tool_call(
-            pep.port(),
-            &session,
-            606,
-            "command_control",
-            json!({"action":"poll","session_id":public_session}),
-        );
+        let terminal_deadline = Instant::now() + Duration::from_secs(6);
+        let mut terminal_poll_id = 606u64;
+        let mut observed_output = String::new();
+        let terminal = loop {
+            let poll = public_tool_call(
+                pep.port(),
+                &session,
+                terminal_poll_id,
+                "command_control",
+                json!({"action":"poll","session_id":public_session,"wait_ms":100}),
+            );
+            terminal_poll_id += 1;
+            assert!(poll.body.get("error").is_none(), "{:#?}", poll.body);
+            observed_output.push_str(
+                poll.body["result"]["structuredContent"]["data"]["output"]
+                    .as_str()
+                    .unwrap_or_default(),
+            );
+            if poll.body["result"]["structuredContent"]["data"]["status"] != "running" {
+                break poll;
+            }
+            assert!(
+                Instant::now() < terminal_deadline,
+                "schema27 command failed to converge to terminal state: {:#?}",
+                poll.body
+            );
+            thread::sleep(Duration::from_millis(50));
+        };
         assert_eq!(
             terminal.body["result"]["structuredContent"]["data"]["status"], "completed",
             "{:#?}",
             terminal.body
         );
         assert!(
-            terminal.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("LB_SCHEMA27_DONE")
+            observed_output.contains("LB_SCHEMA27_DONE"),
+            "schema27 incremental output missing: {observed_output:?}"
         );
 
         if let Some(output_ref) =
@@ -2238,14 +2335,12 @@ mod tests {
             }),
         );
         assert_eq!(
-            autoload.body["result"]["isError"],
-            true,
+            autoload.body["result"]["isError"], true,
             "{:#?}",
             autoload.body
         );
         assert_eq!(
-            autoload.body["result"]["structuredContent"]["error"]["code"],
-            "ProcessFailed",
+            autoload.body["result"]["structuredContent"]["error"]["code"], "ProcessFailed",
             "{:#?}",
             autoload.body
         );
@@ -2452,6 +2547,27 @@ mod tests {
         assert_eq!(
             second_terminal.body["result"]["structuredContent"]["data"]["output"],
             ""
+        );
+
+        let durable_terminal = public_tool_call(
+            pep.port(),
+            &session,
+            poll_id + 6,
+            "task_control",
+            json!({"action":"get"}),
+        );
+        let durable =
+            &durable_terminal.body["result"]["structuredContent"]["data"]["last_terminal_command"];
+        assert_eq!(durable["session_id"], public_session);
+        assert_eq!(durable["status"], "cancelled");
+        assert_eq!(durable["cancelled"], true);
+        assert_eq!(durable["error_code"], "ProcessCancelled");
+        assert!(
+            serde_json::to_string(durable)
+                .unwrap()
+                .find("PRIVATE_")
+                .is_none(),
+            "schema29 durable terminal task-state leaked a private handle: {durable:#?}"
         );
 
         for (id, size) in [(760u64, 512u32), (761u64, 64u32)] {
