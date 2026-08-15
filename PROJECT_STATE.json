@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-006 post-generation19 scoped runtime rework accepted at implementation commit 7078363fb1ca0e48c63f1240d656631bef66aaf0. Next reaccept LB-007 on this new LB-006 baseline, then stop after advancing strict sequence. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
+    "next_action": "LB-007 schema31 shell-policy reacceptance is complete at implementation commit 1558adb37ac674fc6f473ce91dcd0e65498b2884. Strict sequence is advanced to LB-008 READY/current and execution stops here. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -1894,5 +1894,40 @@
     "g2_generation_20_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "lb007_schema31_shell_diagnostic_reacceptance_2026_08_15": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "reacceptance_baseline_commit": "53b5e212ba921e23489a37e1ea1d5cd1cf640db5",
+    "contract_amendment_commit": "933f2d6767ac9bb6586370b6af76189d3b78a5f4",
+    "contract_verifier_regression_commit": "ee543dd8039a34b87bd18ede8feece5ce2b5da74",
+    "implementation_commit": "1558adb37ac674fc6f473ce91dcd0e65498b2884",
+    "reason": "Current-contract and fresh-runtime review found two LB-007 false-positive privilege classifications while the other reported use-side behaviors were either current-contract expected, stale-serving-instance drift, or not reproducible on the fresh revision31 baseline.",
+    "use_side_disposition": [
+      "FIXED_LB007: standalone Get-Command or gcm with exactly one literal command name was over-classified because review_word treated Get-Command globally as review-required; the exception is now deliberately narrow and rejects CR/LF command boundaries, dynamic names, pipelines, ScriptBlock extraction and follow-on execution.",
+      "FIXED_LB007: statically rooted [Console]::In.ReadToEnd() was over-classified because the Console stdin seam allowed ReadLine only; ReadToEnd is now allowed while unrelated instance-member dispatch remains review-required.",
+      "NOT_REPRODUCED_CURRENT_REV31: running command timeout did not converge to lost; a fresh public PEP command with yield_time_ms=0 first returned running and later poll plus durable task state converged to ProcessTimedOut/timed_out=true.",
+      "EXPECTED_CONTRACT: public exec workdir and other workspace-bound path inputs reject absolute paths; active-workspace-relative paths are required.",
+      "EXPECTED_CONTRACT: agent_workflow command workdir is relative to the selected project path, so path=test plus workdir=test denotes test/test while workdir=. denotes the selected test project.",
+      "STALE_SERVING_INSTANCE: current revision31 tools/list command_control.read requires action plus output_ref and does not expose session_id.",
+      "EXPECTED_CONTRACT: explicit pwsh may be unavailable when only an untrusted WindowsApps reparse alias exists; ShellResolver trusts validated Program Files PowerShell installations before version probing.",
+      "EXPECTED_CONTRACT: PowerShell may include the user's own invocation text in Write-Error context; the forbidden LocalBridge-injected Management/OutputEncoding prologue remains stripped and private upstream shape remains hidden.",
+      "NOT_REPRODUCED_AS_POLICY_DENY: explicit cmd literal non-ASCII text was policy-eligible; schema31 separately freezes native cmd active-code-page semantics and forbids LocalBridge from injecting chcp solely to force Unicode fidelity.",
+      "DEFERRED_NO_ROOT_CAUSE: transient target_non_mcp_http or HTTP 400 observations were not attributed to Tunnel in this LB-007 review and remain evidence to re-evaluate only within LB-008 scope."
+    ],
+    "evidence": [
+      "Schema31 formally ratifies the narrow Get-Command/gcm and Console.In.ReadToEnd policy seams plus the cmd native-code-page boundary; the architecture verifier normalizes schema31 back through schema30 and fails closed on amendment drift.",
+      "Contract regression commit ee543dd8039a34b87bd18ede8feece5ce2b5da74 adds an explicit negative verifier case proving removal of the Console stdin required-test contract is rejected.",
+      "LB-007 integration regressions PASS for Full/Elevated standalone literal Get-Command/gcm and Console.In.ReadToEnd, while dynamic command names, CR/LF command boundaries, pipelines, ScriptBlock extraction, command-engine mutation and general instance-member dispatch remain denied.",
+      "Fresh lb007_policy_enforcement and lb007_policy_contracts PASS; touched policy.rs rustfmt check PASS.",
+      "The first final full serial cargo test run recorded 174/175 library tests PASS with only mcp::server::tests::elevated_exec_is_broker_only_mode_gated_cancelable_and_secret_safe failing at the HTTP test helper with WinSock 10054 ConnectionReset; no LB-007 policy assertion failed. That exact test then PASSed alone 1/1, and a subsequent complete cargo test --locked -- --test-threads=1 finished clean with exit 0. The transient failure is preserved rather than rewritten as an initial PASS.",
+      "Fresh cargo clippy --locked --all-targets -- -D warnings PASS.",
+      "Fresh npm test PASS 5/5, npm run build PASS, verify:runtime-manifest PASS, verify:architecture PASS with schema31, verify:ui-language PASS, G4 human-gate regression PASS, and git diff --check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-008"
   }
 }
