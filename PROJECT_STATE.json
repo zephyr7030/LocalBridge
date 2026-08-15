@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -180,7 +180,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-010 schema33 Recovery + Workspace Switch revalidation is accepted with no product patch. Continue strictly with LB-011 Privileged Broker IPC development trust-path repair; preserve release trust boundaries, G2 generation19 FAIL provenance and generation20 unconsumed."
+    "next_action": "LB-011 schema33 development Broker handoff repair is accepted. Continue strictly with LB-012 general Broker-backed administrator capability implementation; preserve ordinary-route boundaries, G2 generation19 FAIL provenance and generation20 unconsumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -2210,5 +2210,23 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "next_pr": "LB-011"
+  },
+  "lb011_schema33_development_broker_acceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-011",
+    "implementation_commit": "d0b08096a090b9702f00d4423a27586ed7419e75",
+    "evidence": [
+      "Debug builds no longer require the mutable target/debug tree to masquerade as a protected Program Files install. They still require the exact canonical sibling Broker and pin that validated binary read-only with write/delete sharing denied across the ShellExecuteExW(runas) handoff.",
+      "The development seam adds no PATH or arbitrary environment Broker lookup; the whole LocalBridge process remains unelevated.",
+      "Non-debug production builds retain canonical Program Files sibling validation plus trusted owner/DACL and per-right unelevated mutation denial across the protected install ancestor chain.",
+      "Fresh production release cargo check --release --lib --bins PASS. A broader --release --all-targets check failed only because an existing LB-008 test-only Tunnel helper is unavailable under release test cfg; no Tunnel code was modified to hide that unrelated test compilation issue.",
+      "Fresh development Broker pin test PASS; canonical protected-sibling security test PASS; LB-011 static security/UAC boundaries PASS; actual Broker IPC 5/5 PASS for PID/SID authentication, handshake, replay/stale generation rejection, structured execution, cancellation/output bounds and broker shutdown.",
+      "Fresh full serial cargo test PASS; cargo clippy --locked --all-targets -- -D warnings PASS; npm test/build, runtime-manifest, architecture, UI-language, G4 regression and git diff check PASS."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-012"
   }
 }
