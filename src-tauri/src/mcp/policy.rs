@@ -723,12 +723,22 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
         "agent_workflow" => {
             let shell_review_required = workflow_commands_require_review(arguments);
             let workflow_action = action?;
+            let commands_present = match arguments.get("commands") {
+                None => false,
+                Some(commands) => !commands.as_array()?.is_empty(),
+            };
             let directory_changes_only = workflow_directory_changes_only(arguments)?
                 && !matches!(workflow_action, "build_release" | "custom");
             let (name, declaration) = match workflow_action {
                 "diagnose" => (
                     "diagnose",
-                    PublicCapabilityDeclaration::workflow(false, true, true, false, false),
+                    PublicCapabilityDeclaration::workflow(
+                        false,
+                        commands_present,
+                        true,
+                        false,
+                        false,
+                    ),
                 ),
                 "document" => (
                     "document",

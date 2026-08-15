@@ -147,6 +147,51 @@ fn malformed_or_semantically_widened_policy_is_rejected() {
 #[test]
 fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
     let policy = policy();
+    let diagnose = json!({"action":"diagnose"});
+    let diagnose_descriptor = policy
+        .classify_public_action("agent_workflow", &diagnose)
+        .expect("minimal diagnose action");
+    assert!(!diagnose_descriptor.transitive.process_exec);
+    assert!(diagnose_descriptor.transitive.git);
+    assert!(
+        policy
+            .decide_public(PermissionMode::Edit, "agent_workflow", &diagnose)
+            .allowed
+    );
+
+    let diagnose_with_command = json!({
+        "action":"diagnose",
+        "commands":[{"command":"Write-Output ok","shell":"windows_powershell"}]
+    });
+    let edit_diagnose_with_command = policy.decide_public(
+        PermissionMode::Edit,
+        "agent_workflow",
+        &diagnose_with_command,
+    );
+    assert!(!edit_diagnose_with_command.allowed);
+    assert_eq!(
+        edit_diagnose_with_command.deny_reason,
+        Some(DenyReason::IndirectProcessExecInEdit)
+    );
+    assert!(
+        policy
+            .decide_public(
+                PermissionMode::Full,
+                "agent_workflow",
+                &diagnose_with_command,
+            )
+            .allowed
+    );
+    assert!(
+        !policy
+            .decide_public(
+                PermissionMode::Edit,
+                "agent_workflow",
+                &json!({"action":"diagnose","commands":"invalid"}),
+            )
+            .allowed
+    );
+
     let directory_only = json!({
         "action":"document",
         "directory_changes":[
