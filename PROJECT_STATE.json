@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,11 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "LB-006: agent_workflow cannot select or discover the explicit nested LocalBridge project when active workspace is D:\\project; git_workflow(path=LocalBridge) reports is_repo=true while agent_workflow reports git_before/git_after is_repo=false and the public agent_workflow schema has no project path selector.",
-    "LB-006: windows_powershell and auto PowerShell execution disable module autoload before user text without preloading a trusted standard management cmdlet surface, so basic cmdlets such as Get-Location and Get-ChildItem fail as CommandNotFound/ProcessFailed.",
-    "LB-006/schema30: active workspace is a reviewed read/write authorization root, but the stable eight-tool facade lacks the required process-free agent_workflow.directory_changes route for create_directory/remove_empty_directory inside that root."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
