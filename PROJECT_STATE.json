@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,9 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "LB-007 A251: PowerShell Alias provider mutation via Set-Item/New-Item can create a dynamic executable alias that bypasses the current static shell review classifier."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -174,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "G2 independent adversarial review generation 12 FAIL. Rework LB-007: Alias-provider mutation and equivalent dynamic command-surface creation must be review-required/fail-closed without breaking ordinary schema28 shell semantics. Then reaccept LB-008 through LB-012, rerun G2 Group-Release, and execute fresh independent adversarial generation 13. LB-013/G3/G4 remain BLOCKED."
+    "next_action": "LB-007 generation12 correction accepted at 0eb2940c0db77b14af3e9d2d06cced3ad6d66e04 after provider-mutation and direct Alias namespace review hardening. Reaccept LB-008 through LB-012 sequentially, rerun G2 Group-Release, then fresh independent generation 13. G3/G4 remain BLOCKED."
   },
   "current_task_ui": {
     "enabled": true,
