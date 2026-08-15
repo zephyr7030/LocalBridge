@@ -1782,6 +1782,7 @@
     "g2_generation_19_consumed": true,
     "next_required_g2_adversarial_generation": 20,
     "g3_unlocked": false,
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "review_decision_commit": "71be8632da0c855bf47a2e44c7e67f972ea726b8"
   }
-}\n
+}
