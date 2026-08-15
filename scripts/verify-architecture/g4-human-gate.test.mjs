@@ -407,6 +407,9 @@ assert.equal(hasExactLb007PolicyAndCmdCodepageAmendment20260815(schema31MissingC
 const schema31MissingPolicyProof = structuredClone(schema31Contracts);
 schema31MissingPolicyProof.prs["LB-007"].required_tests = schema31MissingPolicyProof.prs["LB-007"].required_tests.filter((item) => !item.startsWith("a standalone PowerShell Get-Command or gcm query"));
 assert.equal(hasExactLb007PolicyAndCmdCodepageAmendment20260815(schema31MissingPolicyProof), false);
+const schema31MissingConsoleStdinProof = structuredClone(schema31Contracts);
+schema31MissingConsoleStdinProof.prs["LB-007"].required_tests = schema31MissingConsoleStdinProof.prs["LB-007"].required_tests.filter((item) => !item.startsWith("the narrow trusted PowerShell Console stdin seam"));
+assert.equal(hasExactLb007PolicyAndCmdCodepageAmendment20260815(schema31MissingConsoleStdinProof), false);
 
 const schema28NoFixtureCompression = structuredClone(schema28Contracts);
 schema28NoFixtureCompression.rules.test_heavy_shared_fixture_lifecycle_compression_required = false;
