@@ -1,7 +1,7 @@
 {
   "schema_version": 17,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -172,7 +172,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "LB-007 schema32 ordinary-route system-management privilege rework is accepted. Continue this user-authorized execution round with LB-008 only, then pause. LB-012 still owns reviewed administrator system-management elevated_exec profiles. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
+    "next_action": "LB-008 schema32 Tunnel Runtime reacceptance is accepted with no product patch required. This user-authorized execution round stops at LB-009 READY/current; do not implement LB-009. LB-012 still owns reviewed administrator system-management elevated_exec profiles. G2 generation19 FAIL provenance remains unchanged; generation20 is not consumed."
   },
   "current_task_ui": {
     "enabled": true,
@@ -2012,5 +2012,25 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "next_pr": "LB-008"
+  },
+  "lb008_schema32_tunnel_runtime_reacceptance_2026_08_15": {
+    "status": "PASS",
+    "owner_pr": "LB-008",
+    "reacceptance_baseline_commit": "5189653d75e80afa74561e924382500c0a068ae3",
+    "reason": "LB-007/schema32 changes did not invalidate the existing LB-008 Tunnel Runtime contract; fresh current-source review and runtime verification found no LB-008 product patch required.",
+    "evidence": [
+      "Fresh LB-008 contract test PASS for pinned tunnel-client 0.0.11, exact runtime hashes, child-environment Runtime API Key injection and ordinary Tunnel startup without forced managed Cloudflare flags.",
+      "Fresh ARCH-016 verifier PASS under its required LB-008 architecture environment, proving the Runtime API Key remains absent from process CLI, Tunnel ID is env-only, inherited security overrides are removed, and secret exposure is confined to child environment injection.",
+      "Fresh Tunnel Rust suite PASS 17/17, covering loopback plus control-plane readiness, typed authentication faults, SecretInjectionUnsupported, transient CredentialStore reads, recoverable restart secret refresh, non-recoverable credential/config no-retry behavior, and real Win32_Process command-line secret absence.",
+      "Fresh full serial cargo test --locked -- --test-threads=1 PASS and cargo clippy --locked --all-targets -- -D warnings PASS.",
+      "Fresh npm test PASS 5/5, production build PASS, runtime-manifest PASS, architecture PASS with 15 active rules, UI-language PASS, G4 human-gate regression PASS, and git diff --check PASS.",
+      "The earlier direct ARCH-016 invocation failure was a verifier invocation error caused by omitted LOCALBRIDGE_ARCH_RULE_ID/LOCALBRIDGE_ARCH_ACTIVATE_AT_PR environment variables, not a Tunnel product failure; the contract-correct invocation passes.",
+      "No tracked LB-008 product modification was required for schema32 reacceptance; unrelated untracked artifacts remain untouched."
+    ],
+    "next_required_g2_adversarial_generation": 20,
+    "g2_generation_20_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-009"
   }
 }
