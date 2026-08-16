@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2698,6 +2698,33 @@
     "g2_generation_21_invalidated": false,
     "g3_current_lb015_requires_schema35_typography": true,
     "g4_remains_blocked": true,
-    "next_action": "Implement the three-tier typography contract in current LB-015, carry the same typography into LB-016, and enforce green-storage plus ordinary Medium/no-UAC release behavior in LB-018/LB-019 after the G3 gates."
+    "next_action": "LB-015 schema35 typography/UI rework is accepted; carry the same three-tier typography into LB-016 and enforce green-storage plus ordinary Medium/no-UAC release behavior in LB-018/LB-019 after the G3 gates."
+  },
+  "lb015_schema35_ui_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "contract_schema_version": 35,
+    "contract_amendment_commit": "145ec2eb5341e9bd6a6ef488a933867e301d5010",
+    "product_test_commit": "f377a59971338560eb861cbd2c27b3f12b8c5f17",
+    "product_patch_required": true,
+    "resolved_user_feedback": [
+      "Dashboard card/surface depth is now self-contained and remains visibly rendered when no overlay or upper sheet is present.",
+      "编辑模式/完整模式/管理员模式 are explicitly treated as one symmetric three-way equal-width/equal-height PermissionMode group and are exempt from generic content-derived text-button geometry while remaining no-clipping/no-overflow guarded."
+    ],
+    "evidence": [
+      "ARCH-028 schema35 verifier PASS: exactly title/body/auxiliary font-size tiers; generic text buttons use content-derived geometry; the PermissionMode group uses the explicit equal-three-cell exception with clipping guards.",
+      "Shared administrator-mode safety gate PASS in Settings and onboarding Screen3: exact consequence copy, whole-red confirmation, monotonic full 9000ms disable interval, Escape/backdrop cancellation without PermissionMode/Broker/UAC side effect, and no duplicate UAC when Broker is already Active.",
+      "Elevated plus Active Dashboard projection PASS: current-project scope shows yellow 全目录访问 and project switching is blocked with the exact administrator-token filesystem-scope explanation.",
+      "Real Tauri/WebView dashboard E2E PASS at 150% DPI: logical client 780x620, physical 1170x930, native decorations/resizing/maximize disabled, initial window centered, Settings action alignment delta 0.00px, rounded scrolling retained, and initial dashboard surface sampled with overlay count exactly zero while the card had its own nontransparent background, border and box shadow.",
+      "Real Tauri/WebView onboarding E2E PASS at 150% DPI: fixed 780x620 custom chrome plus rendered Screen3 three-way permission buttons with equal widths, equal heights, symmetric gaps and complete title/description line boxes.",
+      "Fresh formal serial Gate PASS with explicit exit checks: cargo test --locked -- --test-threads=1, cargo clippy --locked --all-targets --all-features -D warnings, npm test, npm build, runtime-manifest, architecture, UI-language, G4 regression and git diff --check."
+    ],
+    "group_transition": "G3_IN_PROGRESS",
+    "historical_g3_review_generation": 6,
+    "historical_generation6_preserved": true,
+    "next_required_g3_adversarial_generation": 7,
+    "g3_generation_7_consumed": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-016"
   }
 }
