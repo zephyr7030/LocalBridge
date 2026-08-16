@@ -239,6 +239,13 @@
       "severity": "error",
       "applies_to": ["src-tauri/src/mcp/**"],
       "verification": { "mode": "deferred", "activate_at_pr": "LB-006", "reason": "The versioned public ToolRegistry and result normalization facade are owned by LB-006", "type": "public_mcp_output_schema" }
+    },
+    {
+      "id": "ARCH-031",
+      "description": "elevated_exec is stably advertised in Edit Full and Elevated independently of Broker state; tool visibility grants no authority, every call is re-authorized against current PermissionMode and Broker/UAC state, and mode/Broker transitions do not require reconnect solely for privileged-tool visibility",
+      "severity": "error",
+      "applies_to": ["src-tauri/src/mcp/**", "runtime-policy.toml"],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-012", "reason": "Stable privileged advertisement and Broker-gated administrator call authorization are completed by LB-012", "type": "stable_privileged_tool_catalog" }
     }
   ]
 }

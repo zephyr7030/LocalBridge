@@ -41,7 +41,7 @@ if (facade.includes("PathAuthority::broker_administrator()")) {
 
 const policy = read("src-tauri/src/mcp/policy.rs");
 for (const required of [
-  "mode == PermissionMode::Elevated",
+  "mode != PermissionMode::Elevated",
   'tool_name == "elevated_exec"',
   "DenyReason::PrivilegedRouteNotAvailable",
   "ordinary_system_management_targets_require_the_privileged_route_in_full_and_elevated",
@@ -51,8 +51,8 @@ for (const required of [
 }
 
 const server = read("src-tauri/src/mcp/server.rs");
-if (!server.includes("gateway.state().accepts_privileged_calls()")) {
-  throw new Error("ARCH-027 elevated_exec visibility is not tied to Active Broker state");
+if (!server.includes("if !matches!(privileged.state(), PrivilegeState::Active { .. })")) {
+  throw new Error("ARCH-027 elevated_exec execution is not tied to Active Broker state");
 }
 if (!server.includes("privileged.filesystem(spec)")) {
   throw new Error("ARCH-027 outside-workspace filesystem route is not Broker-backed");

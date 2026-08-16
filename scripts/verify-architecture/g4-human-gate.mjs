@@ -746,6 +746,42 @@ const PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16 = Object.freeze({
   },
 });
 
+const STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16 = Object.freeze({
+  schemaVersion: 35,
+  baselineSchemaVersion: 35,
+  replacedRules: {
+    dynamic_privileged_tool_catalog_refresh_required: { current: false, baseline: true },
+  },
+  addedRules: {
+    privileged_tool_stable_advertisement_required: true,
+    elevated_exec_advertised_in_all_permission_modes: true,
+    elevated_exec_advertisement_broker_state_independent: true,
+    elevated_exec_call_time_authorization_required: true,
+  },
+  prs: {
+    "LB-007": {
+      artifactReplacements: [[
+        "stable privileged tool advertisement with call-time policy enforcement across permission and Broker transitions",
+        "protocol-correct privileged tool catalog lifecycle across permission and Broker transitions",
+      ]],
+      testReplacements: [[
+        "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteNotAvailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility",
+        "an already-connected MCP session cannot remain permanently unaware of a permission or Broker capability change: entering Elevated plus Active Broker causes a protocol-correct tools/list refresh notification or controlled reconnect, leaving Elevated revokes the privileged catalog capability, and stale calls are still re-authorized fail-closed",
+      ]],
+    },
+    "LB-012": {
+      artifactReplacements: [[
+        "stable privileged tool advertisement with Broker-gated call-time authorization for already-connected MCP sessions",
+        "privileged tool publication and revocation lifecycle for already-connected MCP sessions",
+      ]],
+      testReplacements: [[
+        "an already-connected MCP session sees elevated_exec continuously before and after entering Elevated or Broker activation; Full and Edit calls remain typed denied, Elevated without Active Broker remains awaiting authorization, Active Broker enables only reviewed administrator operations, and ordinary exec_command remains current-user throughout",
+        "an already-connected MCP session that enters Elevated and reaches Broker Active reliably receives or is forced through a protocol-correct tool-capability refresh or reconnect so elevated_exec becomes discoverable and callable; leaving Elevated revokes or denies it, a stale catalog call fails closed, and ordinary exec_command remains current-user throughout",
+      ]],
+    },
+  },
+});
+
 const G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16 = Object.freeze({
   schemaVersion: 35,
   baselineSchemaVersion: 35,
@@ -1674,6 +1710,38 @@ export function normalizePublicMcpOutputSchemaAmendment20260816(contractsDoc) {
   return normalized;
 }
 
+export function hasExactStablePrivilegedToolCatalogAmendment20260816(contractsDoc) {
+  if (contractsDoc?.schema_version !== STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.schemaVersion) return false;
+  for (const [key, replacement] of Object.entries(STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.replacedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(replacement.current)) return false;
+  }
+  for (const [key, expected] of Object.entries(STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const [id, delta] of Object.entries(STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.prs)) {
+    const pr = contractsDoc?.prs?.[id];
+    if (!pr) return false;
+    if (!hasReplacement(pr.required_artifacts, delta.artifactReplacements ?? [])) return false;
+    if (!hasReplacement(pr.required_tests, delta.testReplacements ?? [])) return false;
+  }
+  return true;
+}
+
+export function normalizeStablePrivilegedToolCatalogAmendment20260816(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.baselineSchemaVersion;
+  for (const [key, replacement] of Object.entries(STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.replacedRules)) normalized.rules[key] = replacement.baseline;
+  for (const key of Object.keys(STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.addedRules)) delete normalized.rules[key];
+  for (const [id, delta] of Object.entries(STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.prs)) {
+    const pr = normalized.prs?.[id];
+    if (!pr) continue;
+    pr.required_artifacts = normalizeReplacements(pr.required_artifacts, delta.artifactReplacements ?? []);
+    pr.required_tests = normalizeReplacements(pr.required_tests, delta.testReplacements ?? []);
+  }
+  return normalized;
+}
+
 export function hasExactG3UiTrayRefinementAmendment20260816(contractsDoc) {
   if (contractsDoc?.schema_version !== G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.schemaVersion) return false;
   for (const [key, replacement] of Object.entries(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.replacedRules)) {
@@ -2189,6 +2257,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.schemaVersion) {
+    if (!hasExactStablePrivilegedToolCatalogAmendment20260816(authorizationContracts)) {
+      findings.push(`${expected.id}:stable-privileged-tool-catalog-20260816-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeStablePrivilegedToolCatalogAmendment20260816(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16.schemaVersion) {
     if (!hasExactPublicMcpOutputSchemaAmendment20260816(authorizationContracts)) {
       findings.push(`${expected.id}:public-mcp-output-schema-20260816-contract-amendment-drift`);

@@ -56,7 +56,7 @@ for (const required of [
   '"const": "process"',
   '"const": "shell"',
   '"const": "filesystem"',
-  "gateway.state().accepts_privileged_calls()",
+  "if !matches!(privileged.state(), PrivilegeState::Active { .. })",
   "execution_guard.elevated_decision(mode, &reviewed_arguments)",
   "privileged.start_execute",
   "privileged.poll_execute",

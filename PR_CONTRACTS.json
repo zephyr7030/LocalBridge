@@ -658,7 +658,11 @@
     "permission_mode_elevated_administrator_route": "elevated_exec_broker_uac",
     "policy_denial_typed_error_projection_required": true,
     "full_workspace_script_extension_alone_not_denied": true,
-    "dynamic_privileged_tool_catalog_refresh_required": true,
+    "dynamic_privileged_tool_catalog_refresh_required": false,
+    "privileged_tool_stable_advertisement_required": true,
+    "elevated_exec_advertised_in_all_permission_modes": true,
+    "elevated_exec_advertisement_broker_state_independent": true,
+    "elevated_exec_call_time_authorization_required": true,
     "privileged_tool_stale_catalog_call_fail_closed": true,
     "elevated_administrator_token_scope_required": true,
     "elevated_full_filesystem_access_within_administrator_token": true,
@@ -1065,7 +1069,7 @@
         "transitive capability declarations for high-level LocalBridge workflows",
         "structured agent_workflow directory_changes mutations classified as workspace write without granting control-plane authority",
         "stable public typed policy-denial error projection",
-        "protocol-correct privileged tool catalog lifecycle across permission and Broker transitions"
+        "stable privileged tool advertisement with call-time policy enforcement across permission and Broker transitions"
       ],
       "required_tests": [
         "tools/call bypass",
@@ -1089,7 +1093,7 @@
         "Edit and Full cannot obtain administrator-token filesystem process command or system-maintenance capability through workflow indirection; Full ordinary process descendants retain only the current Windows ordinary-user token, Elevated may declare privileged capabilities only for the Broker-backed administrator route, and LocalBridge control-plane remains deny-always",
         "public MCP policy denial preserves stable typed LocalBridge reason categories so capability or policy denial workspace denial and privileged-route or elevation requirements do not collapse into one generic JSON-RPC denial",
         "Full ordinary invocation of a validated active-workspace .ps1 .cmd or .bat script is not denied solely because of its file extension; dynamic script resolution unsafe indirection provider mutation and other independently review-required behavior remain fail-closed",
-        "an already-connected MCP session cannot remain permanently unaware of a permission or Broker capability change: entering Elevated plus Active Broker causes a protocol-correct tools/list refresh notification or controlled reconnect, leaving Elevated revokes the privileged catalog capability, and stale calls are still re-authorized fail-closed"
+        "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteNotAvailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility"
       ],
       "non_goals": [
         "Tunnel",
@@ -1755,7 +1759,7 @@
         "generic elevated_exec capability",
         "general Broker-backed administrator execution and privileged filesystem route for Elevated mode",
         "Broker-backed privileged filesystem operations that are not constrained to the active workspace once Elevated is Active",
-        "privileged tool publication and revocation lifecycle for already-connected MCP sessions"
+        "stable privileged tool advertisement with Broker-gated call-time authorization for already-connected MCP sessions"
       ],
       "required_tests": [
         "no TTL/expires_at behavior",
@@ -1783,7 +1787,7 @@
         "Elevated plus Active Broker can read create modify rename and delete administrator-token-accessible filesystem objects outside the active workspace through a privileged filesystem route; Edit structured operations and Full LocalBridge structured filesystem/path tools remain active-workspace-bound, while Full ordinary child-process filesystem access is governed by the current Windows ordinary-user token and is outside LocalBridge's OS-level workspace-sandbox guarantee",
         "Elevated plus Active Broker can execute a general administrator direct process and a trusted PowerShell or cmd logical selector outside the active workspace, with timeout cancellation output bounds and redaction preserved",
         "whole-app elevation remains forbidden: LocalBridge MCP Tunnel and ordinary exec stay under the normal user token and only Broker-dispatched administrator operations receive the administrator token",
-        "an already-connected MCP session that enters Elevated and reaches Broker Active reliably receives or is forced through a protocol-correct tool-capability refresh or reconnect so elevated_exec becomes discoverable and callable; leaving Elevated revokes or denies it, a stale catalog call fails closed, and ordinary exec_command remains current-user throughout"
+        "an already-connected MCP session sees elevated_exec continuously before and after entering Elevated or Broker activation; Full and Edit calls remain typed denied, Elevated without Active Broker remains awaiting authorization, Active Broker enables only reviewed administrator operations, and ordinary exec_command remains current-user throughout"
       ],
       "non_goals": [
         "UI",
