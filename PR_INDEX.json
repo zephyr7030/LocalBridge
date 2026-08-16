@@ -366,7 +366,7 @@
       "review_provenance": {
         "generation": 10,
         "kind": "independent_adversarial",
-        "commit": null,
+        "commit": "344bd8ac670f51f863bc68741298642ae2a97537",
         "invalidated_generations": [
           {
             "generation": 6,
