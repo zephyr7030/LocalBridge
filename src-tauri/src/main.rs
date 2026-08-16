@@ -129,6 +129,10 @@ struct FixedWindowE2eMetrics {
     content: Option<FixedWindowE2eRect>,
     onboarding: Option<FixedWindowE2eRect>,
     dashboard: Option<FixedWindowE2eRect>,
+    dashboard_overlay_count_before_settings: usize,
+    dashboard_card_background_before_settings: Option<String>,
+    dashboard_card_border_width_before_settings: Option<String>,
+    dashboard_card_box_shadow_before_settings: Option<String>,
     settings_replace_lefts: Vec<f64>,
     settings_sheet_overflowing: bool,
     settings_sheet_border_radius: Option<String>,
@@ -160,6 +164,22 @@ const FIXED_WINDOW_E2E_METRICS_SCRIPT: &str = r#"
   const chromes = document.querySelectorAll('.window-chrome');
   const dashboard = document.querySelector('.shell');
   const onboarding = document.querySelector('.onboarding-shell');
+  const dashboardCard = dashboard ? document.querySelector('.card') : null;
+  const dashboardCardStyle = dashboardCard ? getComputedStyle(dashboardCard) : null;
+  if (dashboard && window.__LOCALBRIDGE_E2E_INITIAL_DASHBOARD_SURFACE__ === undefined) {
+    window.__LOCALBRIDGE_E2E_INITIAL_DASHBOARD_SURFACE__ = {
+      overlayCount: document.querySelectorAll('.sheet-backdrop,.dialog-backdrop').length,
+      background: dashboardCardStyle?.backgroundColor || null,
+      borderWidth: dashboardCardStyle?.borderTopWidth || null,
+      boxShadow: dashboardCardStyle?.boxShadow || null,
+    };
+  }
+  const initialDashboardSurface = window.__LOCALBRIDGE_E2E_INITIAL_DASHBOARD_SURFACE__ || {
+    overlayCount: 0,
+    background: null,
+    borderWidth: null,
+    boxShadow: null,
+  };
   if (dashboard && !document.querySelector('.sheet')) {
     const settings = Array.from(document.querySelectorAll('.top-actions button'))
       .find((element) => (element.textContent || '').trim() === '设置');
@@ -186,6 +206,10 @@ const FIXED_WINDOW_E2E_METRICS_SCRIPT: &str = r#"
     content: rect(document.querySelector('.window-content')),
     onboarding: rect(onboarding),
     dashboard: rect(dashboard),
+    dashboardOverlayCountBeforeSettings: initialDashboardSurface.overlayCount,
+    dashboardCardBackgroundBeforeSettings: initialDashboardSurface.background,
+    dashboardCardBorderWidthBeforeSettings: initialDashboardSurface.borderWidth,
+    dashboardCardBoxShadowBeforeSettings: initialDashboardSurface.boxShadow,
     settingsReplaceLefts,
     settingsSheetOverflowing: !!sheet && sheet.scrollHeight > sheet.clientHeight,
     settingsSheetBorderRadius: sheetStyle?.borderRadius || null,
@@ -309,6 +333,30 @@ fn execute_fixed_window_e2e(
         .map_err(|error| format!("is_decorated: {error}"))?
     {
         return Err("native window decorations are still enabled".into());
+    }
+
+    let outer_position = window
+        .outer_position()
+        .map_err(|error| format!("outer_position: {error}"))?;
+    let outer_size = window
+        .outer_size()
+        .map_err(|error| format!("outer_size: {error}"))?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| format!("current_monitor: {error}"))?
+        .ok_or("current monitor unavailable")?;
+    let work_area = monitor.work_area();
+    let expected_x = work_area.position.x
+        + (i32::try_from(work_area.size.width).map_err(|_| "work area width overflow")?
+            - i32::try_from(outer_size.width).map_err(|_| "outer width overflow")?) / 2;
+    let expected_y = work_area.position.y
+        + (i32::try_from(work_area.size.height).map_err(|_| "work area height overflow")?
+            - i32::try_from(outer_size.height).map_err(|_| "outer height overflow")?) / 2;
+    if (outer_position.x - expected_x).abs() > 3 || (outer_position.y - expected_y).abs() > 3 {
+        return Err(format!(
+            "first-created main window is not centered in monitor work area: actual=({}, {}) expected=({}, {})",
+            outer_position.x, outer_position.y, expected_x, expected_y
+        ));
     }
 
     let metrics = collect_fixed_window_e2e_metrics(window, view, metrics_rx)?;
@@ -450,6 +498,33 @@ fn assert_fixed_window_e2e_metrics(
                 .ok_or("dashboard shell missing")?;
             if child.width > content.width + 1.0 || child.height < 1.0 {
                 return Err("dashboard does not fit fixed chrome content area".into());
+            }
+            if metrics.dashboard_overlay_count_before_settings != 0 {
+                return Err(format!(
+                    "dashboard surface metrics were captured with an overlay present: {}",
+                    metrics.dashboard_overlay_count_before_settings
+                ));
+            }
+            let card_background = metrics
+                .dashboard_card_background_before_settings
+                .as_deref()
+                .ok_or("dashboard card computed background missing")?;
+            if card_background == "rgba(0, 0, 0, 0)" || card_background == "transparent" {
+                return Err(format!("dashboard card has no independent background: {card_background}"));
+            }
+            let card_border = metrics
+                .dashboard_card_border_width_before_settings
+                .as_deref()
+                .ok_or("dashboard card computed border missing")?;
+            if card_border == "0px" {
+                return Err("dashboard card has no independent border without overlay".into());
+            }
+            let card_shadow = metrics
+                .dashboard_card_box_shadow_before_settings
+                .as_deref()
+                .ok_or("dashboard card computed shadow missing")?;
+            if card_shadow == "none" || card_shadow.is_empty() {
+                return Err("dashboard card has no independent shadow without overlay".into());
             }
             let replace_delta =
                 (metrics.settings_replace_lefts[0] - metrics.settings_replace_lefts[1]).abs();

@@ -7,6 +7,7 @@ import { onboardingApi, type OnboardingState } from "./features/onboarding/api";
 import { Diagnostics } from "./features/diagnostics/Diagnostics";
 import { WindowChrome } from "./components/WindowChrome";
 import { ServiceStatusDot } from "./components/ServiceStatusDot";
+import { AdminModeWarning } from "./components/AdminModeWarning";
 import "./styles.css";
 
 type View = "main" | "settings" | "diagnostics";
@@ -52,6 +53,8 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const [confirmingKeyDelete, setConfirmingKeyDelete] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<ProjectProjection | null>(null);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [adminWarningOpen, setAdminWarningOpen] = useState(false);
+  const [fullAccessInfoOpen, setFullAccessInfoOpen] = useState(false);
   const [handledGeneration, setHandledGeneration] = useState<number | null>(null);
   const clearTransientError = useCallback(() => {
     if (errorTimer.current !== null) {
@@ -102,13 +105,27 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const reconnectVisible = Boolean(projection?.reconnect && projection.reconnect.generation !== handledGeneration);
   const privilegeLabel = projection ? privilegeText[projection.privilege] : "未启用";
   const privilegeService: ServiceCode = projection?.privilege === "active" ? "online" : projection?.privilege === "fault" ? "fault" : projection?.privilege === "requested" || projection?.privilege === "awaiting" ? "starting" : "off";
-  const chooseAccess = (mode: AccessCode) => void run(() => bridge.setAccess(mode));
+  const elevatedFullAccess = projection?.permission === "admin" && projection?.privilege === "active";
+  const chooseAccess = (mode: AccessCode) => {
+    if (mode === "admin" && projection?.privilege !== "active") {
+      setAdminWarningOpen(true);
+      return;
+    }
+    void run(() => bridge.setAccess(mode));
+  };
+  const openProjectPicker = () => {
+    if (elevatedFullAccess) {
+      setFullAccessInfoOpen(true);
+      return;
+    }
+    setProjectPickerOpen(true);
+  };
   const chooseOtherFolder = () => void run(async () => { const path = await bridge.chooseProjectFolder(); if (path) { await bridge.addProject(path); setProjectPickerOpen(false); } });
 
   return <main className="shell">
     <header className="topbar"><div className="brand">{APP_NAME}</div><div className="top-actions"><button className="ghost" onClick={() => setView("settings")}>{uiText.settings}</button><button className="ghost" onClick={() => setView("diagnostics")}>{uiText.diagnostics}</button></div></header>
     <section className="card">
-      <div className="row"><span className="label">当前项目</span><div className="project-actions"><span className="value">{activeProject?.path ?? "未选择项目"}</span><button className="secondary" onClick={() => setProjectPickerOpen(true)}>{activeProject ? "切换" : "选择项目"}</button></div></div>
+      <div className="row"><span className="label">当前项目</span><div className="project-actions"><span className={`value ${elevatedFullAccess ? "full-access" : ""}`}>{elevatedFullAccess ? "全目录访问" : activeProject?.path ?? "未选择项目"}</span><button className="secondary" onClick={openProjectPicker}>{activeProject ? "切换" : "选择项目"}</button></div></div>
       <div className="row"><span className="label">本地运行环境</span><span className="value service-value"><ServiceStatusDot service={projection?.localEnvironmentService ?? null}/><span>{projection ? serviceText[projection.localEnvironmentService] : "正在读取"}</span></span></div>
       <div className="row"><span className="label">OpenAI 安全隧道</span><span className="value service-value"><ServiceStatusDot service={projection?.tunnelService ?? null}/><span>{projection ? serviceText[projection.tunnelService] : "正在读取"}</span></span></div>
       <div className="row"><span className="label">编码服务</span><span className="value service-value"><ServiceStatusDot service={projection?.codingService ?? null}/><span>{projection ? serviceText[projection.codingService] : "正在读取"}</span></span></div>
@@ -128,6 +145,8 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       <div className="dialog-actions"><button className="secondary" onClick={onOpenWelcome}>打开欢迎页</button><button className="primary" onClick={() => setView("main")}>完成</button></div>
     </section></div>}
     {view === "diagnostics" && <Diagnostics onClose={() => setView("main")} />}
+    {adminWarningOpen && <AdminModeWarning onCancel={() => setAdminWarningOpen(false)} onConfirm={() => { setAdminWarningOpen(false); void run(() => bridge.setAccess("admin")); }} />}
+    {fullAccessInfoOpen && <div className="dialog-backdrop" onMouseDown={() => setFullAccessInfoOpen(false)}><section className="dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><h2>全目录访问</h2><p>管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式</p><div className="dialog-actions"><button className="primary" onClick={() => setFullAccessInfoOpen(false)}>完成</button></div></section></div>}
     {projectPickerOpen && <div className="sheet-backdrop" onMouseDown={() => setProjectPickerOpen(false)}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>切换项目</h2><div className="project-list">{projection?.projects.map((item) => <div className="project-item" key={item.id}><button className="ghost project-select" disabled={item.active} onClick={() => void run(async () => { await bridge.selectProject(item.id); setProjectPickerOpen(false); })}><span className="project-path">{item.path}</span>{item.active ? <span className="project-current">当前</span> : null}</button><button className="secondary" onClick={() => { if (item.active) { setProjectPickerOpen(false); setRemoveTarget(item); } else { void run(() => bridge.removeProject(item.id)); } }}>移除</button></div>)}</div><div className="dialog-actions"><button className="secondary" onClick={chooseOtherFolder}>选择其他文件夹</button><button className="primary" onClick={() => setProjectPickerOpen(false)}>完成</button></div></section></div>}
     {removeTarget && <div className="dialog-backdrop"><section className="dialog"><h2>移除当前项目</h2><p>从 LocalBridge 移除此项目？<br/>不会删除项目文件。</p><div className="dialog-actions"><button className="secondary" onClick={() => setRemoveTarget(null)}>取消</button><button className="primary" onClick={() => void run(async () => { await bridge.removeProject(removeTarget.id); setRemoveTarget(null); })}>移除</button></div></section></div>}
     {reconnectVisible && projection?.reconnect && <div className="dialog-backdrop"><section className="dialog" role="dialog" aria-modal="true"><h2>连接失败</h2><p>已自动重试 5 次。</p><div className="dialog-actions"><button className="secondary" onClick={() => void run(async () => { await bridge.retry(); setHandledGeneration(projection.reconnect?.generation ?? null); })}>重试</button><button className="primary" onClick={() => { setHandledGeneration(projection.reconnect?.generation ?? null); setView("diagnostics"); }}>查看诊断</button></div></section></div>}

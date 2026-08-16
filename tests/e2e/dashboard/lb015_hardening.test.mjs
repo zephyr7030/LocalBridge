@@ -8,6 +8,6 @@ if (app.includes('<section className="card"><div className="task-row"')) throw n
 if (app.includes('disabled>等待系统授权</button>')) throw new Error("LB-015 AwaitingUac exposes a redundant action button");
 if (!app.includes("安全隧道")) throw new Error("LB-015 frozen safe-tunnel label is missing");
 if (!backend.includes("localbridge-privileged-broker.exe")) throw new Error("LB-015 explicit admin action targets the wrong broker binary");
-const disableBody = backend.slice(backend.indexOf("pub fn disable_admin"), backend.indexOf("pub fn retry_connection"));
-if (!disableBody.includes("request_without_uac")) throw new Error("LB-015 admin disable does not return to Requested safely");
-console.log("LB015_HARDENING=PASS task_inline=true terminology_map=true awaiting_no_button=true broker_name=true disable_requested=true");
+const permissionBody = backend.slice(backend.indexOf("pub async fn set_permission_mode"), backend.indexOf("fn request_explicit_admin"));
+if (!permissionBody.includes("previous == PermissionMode::Elevated") || !permissionBody.includes("requested != PermissionMode::Elevated") || !permissionBody.includes(".privilege()") || !permissionBody.includes(".disable()")) throw new Error("LB-015 leaving administrator mode does not close the privileged gate/Broker");
+console.log("LB015_HARDENING=PASS task_inline=true terminology_map=true awaiting_no_button=true broker_name=true leaving_admin_disables_broker=true");

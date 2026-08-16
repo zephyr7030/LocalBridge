@@ -42,7 +42,7 @@ if (!app.includes("不会删除项目文件。")) {
 
 const compactCss = css.replace(/\s+/g, "");
 if (!compactCss.includes("html,body,#root{width:100%;min-width:0;height:100%;min-height:0}")) throw new Error("LB-015 document/root does not exactly fill the fixed client area");
-if (!compactCss.includes("body{margin:0;min-width:320px;height:100%;overflow:hidden}") || !compactCss.includes("#root{height:100%;min-height:0;background:#f5f5f7}")) throw new Error("LB-015 body/root is not bound to the single custom chrome");
+if (!compactCss.includes("body{margin:0;min-width:320px;height:100%;overflow:hidden;font-size:var(--font-body)}") || !compactCss.includes("#root{height:100%;min-height:0;background:#f5f5f7}")) throw new Error("LB-015 body/root is not bound to the single custom chrome or schema35 body typography");
 const shellRule = compactCss.match(/\.shell\{([^}]*)\}/)?.[1] ?? "";
 if (!shellRule.includes("width:calc(100%-clamp(32px,6vw,72px))") || !shellRule.includes("max-width:1180px") || !shellRule.includes("min-height:100%")) throw new Error("LB-015 Dashboard shell does not fit the fixed chrome content area");
 if (/\.shell\{[^}]*760px/.test(compactCss) || /100dvh|100vh/.test(shellRule)) throw new Error("LB-015 Dashboard escaped the fixed chrome content area");

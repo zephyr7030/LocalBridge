@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
 import { WizardFrame } from "../../components/WizardFrame";
 import { ReadinessCheck } from "../../components/ReadinessCheck";
+import { AdminModeWarning } from "../../components/AdminModeWarning";
 import { bridge, type AccessCode, type MainProjection } from "../../bridge";
 import { accessText } from "../../presentation";
 import { onboardingApi, type OnboardingState } from "./api";
@@ -32,6 +33,7 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
   const [copiedRows, setCopiedRows] = useState<Record<Screen4CopyKey, boolean>>({ name: false, tunnel: false });
   const copyTimers = useRef<Record<Screen4CopyKey, number | null>>({ name: null, tunnel: null });
   const [preparingProject, setPreparingProject] = useState(false);
+  const [adminWarningOpen, setAdminWarningOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const savedRuntimeKeyMask = state.runtimeKeySaved && state.runtimeKeyLength
     ? "*".repeat(state.runtimeKeyLength)
@@ -60,7 +62,6 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
 
   useLayoutEffect(() => {
     if (!permissionGeometryE2e || step !== 3) return;
-    const ordinary = document.querySelector<HTMLButtonElement>(".onboarding-folder-row button");
     const permissionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".onboarding-permission"));
     const lineBoxesInside = (button: HTMLButtonElement, element: Element | null) => {
       if (!element) return false;
@@ -72,11 +73,18 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
         && box.top >= buttonRect.top - 0.5 && box.bottom <= buttonRect.bottom + 0.5
         && box.left >= buttonRect.left - 0.5 && box.right <= buttonRect.right + 0.5);
     };
-    const ordinaryHeight = ordinary?.getBoundingClientRect().height ?? 0;
+    const rectangles = permissionButtons.map((button) => button.getBoundingClientRect());
+    const widths = rectangles.map((rect) => rect.width);
+    const heights = rectangles.map((rect) => rect.height);
+    const gaps = rectangles.slice(1).map((rect, index) => rect.left - rectangles[index].right);
     const geometryPass = window.innerWidth === 780
-      && ordinaryHeight > 0
       && permissionButtons.length === 3
-      && permissionButtons.every((button) => button.getBoundingClientRect().height + 0.5 >= ordinaryHeight * 2
+      && Math.max(...widths) - Math.min(...widths) <= 0.5
+      && Math.max(...heights) - Math.min(...heights) <= 0.5
+      && gaps.length === 2
+      && Math.abs(gaps[0] - gaps[1]) <= 0.5
+      && permissionButtons.every((button) => button.getBoundingClientRect().width > 0
+        && button.getBoundingClientRect().height > 0
         && lineBoxesInside(button, button.querySelector("strong"))
         && lineBoxesInside(button, button.querySelector("small")));
     if (!geometryPass) setPermissionGeometryFailed(true);
@@ -187,7 +195,7 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     }
   };
 
-  const choosePermission = async (mode: AccessCode) => {
+  const applyPermission = async (mode: AccessCode) => {
     setError(null);
     try {
       await bridge.setAccess(mode);
@@ -196,6 +204,14 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     } catch (value) {
       setError(messageFrom(value, "权限模式未更新"));
     }
+  };
+
+  const choosePermission = async (mode: AccessCode) => {
+    if (mode === "admin" && main?.privilege !== "active") {
+      setAdminWarningOpen(true);
+      return;
+    }
+    await applyPermission(mode);
   };
 
   const copyScreen4Value = async (key: Screen4CopyKey, value: string) => {
@@ -243,7 +259,7 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     </WizardFrame>
   );
 
-  if (step === 3) return (
+  if (step === 3) return (<>
     <WizardFrame step={3} title="项目与权限" footer={<><button className="secondary" disabled={preparingProject} onClick={() => setStep(2)}>返回</button><button className="primary" disabled={preparingProject || (!selectedFolder && !rememberedProject)} onClick={() => void saveProjectAndPermission()}>{preparingProject ? "正在启动…" : "继续"}</button></>}>
       {main?.projects.length ? <div className="onboarding-field"><label htmlFor="remembered-project">已保存项目</label><select id="remembered-project" value={rememberedProject} onChange={(event) => { setRememberedProject(event.target.value); setSelectedFolder(""); }}><option value="">选择项目</option>{main.projects.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select></div> : null}
       <div className="onboarding-folder-row"><button className="secondary" onClick={() => void chooseFolder()}>选择项目文件夹</button><span className="onboarding-selected-folder">{selectedFolder || chosenProject?.path || "尚未选择"}</span></div>
@@ -251,7 +267,8 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
       {permission === "admin" ? <p className="onboarding-hint">管理员模式会请求 Windows 管理员授权。</p> : null}
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
-  );
+    {adminWarningOpen && <AdminModeWarning onCancel={() => setAdminWarningOpen(false)} onConfirm={() => { setAdminWarningOpen(false); void applyPermission("admin"); }} />}
+  </>);
 
   if (step === 4) return (
     <WizardFrame step={4} title="创建自定义插件" footer={<><button className="secondary" onClick={() => setStep(3)}>返回</button><button className="primary" disabled={!allGreen} onClick={() => { setError(null); setStep(5); }}>继续</button></>}>

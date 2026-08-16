@@ -10,6 +10,7 @@ const compactCss = css.replace(/\s+/g, "");
 
 for (const marker of [
   "--accent:#0071e3",
+  "--admin-accent:#ff9500",
   ".primary{background:var(--accent);border-color:var(--accent);color:#fff}",
   ".choice.selected{background:var(--accent);border-color:var(--accent);color:#fff}",
   ".choice.admin-choice.selected{background:var(--admin-accent);border-color:var(--admin-accent);color:#fff}",

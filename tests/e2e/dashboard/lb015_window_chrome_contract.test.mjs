@@ -17,6 +17,11 @@ for (const marker of [
   ".maximizable(false)",
   ".decorations(false)",
 ]) if (!tray.includes(marker)) throw new Error(`LB-015 native fixed-window baseline missing: ${marker}`);
+const existingWindowBranch = tray.slice(tray.indexOf("if let Some(window)"), tray.indexOf("let window ="));
+if (existingWindowBranch.includes(".center()") || existingWindowBranch.includes("window.center()")) throw new Error("LB-015 reopening an existing hidden window forcibly recenters it");
+const newWindowStart = tray.indexOf("let window =");
+const newWindowBranch = tray.slice(newWindowStart, tray.indexOf("Ok(window)", newWindowStart));
+if (!newWindowBranch.includes("window.center()?;")) throw new Error("LB-015 first-created native window is not explicitly centered");
 for (const marker of [
   "MAIN_WINDOW_PHYSICAL_WIDTH",
   "MAIN_WINDOW_PHYSICAL_HEIGHT",

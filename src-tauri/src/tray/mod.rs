@@ -65,6 +65,7 @@ pub fn ensure_main_window<R: Runtime>(
             .decorations(false)
             .build()?;
     sync_main_webview_to_client(app, window.inner_size()?)?;
+    window.center()?;
     window.show()?;
     window.set_focus()?;
     Ok(window)

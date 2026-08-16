@@ -29,7 +29,7 @@ if (!dashboardBeforeSettings.includes("ServiceStatusDot") || !dashboardBeforeSet
 for (const required of [">常规<",">连接<",">权限<","开机启动","关闭窗口后继续运行","Tunnel ID","Runtime API Key","打开欢迎页",">完成<",">更换<"]) if (!app.includes(required)) throw new Error(`LB-015 Settings contract missing: ${required}`);
 if (app.includes("测试连接") || app.includes("运行密钥")) throw new Error("LB-015 Settings exposes forbidden connection wording/action");
 if (!app.includes('type="password"') || !app.includes('projection?.runtimeKeySaved ? "已保存" : "未保存"')) throw new Error("LB-015 Runtime API Key summary/edit security contract missing");
-if (!css.includes("#0071e3") || !css.includes("admin-choice")) throw new Error("LB-015 blue/amber selection styling missing");
+if (!css.includes("#0071e3") || !css.includes("--admin-accent:#ff9500") || !css.includes("admin-choice")) throw new Error("LB-015 blue/orange selection styling missing");
 if (!presentation.includes('"等待命令"') || presentation.includes('"空闲"')) throw new Error("LB-015 no-task wording drifted");
 if (!backend.includes("current_task: task_projection(&snapshot.current_task, snapshot.current_task_elapsed_ms)")) throw new Error("LB-015 Dashboard task does not originate in backend typed projection with backend elapsed timing");
 for (const required of ["CurrentTaskStatus::Active", "CurrentTaskStatus::Idle", "current_task.project(status)"]) if (!mcp.includes(required)) throw new Error(`LB-015 production MCP CurrentTask plumbing missing: ${required}`);
@@ -72,19 +72,20 @@ for (const command of ["restart_services", "stop_services"]) {
   const body = backend.slice(start, next < 0 ? backend.length : next);
   if (!body.includes('spawn_blocking')) throw new Error(`LB-015 service command lacks backend worker boundary: ${command}`);
 }
-if (!css.includes(".settings-summary{display:grid;grid-template-columns:minmax(0,1fr) 64px 76px") || !css.includes(".settings-summary>.settings-clear{grid-column:2;width:64px") || !css.includes(".settings-summary>.settings-replace{grid-column:3;width:76px")) throw new Error("LB-015 Settings clear/replace action columns drifted");
+if (!css.includes(".settings-summary{display:grid;grid-template-columns:minmax(0,1fr) max-content max-content") || !css.includes(".settings-summary>.settings-clear{grid-column:2;justify-self:start") || !css.includes(".settings-summary>.settings-replace{grid-column:3;justify-self:start")) throw new Error("LB-015 Settings clear/replace content-derived action columns drifted");
 if ((app.match(/className="settings-summary"/g) ?? []).length !== 2) throw new Error("LB-015 Settings must use the same action-column layout for both connection summaries");
 if (!app.includes('className="secondary settings-clear" onClick={() => setConfirmingKeyDelete(true)}>清除</button>') || !bridge.includes('clearKey: () => invoke<void>("delete_runtime_key")')) throw new Error("LB-015 Runtime API Key clear confirmation entry or typed intent missing");
 for (const required of ["请确认从windows安全凭据中删除？", 'className="secondary settings-delete-cancel"', '>取消</button>', 'className="secondary settings-confirm-delete"', "await bridge.clearKey(); setConfirmingKeyDelete(false);", '>确认</button>']) if (!app.includes(required)) throw new Error(`LB-015 Runtime API Key inline delete confirmation missing: ${required}`);
 const clearButton = app.indexOf('className="secondary settings-clear"');
 const confirmButton = app.indexOf('className="secondary settings-confirm-delete"');
 if (clearButton < 0 || confirmButton < 0 || app.slice(clearButton, app.indexOf(">清除</button>", clearButton)).includes("bridge.clearKey")) throw new Error("LB-015 first Runtime API Key clear click still deletes before confirmation");
-if (!css.includes(".settings-summary>.settings-delete-cancel{grid-column:2;width:64px") || !css.includes(".settings-summary>.settings-confirm-delete{grid-column:3;width:76px") || !css.includes("color:var(--status-fault)")) throw new Error("LB-015 Runtime API Key confirmation actions lost rightmost alignment or red danger semantics");
+if (!css.includes(".settings-summary>.settings-delete-cancel{grid-column:2;justify-self:start") || !css.includes(".settings-summary>.settings-confirm-delete{grid-column:3;justify-self:start") || !css.includes("color:var(--status-fault)")) throw new Error("LB-015 Runtime API Key confirmation actions lost content-derived alignment or red danger semantics");
 const deleteStart = backend.indexOf("pub async fn delete_runtime_key");
 const deleteEnd = backend.indexOf("pub async fn choose_project_folder", deleteStart);
 const deleteBody = backend.slice(deleteStart, deleteEnd < 0 ? backend.length : deleteEnd);
 if (deleteStart < 0 || !deleteBody.includes(".delete_runtime_api_key()") || deleteBody.includes("read_runtime_api_key") || !deleteBody.includes("if deleted") || !deleteBody.includes("reconnect_after_connection_change")) throw new Error("LB-015 Runtime API Key clear does not securely delete then reuse controlled reconnect");
 for (const marker of [".inner_size(780.0, 620.0)", ".min_inner_size(780.0, 620.0)", ".max_inner_size(780.0, 620.0)"]) if (!tray.includes(marker)) throw new Error(`LB-015 780x620 native window marker missing: ${marker}`);
+if (!tray.includes("window.center()?;")) throw new Error("LB-015 first-created main window does not center before show");
 if (!main.includes("expected 780x620 logical")) throw new Error("LB-015 live native window checker did not freeze 780x620");
 if (!css.includes(".sheet,.dialog{width:min(560px,100%);max-height:84vh;overflow:auto;border-radius:20px;clip-path:inset(0 round 20px);scrollbar-gutter:stable")) throw new Error("LB-015 rounded scroll shell does not clip scrollbar inside all four corners");
 for (const required of [
