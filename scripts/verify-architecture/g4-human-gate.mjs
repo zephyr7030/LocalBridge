@@ -702,6 +702,37 @@ const PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16 = Object.freeze({
   },
 });
 
+const PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16 = Object.freeze({
+  schemaVersion: 35,
+  baselineSchemaVersion: 35,
+  addedRules: {
+    ui_permission_mode_three_way_group_content_size_exempt: true,
+    ui_permission_mode_three_way_group_labels: ["编辑模式", "完整模式", "管理员模式"],
+    ui_permission_mode_three_way_group_layout: "symmetric_equal_three_columns",
+    ui_permission_mode_three_way_group_equal_width_required: true,
+    ui_permission_mode_three_way_group_equal_height_required: true,
+    ui_permission_mode_three_way_group_text_clipping_forbidden: true,
+  },
+  lb015: {
+    testReplacements: [[
+      "every text-bearing button except the symmetric 编辑模式/完整模式/管理员模式 three-way PermissionMode selection group sizes from its own content metrics: width corresponds to the maximum visible character count on any single line and height corresponds to the actual rendered line count; arbitrary fixed button geometry that ignores text content is forbidden; the three-way PermissionMode group is explicitly exempt from content-derived width/height sizing and instead must render as exactly three symmetric equal-width equal-height cells with no clipped or overflowing text",
+      "every text-bearing button sizes from its own content metrics: width corresponds to the maximum visible character count on any single line and height corresponds to the actual rendered line count; arbitrary fixed button geometry that ignores text content is forbidden",
+    ]],
+  },
+  lb016: {
+    testReplacements: [
+      [
+        "screen 3 编辑模式 完整模式 管理员模式 permission buttons are an explicit symmetric three-way-group exception to generic content-derived button sizing: they render as exactly three equal-width equal-height cells in a symmetric layout; title and description content must remain fully visible without clipping or overflow and final visual PASS requires human inspection rather than CSS marker presence",
+        "screen 3 text-bearing permission buttons derive width from the maximum visible character count on any single line and height from the actual title plus description rendered line count; content must not be clipped and final visual PASS requires human inspection rather than CSS marker presence",
+      ],
+      [
+        "screen 3 permission buttons pass a computed/rendered geometry Gate proving exactly three symmetric equal-width equal-height cells with complete title and description line boxes and no clipping or overflow; this PermissionMode group is exempt from generic content-derived width/height sizing and human 780x620 visual Gate remains required",
+        "screen 3 permission buttons pass a computed/rendered geometry Gate proving geometry follows content metrics rather than a fixed min-height or multiplier; title and description line boxes are complete and human 780x620 visual Gate remains required",
+      ],
+    ],
+  },
+});
+
 const UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16 = Object.freeze({
   schemaVersion: 35,
   baselineSchemaVersion: 34,
@@ -1520,6 +1551,30 @@ function normalizeReplacements(array, replacements) {
   });
 }
 
+export function hasExactPermissionModeEqualThirdsGeometryAmendment20260816(contractsDoc) {
+  if (contractsDoc?.schema_version !== PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  const lb016 = contractsDoc?.prs?.["LB-016"];
+  if (!lb015 || !lb016) return false;
+  return hasReplacement(lb015.required_tests, PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.lb015.testReplacements)
+    && hasReplacement(lb016.required_tests, PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.lb016.testReplacements);
+}
+
+export function normalizePermissionModeEqualThirdsGeometryAmendment20260816(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.baselineSchemaVersion;
+  for (const key of Object.keys(PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.addedRules)) delete normalized.rules[key];
+  const lb015 = normalized.prs?.["LB-015"];
+  const lb016 = normalized.prs?.["LB-016"];
+  if (lb015) lb015.required_tests = normalizeReplacements(lb015.required_tests, PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.lb015.testReplacements);
+  if (lb016) lb016.required_tests = normalizeReplacements(lb016.required_tests, PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.lb016.testReplacements);
+  return normalized;
+}
+
 export function hasExactUiGreenStorageDefaultNonAdminAmendment20260816(contractsDoc) {
   if (contractsDoc?.schema_version !== UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.schemaVersion) return false;
   for (const [key, replacement] of Object.entries(UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.replacedRules)) {
@@ -1973,6 +2028,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.schemaVersion) {
+    if (!hasExactPermissionModeEqualThirdsGeometryAmendment20260816(authorizationContracts)) {
+      findings.push(`${expected.id}:permission-mode-equal-thirds-20260816-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizePermissionModeEqualThirdsGeometryAmendment20260816(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.schemaVersion) {
     if (!hasExactUiGreenStorageDefaultNonAdminAmendment20260816(authorizationContracts)) {
       findings.push(`${expected.id}:ui-green-storage-default-non-admin-20260816-contract-amendment-drift`);
