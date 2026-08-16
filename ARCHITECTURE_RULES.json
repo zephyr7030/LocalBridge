@@ -228,9 +228,9 @@
     },
     {
       "id": "ARCH-029",
-      "description": "G3 refined UI/tray contract: Dashboard uses a flat primary surface and a read-only 权限模式 row without a status dot; onboarding Screen 4 places 打开新建插件页 above aligned 名称/Tunnel ID rows; Windows tray uses a dedicated simplified multi-resolution 16/20/24/32/48 ICO with exact DPI frame selection and no runtime resampling",
+      "description": "G3 refined UI/icon contract: Dashboard uses a flat primary surface and a read-only 权限模式 row without a status dot; onboarding Screen 4 places 打开新建插件页 above aligned 名称/Tunnel ID rows; Windows taskbar and notification-area tray icons derive only from the frozen LocalBridge master PNG, with the accepted taskbar ICO retained and tray frames produced by deterministic crop/downscale only",
       "severity": "error",
-      "applies_to": ["src/**", "src-tauri/src/tray/**", "assets/icons/localbridge-tray.ico"],
+      "applies_to": ["src/**", "src-tauri/src/tray/**", "assets/icons/localbridge.png", "assets/icons/localbridge.ico", "assets/icons/localbridge-tray.ico", "scripts/icons/derive-tray-icon.ps1"],
       "verification": { "mode": "deferred", "activate_at_pr": "LB-013", "reason": "Tray and later G3 desktop/onboarding UI are complete within G3 and this explicit post-review amendment must remain machine-enforced", "type": "g3_ui_tray_refinement" }
     }
   ]

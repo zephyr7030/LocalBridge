@@ -673,6 +673,10 @@
     "dashboard_elevated_project_scope_accent": "yellow",
     "dashboard_elevated_project_switch_blocked": true,
     "dashboard_elevated_project_switch_dialog": "管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
+    "dashboard_project_scope_display_source": "permission_mode",
+    "dashboard_project_scope_display_privilege_state_independent": true,
+    "dashboard_project_scope_by_permission_mode": { "edit": "active_workspace_path", "full": "active_workspace_path", "admin": "全目录访问" },
+    "dashboard_project_switch_blocked_in_admin_mode": true,
     "admin_mode_user_consequence_acknowledgement_required": true,
     "dashboard_permission_mode_read_only_row_required": true,
     "dashboard_permission_mode_row_label": "权限模式",
@@ -697,7 +701,7 @@
       32,
       48
     ],
-    "tray_icon_small_frame_simplified_design_required": true,
+    "tray_icon_small_frame_simplified_design_required": false,
     "tray_icon_runtime_resampling_forbidden": true,
     "tray_icon_exact_dpi_frame_mapping": {
       "1.0": 16,
@@ -705,7 +709,17 @@
       "1.5": 24,
       "2.0": 32
     },
-    "tray_icon_large_brand_art_direct_use_forbidden": true
+    "tray_icon_large_brand_art_direct_use_forbidden": true,
+    "windows_icon_master_png": "assets/icons/localbridge.png",
+    "windows_icon_master_png_sha256": "710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a",
+    "windows_taskbar_icon_ico": "assets/icons/localbridge.ico",
+    "windows_taskbar_icon_sha256": "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78",
+    "windows_taskbar_icon_master_png_derivation_required": true,
+    "tray_icon_master_png_derivation_required": true,
+    "tray_icon_new_authored_graphics_forbidden": true,
+    "tray_icon_allowed_processing": ["crop", "downscale", "ico-packaging"],
+    "tray_icon_source_crop_rect": { "x": 90, "y": 400, "width": 390, "height": 390 },
+    "tray_icon_derived_sha256": "5a9fce6e80050c9ce1620b8e28767052ece2536213ee04fe532596d3f4ec811d"
   },
   "prs": {
     "LB-000": {
@@ -1203,7 +1217,8 @@
         "src-tauri/src/settings/**",
         "schema/settings/**",
         "tests/migrations/**",
-        "assets/icons/localbridge-tray.ico"
+        "assets/icons/localbridge-tray.ico",
+        "scripts/icons/derive-tray-icon.ps1"
       ],
       "forbidden_paths": [
         "src/features/onboarding/**"
@@ -1211,7 +1226,7 @@
       "required_artifacts": [
         "Tray",
         "background lifecycle",
-        "system tray uses dedicated frozen LocalBridge small-size high-DPI tray icon family",
+        "Windows taskbar and notification-area tray icons derive only from frozen assets/icons/localbridge.png; the accepted clear taskbar localbridge.ico remains unchanged while tray uses a PNG crop/downscale multi-resolution ICO",
         "persisted close-window behavior preference",
         "non-blocking backend execution boundary for desktop lifecycle work"
       ],
@@ -1222,13 +1237,14 @@
         "tray exit stops privileged broker after closing privileged call gate",
         "background recovery emits no toast/banner/tray notification before retry exhaustion",
         "background mode may show final error window only after fifth failed reconnect",
-        "tray icon derives from frozen assets/icons/localbridge-tray.ico with dedicated 16/20/24/32/48 small-size frames and exact 100/125/150/200% DPI selection without runtime resampling",
+        "tray icon is reproducibly derived only from frozen assets/icons/localbridge.png crop 90,400,390,390 using crop/downscale/ICO packaging into dedicated 16/20/24/32/48 frames with exact 100/125/150/200% DPI selection and no runtime resampling",
         "tray does not use emoji or placeholder icon",
         "关闭窗口后继续运行=true hides the window and leaves runtime/tray unchanged",
         "关闭窗口后继续运行=false performs orderly managed runtime and privileged broker cleanup then exits",
         "close-window behavior preference is versioned persisted and migration-safe",
         "desktop lifecycle blocking work does not execute on the UI/WebView event thread",
-        "tray 16/20/24/32 frames use the simplified small-size LocalBridge glyph rather than the high-detail 1024px brand artwork directly"
+        "tray 16/20/24/32/48 frames contain only pixels derived from the original LocalBridge PNG crop/downscale path; newly authored glyphs backgrounds symbols or third-party-lookalike artwork are forbidden",
+        "Windows taskbar/left-bottom icon remains the accepted frozen assets/icons/localbridge.ico and both taskbar and tray icon provenance is anchored to assets/icons/localbridge.png"
       ],
       "non_goals": [
         "autostart",
@@ -1428,7 +1444,7 @@
         "mode-entry warning does not approve any separate High or Critical per-operation confirmation and AI/MCP cannot approve the warning or mutate PermissionMode Broker or other control-plane authority",
         "every text-bearing button except the symmetric 编辑模式/完整模式/管理员模式 three-way PermissionMode selection group sizes from its own content metrics: width corresponds to the maximum visible character count on any single line and height corresponds to the actual rendered line count; arbitrary fixed button geometry that ignores text content is forbidden; the three-way PermissionMode group is explicitly exempt from content-derived width/height sizing and instead must render as exactly three symmetric equal-width equal-height cells with no clipped or overflowing text",
         "product typography uses exactly three font-size tiers: title for page/major headings, body for ordinary body labels buttons and primary status, and auxiliary for helper metadata time and secondary status; each non-title tier is internally unified and no fourth font-size tier exists",
-        "when PermissionMode is Elevated and Broker is Active the Dashboard current-project area displays yellow 全目录访问 instead of implying an active-workspace access boundary; clicking the project-switch affordance does not switch workspace and shows exactly 管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
+        "Dashboard current-project scope is bound only to backend PermissionMode rather than Broker/PrivilegeState: Edit and Full display the active-workspace path, while Admin displays yellow 全目录访问 for the entire time Admin is the selected mode; Admin project switching remains blocked and shows exactly 管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
         "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode",
         "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent"
       ],

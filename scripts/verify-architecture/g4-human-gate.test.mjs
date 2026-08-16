@@ -267,6 +267,11 @@ for (const [rule, drift] of [
   ["ui_flat_primary_surface_allowed", false],
   ["onboarding_screen_4_new_connector_action_label", "打开插件管理页"],
   ["tray_icon_runtime_resampling_forbidden", false],
+  ["tray_icon_master_png_derivation_required", false],
+  ["tray_icon_new_authored_graphics_forbidden", false],
+  ["windows_taskbar_icon_master_png_derivation_required", false],
+  ["dashboard_project_scope_display_source", "privilege_state"],
+  ["dashboard_project_scope_display_privilege_state_independent", false],
 ]) {
   const weakened = structuredClone(schema35Contracts);
   weakened.rules[rule] = drift;
@@ -275,6 +280,9 @@ for (const [rule, drift] of [
 const schema35MissingTrayAssetScope = structuredClone(schema35Contracts);
 schema35MissingTrayAssetScope.prs["LB-013"].writable_paths = schema35MissingTrayAssetScope.prs["LB-013"].writable_paths.filter((item) => item !== "assets/icons/localbridge-tray.ico");
 assert.equal(hasExactG3UiTrayRefinementAmendment20260816(schema35MissingTrayAssetScope), false);
+const schema35MissingTrayDeriverScope = structuredClone(schema35Contracts);
+schema35MissingTrayDeriverScope.prs["LB-013"].writable_paths = schema35MissingTrayDeriverScope.prs["LB-013"].writable_paths.filter((item) => item !== "scripts/icons/derive-tray-icon.ps1");
+assert.equal(hasExactG3UiTrayRefinementAmendment20260816(schema35MissingTrayDeriverScope), false);
 const schema35MissingFlatSurfaceProof = structuredClone(schema35Contracts);
 schema35MissingFlatSurfaceProof.prs["LB-015"].required_tests = schema35MissingFlatSurfaceProof.prs["LB-015"].required_tests.filter((item) => !item.startsWith("Dashboard main data surface is intentionally flat"));
 assert.equal(hasExactG3UiTrayRefinementAmendment20260816(schema35MissingFlatSurfaceProof), false);
