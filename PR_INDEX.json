@@ -358,10 +358,10 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 9,
-      "human_review_status": "REQUIRED",
+      "human_review_status": "BLOCKED",
       "human_review_generation": 3,
       "review_provenance": {
         "generation": 9,
@@ -382,6 +382,11 @@
             "generation": 8,
             "commit": "c6d7ff74466e93f31439994ef9b6bc9d0980395a",
             "cause": "explicit_user_png_icon_and_permission_scope_binding_2026_08_16"
+          },
+          {
+            "generation": 9,
+            "commit": "e874650cf055998f2a431845b399300a6503a3f1",
+            "cause": "explicit_user_public_mcp_output_schema_2026_08_16"
           }
         ]
       }

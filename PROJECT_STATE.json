@@ -2982,5 +2982,30 @@
     "g4_unlocked": false,
     "review_decision_commit": "e874650cf055998f2a431845b399300a6503a3f1",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "g3_public_mcp_output_schema_refinement_2026_08_16": {
+    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "source": "explicit_user_gpt_output_schema_feedback_2026_08_16",
+    "contract_commit": "fcc9e89",
+    "product_commit": "6e63b24",
+    "invalidated_adversarial_generation": 9,
+    "invalidation_cause": "explicit_user_public_mcp_output_schema_2026_08_16",
+    "changes": [
+      "Public Agent API advanced from facade revision31 to revision32 and all eight LocalBridge-owned core tools now advertise LocalBridge-owned outputSchema definitions instead of exposing only inputSchema.",
+      "The agent_workflow outputSchema describes the stable ok/data/error envelope and action/state/workspace/project/commands result structure; other core tools publish their stable public result fields without forwarding private upstream schemas.",
+      "elevated_exec now advertises an outputSchema matching its existing privileged filesystem, process outcome and typed elevation-error structuredContent variants without changing its Broker/UAC authorization boundary.",
+      "ARCH-030 machine-enforces public outputSchema presence/ownership and the pre-G4 authorization chain accepts only this exact user-authorized contract amendment."
+    ],
+    "verified_before_review": [
+      "The regression test failed before the production fix because the public ToolRegistry omitted outputSchema, proving the GPT-side recommendation was grounded in current LocalBridge behavior.",
+      "Fresh schema28 public runtime behavior test PASS and served tools/list proves agent_workflow outputSchema on facade revision32.",
+      "Fresh elevated_exec Broker-only behavior test PASS and served elevated_exec definition includes outputSchema.",
+      "ARCH-030 PASS, G4 human-gate regression PASS and architecture 30/30 PASS.",
+      "Full formal gate PASS: cargo test/clippy in isolated CARGO_TARGET_DIR, frontend test/build, runtime-manifest, architecture 30/30, UI-language, G4 regression and git diff check."
+    ],
+    "next_required_adversarial_generation": 10,
+    "human_review_generation": 3,
+    "human_review_blocked_until_generation10_pass": true,
+    "g4_unlocked": false
   }
 }
