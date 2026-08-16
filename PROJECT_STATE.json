@@ -2804,5 +2804,48 @@
     "g3_generation_7_consumed": false,
     "g4_unlocked": false,
     "next_action": "Run fresh independent G3 adversarial review generation 7 on the current schema35 baseline. G4 remains blocked."
+  },
+  "g3_adversarial_review_generation_7_2026_08_16": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 7,
+    "baseline_commit": "116368e",
+    "finding": "No blocking G3 defect was found against current schema35 after fresh LB-013 through LB-017 contract verification, a single valid full Group-Release gate, real native WebView geometry evidence, and first-principles source attack of lifecycle, UI/backend ownership, privilege-warning, CurrentTask, onboarding, and diagnostics boundaries.",
+    "evidence": [
+      "Fresh G3 contract gate PASS for LB-013 background/tray lifecycle, LB-014 single-instance/autostart/UI-ready startup, LB-015 Dashboard/UI shell, LB-016 five-screen onboarding, and LB-017 minimal diagnostics.",
+      "Fresh full serial cargo test PASS with 185 library tests plus all integration/unit/doc-test targets; cargo clippy --locked --all-targets --all-features -D warnings PASS.",
+      "Fresh frontend Vitest 4 files / 7 tests PASS, production build PASS, runtime-manifest PASS, all 28 active architecture rules PASS, UI-language PASS, G4 governance regression PASS and git diff --check PASS.",
+      "Fresh native Tauri/WebView LB-016 E2E on the same product tree PASS at 150% DPI: logical 780x620 physical 1170x930, no native decorations/resizing/maximize, one edge-to-edge custom chrome, Screen3 PermissionMode equal-width/equal-height geometry self-gated, Dashboard rounded scrolling preserved.",
+      "Dashboard CurrentTask source attack PASS: visual state is derived directly from backend task.state; Running uses ready-green pulse, Waiting warning/amber, Blocked/Failed fault-red, Idle/Cancelled neutral; typed wording includes 等待授权 已阻止 执行失败 已取消 and Running has no redundant 执行中.",
+      "Frontend orchestration/bypass search found no READY_POLL/startProject or separate enable/disable-admin path. The only setInterval in the reviewed frontend is the shared nine-second AdminModeWarning display countdown; runtime/readiness remains backend-owned.",
+      "Administrator entry source attack PASS: Settings and onboarding both open the shared warning when admin is selected without Active Broker; continuation to setAccess(admin) occurs only from enabled warning confirmation.",
+      "Permission geometry source and real DOM gate PASS: three equal columns, equal rendered width/height, symmetric gaps and complete title/description line boxes; this respects the explicit user equal-thirds exception instead of generic content-derived button sizing.",
+      "Diagnostics WebView source attack found no Broker/reconnect generation, attempt counter, PID, SID, nonce, IPC, Runtime API key or Authorization projection; normal page remains exactly three sections and three actions with bounded redacted backend events.",
+      "First-created window centering remains isolated to the new-window branch; existing hidden-window reopen is not forcibly recentered. Dashboard visual-depth regression remains protected by the native no-overlay card background/border/shadow probe added in LB-015."
+    ],
+    "non_blocking_observations": [
+      "The first Group-Release command used stale LB-013/LB-014 test directory names and stopped immediately with MODULE_NOT_FOUND before any product test; it was discarded as an invalid invocation. The subsequent contract-correct Group-Release chain ran once and PASSed.",
+      "A diagnostics CSS selector named diagnostics-attempts remains unused by the normal Diagnostics component; no attempt counter is projected or rendered, so it is dead presentation residue rather than a user-visible contract breach."
+    ],
+    "verified_passes": [
+      "LB-013 -> LB-017 current contracts",
+      "cargo test --locked -- --test-threads=1",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "npm test",
+      "npm run build",
+      "npm run verify:runtime-manifest",
+      "npm run verify:architecture",
+      "npm run verify:ui-language",
+      "g4-human-gate.test.mjs",
+      "git diff --check",
+      "native fixed-window/WebView2 Screen3 geometry and Dashboard surface regression"
+    ],
+    "g3_generation_7_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": null,
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }
