@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,9 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "Schema34 / LB-012 reacceptance: verify the real already-connected use-side elevated_exec -> Broker -> UAC -> Administrator Token lifecycle, including publication/revocation after Broker or mode changes, stale-call fail-closed behavior, and confirmation that ordinary exec_command remains current-user."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -2351,7 +2349,7 @@
     "review_decision_commit": "4384d1fc26bde6784d49a05d72d0d8ed559f5d55"
   },
   "schema34_permission_execution_model_2026_08_16": {
-    "status": "CONTRACT_RATIFIED_REWORK_REQUIRED",
+    "status": "REACCEPTED_REVIEW_REQUIRED",
     "source": "explicit_user_product_strategy_2026_08_16",
     "contract_schema_version": 34,
     "architecture_rules_schema_version": 10,
@@ -2368,7 +2366,8 @@
     "generation20_disposition": {
       "lb006_full_shell_workspace_escape": "SUPERSEDED_BY_SCHEMA34_PRODUCT_POLICY",
       "lb007_typed_policy_denial": "RESOLVED_BY_LB007_SCHEMA34_REWORK",
-      "lb007_workspace_script_extension": "RESOLVED_BY_LB007_SCHEMA34_REWORK"
+      "lb007_workspace_script_extension": "RESOLVED_BY_LB007_SCHEMA34_REWORK",
+      "lb012_real_use_side_uac_catalog_lifecycle": "RESOLVED_BY_LB012_SCHEMA34_REACCEPTANCE"
     },
     "additional_reacceptance": [
       "LB-006 must prove Edit cannot launch ordinary processes and Full ordinary execution never inherits Broker or administrator authority while structured LocalBridge inputs remain active-workspace-bound",
@@ -2380,13 +2379,14 @@
       "current_group": "G2",
       "current_pr": "LB-006"
     },
-    "g2_status": "REWORK_REQUIRED",
+    "g2_status": "REVIEW_REQUIRED",
     "historical_review_generation": 20,
     "historical_review_status": "FAIL",
     "next_required_g2_adversarial_generation": 21,
     "g2_generation_21_consumed": false,
     "g3_unlocked": false,
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "reacceptance_complete_through": "LB-012"
   },
   "lb006_schema34_reacceptance_2026_08_16": {
     "status": "PASS",
@@ -2503,5 +2503,30 @@
     "g2_generation_21_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "lb012_schema34_real_uac_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "production_code_patch_required": false,
+    "acceptance_test_commit": "692a131",
+    "contract_schema_version": 34,
+    "resolves_generation20_followup": "real already-connected use-side elevated_exec -> Broker -> UAC -> Administrator Token lifecycle and capability publication/revocation",
+    "evidence": [
+      "Fresh Explorer desktop token probe proved the real interactive Explorer session is Medium Integrity S-1-16-8192; the coding MCP host itself is High Integrity and was explicitly not used as ordinary-route token evidence.",
+      "A dedicated ignored live acceptance test was launched through the existing Medium Explorer SWC_DESKTOP/IShellWindows automation context; it then invoked the production PrivilegeController::enable_from_explicit_user_action path, which uses NamedPipeServer -> ShellExecuteExW(runas) -> real privileged Broker handshake/ping rather than a fake gateway.",
+      "Live UAC acceptance PASS: ordinary exec_command reported S-1-16-8192 before Broker activation and remained S-1-16-8192 after Broker Active; elevated_exec through the Broker reported S-1-16-12288 High/Administrator integrity.",
+      "The same live MCP session lifecycle proved stale session HTTP 404 after enabling Elevated/Broker and again after Broker disable; reinitialize discovered elevated_exec only while Active and revoked it afterward, with stale privileged call returning typed ElevationRequired.",
+      "Fresh LB-012 contract PASS after updating its static verifier to follow the shared effective_tool_catalog Active-Broker authority introduced by LB-007; ARCH-026 and ARCH-027 PASS, actual Broker IPC 6/6 PASS with the live UAC case intentionally ignored in routine gates, and the key bundled PEP elevated_exec lifecycle test PASS.",
+      "Formal final Gate PASS after the live test addition: touched Rust rustfmt check, serial cargo test --locked -- --test-threads=1, cargo clippy --locked --all-targets --all-features -- -D warnings, npm test, npm build, runtime-manifest, architecture, UI-language, G4 regression and git diff --check."
+    ],
+    "group_transition": "G2_REVIEW_REQUIRED",
+    "historical_g2_review_generation": 20,
+    "historical_g2_review_status": "FAIL",
+    "historical_generation20_preserved": true,
+    "next_required_g2_adversarial_generation": 21,
+    "g2_generation_21_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false,
+    "next_action": "Run fresh independent G2 adversarial review generation 21. LB-013 and G3 remain blocked until that review passes."
   }
 }
