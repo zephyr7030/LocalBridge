@@ -20,12 +20,15 @@ const backgroundTests = readFileSync("tests/integration/background/background.rs
 const policyTests = readFileSync("tests/integration/policy/policy_enforcement.rs", "utf8");
 const codingRuntimeTests = readFileSync("tests/integration/mcp/coding_runtime.rs", "utf8");
 const auth = JSON.parse(readFileSync("scripts/authorization-records/LB-015.json", "utf8"));
-for (const text of ["当前项目","本地运行环境","OpenAI 安全隧道","编码服务","管理员权限","等待命令"]) if (!`${app}\n${presentation}`.includes(text)) throw new Error(`LB-015 Dashboard wording missing: ${text}`);
+for (const text of ["当前项目","本地运行环境","OpenAI 安全隧道","编码服务","权限模式","等待命令"]) if (!`${app}\n${presentation}`.includes(text)) throw new Error(`LB-015 Dashboard wording missing: ${text}`);
 if (app.includes("pathEditor") || app.includes("newPath") || app.includes('id="project-path"')) throw new Error("LB-015 Dashboard still exposes raw project path input");
 if (!bridge.includes('chooseProjectFolder: () => invoke<string | null>("choose_onboarding_workspace_folder")') || !app.includes("bridge.chooseProjectFolder()")) throw new Error("LB-015 Dashboard does not use native Windows folder picker");
 const dashboardBeforeSettings = app.slice(app.indexOf("return <main"), app.indexOf('{view === "settings"'));
-for (const forbidden of ["权限模式","编辑模式","完整模式","管理员模式","setAccess(","enableAdmin","disableAdmin","启用管理员权限"]) if (dashboardBeforeSettings.includes(forbidden)) throw new Error(`LB-015 Dashboard permission mutation surface remains: ${forbidden}`);
-if (!dashboardBeforeSettings.includes("ServiceStatusDot") || !dashboardBeforeSettings.includes("privilegeService")) throw new Error("LB-015 Dashboard lacks shared typed status dots/read-only privilege state");
+if (!dashboardBeforeSettings.includes('>权限模式</span>') || !dashboardBeforeSettings.includes('accessText[projection.permission]')) throw new Error("LB-015 Dashboard read-only PermissionMode projection missing");
+if (dashboardBeforeSettings.includes('>管理员权限</span>') || dashboardBeforeSettings.includes('permission-mode-value"><ServiceStatusDot') || dashboardBeforeSettings.includes('setAccess(') || dashboardBeforeSettings.includes('enableAdmin') || dashboardBeforeSettings.includes('disableAdmin') || dashboardBeforeSettings.includes('启用管理员权限')) throw new Error("LB-015 Dashboard permission row regressed into privilege-dot or mutation UI");
+const flatCard = css.replace(/\s+/g, "").match(/\.card\{([^}]*)\}/)?.[1] ?? "";
+for (const marker of ["background:transparent", "border:0", "border-radius:0", "box-shadow:none"]) if (!flatCard.includes(marker)) throw new Error(`LB-015 flat primary surface missing: ${marker}`);
+if (!dashboardBeforeSettings.includes("ServiceStatusDot") || dashboardBeforeSettings.includes("privilegeService")) throw new Error("LB-015 Dashboard service dots or PermissionMode no-dot boundary drifted");
 for (const required of [">常规<",">连接<",">权限<","开机启动","关闭窗口后继续运行","Tunnel ID","Runtime API Key","打开欢迎页",">完成<",">更换<"]) if (!app.includes(required)) throw new Error(`LB-015 Settings contract missing: ${required}`);
 if (app.includes("测试连接") || app.includes("运行密钥")) throw new Error("LB-015 Settings exposes forbidden connection wording/action");
 if (!app.includes('type="password"') || !app.includes('projection?.runtimeKeySaved ? "已保存" : "未保存"')) throw new Error("LB-015 Runtime API Key summary/edit security contract missing");

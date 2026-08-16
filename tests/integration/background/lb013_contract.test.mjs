@@ -62,7 +62,7 @@ for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required",
 if (background.includes("Mutex<Option<Box<dyn ExitRuntime")) throw new Error("LB-013 still permits the production lifecycle owner itself to be absent");
 if (!main.includes("DesktopLifecycle::new(PrivilegeController::new())")) throw new Error("LB-013 production app setup does not construct the runtime owner");
 
-for (const required of ["TrayIconBuilder", "FROZEN_TRAY_ICON_ICO", "include_bytes!", "select_frozen_ico_frame", "TRAY_LOGICAL_ICON_SIZE", "primary_monitor", "monitor.scale_factor()", "Image::from_bytes(frame.bytes)", '"打开 LocalBridge"', '"退出"'])
+for (const required of ["TrayIconBuilder", "FROZEN_TRAY_ICON_ICO", 'localbridge-tray.ico', "include_bytes!", "select_frozen_ico_frame", "TRAY_LOGICAL_ICON_SIZE", "primary_monitor", "monitor.scale_factor()", "Image::from_bytes(frame.bytes)", '"打开 LocalBridge"', '"退出"'])
   if (!tray.includes(required)) throw new Error(`LB-013 tray contract missing: ${required}`);
 for (const forbidden of ["TRAY_ICON_CROP_PERCENT", "tray_icon_from_frozen(&icon)", "default_window_icon()"])
   if (tray.includes(forbidden)) throw new Error(`LB-013 stale tray resampling path remains: ${forbidden}`);
@@ -73,6 +73,17 @@ if (!config.bundle?.icon?.includes("../assets/icons/localbridge.ico")) throw new
 const ico = readFileSync("assets/icons/localbridge.ico");
 const hash = createHash("sha256").update(ico).digest("hex");
 if (hash !== "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78") throw new Error("LB-013 frozen tray icon hash drift");
+const trayIco = readFileSync("assets/icons/localbridge-tray.ico");
+const trayHash = createHash("sha256").update(trayIco).digest("hex");
+if (trayHash !== "1cbf7251fc08366b4107b633d0145886526ebec45f4c9d0d01c55c6e2683a06c") throw new Error("LB-013 dedicated tray icon hash drift");
+const trayFrameSizes = [];
+const trayFrameCount = trayIco.readUInt16LE(4);
+for (let index = 0; index < trayFrameCount; index += 1) {
+  const raw = trayIco[6 + index * 16];
+  trayFrameSizes.push(raw === 0 ? 256 : raw);
+}
+if (JSON.stringify(trayFrameSizes) !== JSON.stringify([16,20,24,32,48])) throw new Error(`LB-013 dedicated tray frame inventory drift: ${trayFrameSizes.join(",")}`);
+if (!/select_frozen_ico_frame\(FROZEN_TRAY_ICON_ICO, 1\.25\)[\s\S]*?\.size,[\s\r\n]*20/.test(tray)) throw new Error("LB-013 125% DPI does not select exact 20px tray frame");
 
 const disableStart = privilege.indexOf("pub fn disable");
 const disableEnd = privilege.indexOf("pub fn refresh_broker_state", disableStart);

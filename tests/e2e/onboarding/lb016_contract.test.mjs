@@ -40,10 +40,15 @@ for (const marker of ['"permission-geometry"', "getBoundingClientRect()", "docum
 if (!runtimeE2e.includes('?lb016-e2e=permission-geometry')) throw new Error("LB-016 native onboarding E2E does not open the real Screen3 geometry gate");
 for (const text of ["启用管理员权限后，错误或恶意操作可能导致：","删除或覆盖重要文件","修改系统关键配置","软件或系统无法正常启动","数据永久丢失","安全机制被绕过或关闭","凭据、密钥等敏感信息泄露","恶意程序获得更高权限","系统被破坏，严重时可能需要重装 Windows","仅在你明确理解操作后果时授权。"]) if (!adminWarning.includes(text)) throw new Error(`LB-016 shared administrator warning exact copy missing: ${text}`);
 for (const marker of ["ADMIN_WARNING_COUNTDOWN_MS = 9000","performance.now()",'event.key === "Escape"',"disabled={remainingSeconds > 0}",' : "确认"']) if (!adminWarning.includes(marker)) throw new Error(`LB-016 shared administrator warning safety gate missing: ${marker}`);
-if (!ui.includes('title="创建自定义插件"') || !ui.includes('在插件设置页面最底端，打开“开发者模式”') || !ui.includes('打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件')) throw new Error("LB-016 Screen4 exact copy drifted");
+if (!ui.includes('title="创建自定义插件"') || !ui.includes('在插件设置页面最底端，打开“开发者模式”') || !ui.includes('打开新建插件页后，选择隧道并选择刚刚添加的Tunel，创建插件') || !ui.includes('>打开新建插件页</button>')) throw new Error("LB-016 Screen4 exact copy drifted");
 for (const required of ["open_chatgpt_plugins_settings","https://chatgpt.com/plugins#settings/Plugins","open_chatgpt_custom_connector_settings","https://chatgpt.com/plugins#settings/Connectors?create-connector=true&redirectAfter=%2Fplugins"]) if (!backend.includes(required)) throw new Error(`LB-016 fixed Rust browser allowlist missing: ${required}`);
 if (!css.includes(".onboarding-plugin-top-action,.onboarding-plugin-management{display:flex;justify-content:flex-start}")) throw new Error("LB-016 Screen4 browser actions are not left aligned");
 if ((ui.match(/onboarding-info-row/g)||[]).length !== 2 || !ui.includes('>Local Bridge<') || !ui.includes('>Tunnel ID<') || ui.includes('本地服务</span>')) throw new Error("LB-016 Screen4 is not exact two-row persisted identity");
+const connectorAction = ui.indexOf('>打开新建插件页</button>');
+const identityRows = ui.indexOf('<div className="onboarding-plugin-info">');
+if (connectorAction < 0 || identityRows < 0 || connectorAction > identityRows) throw new Error("LB-016 打开新建插件页 action is not above identity rows");
+const compactCss = css.replace(/\s+/g, "");
+if (!compactCss.includes(".onboarding-info-row{display:grid;grid-template-columns:6emminmax(0,1fr)max-content") || !compactCss.includes(".onboarding-copy-action{justify-self:end}")) throw new Error("LB-016 Screen4 identity columns are not aligned");
 if (!ui.includes("window.setTimeout(() =>") || !ui.includes("}, 3000)") || !ui.includes('copiedRows.name ? "已复制" : "复制"') || !ui.includes('copiedRows.tunnel ? "已复制" : "复制"')) throw new Error("LB-016 copy feedback is not stable three-second per row");
 for (const step of [2,3,4,5]) if (!ui.includes(`setStep(${step-1})`)) throw new Error(`LB-016 Screen ${step} lacks back path`);
 for (const label of ["本地运行环境","编码服务","OpenAI Tunnel"]) if (!ui.includes(`label="${label}"`)) throw new Error(`LB-016 Screen5 check missing: ${label}`);

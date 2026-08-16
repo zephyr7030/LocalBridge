@@ -274,12 +274,12 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     <WizardFrame step={4} title="创建自定义插件" footer={<><button className="secondary" onClick={() => setStep(3)}>返回</button><button className="primary" disabled={!allGreen} onClick={() => { setError(null); setStep(5); }}>继续</button></>}>
       <p className="onboarding-copy">在插件设置页面最底端，打开“开发者模式”</p>
       <div className="onboarding-plugin-top-action"><button className="secondary" onClick={() => void onboardingApi.openPluginsSettings().catch(() => setError("无法打开 ChatGPT插件设置"))}>打开 ChatGPT插件设置</button></div>
-      <p className="onboarding-hint">打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件</p>
+      <p className="onboarding-hint">打开新建插件页后，选择隧道并选择刚刚添加的Tunel，创建插件</p>
+      <div className="onboarding-plugin-management"><button className="secondary" disabled={!allGreen} onClick={() => void onboardingApi.openConnectorSettings().catch(() => setError("无法打开新建插件页"))}>打开新建插件页</button></div>
       <div className="onboarding-plugin-info">
         <div className="onboarding-info-row"><span className="onboarding-info-label">名称</span><span className="onboarding-info-value">Local Bridge</span><button className={`secondary onboarding-copy-action ${copiedRows.name ? "copied" : ""}`} onClick={() => void copyScreen4Value("name", "Local Bridge")}>{copiedRows.name ? "已复制" : "复制"}</button></div>
         <div className="onboarding-info-row"><span className="onboarding-info-label">Tunnel ID</span><span className="onboarding-info-value">{state.tunnelId ?? "—"}</span><button className={`secondary onboarding-copy-action ${copiedRows.tunnel ? "copied" : ""}`} disabled={!state.tunnelId} onClick={() => state.tunnelId && void copyScreen4Value("tunnel", state.tunnelId)}>{copiedRows.tunnel ? "已复制" : "复制"}</button></div>
       </div>
-      <div className="onboarding-plugin-management"><button className="secondary" disabled={!allGreen} onClick={() => void onboardingApi.openConnectorSettings().catch(() => setError("无法打开插件管理页"))}>打开插件管理页</button></div>
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
   );

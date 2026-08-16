@@ -68,11 +68,12 @@ button{cursor:pointer}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
 .brand{font-size:var(--font-title);font-weight:650;letter-spacing:-.02em}
 .top-actions{display:flex;gap:8px}
-.card{background:#fff;border:1px solid rgba(29,29,31,.10);border-radius:18px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.10),0 1px 3px rgba(0,0,0,.06);margin-bottom:14px}
+.card{background:transparent;border:0;border-radius:0;padding:0 20px;box-shadow:none;margin-bottom:14px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:46px}
 .row+.row{border-top:1px solid rgba(0,0,0,.06)}
 .label{color:#6e6e73;font-size:var(--font-body)}
 .value{text-align:right;overflow-wrap:anywhere}
+.permission-mode-value{font-weight:500}
 .project-actions,.inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 select,input[type="text"],input[type="password"]{min-height:var(--control-height);border:1px solid rgba(0,0,0,.12);border-radius:var(--control-radius);background:#fff;padding:0 11px;color:#1d1d1f}
 .access-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}

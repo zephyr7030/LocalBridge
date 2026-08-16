@@ -509,22 +509,22 @@ fn assert_fixed_window_e2e_metrics(
                 .dashboard_card_background_before_settings
                 .as_deref()
                 .ok_or("dashboard card computed background missing")?;
-            if card_background == "rgba(0, 0, 0, 0)" || card_background == "transparent" {
-                return Err(format!("dashboard card has no independent background: {card_background}"));
+            if card_background != "rgba(0, 0, 0, 0)" && card_background != "transparent" {
+                return Err(format!("dashboard card still has an independent background: {card_background}"));
             }
             let card_border = metrics
                 .dashboard_card_border_width_before_settings
                 .as_deref()
                 .ok_or("dashboard card computed border missing")?;
-            if card_border == "0px" {
-                return Err("dashboard card has no independent border without overlay".into());
+            if card_border != "0px" {
+                return Err(format!("dashboard card still has an independent border: {card_border}"));
             }
             let card_shadow = metrics
                 .dashboard_card_box_shadow_before_settings
                 .as_deref()
                 .ok_or("dashboard card computed shadow missing")?;
-            if card_shadow == "none" || card_shadow.is_empty() {
-                return Err("dashboard card has no independent shadow without overlay".into());
+            if card_shadow != "none" && !card_shadow.is_empty() {
+                return Err(format!("dashboard card still has an independent shadow: {card_shadow}"));
             }
             let replace_delta =
                 (metrics.settings_replace_lefts[0] - metrics.settings_replace_lefts[1]).abs();

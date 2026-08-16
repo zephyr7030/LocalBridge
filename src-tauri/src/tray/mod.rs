@@ -15,7 +15,7 @@ const TRAY_ID: &str = "localbridge-tray";
 const MENU_OPEN_ID: &str = "open";
 const MENU_EXIT_ID: &str = "exit";
 const TRAY_LOGICAL_ICON_SIZE: f64 = 16.0;
-const FROZEN_TRAY_ICON_ICO: &[u8] = include_bytes!("../../../assets/icons/localbridge.ico");
+const FROZEN_TRAY_ICON_ICO: &[u8] = include_bytes!("../../../assets/icons/localbridge-tray.ico");
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
 #[derive(Debug)]
@@ -251,7 +251,7 @@ mod tests {
             select_frozen_ico_frame(FROZEN_TRAY_ICON_ICO, 1.25)
                 .unwrap()
                 .size,
-            24
+            20
         );
         assert_eq!(
             select_frozen_ico_frame(FROZEN_TRAY_ICON_ICO, 1.5)
