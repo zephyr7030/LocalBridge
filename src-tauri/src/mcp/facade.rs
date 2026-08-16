@@ -22,7 +22,7 @@ use super::task_state::{
 };
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 32;
+pub const AGENT_API_REVISION: u32 = 33;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",

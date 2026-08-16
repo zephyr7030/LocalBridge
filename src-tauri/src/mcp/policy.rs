@@ -584,9 +584,8 @@ impl CapabilityPolicy {
         self.decide(mode, tool_name, &[]).allowed
     }
 
-    pub fn privileged_tool_visible(&self, mode: PermissionMode, tool_name: &str) -> bool {
-        mode == PermissionMode::Elevated
-            && tool_name == "elevated_exec"
+    pub fn privileged_tool_visible(&self, _mode: PermissionMode, tool_name: &str) -> bool {
+        tool_name == "elevated_exec"
             && self.elevated_allowed.contains(tool_name)
             && self.classify(tool_name).capability == Capability::ElevatedExec
     }

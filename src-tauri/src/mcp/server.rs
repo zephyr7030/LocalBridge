@@ -534,24 +534,11 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn set_permission_mode(&self, mode: PermissionMode) {
-        let changed = {
-            let mut current = self
-                .permission_mode
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if *current == mode {
-                false
-            } else {
-                *current = mode;
-                true
-            }
-        };
-        if changed {
-            self.sessions
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clear();
-        }
+        let mut current = self
+            .permission_mode
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *current = mode;
     }
 
     pub fn replace_policy(&self, policy: CapabilityPolicy) -> Result<(), PolicyEnforcementError> {
@@ -887,7 +874,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             let policy = public_policy
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            effective_tool_catalog_signature(&policy, mode, privileged)
+            effective_tool_catalog_signature(&policy, mode)
         };
         let session = new_session_id();
         {
@@ -937,7 +924,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         let policy = public_policy
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        effective_tool_catalog_signature(&policy, mode, privileged)
+        effective_tool_catalog_signature(&policy, mode)
     };
     if stored_session.tool_catalog_signature != current_signature {
         sessions
@@ -1003,7 +990,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             let guard = guard
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let result = effective_tool_catalog(&guard, mode, privileged);
+            let result = effective_tool_catalog(&guard, mode);
             write_rpc_result(&mut stream, id, result, Some(session))
         }
         "tools/call" => {
@@ -1281,12 +1268,9 @@ const fn task_kind_name(kind: TaskKind) -> &'static str {
 fn effective_tool_catalog(
     guard: &AgentFacade<CodingToolsRuntimeAdapter>,
     mode: PermissionMode,
-    privileged: Option<&Arc<dyn PrivilegedExecution>>,
 ) -> Value {
     let mut result = guard.public_tools(mode);
-    if privileged.is_some_and(|gateway| gateway.state().accepts_privileged_calls())
-        && guard.privileged_tool_visible(mode, "elevated_exec")
-    {
+    if guard.privileged_tool_visible(mode, "elevated_exec") {
         append_elevated_exec_tool(&mut result);
     }
     result
@@ -1295,16 +1279,13 @@ fn effective_tool_catalog(
 fn effective_tool_catalog_signature(
     policy: &CapabilityPolicy,
     mode: PermissionMode,
-    privileged: Option<&Arc<dyn PrivilegedExecution>>,
 ) -> String {
     let mut names = V1_CORE_TOOL_NAMES
         .iter()
         .copied()
         .filter(|name| policy.public_tool_allowed_for_list(mode, name))
         .collect::<Vec<_>>();
-    if privileged.is_some_and(|gateway| gateway.state().accepts_privileged_calls())
-        && policy.privileged_tool_visible(mode, "elevated_exec")
-    {
+    if policy.privileged_tool_visible(mode, "elevated_exec") {
         names.push("elevated_exec");
     }
     serde_json::to_string(&names)
@@ -2724,8 +2705,8 @@ mod tests {
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 32,
-            "fresh serving instance did not identify the revision32 facade: {:#?}",
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 33,
+            "fresh serving instance did not identify the revision33 facade: {:#?}",
             provenance.body
         );
         let served_tools = post(
@@ -3491,11 +3472,16 @@ mod tests {
             &json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
         );
         let full_catalog = full_tools.body["result"]["tools"].as_array().unwrap();
-        assert_eq!(full_catalog.len(), 8);
+        assert_eq!(full_catalog.len(), 9);
         assert!(
             full_catalog
                 .iter()
                 .any(|tool| tool["name"] == "exec_command")
+        );
+        assert!(
+            full_catalog
+                .iter()
+                .any(|tool| tool["name"] == "elevated_exec")
         );
         for private in [
             "read_file",
@@ -3569,8 +3555,9 @@ mod tests {
             .iter()
             .filter_map(|tool| tool["name"].as_str())
             .collect::<Vec<_>>();
-        assert_eq!(edit_tool_names.len(), 5);
+        assert_eq!(edit_tool_names.len(), 6);
         assert!(edit_tool_names.contains(&"agent_workflow"));
+        assert!(edit_tool_names.contains(&"elevated_exec"));
         for process_tool in ["exec_command", "command_control", "task_control"] {
             assert!(!edit_tool_names.contains(&process_tool));
         }
@@ -4113,39 +4100,29 @@ mod tests {
         assert!(elevated_tool["outputSchema"]["oneOf"].is_array());
 
         fake.set_state(PrivilegeState::AwaitingUac);
-        let stale_active_tools = post(
-            pep.port(),
-            Some(&session),
-            &json!({"jsonrpc":"2.0","id":306,"method":"tools/list","params":{}}),
-        );
-        assert_eq!(stale_active_tools.status, 404);
-        session = initialize(pep.port(), 3061)
-            .session
-            .expect("AwaitingUac reinitialize after Broker catalog change");
         let awaiting_tools = post(
             pep.port(),
             Some(&session),
-            &json!({"jsonrpc":"2.0","id":3062,"method":"tools/list","params":{}}),
+            &json!({"jsonrpc":"2.0","id":306,"method":"tools/list","params":{}}),
         );
         assert!(
             awaiting_tools.body["result"]["tools"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|tool| tool["name"] != "elevated_exec")
+                .any(|tool| tool["name"] == "elevated_exec")
         );
         fake.set_state(PrivilegeState::Active {
             broker_generation: crate::state::GenerationId::new(77),
         });
-        let stale_awaiting_session = post(
+        let active_tools_same_session = post(
             pep.port(),
             Some(&session),
             &json!({"jsonrpc":"2.0","id":3063,"method":"tools/list","params":{}}),
         );
-        assert_eq!(stale_awaiting_session.status, 404);
-        session = initialize(pep.port(), 3064)
-            .session
-            .expect("Active Broker reinitialize after catalog change");
+        assert_eq!(active_tools_same_session.status, 200);
+        assert!(active_tools_same_session.body["result"]["tools"]
+            .as_array().unwrap().iter().any(|tool| tool["name"] == "elevated_exec"));
 
         let secret = "LB012_SYNTHETIC_PEP_SECRET";
         let reviewed_program = super::super::policy::reviewed_elevated_program()
@@ -4249,26 +4226,18 @@ mod tests {
         );
 
         pep.set_permission_mode(PermissionMode::Full);
-        let stale_elevated_session = post(
-            pep.port(),
-            Some(&session),
-            &json!({"jsonrpc":"2.0","id":307,"method":"tools/list","params":{}}),
-        );
-        assert_eq!(stale_elevated_session.status, 404);
-        session = initialize(pep.port(), 3071)
-            .session
-            .expect("Full reinitialize after mode change");
         let full_tools = post(
             pep.port(),
             Some(&session),
             &json!({"jsonrpc":"2.0","id":307,"method":"tools/list","params":{}}),
         );
+        assert_eq!(full_tools.status, 200);
         assert!(
             full_tools.body["result"]["tools"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|tool| tool["name"] != "elevated_exec")
+                .any(|tool| tool["name"] == "elevated_exec")
         );
         let full_denied = post(
             pep.port(),
@@ -4297,17 +4266,53 @@ mod tests {
             CurrentTaskStatus::Idle
         );
 
+        pep.set_permission_mode(PermissionMode::Edit);
+        let stale_full_for_edit = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":3021,"method":"tools/list","params":{}}),
+        );
+        assert_eq!(stale_full_for_edit.status, 404, "core Edit/Full catalog difference still invalidates stale sessions");
+        session = initialize(pep.port(), 3022).session.expect("Edit reinitialize");
+        let edit_tools = post(
+            pep.port(), Some(&session),
+            &json!({"jsonrpc":"2.0","id":3023,"method":"tools/list","params":{}}),
+        );
+        assert!(edit_tools.body["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "elevated_exec"));
+        let edit_denied = post(
+            pep.port(), Some(&session),
+            &json!({"jsonrpc":"2.0","id":3024,"method":"tools/call","params":{"name":"elevated_exec","arguments":{
+                "program":reviewed_program.clone(),"args":["/user"],"workdir":null,"timeout_ms":1000,"max_output_bytes":1024
+            }}}),
+        );
+        assert_tool_error(&edit_denied, "PrivilegedRouteNotAvailable");
+        assert!(matches!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Active(CurrentTask {
+                kind: TaskKind::ElevatedOperation,
+                state: TaskExecutionState::Blocked,
+                ..
+            })
+        ));
+        thread::sleep(Duration::from_millis(540));
+        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+
         pep.set_permission_mode(PermissionMode::Elevated);
         fake.set_state(PrivilegeState::AwaitingUac);
-        let stale_full_session = post(
+        let stale_edit_session = post(
             pep.port(),
             Some(&session),
             &json!({"jsonrpc":"2.0","id":3030,"method":"tools/list","params":{}}),
         );
-        assert_eq!(stale_full_session.status, 404);
+        assert_eq!(stale_edit_session.status, 404);
         session = initialize(pep.port(), 3031)
             .session
-            .expect("Elevated awaiting-Broker reinitialize after mode change");
+            .expect("Elevated reinitialize after Edit core catalog change");
+        let elevated_awaiting_tools = post(
+            pep.port(), Some(&session),
+            &json!({"jsonrpc":"2.0","id":3032,"method":"tools/list","params":{}}),
+        );
+        assert!(elevated_awaiting_tools.body["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "elevated_exec"));
         let awaiting = post(
             pep.port(),
             Some(&session),
@@ -4353,15 +4358,13 @@ mod tests {
         fake.set_state(PrivilegeState::Active {
             broker_generation: crate::state::GenerationId::new(78),
         });
-        let stale_awaiting_session = post(
+        let active_tools = post(
             pep.port(),
             Some(&session),
             &json!({"jsonrpc":"2.0","id":3041,"method":"tools/list","params":{}}),
         );
-        assert_eq!(stale_awaiting_session.status, 404);
-        session = initialize(pep.port(), 3042)
-            .session
-            .expect("Active Broker reinitialize after awaiting state");
+        assert_eq!(active_tools.status, 200);
+        assert!(active_tools.body["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "elevated_exec"));
         fake.complete.store(true, Ordering::Release);
         let completed_started = Instant::now();
         let completed = post(
