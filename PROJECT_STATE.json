@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2759,5 +2759,28 @@
       "LB-015 contract npm test architecture verification and G4 regression all PASS with no product compatibility shim."
     ],
     "next_action": "Resume LB-016 schema35 acceptance."
+  },
+  "lb016_schema35_first_run_wizard_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "contract_schema_version": 35,
+    "implementation_commit": "fa6b17b",
+    "product_patch_required": true,
+    "evidence": [
+      "Strict five-screen onboarding contract PASS with no sixth-screen path; Screen1/2/4/5 exact copy, saved Tunnel ID and secret-length-only Runtime API Key projection, and explicit back paths are preserved.",
+      "Screen3 uses the native Windows folder picker and the current explicit PermissionMode exception: three symmetric equal-width equal-height cells with rendered title/description line boxes and no clipping/overflow.",
+      "Shared administrator safety gate exact schema35 copy PASS including 删除或覆盖重要文件, orange #ff9500 mode warning semantics, whole-red confirmation, monotonic full 9000ms disabled interval, Escape/backdrop cancellation, and no separate enable-admin path.",
+      "Backend prepare_onboarding_project owns project activation and bounded readiness; Screen4 is unreachable until local environment coding service and OpenAI Tunnel are all actually ready. React only observes typed projection changes.",
+      "Screen4 fixed Rust allowlist/system-browser destinations, exact two persisted information rows, per-row 3-second 已复制 feedback, developer guidance and left-aligned actions PASS. Screen5 exact three typed checks and all-green completion gate PASS.",
+      "Fresh native Tauri/WebView E2E PASS at 150% DPI: logical 780x620, physical 1170x930, no native decorations/resizing/maximize, single edge-to-edge custom chrome, onboarding permission geometry self-gated, Dashboard rounded-scroll regression preserved.",
+      "Fresh LB-016 contract, onboarding Rust tests, frontend Vitest, production build, architecture verification and G4 governance regression PASS."
+    ],
+    "group_transition": "G3_IN_PROGRESS",
+    "historical_g3_review_generation": 6,
+    "historical_generation6_preserved": true,
+    "next_required_g3_adversarial_generation": 7,
+    "g3_generation_7_consumed": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-017"
   }
 }
