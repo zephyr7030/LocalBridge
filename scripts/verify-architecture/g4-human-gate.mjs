@@ -1973,6 +1973,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.schemaVersion) {
+    if (!hasExactUiGreenStorageDefaultNonAdminAmendment20260816(authorizationContracts)) {
+      findings.push(`${expected.id}:ui-green-storage-default-non-admin-20260816-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeUiGreenStorageDefaultNonAdminAmendment20260816(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.schemaVersion) {
     if (!hasExactPermissionExecutionModelAmendment20260816(authorizationContracts)) {
       findings.push(`${expected.id}:permission-execution-model-20260816-contract-amendment-drift`);

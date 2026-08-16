@@ -111,6 +111,8 @@ static/source-string contract test 只适合固定文案、schema、allowlist、
 
 ## Release
 
+Schema35 release Gate 额外验证绿色化 footprint 与默认非管理员启动：不可变应用/bundled runtime 只从 canonical 安装根运行，可变非密钥状态只集中到 `%LOCALAPPDATA%\LocalBridge`，Runtime API Key 只在 Windows Credential Manager，不产生无必要的 ProgramData/Windows 系统目录/持久 Temp 产品副本；foreground、`--background` 与登录自启动 ordinary LocalBridge 都使用当前 Windows 普通用户 Token / Medium Integrity 且不触发 UAC，只有显式 `elevated_exec → Broker → UAC` 管理员 route 可进入 High Integrity，主应用与 ordinary route 始终保持 Medium。
+
 ```text
 development
 → release candidate

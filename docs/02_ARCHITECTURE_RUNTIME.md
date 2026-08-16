@@ -203,7 +203,7 @@ active workspace 内普通文件/目录 mutation 属于 reviewed workspace write
 
 管理员范围扩大不扩大 LocalBridge control-plane：AI/MCP 仍不能修改 PermissionMode、批准警告/UAC、启停 Broker、修改 WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy 或 LocalBridge autostart。
 
-UI 同步采用两条全局规则：含文字按钮宽度由最大单行可见字数决定、高度由实际渲染行数决定；字体大小只有标题与统一次级/非标题两级，禁止第三级字号。Dashboard 在 Elevated + Active Broker 时以黄色 `全目录访问` 表示当前文件访问范围，并阻止项目切换，显示固定说明弹窗。
+UI 同步采用两条全局规则：含文字按钮宽度由最大单行可见字数决定、高度由实际渲染行数决定；字体大小严格只有标题、正文、辅助三级，普通正文/字段标签/按钮/主要状态统一使用正文字号，helper/元数据/时间/次要状态统一使用辅助字号，禁止第四级字号。Dashboard 在 Elevated + Active Broker 时以黄色 `全目录访问` 表示当前文件访问范围，并阻止项目切换，显示固定说明弹窗。
 
 ### Schema26 — Administrator Mode Safety Consent Gate
 

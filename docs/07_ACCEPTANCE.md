@@ -313,5 +313,7 @@
 | A309 | Elevated process/command scope | Broker Active 后支持 general administrator direct process 及可信 PowerShell/cmd logical selector，保留 timeout/cancel/output bound/redaction；whole app 仍非提权 |
 | A310 | Dashboard Elevated project scope | Elevated + Broker Active 时当前项目区域黄色显示 `全目录访问`；点击切换不改变 workspace，精确弹窗 `管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式` |
 | A311 | text-button geometry | 所有含文字按钮宽度由最大单行可见字数决定，高度由实际渲染行数决定；同内容指标得到一致几何，禁止与内容无关的任意固定尺寸 |
-| A312 | typography tiers | 产品字号严格只有标题与统一次级/非标题两级；正文、说明、helper、状态、元数据、字段标签和按钮文字不得产生第三级字号 |
+| A312 | typography tiers | 产品字号严格只有标题、正文、辅助三级；页面/主要标题使用标题字号，普通正文/字段标签/按钮/主要状态统一使用正文字号，helper/元数据/时间/次要状态统一使用辅助字号；不得产生第四级字号 |
 | A313 | administrator consequence acknowledgement | 授权前明确说明系统修改后果由用户知悉并自主承担；该确认不允许 AI/MCP 批准自身提权或修改 LocalBridge control-plane |
+| A314 | green-storage layout | LocalBridge 主程序、Python/coding runtime/Tunnel/Broker/静态资源等不可变载荷保留并直接从 canonical 安装根运行；可变非密钥状态只集中在 `%LOCALAPPDATA%\LocalBridge`；Runtime API Key 只在 Windows Credential Manager；不得仅为执行把 bundled runtime 复制/解压到 LocalAppData、ProgramData、Windows 系统目录或持久 Temp，也不得建立无必要 ProgramData footprint |
+| A315 | ordinary launch integrity | foreground、`--background` 与登录自启动 ordinary LocalBridge 都必须使用当前 Windows 普通用户 Token / Medium Integrity 且不触发 UAC；进入管理员模式后主应用与 ordinary route 仍保持 Medium，只有显式 `elevated_exec → Broker → UAC` 管理员 route 可获得 High Integrity |

@@ -55,6 +55,10 @@ old baseline
 
 Windows 11 x64 only。
 
+Schema35 冻结绿色化存储布局：LocalBridge 主程序、Python Embedded、coding-tools-mcp、tunnel-client、Privileged Broker 与静态资源等不可变产品/运行时载荷都保留并直接从 canonical LocalBridge 安装根目录运行；普通启动不得仅为执行而把 bundled runtime 再复制或解压到 `%LOCALAPPDATA%`、`%ProgramData%`、Windows 系统目录或持久 Temp。受保护的 per-machine Program Files 安装与 Broker 信任边界继续保留。
+
+可变但非密钥的产品状态只集中到一个 `%LOCALAPPDATA%\LocalBridge` 根目录，包括 settings、workspace registry、task state、logs 与 diagnostics；不建立无必要的 `%ProgramData%\LocalBridge` 持久 footprint，也不把可变产品状态散落到 Windows 系统目录或持久 Temp。Runtime API Key 仍只保存在 Windows Credential Manager。Windows 正常维护的 installer、shortcut 与 autostart registration metadata 不视为违反该绿色化边界。
+
 安装包自带：
 
 ```text
