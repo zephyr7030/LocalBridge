@@ -3049,5 +3049,29 @@
     "g4_unlocked": false,
     "review_decision_commit": "344bd8ac670f51f863bc68741298642ae2a97537",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "g2_stable_privileged_tool_catalog_refinement_2026_08_16": {
+    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "source": "explicit_user_stable_admin_tool_visibility_2026_08_16",
+    "product_commit": "845b1d9",
+    "contract_commit": "ccf5775",
+    "invalidated_g2_adversarial_generation": 21,
+    "invalidated_downstream_g3_adversarial_generation": 10,
+    "changes": [
+      "Public Agent API revision33 advertises elevated_exec in Edit Full and Elevated and independently of Broker Disabled Requested AwaitingUac Active or Faulted state.",
+      "Tool visibility grants no administrator authority: Edit and Full elevated_exec calls are re-authorized and return typed PrivilegedRouteNotAvailable; Elevated without Active Broker returns typed ElevationRequired; only reviewed Elevated plus Active Broker requests can dispatch through Broker/UAC.",
+      "Permission-mode changes no longer unconditionally clear MCP sessions. Existing catalog signatures still fail closed when the actual core catalog changes, such as Edit versus Full, while Full-to-Elevated and Broker-state transitions do not require reconnect solely for elevated_exec visibility.",
+      "ARCH-031 machine-enforces stable privileged-tool advertisement and call-time authorization; ARCH-026 and ARCH-027 verify the Active Broker execution gate rather than retired visibility-time gating."
+    ],
+    "verified_before_review": [
+      "Real bundled tools/list tests PASS with Full exposing eight core tools plus elevated_exec and Edit exposing five core tools plus elevated_exec while process tools remain hidden in Edit.",
+      "elevated_exec mode/Broker lifecycle test PASS: Full and Edit typed deny, Elevated AwaitingUac typed ElevationRequired, Active Broker execution path preserved, and Full/Elevated plus Broker transitions retain the same MCP session when the core catalog is unchanged.",
+      "Full formal gate PASS in isolated CARGO_TARGET_DIR: cargo test, clippy -D warnings, ARCH-026/027/030/031, frontend tests/build, runtime manifest, architecture 31/31, UI language, G4 fail-closed regression and git diff check."
+    ],
+    "next_required_g2_adversarial_generation": 22,
+    "g3_blocked_until_g2_generation22_pass": true,
+    "g3_next_required_adversarial_generation_after_upstream_pass": 11,
+    "human_review_generation": 3,
+    "g4_unlocked": false
   }
 }
