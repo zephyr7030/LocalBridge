@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2743,7 +2743,7 @@
     ]
   },
   "lb015_schema35_verifier_alignment_reopen_2026_08_16": {
-    "status": "REWORK_REQUIRED",
+    "status": "PASS",
     "owner_pr": "LB-015",
     "source": "LB-016 schema35 acceptance exposed stale LB-015 machine tests",
     "findings": [
@@ -2751,6 +2751,13 @@
       "LB-015 administrator warning contract test still expects superseded 删除或覆盖重要文档 while current schema35 contract and shared component require 删除或覆盖重要文件."
     ],
     "required_correction": "Update only LB-015 verifier/test expectations to the already-ratified current product contracts; do not add dead compatibility CSS and do not revert current warning copy.",
-    "return_to_pr": "LB-016"
+    "return_to_pr": "LB-016",
+    "test_commit": "HEAD_PENDING",
+    "evidence": [
+      "ARCH-014 now checks the accepted typed task-running class and reduced-motion animation disable rather than obsolete .activity-dot.active.",
+      "LB-015 administrator warning exact-copy test now follows current schema35 删除或覆盖重要文件 wording.",
+      "LB-015 contract npm test architecture verification and G4 regression all PASS with no product compatibility shim."
+    ],
+    "next_action": "Resume LB-016 schema35 acceptance."
   }
 }
