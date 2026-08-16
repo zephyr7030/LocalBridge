@@ -2849,7 +2849,7 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "g3_ui_tray_refinement_2026_08_16": {
-    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "status": "IMPLEMENTED_G3_GENERATION8_PASS",
     "source": "explicit_user_feedback_2026_08_16",
     "contract_commit": "0014a2c",
     "product_commit": "a4ce79e",
@@ -2869,7 +2869,50 @@
     ],
     "next_required_adversarial_generation": 8,
     "human_review_generation": 3,
-    "human_review_blocked_until_generation8_pass": true,
+    "human_review_blocked_until_generation8_pass": false,
     "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_8_2026_08_16": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 8,
+    "baseline_commit": "3ad392b27df6b9325bdb75adc60d36dad2049bea",
+    "finding": "No blocking G3 defect was found on the post-amendment schema35 baseline after fresh LB-013 through LB-017 contract verification, the new ARCH-029 refinement gate, a complete serial Group-Release gate, real 150% DPI Tauri/WebView execution, and first-principles source attack of the Dashboard PermissionMode projection, Screen4 layout/order, tray DPI-frame selection, lifecycle, privilege and diagnostics boundaries.",
+    "evidence": [
+      "LB-013 through LB-017 current contract gates PASS; ARCH-029 PASS for flat Dashboard surface, read-only PermissionMode/no-dot, Screen4 new-connector ordering/alignment and dedicated tray frame inventory.",
+      "Fresh full serial cargo test PASS with 185 library tests plus all integration/unit/doc-test targets; cargo clippy --locked --all-targets --all-features -D warnings PASS.",
+      "Fresh frontend Vitest 4 files / 7 tests PASS, production build PASS, runtime-manifest PASS, all 29 active architecture rules PASS, UI-language PASS, G4 governance regression PASS and git diff --check PASS.",
+      "Fresh native Tauri/WebView E2E PASS at 150% DPI: onboarding and Dashboard logical 780x620 / physical 1170x930, custom chrome/window constraints intact, Screen3 equal-third permission geometry intact, Dashboard flat no-overlay surface assertion PASS and Settings scrolling remains aligned.",
+      "Dashboard source attack confirms the主页 权限模式 row renders only accessText[projection.permission] with no ServiceStatusDot; actual runtime/tunnel/coding service rows retain typed dots; no permission mutation or UAC control exists in the Dashboard slice.",
+      "Onboarding Screen4 source attack confirms 打开新建插件页 is above the identity rows, uses the fixed backend custom-connector route, and the two information rows share a 6em label column plus right-justified copy action without fixed copy-button width.",
+      "Tray source attack confirms production includes assets/icons/localbridge-tray.ico, computes target pixels from 16 logical px times monitor scale, selects a frozen ICO frame, validates decoded dimensions, and passes the selected frame bytes directly to Image::from_bytes with no runtime crop/resample path. Dedicated frames are exactly 16/20/24/32/48 and 125% selects 20px.",
+      "The dedicated tray asset is a simplified small-size LocalBridge glyph frozen by SHA-256 1cbf7251fc08366b4107b633d0145886526ebec45f4c9d0d01c55c6e2683a06c; the normal application bundle icon remains the separate original brand ICO.",
+      "Diagnostics still presents Broker administrator state separately; this does not reintroduce Dashboard PermissionMode mutation and no internal PID/SID/nonce/IPC or secret projection was added."
+    ],
+    "non_blocking_observations": [
+      "The first formal-gate launch before generation8 used an accidental one-second MCP timeout and was tool-terminated during Rust startup; it made no file changes and was discarded. The correctly timed formal gate and the independent generation8 Group-Release gate both completed with exit 0.",
+      "The onboarding CSS retains a max-width:640px compact-layout override using intrinsic label sizing; the fixed desktop product window is 780px and the current Screen4 contract/real product path uses the aligned 6em base grid."
+    ],
+    "verified_passes": [
+      "LB-013 -> LB-017 current contracts",
+      "ARCH-029",
+      "cargo test --locked -- --test-threads=1",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "npm test",
+      "npm run build",
+      "npm run verify:runtime-manifest",
+      "npm run verify:architecture",
+      "npm run verify:ui-language",
+      "g4-human-gate.test.mjs",
+      "native fixed-window/WebView2 at 150% DPI",
+      "git diff --check"
+    ],
+    "g3_generation_8_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": null,
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }
