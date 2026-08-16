@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-013",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -253,7 +253,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G2",
+  "current_group": "G3",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -2349,7 +2349,7 @@
     "review_decision_commit": "4384d1fc26bde6784d49a05d72d0d8ed559f5d55"
   },
   "schema34_permission_execution_model_2026_08_16": {
-    "status": "REACCEPTED_REVIEW_REQUIRED",
+    "status": "REACCEPTED_G2_PASS",
     "source": "explicit_user_product_strategy_2026_08_16",
     "contract_schema_version": 34,
     "architecture_rules_schema_version": 10,
@@ -2376,15 +2376,15 @@
     ],
     "historical_generation20_record_preserved": true,
     "current_execution_pointer_unchanged": {
-      "current_group": "G2",
-      "current_pr": "LB-006"
+      "current_group": "G3",
+      "current_pr": "LB-013"
     },
-    "g2_status": "REVIEW_REQUIRED",
+    "g2_status": "PASS",
     "historical_review_generation": 20,
     "historical_review_status": "FAIL",
     "next_required_g2_adversarial_generation": 21,
-    "g2_generation_21_consumed": false,
-    "g3_unlocked": false,
+    "g2_generation_21_consumed": true,
+    "g3_unlocked": true,
     "g4_unlocked": false,
     "reacceptance_complete_through": "LB-012"
   },
@@ -2527,6 +2527,48 @@
     "g2_generation_21_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false,
-    "next_action": "Run fresh independent G2 adversarial review generation 21. LB-013 and G3 remain blocked until that review passes."
+    "next_action": "Fresh independent G2 adversarial review generation 21 is recorded separately; follow the current PR_INDEX execution pointer."
+  },
+  "g2_adversarial_review_generation_21_2026_08_16": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 21,
+    "baseline_commit": "906d50852780ffb9244f42ed44a5638bc7cec628",
+    "finding": "No blocking G2 defect was found against schema34 after strict LB-006 through LB-012 revalidation, fresh Group-Release gates, first-principles adversarial source review, real user-side Medium-token verification, and real current-instance Broker/UAC Administrator-token execution.",
+    "evidence": [
+      "LB-006 fresh revalidation PASS: cached Full catalog cannot bypass Edit after mode change; bundled runtime 5/5 PASS; active-workspace path authority PASS; Edit workflow process indirection is denied before launch; no product/runtime/test windows_sandbox implementation remains.",
+      "LB-007 fresh revalidation PASS: policy contracts 9/9, policy enforcement 9/9, stable typed denial projection, and real active-workspace .ps1/.cmd/.bat execution with traversal rejection all PASS.",
+      "LB-008 through LB-011 fresh serial revalidation PASS: Tunnel contract/ARCH-016/Rust 17/17; orchestrator 8/8; recovery 15/15 plus workspace control 6/6 and ARCH-018/020/022; Broker security/UAC contracts, Broker IPC 6/6 plus one intentional live ignore, privilege unit 23/23 and release lib/bins check.",
+      "Actual @测试 ordinary exec_command in the selected administrator mode reports Mandatory Label S-1-16-8192 Medium Integrity before and after privileged verification, proving ordinary routing does not inherit the Broker token.",
+      "Fresh live UAC acceptance launched through the actual @测试 Medium route PASS: production PrivilegeController -> ShellExecuteExW(runas) -> separate Broker -> PEP yielded ordinary_before=S-1-16-8192, elevated=S-1-16-12288, ordinary_after=S-1-16-8192, stale_enable=404 and stale_disable=404.",
+      "The currently running LocalBridge process at 127.0.0.1:50539 was independently initialized over raw MCP after the real administrator selection; its new tools/list exposed elevated_exec, and a real elevated_exec of C:\\Windows\\System32\\whoami.exe /groups completed through the active Broker with High Mandatory Level S-1-16-12288.",
+      "Schema34 explicitly permits a protocol-correct refresh notification or controlled reconnect. Current server sessions bind the effective catalog signature and return HTTP 404 when permission/policy/Broker capability changes; the live UAC test proves reinitialize discovers elevated_exec only while Active and revokes it after disable, with stale calls fail-closed.",
+      "Fresh complete Group-Release gates PASS on baseline 906d508: serial cargo test including 185 library tests and all integration targets, cargo clippy --all-targets --all-features -D warnings, frontend Vitest 5/5, production build, runtime-manifest, all 22 active architecture rules, UI-language, G4 regression and git diff --check.",
+      "Independent generation21 source attack found no concrete schema34 bypass across Edit process launch, Full/Elevated ordinary-token routing, structured canonical path authority, typed denial projection, script indirection review, privileged catalog lifecycle, production permission-mode wiring, Broker authentication/replay/cancellation/crash fail-closed behavior, or Tunnel stale-session semantics."
+    ],
+    "non_blocking_observations": [
+      "One early @测试 workspace_context call returned a transient target HTTP 400, then the same connection recovered; fresh LB-008 Tunnel tests and repeated real calls passed, so no LocalBridge Tunnel root cause was established.",
+      "The ChatGPT-hosted @测试 recipient list visible to this conversation remained the eight ordinary tools even though the running LocalBridge raw MCP tools/list exposed elevated_exec while Active. Schema34 accepts controlled reconnect, and LocalBridge server-side publication plus stale-session reauthorization were proven; host-side static tool-schema caching is therefore not recorded as a LocalBridge blocker in this generation."
+    ],
+    "verified_passes": [
+      "LB-006 -> LB-012 strict serial revalidation",
+      "real @测试 ordinary Medium Integrity verification",
+      "real UAC Broker High Integrity acceptance and stale enable/disable 404 lifecycle",
+      "current running-instance raw MCP elevated_exec publication and High Integrity execution",
+      "cargo test --locked -- --test-threads=1",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "npm test",
+      "npm run build",
+      "npm run verify:runtime-manifest",
+      "npm run verify:architecture",
+      "npm run verify:ui-language",
+      "g4-human-gate.test.mjs",
+      "git diff --check"
+    ],
+    "g2_generation_21_consumed": true,
+    "g3_unlocked": true,
+    "g4_unlocked": false,
+    "review_decision_commit": null
   }
 }

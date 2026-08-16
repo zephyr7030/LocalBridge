@@ -41,7 +41,7 @@
     ],
     "advance_only_after_acceptance": true,
     "governance_transition_updates_current_pr": true,
-    "current_group": "G2",
+    "current_group": "G3",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
     "pre_g4_human_review_gate_required": true,
@@ -202,7 +202,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "BLOCKED"
+      "status": "READY"
     },
     {
       "id": "LB-014",
@@ -327,13 +327,13 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
-      "review_generation": 20,
+      "status": "PASS",
+      "review_status": "PASS",
+      "review_generation": 21,
       "review_provenance": {
-        "generation": 20,
+        "generation": 21,
         "kind": "independent_adversarial",
-        "commit": "4384d1fc26bde6784d49a05d72d0d8ed559f5d55",
+        "commit": null,
         "invalidated_generations": [
           {
             "generation": 8,
@@ -358,8 +358,8 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "BLOCKED",
-      "review_status": "BLOCKED",
+      "status": "READY",
+      "review_status": "PENDING",
       "review_generation": 6,
       "human_review_status": "BLOCKED",
       "human_review_generation": 2,
@@ -388,5 +388,5 @@
       "review_generation": 0
     }
   ],
-  "current_pr": null
+  "current_pr": "LB-013"
 }
