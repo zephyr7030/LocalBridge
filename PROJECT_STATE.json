@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2782,5 +2782,27 @@
     "g3_generation_7_consumed": false,
     "g4_unlocked": false,
     "next_pr": "LB-017"
+  },
+  "lb017_schema35_diagnostics_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-017",
+    "contract_schema_version": 35,
+    "product_patch_required": false,
+    "reacceptance_baseline_commit": "e4cfc01",
+    "evidence": [
+      "Fresh LB-017 static contract PASS: normal diagnostics UI contains exactly 运行状态 项目 日志 and page actions exactly 打开日志 导出诊断 完成 with no refresh retry-connection or open-welcome surface.",
+      "Typed runtime rows and administrator privilege projection remain backend-owned; normal WebView API excludes reconnect generations attempt counters Broker generation PID SID nonce IPC and other engineering internals.",
+      "Current project displays the validated active workspace ordinary Win32 path rather than a selected/unselected boolean or verbatim identity path.",
+      "Fresh diagnostics Rust behavior 4/4 PASS: bounded timestamped redacted recent events, typed checks, exact reconnect history semantics, and allowlisted redacted user export.",
+      "Recent-event and export regressions prove Runtime API Key Authorization nonce credential/process internals and raw active-workspace path are absent from the corresponding redacted surfaces.",
+      "Fresh frontend Vitest 7/7, production build, architecture verification with all 28 rules active, G4 governance regression and LB-017 contract PASS."
+    ],
+    "group_transition": "G3_REVIEW_REQUIRED",
+    "historical_g3_review_generation": 6,
+    "historical_generation6_preserved": true,
+    "next_required_g3_adversarial_generation": 7,
+    "g3_generation_7_consumed": false,
+    "g4_unlocked": false,
+    "next_action": "Run fresh independent G3 adversarial review generation 7 on the current schema35 baseline. G4 remains blocked."
   }
 }
