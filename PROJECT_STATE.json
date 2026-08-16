@@ -3143,7 +3143,7 @@
     "human_review_required": true,
     "human_review_generation": 3,
     "g4_unlocked": false,
-    "review_decision_commit": null,
+    "review_decision_commit": "d88281f30a5024f65279b1bb24c414353a45f0f5",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }
