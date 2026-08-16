@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2741,5 +2741,16 @@
       "Typed text regressions PASS for 等待授权 已阻止 执行失败 已取消 while Running remains free of redundant 执行中 wording.",
       "Fresh LB-015 contract, frontend tests, production build, architecture verification, G4 regression and touched-file diff check PASS."
     ]
+  },
+  "lb015_schema35_verifier_alignment_reopen_2026_08_16": {
+    "status": "REWORK_REQUIRED",
+    "owner_pr": "LB-015",
+    "source": "LB-016 schema35 acceptance exposed stale LB-015 machine tests",
+    "findings": [
+      "ARCH-014 still hard-codes obsolete .activity-dot.active after the accepted direct CurrentTaskStatus class mapping introduced by 4f83644.",
+      "LB-015 administrator warning contract test still expects superseded 删除或覆盖重要文档 while current schema35 contract and shared component require 删除或覆盖重要文件."
+    ],
+    "required_correction": "Update only LB-015 verifier/test expectations to the already-ratified current product contracts; do not add dead compatibility CSS and do not revert current warning copy.",
+    "return_to_pr": "LB-016"
   }
 }
