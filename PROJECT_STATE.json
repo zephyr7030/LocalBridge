@@ -2847,5 +2847,29 @@
     "g4_unlocked": false,
     "review_decision_commit": "c7a8f701a9bd4b65566096020b13f384da9d5c18",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "g3_ui_tray_refinement_2026_08_16": {
+    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "source": "explicit_user_feedback_2026_08_16",
+    "contract_commit": "0014a2c",
+    "product_commit": "a4ce79e",
+    "invalidated_adversarial_generation": 7,
+    "invalidation_cause": "explicit_user_g3_ui_tray_refinement_2026_08_16",
+    "changes": [
+      "Dashboard primary data surface flattened; prior mandatory card/base color-difference and shadow treatment removed.",
+      "Dashboard 管理员权限 row replaced by read-only 权限模式 sourced from backend PermissionMode with no status dot and no mutation/UAC control.",
+      "Onboarding Screen4 action renamed 打开新建插件页, moved above 名称/Tunnel ID rows, with aligned shared label/value/copy columns.",
+      "Windows tray moved to dedicated simplified multi-resolution assets/icons/localbridge-tray.ico with 16/20/24/32/48 frames and exact 100/125/150/200% mapping without runtime resampling."
+    ],
+    "verified_before_review": [
+      "LB-013/LB-015/LB-016 targeted contracts PASS",
+      "ARCH-029 PASS",
+      "native Tauri/WebView 150% DPI fixed-window E2E PASS",
+      "full formal gate PASS including cargo test, clippy -D warnings, npm test/build, runtime-manifest, architecture 29/29, UI-language, G4 regression and diff check"
+    ],
+    "next_required_adversarial_generation": 8,
+    "human_review_generation": 3,
+    "human_review_blocked_until_generation8_pass": true,
+    "g4_unlocked": false
   }
 }

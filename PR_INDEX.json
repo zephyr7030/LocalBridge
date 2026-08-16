@@ -358,10 +358,10 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 7,
-      "human_review_status": "REQUIRED",
+      "human_review_status": "BLOCKED",
       "human_review_generation": 3,
       "review_provenance": {
         "generation": 7,
@@ -372,6 +372,11 @@
             "generation": 6,
             "commit": "d3ba82ffbd8e1a42f1e9a3fb5317f77559d2aa0a",
             "cause": "schema25_localbridge_agent_runtime_facade_redesign"
+          },
+          {
+            "generation": 7,
+            "commit": "c7a8f701a9bd4b65566096020b13f384da9d5c18",
+            "cause": "explicit_user_g3_ui_tray_refinement_2026_08_16"
           }
         ]
       }
