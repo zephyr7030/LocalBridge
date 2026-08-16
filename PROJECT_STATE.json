@@ -2916,7 +2916,7 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "g3_icon_scope_refinement_2026_08_16": {
-    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "status": "IMPLEMENTED_G3_GENERATION9_PASS",
     "source": "explicit_user_feedback_2026_08_16",
     "contract_commit": "9ef24e0",
     "product_commit": "b0789c6",
@@ -2936,7 +2936,51 @@
     ],
     "next_required_adversarial_generation": 9,
     "human_review_generation": 3,
-    "human_review_blocked_until_generation9_pass": true,
+    "human_review_blocked_until_generation9_pass": false,
     "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_9_2026_08_16": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 9,
+    "baseline_commit": "228a86af1134893502373b2661bceb7790ad2f0c",
+    "finding": "No blocking G3 defect was found on the post-icon/source-scope amendment schema35 baseline after fresh LB-013 through LB-017 contract verification, ARCH-029, complete Group-Release gates, real 150% DPI Tauri/WebView execution, and first-principles attacks on icon provenance and Dashboard PermissionMode-bound project scope.",
+    "evidence": [
+      "Fresh LB-013 through LB-017 contract gates PASS; ARCH-029 PASS with master-PNG provenance, unchanged accepted taskbar ICO, PNG-only tray derivation, read-only PermissionMode row and PermissionMode-bound project scope.",
+      "Fresh cargo test --locked PASS for 185 library tests plus integration/unit/doc-test targets and cargo clippy --locked --all-targets --all-features -D warnings PASS in an isolated CARGO_TARGET_DIR so the user-running LocalBridge instance was not stopped.",
+      "Fresh frontend Vitest 4 files / 7 tests PASS, production build PASS, runtime-manifest PASS, architecture 29/29 PASS, UI-language PASS, G4 governance regression PASS and git diff --check PASS.",
+      "Fresh native Tauri/WebView E2E PASS at 150% DPI: onboarding and Dashboard logical 780x620 / physical 1170x930, single custom chrome/window constraints intact, Screen3 permission geometry intact, Dashboard and Settings runtime probes intact.",
+      "Icon source attack PASS: assets/icons/localbridge.png is frozen at SHA-256 710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a; scripts/icons/derive-tray-icon.ps1 uses only source-PNG DrawImage crop/downscale and ICO packaging with no Fill/DrawString/new-graphics primitives.",
+      "Tray reproducibility PASS: crop 90,400,390,390 deterministically yields native 16/20/24/32/48 frames and SHA-256 5a9fce6e80050c9ce1620b8e28767052ece2536213ee04fe532596d3f4ec811d; runtime selects exact DPI frames without resampling.",
+      "Taskbar/left-bottom icon regression PASS: assets/icons/localbridge.ico remained unchanged at SHA-256 c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78 and remains the application bundle icon.",
+      "Dashboard scope attack PASS: adminModeFullAccess is defined only as projection.permission === admin; current-project display uses 全目录访问 in Admin and active workspace in Edit/Full, and project switching is blocked for the entire Admin mode without consulting PrivilegeState/Broker Active."
+    ],
+    "non_blocking_observations": [
+      "Two pre-review cargo invocations against the default target failed before tests because the user-running LocalBridge process legitimately held src-tauri/target/debug/localbridge.exe. The running product was not terminated; formal and generation9 Rust gates used an isolated CARGO_TARGET_DIR and completed PASS.",
+      "The tray crop intentionally prioritizes the original robot body/face from the master PNG at notification-area sizes; it does not preserve every high-detail element of the 1024px composition and introduces no replacement artwork."
+    ],
+    "verified_passes": [
+      "LB-013 -> LB-017 current contracts",
+      "ARCH-029",
+      "cargo test --locked -- --test-threads=1",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "npm test",
+      "npm run build",
+      "npm run verify:runtime-manifest",
+      "npm run verify:architecture",
+      "npm run verify:ui-language",
+      "g4-human-gate.test.mjs",
+      "native fixed-window/WebView2 at 150% DPI",
+      "PNG-to-tray deterministic derivation/source attack",
+      "Dashboard PermissionMode project-scope source attack",
+      "git diff --check"
+    ],
+    "g3_generation_9_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": null,
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }
