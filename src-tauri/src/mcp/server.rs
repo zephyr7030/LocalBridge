@@ -1387,8 +1387,53 @@ fn append_elevated_exec_tool(result: &mut Value) {
                     "additionalProperties": false
                 }
             ]
-        }
+        },
+        "outputSchema": elevated_exec_output_schema()
     }));
+}
+
+fn elevated_exec_output_schema() -> Value {
+    json!({
+        "oneOf":[
+            {
+                "type":"object",
+                "properties":{
+                    "operation":{"const":"filesystem"},
+                    "result":{"type":"object","additionalProperties":true}
+                },
+                "required":["operation","result"],
+                "additionalProperties":false
+            },
+            {
+                "type":"object",
+                "properties":{
+                    "outcome":{"type":"string","enum":["completed","timed_out","cancelled"]},
+                    "exit_code":{"type":["integer","null"]},
+                    "truncated":{"type":"boolean"}
+                },
+                "required":["outcome","exit_code","truncated"],
+                "additionalProperties":false
+            },
+            {
+                "type":"object",
+                "properties":{
+                    "ok":{"const":false},
+                    "error":{
+                        "type":"object",
+                        "properties":{
+                            "code":{"type":"string"},
+                            "message":{"type":"string"},
+                            "retryable":{"type":"boolean"}
+                        },
+                        "required":["code","message","retryable"],
+                        "additionalProperties":false
+                    }
+                },
+                "required":["ok","error"],
+                "additionalProperties":false
+            }
+        ]
+    })
 }
 
 fn privileged_request_id(
@@ -2679,8 +2724,8 @@ mod tests {
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 31,
-            "fresh serving instance did not identify the revision31 facade: {:#?}",
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 32,
+            "fresh serving instance did not identify the revision32 facade: {:#?}",
             provenance.body
         );
         let served_tools = post(
@@ -2693,6 +2738,13 @@ mod tests {
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "agent_workflow"))
             .expect("fresh serving instance exposes agent_workflow");
         assert!(served_agent["inputSchema"]["properties"]["path"].is_object());
+        assert_eq!(served_agent["outputSchema"]["type"], "object");
+        assert_eq!(served_agent["outputSchema"]["properties"]["ok"]["type"], "boolean");
+        assert_eq!(
+            served_agent["outputSchema"]["properties"]["data"]["properties"]["state"]["type"],
+            "string"
+        );
+        assert!(served_agent["outputSchema"]["properties"]["error"].is_object());
         let served_command_control = served_tools.body["result"]["tools"]
             .as_array()
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "command_control"))
@@ -4054,6 +4106,11 @@ mod tests {
             .filter(|tool| tool["name"] == "elevated_exec")
             .count();
         assert_eq!(elevated_count, 1);
+        let elevated_tool = tools.body["result"]["tools"]
+            .as_array()
+            .and_then(|tools| tools.iter().find(|tool| tool["name"] == "elevated_exec"))
+            .expect("elevated_exec tool definition");
+        assert!(elevated_tool["outputSchema"]["oneOf"].is_array());
 
         fake.set_state(PrivilegeState::AwaitingUac);
         let stale_active_tools = post(

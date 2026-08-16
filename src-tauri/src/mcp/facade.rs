@@ -22,7 +22,7 @@ use super::task_state::{
 };
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 31;
+pub const AGENT_API_REVISION: u32 = 32;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",
@@ -370,7 +370,174 @@ fn public_tool_schema(name: &str) -> Value {
     json!({
         "name": name,
         "description": description,
-        "inputSchema": input_schema
+        "inputSchema": input_schema,
+        "outputSchema": public_tool_output_schema(name)
+    })
+}
+
+fn public_tool_output_schema(name: &str) -> Value {
+    let data_schema = match name {
+        "workspace_context" => json!({
+            "type":"object",
+            "properties":{
+                "api_version":{"type":"integer"},
+                "facade_revision":{"type":"integer"},
+                "workspace":{"type":"string"},
+                "default_cwd":{"type":"string"},
+                "runtime":{"type":"string","enum":["ready"]}
+            },
+            "required":["api_version","facade_revision","workspace","default_cwd","runtime"],
+            "additionalProperties":false
+        }),
+        "agent_workflow" => json!({
+            "type":"object",
+            "properties":{
+                "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"]},
+                "objective":{"type":["string","null"]},
+                "state":{"type":"string","enum":["context_ready","running","completed"]},
+                "workspace":{"type":"object","additionalProperties":true},
+                "project":{"type":"object","additionalProperties":true},
+                "git_before":{"type":"object","additionalProperties":true},
+                "git_after":{"type":"object","additionalProperties":true},
+                "patch_applied":{"type":"boolean"},
+                "directory_changes":{"type":"array","items":{"type":"object","additionalProperties":true}},
+                "commands":{"type":"array","items":{"type":"object","additionalProperties":true}}
+            },
+            "required":["action","state","workspace","project","git_before","patch_applied","directory_changes","commands"],
+            "additionalProperties":false
+        }),
+        "exec_command" => command_output_data_schema(),
+        "command_control" => json!({
+            "type":"object",
+            "properties":{
+                "status":{"type":"string","enum":["running","completed","failed","timed_out","cancelled","lost"]},
+                "exit_code":{"type":"integer"},
+                "signal":{"type":"string"},
+                "session_id":{"type":"string"},
+                "output":{"type":"string"},
+                "output_ref":{"type":"string"},
+                "output_refs":{"type":"object","additionalProperties":{"type":"string"}},
+                "truncated":{"type":"boolean"},
+                "stream":{"type":"string","enum":["stdout","stderr"]},
+                "offset":{"type":"integer"},
+                "requested_offset":{"type":"integer"},
+                "limit":{"type":"integer"},
+                "next_offset":{"type":["integer","null"]},
+                "content":{"type":"string"}
+            },
+            "additionalProperties":false
+        }),
+        "task_control" => json!({
+            "type":"object",
+            "properties":{
+                "state":{"type":"string","enum":["idle","active","cancel_requested"]},
+                "execution_state":{"type":"string"},
+                "kind":{"type":"string"},
+                "summary":{"type":["string","null"]},
+                "cancelled_requests":{"type":"integer","minimum":0},
+                "last_terminal_command":{"type":["object","null"]}
+            },
+            "required":["state"],
+            "additionalProperties":false
+        }),
+        "git_workflow" => json!({
+            "type":"object",
+            "properties":{
+                "is_repo":{"type":"boolean"},
+                "repository_root":{"type":["string","null"]},
+                "head":{"type":["string","null"]},
+                "diff":{"type":"string"},
+                "content":{"type":"string"},
+                "entries":{"type":"array"},
+                "files":{"type":"array"},
+                "commits":{"type":"array"},
+                "lines":{"type":"array"},
+                "warnings":{"type":"array"}
+            },
+            "additionalProperties":true
+        }),
+        "document_workflow" => json!({
+            "type":"object",
+            "properties":{
+                "action":{"type":"string","enum":["create","convert","rebuild"]},
+                "path":{"type":"string"},
+                "source":{"type":"string"},
+                "text":{"type":"string"},
+                "encoding":{"type":"string"},
+                "start_line":{"type":"integer"},
+                "end_line":{"type":"integer"},
+                "total_lines":{"type":"integer"},
+                "total_bytes":{"type":"integer"},
+                "bytes_read":{"type":"integer"},
+                "truncated":{"type":"boolean"},
+                "created":{"type":"boolean"},
+                "converted":{"type":"boolean"},
+                "rebuilt":{"type":"boolean"}
+            },
+            "additionalProperties":false
+        }),
+        "view_image" => json!({
+            "type":"object",
+            "properties":{
+                "kind":{"const":"image"},
+                "path":{"type":"string"},
+                "mime_type":{"type":"string"},
+                "original_width":{"type":"integer","minimum":1},
+                "original_height":{"type":"integer","minimum":1},
+                "width":{"type":"integer","minimum":1},
+                "height":{"type":"integer","minimum":1},
+                "resized":{"type":"boolean"}
+            },
+            "required":["kind","path","mime_type","original_width","original_height","width","height","resized"],
+            "additionalProperties":false
+        }),
+        _ => unreachable!("registry only requests frozen public tools"),
+    };
+    json!({
+        "type":"object",
+        "properties":{
+            "ok":{"type":"boolean"},
+            "data":data_schema,
+            "error":public_error_output_schema()
+        },
+        "required":["ok"],
+        "additionalProperties":false
+    })
+}
+
+fn command_output_data_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "status":{"type":"string","enum":["running","completed","failed","timed_out","cancelled","lost"]},
+            "exit_code":{"type":"integer"},
+            "signal":{"type":"string"},
+            "session_id":{"type":"string"},
+            "output":{"type":"string"},
+            "output_ref":{"type":"string"},
+            "output_refs":{"type":"object","additionalProperties":{"type":"string"}},
+            "truncated":{"type":"boolean"}
+        },
+        "required":["status","session_id","output"],
+        "additionalProperties":false
+    })
+}
+
+fn public_error_output_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "code":{"type":"string","enum":[
+                "InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied",
+                "PrivilegedRouteNotAvailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
+                "ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable",
+                "RuntimeProtocolMismatch","RuntimeCapabilityMismatch","Internal"
+            ]},
+            "message":{"type":"string"},
+            "retryable":{"type":"boolean"}
+        },
+        "required":["code","message","retryable"],
+        "additionalProperties":false
     })
 }
 
@@ -3866,6 +4033,17 @@ mod tests {
             assert!(!names.contains(&private));
         }
         assert!(tools.iter().all(|tool| tool.get("inputSchema").is_some()));
+        assert!(tools.iter().all(|tool| tool.get("outputSchema").is_some()));
+        for tool in tools {
+            let schema = &tool["outputSchema"];
+            assert_eq!(schema["type"], "object");
+            assert!(schema["properties"]["ok"].is_object());
+            assert!(schema["properties"]["data"].is_object());
+            assert!(schema["properties"]["error"].is_object());
+            assert!(schema["required"]
+                .as_array()
+                .is_some_and(|required| required.iter().any(|item| item == "ok")));
+        }
     }
 
     #[test]
