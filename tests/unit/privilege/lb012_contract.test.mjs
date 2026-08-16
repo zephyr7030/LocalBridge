@@ -108,13 +108,14 @@ const catalogStart = server.indexOf("fn effective_tool_catalog(");
 const catalogEnd = server.indexOf("fn effective_tool_catalog_signature(", catalogStart);
 const effectiveCatalog = server.slice(catalogStart, catalogEnd);
 if (
-  !toolsList.includes("effective_tool_catalog(&guard, mode, privileged)") ||
+  !toolsList.includes("effective_tool_catalog(&guard, mode)") ||
   catalogStart < 0 ||
   catalogEnd <= catalogStart ||
-  !effectiveCatalog.includes("gateway.state().accepts_privileged_calls()") ||
-  !effectiveCatalog.includes('privileged_tool_visible(mode, "elevated_exec")')
+  effectiveCatalog.includes("accepts_privileged_calls()") ||
+  !effectiveCatalog.includes('privileged_tool_visible(mode, "elevated_exec")') ||
+  !effectiveCatalog.includes("append_elevated_exec_tool(&mut result)")
 ) {
-  throw new Error("LB-012 tools/list does not gate elevated_exec through the shared Active Broker catalog authority");
+  throw new Error("LB-012 tools/list does not stably advertise elevated_exec independently of Broker state");
 }
 const gatewayImplStart = control.indexOf("impl PrivilegedExecutionGateway");
 const gatewayStateStart = control.indexOf("pub fn state(&self) -> PrivilegeState", gatewayImplStart);
@@ -126,7 +127,7 @@ const gatewayState = control.slice(gatewayStateStart, gatewayExecuteStart);
 if (!gatewayState.includes("refresh_broker_liveness")) {
   throw new Error("LB-012 tools/list can observe cached Active without refreshing Broker process liveness");
 }
-for (const required of ["privileged.start_execute", "privileged.poll_execute", "PrivilegeState::Active", "TaskExecutionState::AwaitingAuthorization", "TaskExecutionState::Blocked", "SafeTaskSummary::Omitted"]) {
+for (const required of ["if !matches!(privileged.state(), PrivilegeState::Active { .. })", "privileged.start_execute", "privileged.poll_execute", "PrivilegeState::Active", "TaskExecutionState::AwaitingAuthorization", "TaskExecutionState::Blocked", "SafeTaskSummary::Omitted"]) {
   const source = required === "SafeTaskSummary::Omitted" ? server : handler;
   if (!source.includes(required)) throw new Error(`LB-012 broker route missing: ${required}`);
 }
