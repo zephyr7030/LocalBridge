@@ -3051,7 +3051,7 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "g2_stable_privileged_tool_catalog_refinement_2026_08_16": {
-    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "status": "IMPLEMENTED_G2_GENERATION22_PASS",
     "source": "explicit_user_stable_admin_tool_visibility_2026_08_16",
     "product_commit": "845b1d9",
     "contract_commit": "ccf5775",
@@ -3069,9 +3069,48 @@
       "Full formal gate PASS in isolated CARGO_TARGET_DIR: cargo test, clippy -D warnings, ARCH-026/027/030/031, frontend tests/build, runtime manifest, architecture 31/31, UI language, G4 fail-closed regression and git diff check."
     ],
     "next_required_g2_adversarial_generation": 22,
-    "g3_blocked_until_g2_generation22_pass": true,
+    "g3_blocked_until_g2_generation22_pass": false,
     "g3_next_required_adversarial_generation_after_upstream_pass": 11,
     "human_review_generation": 3,
     "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_22_2026_08_16": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 22,
+    "baseline_commit": "bcae3a462bc57bf1d6328164537e97b312252c9c",
+    "finding": "No blocking G2 defect was found on the revision33 stable privileged-tool catalog baseline. elevated_exec is continuously discoverable but remains fail-closed at tools/call: Edit and Full cannot obtain administrator authority, Elevated without an Active Broker cannot execute, and only reviewed Elevated plus Active Broker requests reach the Broker/UAC administrator route.",
+    "evidence": [
+      "Fresh LB-008, LB-009, LB-011 and updated LB-012 contracts PASS; ARCH-026, ARCH-027, ARCH-030 and new ARCH-031 PASS with architecture inventory 31/31.",
+      "Real bundled Full tools/list exposes eight core tools plus elevated_exec; real Edit tools/list exposes five Edit core tools plus elevated_exec while exec_command command_control and task_control remain hidden in Edit.",
+      "Fresh elevated_exec lifecycle behavior PASS: Edit and Full tools/call return typed PrivilegedRouteNotAvailable, Elevated AwaitingUac returns typed ElevationRequired, and Active Broker remains mandatory before privileged dispatch.",
+      "Full-to-Elevated and Broker AwaitingUac-to-Active transitions retain the same MCP session because privileged visibility is stable; Edit-to-Full or Edit-to-Elevated still fail stale sessions when the actual core catalog changes.",
+      "Fresh ordinary system-management policy test PASS and schema34 active-workspace script/traversal test PASS; LocalBridge control-plane remains deny-always and ordinary Elevated routes remain ordinary-user routes.",
+      "Complete revision33 formal gate PASS in isolated CARGO_TARGET_DIR: cargo test including 185 library tests and all integration targets, clippy -D warnings, frontend tests/build, runtime-manifest, architecture 31/31, UI-language, G4 fail-closed regression and git diff check."
+    ],
+    "non_blocking_observations": [
+      "No fresh live UAC prompt was required for this visibility-only redesign because administrator-token acquisition semantics did not change; the Broker Active execution boundary is covered by existing real Broker tests plus the prior live UAC acceptance and current call-time gate tests."
+    ],
+    "verified_passes": [
+      "LB-006 -> LB-012 current security contracts",
+      "stable elevated_exec advertisement in Edit Full Elevated",
+      "typed call-time denial outside Elevated Active Broker",
+      "cargo test --locked -- --test-threads=1",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "ARCH-026/027/030/031",
+      "npm test",
+      "npm run build",
+      "npm run verify:runtime-manifest",
+      "npm run verify:architecture 31/31",
+      "npm run verify:ui-language",
+      "g4-human-gate.test.mjs",
+      "git diff --check"
+    ],
+    "g2_generation_22_consumed": true,
+    "g3_unlocked_for_review": true,
+    "g4_unlocked": false,
+    "review_decision_commit": null,
+    "next_action": "Run fresh independent G3 adversarial review generation 11 on the new upstream G2 revision33 baseline. Human G3-to-G4 review generation 3 and G4 remain blocked until generation11 passes."
   }
 }
