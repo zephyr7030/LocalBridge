@@ -644,6 +644,64 @@ const ADMIN_MODE_SAFETY_WARNING_AMENDMENT_2026_08_14 = Object.freeze({
   },
 });
 
+const PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16 = Object.freeze({
+  schemaVersion: 34,
+  baselineSchemaVersion: 33,
+  removedRules: {
+    permission_mode_full_workspace_bound: true,
+  },
+  addedRules: {
+    permission_mode_edit_structured_workspace_only: true,
+    permission_mode_edit_ordinary_shell_process_forbidden: true,
+    permission_mode_full_structured_inputs_workspace_bound: true,
+    permission_mode_full_workdir_workspace_bound: true,
+    permission_mode_full_explicit_path_arguments_workspace_bound: true,
+    permission_mode_full_ordinary_shell_process_allowed: true,
+    permission_mode_full_ordinary_process_token: "current_windows_user",
+    permission_mode_full_shell_child_os_workspace_isolation_guaranteed: false,
+    permission_mode_full_shell_child_os_access_scope: "current_windows_user_token",
+    permission_mode_elevated_ordinary_route_token: "current_windows_user",
+    permission_mode_elevated_administrator_route: "elevated_exec_broker_uac",
+    policy_denial_typed_error_projection_required: true,
+    full_workspace_script_extension_alone_not_denied: true,
+    dynamic_privileged_tool_catalog_refresh_required: true,
+    privileged_tool_stale_catalog_call_fail_closed: true,
+  },
+  lb006: {
+    artifactReplacements: [
+      ["mode-aware LocalBridge structured path/workdir authority adapter: Edit and Full structured document image Git file edit directory and exec workdir/typed path inputs remain active-workspace-bound; this boundary does not claim OS-level filesystem confinement for Full child processes, while Elevated administrator paths are Broker-backed", "mode-aware public path/workdir authority adapter: Edit and Full are active-workspace-relative while Elevated privileged operations may address administrator-token-scoped filesystem paths outside the active workspace"],
+      ["permission-scope-aware Git repository resolver: LocalBridge ordinary Git routing remains bounded to the active workspace in Edit Full and ordinary Elevated routes; administrator-token outside-workspace authority is available only through the separate Broker-backed privileged route", "permission-scope-aware Git repository resolver: Edit and Full stop at the active workspace root while Elevated may resolve administrator-token-accessible repositories outside that root"],
+    ],
+    testReplacements: [
+      ["Edit and Full LocalBridge structured document image Git file edit directory and exec workdir/typed path inputs remain active-workspace-relative and reject drive UNC verbatim POSIX absolute or parent traversal; this structured boundary does not sandbox Full child-process filesystem access, while Elevated privileged routes accept administrator-token-accessible absolute paths", "Edit and Full document image Git and exec workdir inputs remain active-workspace-relative and reject drive UNC verbatim POSIX absolute or parent traversal; Elevated privileged filesystem and administrator execution routes accept administrator-token-accessible absolute paths outside the active workspace without weakening Edit or Full"],
+      ["ordinary Git repository discovery never escapes the active workspace in Edit Full or ordinary Elevated routing; administrator-token outside-workspace repository authority requires the separate Broker-backed privileged route, and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository", "Git repository discovery never escapes the active workspace in Edit or Full; Elevated may resolve repositories outside the active workspace only through its administrator-token scope, and git_diff never uses non-git fallback once the LocalBridge resolver has confirmed a repository"],
+      ["Elevated path authority is mode-aware rather than a lexical workspace bypass: LocalBridge structured ordinary routes stay workspace-bound, Full child-process filesystem authority remains the current ordinary-user token without an OS workspace-sandbox promise, and administrator-token operations outside the active workspace are dispatched only through a Broker-backed privileged filesystem or administrator execution route", "Elevated path authority is mode-aware rather than a lexical workspace bypass: the ordinary user route stays workspace-bound, while operations outside the active workspace are dispatched only through a Broker-backed privileged filesystem or administrator execution route and are bounded by the administrator token"],
+    ],
+    addedTests: [
+      "Edit exposes and authorizes no ordinary shell or process execution, including direct exec_command calls, stale cached calls and agent_workflow command indirection; denial occurs before any process launch",
+      "Full allows trusted cmd PowerShell and development process execution only under the current Windows ordinary-user token; the ordinary route never receives or inherits Broker administrator authority",
+      "Full child-process filesystem access is governed by the current Windows ordinary-user token and LocalBridge makes no OS-level active-workspace sandbox guarantee for those descendants; outside-workspace child access permitted by that token is not itself a contract defect while LocalBridge structured path and workdir inputs remain active-workspace-bound",
+    ],
+  },
+  lb007: {
+    addedArtifacts: [
+      "stable public typed policy-denial error projection",
+      "protocol-correct privileged tool catalog lifecycle across permission and Broker transitions",
+    ],
+    testReplacements: [["Edit and Full cannot obtain administrator-token filesystem process command or system-maintenance capability through workflow indirection; Full ordinary process descendants retain only the current Windows ordinary-user token, Elevated may declare privileged capabilities only for the Broker-backed administrator route, and LocalBridge control-plane remains deny-always", "Edit and Full cannot obtain administrator-token filesystem process command or system-maintenance capability through workflow indirection; Elevated may declare those privileged capabilities only for the Broker-backed administrator route and LocalBridge control-plane remains deny-always"]],
+    addedTests: [
+      "public MCP policy denial preserves stable typed LocalBridge reason categories so capability or policy denial workspace denial and privileged-route or elevation requirements do not collapse into one generic JSON-RPC denial",
+      "Full ordinary invocation of a validated active-workspace .ps1 .cmd or .bat script is not denied solely because of its file extension; dynamic script resolution unsafe indirection provider mutation and other independently review-required behavior remain fail-closed",
+      "an already-connected MCP session cannot remain permanently unaware of a permission or Broker capability change: entering Elevated plus Active Broker causes a protocol-correct tools/list refresh notification or controlled reconnect, leaving Elevated revokes the privileged catalog capability, and stale calls are still re-authorized fail-closed",
+    ],
+  },
+  lb012: {
+    addedArtifacts: ["privileged tool publication and revocation lifecycle for already-connected MCP sessions"],
+    testReplacements: [["Elevated plus Active Broker can read create modify rename and delete administrator-token-accessible filesystem objects outside the active workspace through a privileged filesystem route; Edit structured operations and Full LocalBridge structured filesystem/path tools remain active-workspace-bound, while Full ordinary child-process filesystem access is governed by the current Windows ordinary-user token and is outside LocalBridge's OS-level workspace-sandbox guarantee", "Elevated plus Active Broker can read create modify rename and delete administrator-token-accessible filesystem objects outside the active workspace through a privileged filesystem route; Edit and Full remain unable to cross the active workspace authorization root"]],
+    addedTests: ["an already-connected MCP session that enters Elevated and reaches Broker Active reliably receives or is forced through a protocol-correct tool-capability refresh or reconnect so elevated_exec becomes discoverable and callable; leaving Elevated revokes or denies it, a stale catalog call fails closed, and ordinary exec_command remains current-user throughout"],
+  },
+});
+
 const ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15 = Object.freeze({
   schemaVersion: 33,
   baselineSchemaVersion: 32,
@@ -1385,6 +1443,53 @@ function normalizeReplacements(array, replacements) {
   });
 }
 
+export function hasExactPermissionExecutionModelAmendment20260816(contractsDoc) {
+  if (contractsDoc?.schema_version !== PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.schemaVersion) return false;
+  for (const key of Object.keys(PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.removedRules)) {
+    if (Object.hasOwn(contractsDoc?.rules ?? {}, key)) return false;
+  }
+  for (const [key, expected] of Object.entries(PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb006 = contractsDoc?.prs?.["LB-006"];
+  const lb007 = contractsDoc?.prs?.["LB-007"];
+  const lb012 = contractsDoc?.prs?.["LB-012"];
+  if (!lb006 || !lb007 || !lb012) return false;
+  return hasReplacement(lb006.required_artifacts, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb006.artifactReplacements)
+    && hasReplacement(lb006.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb006.testReplacements)
+    && containsAll(lb006.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb006.addedTests)
+    && containsAll(lb007.required_artifacts, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb007.addedArtifacts)
+    && hasReplacement(lb007.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb007.testReplacements)
+    && containsAll(lb007.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb007.addedTests)
+    && containsAll(lb012.required_artifacts, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb012.addedArtifacts)
+    && hasReplacement(lb012.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb012.testReplacements)
+    && containsAll(lb012.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb012.addedTests);
+}
+
+export function normalizePermissionExecutionModelAmendment20260816(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.baselineSchemaVersion;
+  for (const key of Object.keys(PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.addedRules)) delete normalized.rules[key];
+  for (const [key, old] of Object.entries(PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.removedRules)) normalized.rules[key] = structuredClone(old);
+  const lb006 = normalized.prs?.["LB-006"];
+  const lb007 = normalized.prs?.["LB-007"];
+  const lb012 = normalized.prs?.["LB-012"];
+  if (lb006) {
+    lb006.required_artifacts = normalizeReplacements(lb006.required_artifacts, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb006.artifactReplacements);
+    lb006.required_tests = removeItems(normalizeReplacements(lb006.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb006.testReplacements), PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb006.addedTests);
+  }
+  if (lb007) {
+    lb007.required_artifacts = removeItems(lb007.required_artifacts, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb007.addedArtifacts);
+    lb007.required_tests = removeItems(normalizeReplacements(lb007.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb007.testReplacements), PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb007.addedTests);
+  }
+  if (lb012) {
+    lb012.required_artifacts = removeItems(lb012.required_artifacts, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb012.addedArtifacts);
+    lb012.required_tests = removeItems(normalizeReplacements(lb012.required_tests, PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb012.testReplacements), PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.lb012.addedTests);
+  }
+  return normalized;
+}
+
 export function hasExactElevatedScopeAndUiGeometryAmendment20260815(contractsDoc) {
   if (contractsDoc?.schema_version !== ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.schemaVersion) return false;
   for (const [key, expected] of Object.entries(ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.addedRules)) {
@@ -1743,6 +1848,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16.schemaVersion) {
+    if (!hasExactPermissionExecutionModelAmendment20260816(authorizationContracts)) {
+      findings.push(`${expected.id}:permission-execution-model-20260816-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizePermissionExecutionModelAmendment20260816(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15.schemaVersion) {
     if (!hasExactElevatedScopeAndUiGeometryAmendment20260815(authorizationContracts)) {
       findings.push(`${expected.id}:elevated-scope-ui-geometry-20260815-contract-amendment-drift`);

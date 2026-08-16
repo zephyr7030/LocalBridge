@@ -32,9 +32,10 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "G2 generation20 / LB-006: Full shell execution is only workdir/path-parameter bounded; PowerShell -EncodedCommand and cmd built-ins can access filesystem paths outside the active workspace, and agent_workflow.commands shares the same route.",
+    "Schema34 / LB-006 reacceptance: Edit must expose and authorize no ordinary shell/process execution, while Full ordinary cmd/PowerShell/development processes must run only under the current Windows ordinary-user token; LocalBridge structured path/workdir/Git/document/image/file/edit/directory inputs remain active-workspace-bound. Full child-process filesystem access outside the active workspace is not itself a defect when permitted by that ordinary-user token because schema34 makes no OS-level workspace-sandbox guarantee.",
     "G2 generation20 / LB-007: policy denials collapse to generic JSON-RPC -32001 instead of preserving stable typed denial reasons such as capability/privilege/elevation distinctions.",
-    "G2 generation20 / LB-007: the fail-closed review_word extension rule blanket-classifies ordinary .ps1/.cmd/.bat script invocation as review-required, so Full lacks the expected ordinary workspace script execution path."
+    "G2 generation20 / LB-007: the fail-closed review_word extension rule blanket-classifies ordinary .ps1/.cmd/.bat script invocation as review-required, so Full lacks the expected ordinary workspace script execution path.",
+    "Schema34 / LB-007 + LB-012 reacceptance: an already-connected MCP client must reliably discover elevated_exec after entering Elevated and Broker Active through protocol-correct tools/list refresh or controlled reconnect, and leaving Elevated must revoke/deny that capability while stale calls fail closed and ordinary exec_command remains current-user."
   ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
@@ -115,8 +116,18 @@
     "background_warning": false,
     "ai_can_approve_warning": false,
     "edit_workspace_bound": true,
-    "full_workspace_bound": true,
+    "edit_structured_workspace_only": true,
+    "edit_ordinary_shell_process_forbidden": true,
+    "full_structured_inputs_workspace_bound": true,
+    "full_workdir_workspace_bound": true,
+    "full_explicit_path_arguments_workspace_bound": true,
+    "full_ordinary_shell_process_allowed": true,
+    "full_ordinary_process_token": "current_windows_user",
+    "full_shell_child_os_workspace_isolation_guaranteed": false,
+    "full_shell_child_os_access_scope": "current_windows_user_token",
     "elevated_workspace_bound": false,
+    "elevated_ordinary_route_token": "current_windows_user",
+    "elevated_administrator_route": "elevated_exec_broker_uac",
     "elevated_full_filesystem_access": true,
     "elevated_general_admin_process_command_execution": true,
     "elevated_system_maintenance": true,
@@ -184,7 +195,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Repair G2 generation20 from LB-006: make Full shell/process filesystem authority actually active-workspace-contained rather than workdir-only, including PowerShell/cmd and agent_workflow.commands. Then repair LB-007 typed policy denial projection and ordinary workspace script execution without weakening shell-indirection safety. Strictly reaccept LB-007 through LB-012 and run fresh G2 adversarial generation21; G3 remains blocked."
+    "next_action": "Reaccept LB-006 against schema34: Edit must have no ordinary process route; Full ordinary cmd/PowerShell/development execution must remain current-Windows-user only; LocalBridge structured inputs and workdir remain active-workspace-bound; do not implement or require an OS-level Full child-process workspace sandbox. Then repair/reaccept LB-007 typed policy denial projection, validated workspace script execution and privileged tool catalog refresh lifecycle, continue strict LB-008 through LB-012 reacceptance including elevated_exec publication/revocation, then run fresh G2 adversarial generation21; G3 remains blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -2341,5 +2352,43 @@
     "g3_unlocked": false,
     "g4_unlocked": false,
     "review_decision_commit": "4384d1fc26bde6784d49a05d72d0d8ed559f5d55"
+  },
+  "schema34_permission_execution_model_2026_08_16": {
+    "status": "CONTRACT_RATIFIED_REWORK_REQUIRED",
+    "source": "explicit_user_product_strategy_2026_08_16",
+    "contract_schema_version": 34,
+    "architecture_rules_schema_version": 10,
+    "owner_prs": [
+      "LB-006",
+      "LB-007",
+      "LB-012"
+    ],
+    "mode_contract": {
+      "Edit": "strict active-workspace LocalBridge structured file edit directory Git document and image operations only; ordinary shell/process execution is forbidden including workflow indirection",
+      "Full": "trusted cmd PowerShell and development processes execute only under the current Windows ordinary-user token; LocalBridge structured tools workdir and explicit typed path arguments remain active-workspace-bound; child processes have no LocalBridge OS-level active-workspace filesystem-isolation guarantee",
+      "Elevated": "ordinary routes remain current Windows ordinary-user token; only elevated_exec through Broker plus Windows UAC receives administrator-token-scoped full-filesystem administrator process/command and system-maintenance authority"
+    },
+    "generation20_disposition": {
+      "lb006_full_shell_workspace_escape": "SUPERSEDED_BY_SCHEMA34_PRODUCT_POLICY",
+      "lb007_typed_policy_denial": "REMAINS_BLOCKER",
+      "lb007_workspace_script_extension": "REMAINS_BLOCKER"
+    },
+    "additional_reacceptance": [
+      "LB-006 must prove Edit cannot launch ordinary processes and Full ordinary execution never inherits Broker or administrator authority while structured LocalBridge inputs remain active-workspace-bound",
+      "LB-007/LB-012 must provide protocol-correct elevated_exec publication and revocation for already-connected MCP clients across Elevated/Broker transitions, with stale calls fail-closed",
+      "LocalBridge control-plane mutation remains deny-always in every mode"
+    ],
+    "historical_generation20_record_preserved": true,
+    "current_execution_pointer_unchanged": {
+      "current_group": "G2",
+      "current_pr": "LB-006"
+    },
+    "g2_status": "REWORK_REQUIRED",
+    "historical_review_generation": 20,
+    "historical_review_status": "FAIL",
+    "next_required_g2_adversarial_generation": 21,
+    "g2_generation_21_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }

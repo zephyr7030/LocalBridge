@@ -77,4 +77,4 @@ if (!brokerTests.includes("actual_broker_structured_filesystem_roundtrips_outsid
   throw new Error("ARCH-027 outside-workspace Broker filesystem behavioral evidence missing");
 }
 
-console.log("ARCH-027_VERIFY=PASS edit_full_active_workspace=true ordinary_route_no_broker_authority=true elevated_active_broker=true administrator_absolute_scope=true outside_workspace_broker_only=true");
+console.log("ARCH-027_VERIFY=PASS structured_localbridge_paths_active_workspace=true ordinary_route_no_broker_authority=true full_process_token=current_windows_user_contract full_os_workspace_sandbox_guaranteed=false elevated_active_broker=true administrator_absolute_scope=true administrator_route_broker_only=true");

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLb007PolicyAndCmdCodepageAmendment20260815, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLb007PolicyAndCmdCodepageAmendment20260815, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
-import { hasExactElevatedScopeAndUiGeometryAmendment20260815, normalizeElevatedScopeAndUiGeometryAmendment20260815, hasExactWindowsSystemManagementPrivilegeAmendment20260815, normalizeWindowsSystemManagementPrivilegeAmendment20260815 } from "./g4-human-gate.mjs";
+import { hasExactPermissionExecutionModelAmendment20260816, normalizePermissionExecutionModelAmendment20260816, hasExactElevatedScopeAndUiGeometryAmendment20260815, normalizeElevatedScopeAndUiGeometryAmendment20260815, hasExactWindowsSystemManagementPrivilegeAmendment20260815, normalizeWindowsSystemManagementPrivilegeAmendment20260815 } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -259,7 +259,10 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema33Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema34Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactPermissionExecutionModelAmendment20260816(schema34Contracts), true);
+const schema33Contracts = normalizePermissionExecutionModelAmendment20260816(schema34Contracts);
+assert.equal(schema33Contracts.schema_version, 33);
 assert.equal(hasExactElevatedScopeAndUiGeometryAmendment20260815(schema33Contracts), true);
 const schema32Contracts = normalizeElevatedScopeAndUiGeometryAmendment20260815(schema33Contracts);
 assert.equal(schema32Contracts.schema_version, 32);
@@ -408,6 +411,32 @@ for (const rule of [
   weakened.rules[rule] = rule === "windows_system_management_programs" ? ["reg.exe"] : false;
   assert.equal(hasExactWindowsSystemManagementPrivilegeAmendment20260815(weakened), false, rule);
 }
+for (const [rule, drift] of [
+  ["permission_mode_edit_ordinary_shell_process_forbidden", false],
+  ["permission_mode_full_ordinary_shell_process_allowed", false],
+  ["permission_mode_full_ordinary_process_token", "administrator"],
+  ["permission_mode_full_shell_child_os_workspace_isolation_guaranteed", true],
+  ["permission_mode_elevated_ordinary_route_token", "administrator"],
+  ["permission_mode_elevated_administrator_route", "ordinary_exec_command"],
+  ["policy_denial_typed_error_projection_required", false],
+  ["dynamic_privileged_tool_catalog_refresh_required", false],
+]) {
+  const weakened = structuredClone(schema34Contracts);
+  weakened.rules[rule] = drift;
+  assert.equal(hasExactPermissionExecutionModelAmendment20260816(weakened), false, rule);
+}
+const schema34RestoredOldFullBoundary = structuredClone(schema34Contracts);
+schema34RestoredOldFullBoundary.rules.permission_mode_full_workspace_bound = true;
+assert.equal(hasExactPermissionExecutionModelAmendment20260816(schema34RestoredOldFullBoundary), false);
+const schema34MissingNoSandboxProof = structuredClone(schema34Contracts);
+schema34MissingNoSandboxProof.prs["LB-006"].required_tests = schema34MissingNoSandboxProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("Full child-process filesystem access is governed"));
+assert.equal(hasExactPermissionExecutionModelAmendment20260816(schema34MissingNoSandboxProof), false);
+const schema34MissingEditNoProcessProof = structuredClone(schema34Contracts);
+schema34MissingEditNoProcessProof.prs["LB-006"].required_tests = schema34MissingEditNoProcessProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("Edit exposes and authorizes no ordinary shell"));
+assert.equal(hasExactPermissionExecutionModelAmendment20260816(schema34MissingEditNoProcessProof), false);
+const schema34MissingToolRefreshProof = structuredClone(schema34Contracts);
+schema34MissingToolRefreshProof.prs["LB-012"].required_tests = schema34MissingToolRefreshProof.prs["LB-012"].required_tests.filter((item) => !item.startsWith("an already-connected MCP session that enters Elevated"));
+assert.equal(hasExactPermissionExecutionModelAmendment20260816(schema34MissingToolRefreshProof), false);
 for (const rule of [
   "ui_text_button_content_sized_required",
   "ui_secondary_non_title_font_size_unified_required",

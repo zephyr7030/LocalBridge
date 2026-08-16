@@ -1,5 +1,5 @@
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "status": "ENFORCEMENT_BASELINE_LB_001",
   "rules": [
     {
@@ -215,7 +215,7 @@
     },
     {
       "id": "ARCH-027",
-      "description": "Edit and Full filesystem/process authority is bounded by the active workspace; Elevated with an Active Broker may operate outside that root only within the administrator token scope",
+      "description": "Edit permits only active-workspace structured LocalBridge operations and no ordinary process execution; Full keeps LocalBridge structured path/workdir/Git/document/image/file/edit/directory inputs active-workspace-bound but runs allowed shell/process descendants under the current Windows ordinary-user token without an OS-level workspace filesystem-sandbox guarantee; Elevated ordinary routes remain current-user and only elevated_exec through an Active Broker/UAC receives administrator-token filesystem/process/system-maintenance authority",
       "severity": "error",
       "verification": { "mode": "deferred", "activate_at_pr": "LB-012", "reason": "Mode-aware privileged filesystem authority is completed by LB-012", "type": "permission_scope_boundary" }
     },
