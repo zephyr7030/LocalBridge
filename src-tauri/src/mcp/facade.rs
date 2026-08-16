@@ -13,7 +13,7 @@ use crate::state::{
 
 use super::http::McpCancellationClient;
 use super::path_authority::{PathAuthority, PathAuthorityError, workspace_relative_path_valid};
-use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision};
+use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision, static_workspace_script_target};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use super::shell::{ShellExecutionSpec, ShellExecutor, ShellResolveError, ShellSelector};
 use super::task_state::{
@@ -40,6 +40,9 @@ pub enum FacadeErrorCode {
     NotFound,
     WorkspaceDenied,
     CapabilityDenied,
+    PolicyDenied,
+    PrivilegedRouteNotAvailable,
+    ElevationRequired,
     ProcessFailed,
     ProcessTimedOut,
     ProcessCancelled,
@@ -58,6 +61,9 @@ impl FacadeErrorCode {
             Self::NotFound => "NotFound",
             Self::WorkspaceDenied => "WorkspaceDenied",
             Self::CapabilityDenied => "CapabilityDenied",
+            Self::PolicyDenied => "PolicyDenied",
+            Self::PrivilegedRouteNotAvailable => "PrivilegedRouteNotAvailable",
+            Self::ElevationRequired => "ElevationRequired",
             Self::ProcessFailed => "ProcessFailed",
             Self::ProcessTimedOut => "ProcessTimedOut",
             Self::ProcessCancelled => "ProcessCancelled",
@@ -115,6 +121,38 @@ impl std::error::Error for FacadeError {}
 pub struct FacadeDenied {
     pub reason: DenyReason,
     pub capability: Capability,
+}
+
+impl FacadeDenied {
+    pub fn to_mcp_result(self) -> Value {
+        let (code, message, retryable) = match self.reason {
+            DenyReason::VerbatimExecutionPath => (
+                FacadeErrorCode::WorkspaceDenied,
+                "工作区路径参数无效",
+                false,
+            ),
+            DenyReason::PrivilegedRouteNotAvailable | DenyReason::ElevatedExecNotReviewed => (
+                FacadeErrorCode::PrivilegedRouteNotAvailable,
+                "该操作需要受控管理员路由",
+                false,
+            ),
+            DenyReason::UnknownTool | DenyReason::NetworkRouteNotAvailable => (
+                FacadeErrorCode::CapabilityDenied,
+                "请求的能力当前不可用",
+                false,
+            ),
+            DenyReason::ControlPlane
+            | DenyReason::ToolNotAllowedInMode
+            | DenyReason::IndirectProcessExecInEdit
+            | DenyReason::IndirectControlPlane
+            | DenyReason::IndirectUnknownCapability => (
+                FacadeErrorCode::PolicyDenied,
+                "请求被 LocalBridge 权限策略拒绝",
+                false,
+            ),
+        };
+        FacadeError::new(code, message, retryable).to_mcp_result()
+    }
 }
 
 #[derive(Debug)]
@@ -1146,6 +1184,56 @@ impl CodingToolsRuntimeAdapter {
             .map_err(normalize_path_authority_error)
     }
 
+    fn validate_static_workspace_script(
+        &self,
+        execution: &ShellExecutionSpec,
+    ) -> Result<(), FacadeError> {
+        let shell = match execution.shell {
+            ShellSelector::Auto => "auto",
+            ShellSelector::Powershell => "powershell",
+            ShellSelector::Pwsh => "pwsh",
+            ShellSelector::WindowsPowershell => "windows_powershell",
+            ShellSelector::Cmd => "cmd",
+        };
+        let Some(target) = static_workspace_script_target(shell, &execution.command) else {
+            return Ok(());
+        };
+
+        let cwd = execution.cwd.to_string_lossy().replace('\\', "/");
+        let target = target.replace('\\', "/");
+        if !workspace_relative_path_valid(&cwd) || !workspace_relative_path_valid(&target) {
+            return Err(FacadeError::new(
+                FacadeErrorCode::WorkspaceDenied,
+                "脚本目标必须位于当前工作区内",
+                false,
+            ));
+        }
+        let relative = if cwd == "." {
+            target
+        } else {
+            format!("{}/{}", cwd.trim_end_matches('/'), target)
+        };
+        if !workspace_relative_path_valid(&relative) {
+            return Err(FacadeError::new(
+                FacadeErrorCode::WorkspaceDenied,
+                "脚本目标必须位于当前工作区内",
+                false,
+            ));
+        }
+        let resolved = PathAuthority::active_workspace(&self.workspace)
+            .map_err(normalize_path_authority_error)?
+            .resolve_existing(&relative)
+            .map_err(normalize_path_authority_error)?;
+        if !resolved.is_file() {
+            return Err(FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "脚本目标必须是文件",
+                false,
+            ));
+        }
+        Ok(())
+    }
+
     fn probe_private_result_semantics(&mut self) -> Result<(), FacadeError> {
         let invocation = self
             .shell_executor
@@ -1363,6 +1451,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         request: ShellCommandRequest,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
+        self.validate_static_workspace_script(&request.execution)?;
         let public_session_id = self.public_commands.start_session(&self.task_state)?;
         let outcome = (|| {
             let invocation = self
@@ -3071,11 +3160,9 @@ fn normalize_path_authority_error(error: PathAuthorityError) -> FacadeError {
             "工作区路径参数无效",
             false,
         ),
-        PathAuthorityError::NotFound => FacadeError::new(
-            FacadeErrorCode::NotFound,
-            "工作区文件不存在",
-            false,
-        ),
+        PathAuthorityError::NotFound => {
+            FacadeError::new(FacadeErrorCode::NotFound, "工作区文件不存在", false)
+        }
     }
 }
 

@@ -21,7 +21,10 @@ use crate::state::{
     PrivilegeState, SafeTaskSummary, TaskExecutionState, TaskKind,
 };
 
-use super::facade::{AgentFacade, CodingToolsRuntimeAdapter, FacadeCallError};
+use super::facade::{
+    AgentFacade, CodingToolsRuntimeAdapter, FacadeCallError, FacadeDenied, FacadeError,
+    FacadeErrorCode, V1_CORE_TOOL_NAMES,
+};
 use super::http::McpCancellationClient;
 use super::policy::CapabilityPolicy;
 use super::runtime::CodingToolsRuntime;
@@ -39,6 +42,12 @@ const MAX_CONNECTION_WORKERS: usize = 32;
 static SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Debug, Clone)]
+struct McpSession {
+    protocol: String,
+    tool_catalog_signature: String,
+}
+
 struct ConnectionContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     public_policy: &'a RwLock<CapabilityPolicy>,
@@ -46,7 +55,7 @@ struct ConnectionContext<'a> {
     permission_mode: &'a RwLock<PermissionMode>,
     current_task: &'a CurrentTaskProjection,
     task_state: &'a CommandTaskStateStore,
-    sessions: &'a Mutex<HashMap<String, String>>,
+    sessions: &'a Mutex<HashMap<String, McpSession>>,
     active_requests: &'a Mutex<Vec<Value>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
     privileged_requests: &'a Mutex<Vec<(Value, String)>>,
@@ -79,6 +88,7 @@ struct ServeContext {
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
     task_state: CommandTaskStateStore,
+    sessions: Arc<Mutex<HashMap<String, McpSession>>>,
     privileged: Option<Arc<dyn PrivilegedExecution>>,
     shutdown: mpsc::Receiver<()>,
 }
@@ -387,6 +397,7 @@ pub struct PolicyEnforcementRuntime {
     current_task: CurrentTaskProjection,
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
+    sessions: Arc<Mutex<HashMap<String, McpSession>>>,
     shutdown: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<AgentFacade<CodingToolsRuntimeAdapter>>>,
 }
@@ -475,8 +486,10 @@ impl PolicyEnforcementRuntime {
             .port();
         let permission_mode = Arc::new(RwLock::new(permission_mode));
         let current_task = CurrentTaskProjection::new(wake);
+        let sessions = Arc::new(Mutex::new(HashMap::<String, McpSession>::new()));
         let thread_mode = Arc::clone(&permission_mode);
         let thread_task = current_task.clone();
+        let thread_sessions = Arc::clone(&sessions);
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
         let guard = Arc::new(Mutex::new(guard));
         let thread_guard = Arc::clone(&guard);
@@ -493,6 +506,7 @@ impl PolicyEnforcementRuntime {
                         permission_mode: thread_mode,
                         current_task: thread_task,
                         task_state,
+                        sessions: thread_sessions,
                         privileged,
                         shutdown: shutdown_rx,
                     },
@@ -505,6 +519,7 @@ impl PolicyEnforcementRuntime {
             current_task,
             guard: Some(guard),
             public_policy,
+            sessions,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         })
@@ -519,10 +534,24 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn set_permission_mode(&self, mode: PermissionMode) {
-        *self
-            .permission_mode
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = mode;
+        let changed = {
+            let mut current = self
+                .permission_mode
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if *current == mode {
+                false
+            } else {
+                *current = mode;
+                true
+            }
+        };
+        if changed {
+            self.sessions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
+        }
     }
 
     pub fn replace_policy(&self, policy: CapabilityPolicy) -> Result<(), PolicyEnforcementError> {
@@ -538,6 +567,10 @@ impl PolicyEnforcementRuntime {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .replace_policy(policy.clone());
         *public_policy = policy;
+        self.sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         Ok(())
     }
 
@@ -602,10 +635,10 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         permission_mode,
         current_task,
         task_state,
+        sessions,
         privileged,
         shutdown,
     } = context;
-    let sessions = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     let active_requests = Arc::new(Mutex::new(Vec::<Value>::new()));
     let privileged_requests = Arc::new(Mutex::new(Vec::<(Value, String)>::new()));
     let stopping = Arc::new(AtomicBool::new(false));
@@ -847,13 +880,28 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 None,
             );
         };
+        let mode = *permission_mode
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tool_catalog_signature = {
+            let policy = public_policy
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            effective_tool_catalog_signature(&policy, mode, privileged)
+        };
         let session = new_session_id();
         {
             let mut sessions = sessions
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             sessions.clear();
-            sessions.insert(session.clone(), protocol.to_string());
+            sessions.insert(
+                session.clone(),
+                McpSession {
+                    protocol: protocol.to_string(),
+                    tool_catalog_signature,
+                },
+            );
         }
         return write_rpc_result(
             &mut stream,
@@ -874,17 +922,33 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
     let Some(session) = request.header("mcp-session-id") else {
         return write_rpc_error(&mut stream, id, -32600, "Mcp-Session-Id is required", None);
     };
-    let protocol = sessions
+    let stored_session = sessions
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(session)
         .cloned();
-    let Some(protocol) = protocol else {
-        return write_rpc_error(&mut stream, id, -32600, "Unknown MCP session", None);
+    let Some(stored_session) = stored_session else {
+        return write_empty(&mut stream, 404, None);
     };
+    let mode = *permission_mode
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let current_signature = {
+        let policy = public_policy
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        effective_tool_catalog_signature(&policy, mode, privileged)
+    };
+    if stored_session.tool_catalog_signature != current_signature {
+        sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(session);
+        return write_empty(&mut stream, 404, None);
+    }
     if request
         .header("mcp-protocol-version")
-        .is_some_and(|version| version != protocol)
+        .is_some_and(|version| version != stored_session.protocol)
     {
         return write_rpc_error(
             &mut stream,
@@ -939,12 +1003,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             let guard = guard
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let mut result = guard.public_tools(mode);
-            if privileged.is_some_and(|gateway| gateway.state().accepts_privileged_calls())
-                && guard.privileged_tool_visible(mode, "elevated_exec")
-            {
-                append_elevated_exec_tool(&mut result);
-            }
+            let result = effective_tool_catalog(&guard, mode, privileged);
             write_rpc_result(&mut stream, id, result, Some(session))
         }
         "tools/call" => {
@@ -1046,13 +1105,9 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             remove_active_request(active_requests, &id);
             match result {
                 Ok(result) => write_rpc_result(&mut stream, id, result, Some(session)),
-                Err(FacadeCallError::Denied(_)) => write_rpc_error(
-                    &mut stream,
-                    id,
-                    -32001,
-                    "Tool call denied by LocalBridge policy",
-                    Some(session),
-                ),
+                Err(FacadeCallError::Denied(denied)) => {
+                    write_rpc_result(&mut stream, id, denied.to_mcp_result(), Some(session))
+                }
             }
         }
         _ => write_rpc_error(&mut stream, id, -32601, "Method not found", Some(session)),
@@ -1091,13 +1146,13 @@ fn handle_task_control(
                 .expect("task_control blocked is a valid projected task"),
             );
             current_task.project(CurrentTaskStatus::Idle);
-            return write_rpc_error(
-                stream,
-                id,
-                -32001,
-                "Tool call denied by LocalBridge policy",
-                Some(session),
-            );
+            let denied = FacadeDenied {
+                reason: decision
+                    .deny_reason
+                    .expect("denied task_control decision contains reason"),
+                capability: decision.descriptor.capability,
+            };
+            return write_rpc_result(stream, id, denied.to_mcp_result(), Some(session));
         }
     }
 
@@ -1221,6 +1276,48 @@ const fn task_kind_name(kind: TaskKind) -> &'static str {
         TaskKind::ElevatedOperation => "elevated_operation",
         TaskKind::Other => "other",
     }
+}
+
+fn effective_tool_catalog(
+    guard: &AgentFacade<CodingToolsRuntimeAdapter>,
+    mode: PermissionMode,
+    privileged: Option<&Arc<dyn PrivilegedExecution>>,
+) -> Value {
+    let mut result = guard.public_tools(mode);
+    if privileged.is_some_and(|gateway| gateway.state().accepts_privileged_calls())
+        && guard.privileged_tool_visible(mode, "elevated_exec")
+    {
+        append_elevated_exec_tool(&mut result);
+    }
+    result
+}
+
+fn effective_tool_catalog_signature(
+    policy: &CapabilityPolicy,
+    mode: PermissionMode,
+    privileged: Option<&Arc<dyn PrivilegedExecution>>,
+) -> String {
+    let mut names = V1_CORE_TOOL_NAMES
+        .iter()
+        .copied()
+        .filter(|name| policy.public_tool_allowed_for_list(mode, name))
+        .collect::<Vec<_>>();
+    if privileged.is_some_and(|gateway| gateway.state().accepts_privileged_calls())
+        && policy.privileged_tool_visible(mode, "elevated_exec")
+    {
+        names.push("elevated_exec");
+    }
+    serde_json::to_string(&names)
+        .expect("LocalBridge public tool catalog signature is serializable")
+}
+
+fn elevation_required_result() -> Value {
+    FacadeError::new(
+        FacadeErrorCode::ElevationRequired,
+        "需要有效的管理员 Broker 授权",
+        true,
+    )
+    .to_mcp_result()
 }
 
 fn append_elevated_exec_tool(result: &mut Value) {
@@ -1429,13 +1526,13 @@ fn handle_elevated_exec(
     let decision = execution_guard.elevated_decision(mode, &reviewed_arguments);
     if !decision.allowed || decision.descriptor.capability != Capability::ElevatedExec {
         finish_elevated_task(current_task, Some(TaskExecutionState::Blocked));
-        return write_rpc_error(
-            stream,
-            id,
-            -32001,
-            "Tool call denied by LocalBridge policy",
-            Some(session),
-        );
+        let denied = FacadeDenied {
+            reason: decision
+                .deny_reason
+                .unwrap_or(super::policy::DenyReason::PrivilegedRouteNotAvailable),
+            capability: decision.descriptor.capability,
+        };
+        return write_rpc_result(stream, id, denied.to_mcp_result(), Some(session));
     }
 
     let Some(privileged) = privileged else {
@@ -1443,14 +1540,14 @@ fn handle_elevated_exec(
             current_task,
             Some(TaskExecutionState::AwaitingAuthorization),
         );
-        return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
+        return write_rpc_result(stream, id, elevation_required_result(), Some(session));
     };
     if !matches!(privileged.state(), PrivilegeState::Active { .. }) {
         finish_elevated_task(
             current_task,
             Some(TaskExecutionState::AwaitingAuthorization),
         );
-        return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
+        return write_rpc_result(stream, id, elevation_required_result(), Some(session));
     }
     let route = match elevated_exec_spec(arguments) {
         Ok(route) => route,
@@ -1475,7 +1572,7 @@ fn handle_elevated_exec(
                     current_task,
                     Some(TaskExecutionState::AwaitingAuthorization),
                 );
-                return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
+                return write_rpc_result(stream, id, elevation_required_result(), Some(session));
             }
             Err(PrivilegedExecError::Broker(_)) => {
                 finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
@@ -1526,7 +1623,7 @@ fn handle_elevated_exec(
                     current_task,
                     Some(TaskExecutionState::AwaitingAuthorization),
                 );
-                write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session))
+                write_rpc_result(stream, id, elevation_required_result(), Some(session))
             }
             PrivilegedExecError::Broker(_) => {
                 finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
@@ -1561,7 +1658,7 @@ fn handle_elevated_exec(
                 current_task,
                 Some(TaskExecutionState::AwaitingAuthorization),
             );
-            return write_rpc_error(stream, id, -32002, "ElevationRequired", Some(session));
+            return write_rpc_result(stream, id, elevation_required_result(), Some(session));
         }
         Err(PrivilegedExecError::Broker(_)) => {
             finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
@@ -2031,6 +2128,21 @@ mod tests {
         status: u16,
         session: Option<String>,
         body: Value,
+    }
+
+    fn assert_tool_error(response: &ClientResponse, expected_code: &str) {
+        assert_eq!(response.status, 200, "{:#?}", response.body);
+        assert!(response.body.get("error").is_none(), "{:#?}", response.body);
+        assert_eq!(
+            response.body["result"]["isError"], true,
+            "{:#?}",
+            response.body
+        );
+        assert_eq!(
+            response.body["result"]["structuredContent"]["error"]["code"], expected_code,
+            "{:#?}",
+            response.body
+        );
     }
 
     fn repo_root() -> PathBuf {
@@ -2553,7 +2665,7 @@ mod tests {
         let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
             .expect("schema28 PEP ready after live private-result semantic probe");
         let initialized = initialize(pep.port(), 700);
-        let session = initialized.session.expect("schema28 downstream session");
+        let mut session = initialized.session.expect("schema28 downstream session");
         assert_eq!(
             post(
                 pep.port(),
@@ -2762,6 +2874,15 @@ mod tests {
         );
 
         pep.set_permission_mode(PermissionMode::Edit);
+        let stale_full_session = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":6975,"method":"ping","params":{}}),
+        );
+        assert_eq!(stale_full_session.status, 404);
+        session = initialize(pep.port(), 6976)
+            .session
+            .expect("schema28 Edit reconnect session");
         let edit_mkdir = public_tool_call(
             pep.port(),
             &session,
@@ -2795,6 +2916,15 @@ mod tests {
         );
         assert!(!workspace.join("schema30-edit-dir").exists());
         pep.set_permission_mode(PermissionMode::Full);
+        let stale_edit_session = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":6977,"method":"ping","params":{}}),
+        );
+        assert_eq!(stale_edit_session.status, 404);
+        session = initialize(pep.port(), 6978)
+            .session
+            .expect("schema28 Full reconnect session");
 
         for (id, shell) in [(696u64, "windows_powershell"), (697u64, "auto")] {
             let baseline = public_tool_call(
@@ -3335,11 +3465,11 @@ mod tests {
                 "params":{"name":"read_file","arguments":{"path":"probe.txt"}}
             }),
         );
-        assert_eq!(raw_private.body["error"]["code"], -32001);
+        assert_tool_error(&raw_private, "CapabilityDenied");
         thread::sleep(Duration::from_millis(540));
 
         pep.set_permission_mode(PermissionMode::Edit);
-        let denied = post(
+        let stale_full_call = post(
             pep.port(),
             Some(&session),
             &json!({
@@ -3347,7 +3477,19 @@ mod tests {
                 "params":{"name":"exec_command","arguments":{"command":"echo must-not-run"}}
             }),
         );
-        assert_eq!(denied.body["error"]["code"], -32001);
+        assert_eq!(stale_full_call.status, 404);
+        let edit_session = initialize(pep.port(), 31)
+            .session
+            .expect("Edit reinitialize after catalog change");
+        let denied = post(
+            pep.port(),
+            Some(&edit_session),
+            &json!({
+                "jsonrpc":"2.0","id":32,"method":"tools/call",
+                "params":{"name":"exec_command","arguments":{"command":"echo must-not-run"}}
+            }),
+        );
+        assert_tool_error(&denied, "PolicyDenied");
         assert!(matches!(
             pep.current_task_projection().snapshot(),
             CurrentTaskStatus::Active(CurrentTask {
@@ -3366,7 +3508,7 @@ mod tests {
 
         let edit_tools = post(
             pep.port(),
-            Some(&session),
+            Some(&edit_session),
             &json!({"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}),
         );
         let edit_tool_names = edit_tools.body["result"]["tools"]
@@ -3384,7 +3526,7 @@ mod tests {
         let read_started = Instant::now();
         let read = post(
             pep.port(),
-            Some(&session),
+            Some(&edit_session),
             &json!({
                 "jsonrpc":"2.0","id":5,"method":"tools/call",
                 "params":{"name":"document_workflow","arguments":{"action":"inspect","path":"probe.txt"}}
@@ -3416,10 +3558,19 @@ mod tests {
         );
 
         pep.set_permission_mode(PermissionMode::Full);
+        let stale_edit_tools = post(
+            pep.port(),
+            Some(&edit_session),
+            &json!({"jsonrpc":"2.0","id":"cached-full","method":"tools/list","params":{}}),
+        );
+        assert_eq!(stale_edit_tools.status, 404);
+        let full_session = initialize(pep.port(), 41)
+            .session
+            .expect("Full reinitialize after catalog change");
         let cached_full = post(
             pep.port(),
-            Some(&session),
-            &json!({"jsonrpc":"2.0","id":"cached-full","method":"tools/list","params":{}}),
+            Some(&full_session),
+            &json!({"jsonrpc":"2.0","id":"fresh-full","method":"tools/list","params":{}}),
         );
         assert!(
             cached_full.body["result"]["tools"]
@@ -3431,13 +3582,13 @@ mod tests {
 
         let unknown_action = post(
             pep.port(),
-            Some(&session),
+            Some(&full_session),
             &json!({
                 "jsonrpc":"2.0","id":"unknown-public-action","method":"tools/call",
                 "params":{"name":"git_workflow","arguments":{"action":"future_private_action"}}
             }),
         );
-        assert_eq!(unknown_action.body["error"]["code"], -32001);
+        assert_tool_error(&unknown_action, "CapabilityDenied");
         assert!(matches!(
             pep.current_task_projection().snapshot(),
             CurrentTaskStatus::Active(CurrentTask {
@@ -3465,13 +3616,25 @@ mod tests {
             .expect("live public policy narrowing");
         let stale_policy_call = post(
             pep.port(),
-            Some(&session),
+            Some(&full_session),
             &json!({
                 "jsonrpc":"2.0","id":"stale-policy-call","method":"tools/call",
                 "params":{"name":"exec_command","arguments":{"command":"echo cached-list-must-not-run"}}
             }),
         );
-        assert_eq!(stale_policy_call.body["error"]["code"], -32001);
+        assert_eq!(stale_policy_call.status, 404);
+        let narrowed_session = initialize(pep.port(), 61)
+            .session
+            .expect("reinitialize after policy catalog change");
+        let narrowed_denied = post(
+            pep.port(),
+            Some(&narrowed_session),
+            &json!({
+                "jsonrpc":"2.0","id":"narrowed-denied","method":"tools/call",
+                "params":{"name":"exec_command","arguments":{"command":"echo cached-list-must-not-run"}}
+            }),
+        );
+        assert_tool_error(&narrowed_denied, "PolicyDenied");
         assert!(matches!(
             pep.current_task_projection().snapshot(),
             CurrentTaskStatus::Active(CurrentTask {
@@ -3482,7 +3645,7 @@ mod tests {
         ));
         let narrowed_tools = post(
             pep.port(),
-            Some(&session),
+            Some(&narrowed_session),
             &json!({"jsonrpc":"2.0","id":"narrowed-tools","method":"tools/list","params":{}}),
         );
         assert!(
@@ -3496,13 +3659,13 @@ mod tests {
 
         let reinitialized = initialize(pep.port(), 6);
         let new_session = reinitialized.session.unwrap();
-        assert_ne!(new_session, session);
+        assert_ne!(new_session, narrowed_session);
         let stale = post(
             pep.port(),
-            Some(&session),
+            Some(&narrowed_session),
             &json!({"jsonrpc":"2.0","id":7,"method":"ping","params":{}}),
         );
-        assert_eq!(stale.body["error"]["code"], -32600);
+        assert_eq!(stale.status, 404);
         assert_eq!(delete(pep.port(), &new_session), 204);
 
         let pep_port = pep.port();
@@ -3512,6 +3675,101 @@ mod tests {
         coding.stop().expect("MCP Job stop");
         assert_eq!(coding.active_processes().unwrap(), 0);
         drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn schema34_full_executes_static_workspace_scripts_and_rejects_traversal_before_launch() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let scripts = workspace.join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        fs::write(scripts.join("probe.cmd"), b"@echo LB007_CMD_SCRIPT_OK\r\n").unwrap();
+        fs::write(scripts.join("probe.bat"), b"@echo LB007_BAT_SCRIPT_OK\r\n").unwrap();
+        fs::write(
+            scripts.join("probe.ps1"),
+            b"Write-Output 'LB007_PS1_SCRIPT_OK'\r\n",
+        )
+        .unwrap();
+
+        let outside_name = format!(
+            "lb007-outside-{}-{}.cmd",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let outside = workspace.parent().unwrap().join(&outside_name);
+        fs::write(&outside, b"@echo SHOULD_NOT_RUN>should-not-exist.txt\r\n").unwrap();
+
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready for script execution");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP listener ready for script execution");
+        let session = initialize(pep.port(), 700)
+            .session
+            .expect("script E2E MCP session");
+
+        for (id, command, shell, marker) in [
+            (701, r"scripts\probe.cmd", "cmd", "LB007_CMD_SCRIPT_OK"),
+            (702, r"scripts\probe.bat", "cmd", "LB007_BAT_SCRIPT_OK"),
+            (
+                703,
+                r".\scripts\probe.ps1",
+                "windows_powershell",
+                "LB007_PS1_SCRIPT_OK",
+            ),
+        ] {
+            let response = public_tool_call(
+                pep.port(),
+                &session,
+                id,
+                "exec_command",
+                json!({"command":command,"shell":shell,"yield_time_ms":10000}),
+            );
+            assert_eq!(
+                response.body["result"]["isError"], false,
+                "{:#?}",
+                response.body
+            );
+            assert!(
+                response.body["result"]["structuredContent"]["data"]["output"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains(marker),
+                "{:#?}",
+                response.body
+            );
+        }
+
+        let escaped = public_tool_call(
+            pep.port(),
+            &session,
+            704,
+            "exec_command",
+            json!({
+                "command":format!(r"..\{outside_name}"),
+                "shell":"cmd",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_tool_error(&escaped, "WorkspaceDenied");
+        assert!(!workspace.join("should-not-exist.txt").exists());
+
+        let mut coding = pep.stop().expect("script E2E PEP stop");
+        coding.stop().expect("script E2E MCP stop");
+        drop(coding);
+        let _ = fs::remove_file(outside);
         cleanup_test_directory(&workspace);
     }
 
@@ -3782,7 +4040,7 @@ mod tests {
         )
         .expect("PEP with privileged route ready");
         let initialized = initialize(pep.port(), 300);
-        let session = initialized.session.expect("downstream MCP session");
+        let mut session = initialized.session.expect("downstream MCP session");
 
         let tools = post(
             pep.port(),
@@ -3798,10 +4056,19 @@ mod tests {
         assert_eq!(elevated_count, 1);
 
         fake.set_state(PrivilegeState::AwaitingUac);
-        let awaiting_tools = post(
+        let stale_active_tools = post(
             pep.port(),
             Some(&session),
             &json!({"jsonrpc":"2.0","id":306,"method":"tools/list","params":{}}),
+        );
+        assert_eq!(stale_active_tools.status, 404);
+        session = initialize(pep.port(), 3061)
+            .session
+            .expect("AwaitingUac reinitialize after Broker catalog change");
+        let awaiting_tools = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":3062,"method":"tools/list","params":{}}),
         );
         assert!(
             awaiting_tools.body["result"]["tools"]
@@ -3813,6 +4080,15 @@ mod tests {
         fake.set_state(PrivilegeState::Active {
             broker_generation: crate::state::GenerationId::new(77),
         });
+        let stale_awaiting_session = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":3063,"method":"tools/list","params":{}}),
+        );
+        assert_eq!(stale_awaiting_session.status, 404);
+        session = initialize(pep.port(), 3064)
+            .session
+            .expect("Active Broker reinitialize after catalog change");
 
         let secret = "LB012_SYNTHETIC_PEP_SECRET";
         let reviewed_program = super::super::policy::reviewed_elevated_program()
@@ -3834,7 +4110,7 @@ mod tests {
                     "params":{"name":"elevated_exec","arguments":arguments}
                 }),
             );
-            assert_eq!(denied.body["error"]["code"], -32001);
+            assert_tool_error(&denied, "PrivilegedRouteNotAvailable");
             assert!(!denied.body.to_string().contains(secret));
             assert_eq!(fake.start_count(), 0, "unreviewed elevated request reached Broker");
         }
@@ -3916,6 +4192,15 @@ mod tests {
         );
 
         pep.set_permission_mode(PermissionMode::Full);
+        let stale_elevated_session = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":307,"method":"tools/list","params":{}}),
+        );
+        assert_eq!(stale_elevated_session.status, 404);
+        session = initialize(pep.port(), 3071)
+            .session
+            .expect("Full reinitialize after mode change");
         let full_tools = post(
             pep.port(),
             Some(&session),
@@ -3939,7 +4224,7 @@ mod tests {
                 }}
             }),
         );
-        assert_eq!(full_denied.body["error"]["code"], -32001);
+        assert_tool_error(&full_denied, "PrivilegedRouteNotAvailable");
         assert_eq!(fake.start_count(), 1);
         assert!(matches!(
             pep.current_task_projection().snapshot(),
@@ -3957,6 +4242,15 @@ mod tests {
 
         pep.set_permission_mode(PermissionMode::Elevated);
         fake.set_state(PrivilegeState::AwaitingUac);
+        let stale_full_session = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":3030,"method":"tools/list","params":{}}),
+        );
+        assert_eq!(stale_full_session.status, 404);
+        session = initialize(pep.port(), 3031)
+            .session
+            .expect("Elevated awaiting-Broker reinitialize after mode change");
         let awaiting = post(
             pep.port(),
             Some(&session),
@@ -3968,8 +4262,7 @@ mod tests {
                 }}
             }),
         );
-        assert_eq!(awaiting.body["error"]["code"], -32002);
-        assert_eq!(awaiting.body["error"]["message"], "ElevationRequired");
+        assert_tool_error(&awaiting, "ElevationRequired");
         assert_eq!(fake.start_count(), 1);
         assert!(matches!(
             pep.current_task_projection().snapshot(),
@@ -3993,7 +4286,7 @@ mod tests {
                 "params":{"name":"request_permissions","arguments":{"permission":"admin"}}
             }),
         );
-        assert_eq!(control_plane.body["error"]["code"], -32001);
+        assert_tool_error(&control_plane, "CapabilityDenied");
         thread::sleep(Duration::from_millis(540));
         assert_eq!(
             pep.current_task_projection().snapshot(),
@@ -4003,6 +4296,15 @@ mod tests {
         fake.set_state(PrivilegeState::Active {
             broker_generation: crate::state::GenerationId::new(78),
         });
+        let stale_awaiting_session = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":3041,"method":"tools/list","params":{}}),
+        );
+        assert_eq!(stale_awaiting_session.status, 404);
+        session = initialize(pep.port(), 3042)
+            .session
+            .expect("Active Broker reinitialize after awaiting state");
         fake.complete.store(true, Ordering::Release);
         let completed_started = Instant::now();
         let completed = post(
@@ -4240,7 +4542,7 @@ mod tests {
                 }}
             }),
         );
-        assert_eq!(shell_path_denied.body["error"]["code"], -32001);
+        assert_tool_error(&shell_path_denied, "PrivilegedRouteNotAvailable");
         assert_eq!(fake.start_count(), 2);
 
         let filesystem = post(
@@ -4279,7 +4581,7 @@ mod tests {
                 }}
             }),
         );
-        assert_eq!(control_plane_denied.body["error"]["code"], -32001);
+        assert_tool_error(&control_plane_denied, "PrivilegedRouteNotAvailable");
         assert_eq!(fake.start_count(), 2);
 
         let mut coding = pep

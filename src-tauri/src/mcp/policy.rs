@@ -564,6 +564,12 @@ impl CapabilityPolicy {
         indirect_capabilities: &[Capability],
         arguments: &Value,
     ) -> PolicyDecision {
+        if tool_name == "elevated_exec" && mode != PermissionMode::Elevated {
+            return denied(
+                self.classify(tool_name),
+                DenyReason::PrivilegedRouteNotAvailable,
+            );
+        }
         let decision = self.decide(mode, tool_name, indirect_capabilities);
         if !decision.allowed || decision.descriptor.capability != Capability::ElevatedExec {
             return decision;
@@ -889,6 +895,20 @@ fn shell_request_requires_review(arguments: &Value) -> bool {
 }
 
 pub(crate) fn shell_invocation_requires_review(shell: &str, command: &str) -> bool {
+    if let Some((_, consumed)) = static_workspace_script_invocation(shell, command) {
+        let remainder = &command[consumed..];
+        return match shell {
+            "powershell" | "pwsh" | "windows_powershell" => {
+                powershell_invocation_requires_review(remainder)
+            }
+            "cmd" => cmd_invocation_requires_review(remainder),
+            "auto" => {
+                powershell_invocation_requires_review(remainder)
+                    || cmd_invocation_requires_review(remainder)
+            }
+            _ => true,
+        };
+    }
     match shell {
         "powershell" | "pwsh" | "windows_powershell" => {
             powershell_invocation_requires_review(command)
@@ -904,6 +924,97 @@ pub(crate) fn shell_invocation_requires_review(shell: &str, command: &str) -> bo
         // must never turn an unknown execution grammar into an allow decision.
         _ => true,
     }
+}
+
+pub(crate) fn static_workspace_script_target(shell: &str, command: &str) -> Option<String> {
+    static_workspace_script_invocation(shell, command).map(|(target, _)| target)
+}
+
+fn static_workspace_script_invocation(shell: &str, command: &str) -> Option<(String, usize)> {
+    let powershell = matches!(shell, "powershell" | "pwsh" | "windows_powershell" | "auto");
+    let cmd = matches!(shell, "cmd" | "auto");
+    if !powershell && !cmd {
+        return None;
+    }
+
+    fn parse_token(input: &str, allow_single_quote: bool) -> Option<(String, usize)> {
+        let leading = input.len().saturating_sub(input.trim_start().len());
+        let value = &input[leading..];
+        let first = value.chars().next()?;
+        if first == '"' || (allow_single_quote && first == '\'') {
+            let quote_len = first.len_utf8();
+            let body = &value[quote_len..];
+            let end = body.find(first)?;
+            let token = &body[..end];
+            if token.is_empty() {
+                return None;
+            }
+            return Some((token.to_string(), leading + quote_len + end + quote_len));
+        }
+        let end = value
+            .find(|ch: char| {
+                ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')' | '{' | '}')
+            })
+            .unwrap_or(value.len());
+        let token = &value[..end];
+        (!token.is_empty()).then(|| (token.to_string(), leading + end))
+    }
+
+    fn literal_script_target(target: &str) -> bool {
+        if target.is_empty()
+            || target.chars().any(|ch| {
+                matches!(
+                    ch,
+                    '$' | '%' | '!' | '`' | '*' | '?' | '[' | ']' | '{' | '}'
+                )
+            })
+        {
+            return false;
+        }
+        let lower = target.to_ascii_lowercase();
+        lower.ends_with(".ps1") || lower.ends_with(".cmd") || lower.ends_with(".bat")
+    }
+
+    let leading = command.len().saturating_sub(command.trim_start().len());
+    let trimmed = &command[leading..];
+
+    if powershell {
+        if trimmed.starts_with('.') && trimmed.chars().nth(1).is_some_and(char::is_whitespace) {
+            return None;
+        }
+        if let Some(after_call) = trimmed.strip_prefix('&') {
+            if !after_call.chars().next().is_some_and(char::is_whitespace) {
+                return None;
+            }
+            let (target, consumed) = parse_token(after_call, true)?;
+            if literal_script_target(&target) {
+                return Some((target, leading + 1 + consumed));
+            }
+            return None;
+        }
+        if !matches!(trimmed.chars().next(), Some('\'' | '"')) {
+            if let Some((target, consumed)) = parse_token(trimmed, false) {
+                if literal_script_target(&target) {
+                    return Some((target, leading + consumed));
+                }
+            }
+        }
+    }
+
+    if cmd {
+        let mut cmd_input = trimmed;
+        let mut prefix = leading;
+        if let Some(rest) = cmd_input.strip_prefix('@') {
+            cmd_input = rest;
+            prefix += 1;
+        }
+        if let Some((target, consumed)) = parse_token(cmd_input, false) {
+            if literal_script_target(&target) {
+                return Some((target, prefix + consumed));
+            }
+        }
+    }
+    None
 }
 
 fn review_word(word: &str) -> bool {

@@ -397,7 +397,10 @@ fn schema33_system_management_workflow_indirection_stays_broker_only() {
                 &json!({"action":"diagnose","commands":[{"command":command,"shell":"cmd"}]}),
             );
             assert!(!decision.allowed);
-            assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+            assert_eq!(
+                decision.deny_reason,
+                Some(DenyReason::PrivilegedRouteNotAvailable)
+            );
         }
     }
 }
@@ -450,6 +453,44 @@ fn unknown_public_actions_and_public_policy_widening_fail_closed() {
         "full_tools = [\"workspace_context\", \"future_private_tool\"]",
     );
     assert!(CapabilityPolicy::from_toml(&unknown_tool).is_err());
+}
+
+#[test]
+fn schema34_static_workspace_scripts_are_ordinary_but_dynamic_resolution_stays_reviewed() {
+    let policy = policy();
+    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
+        for arguments in [
+            json!({"command":r"scripts\probe.cmd alpha","shell":"cmd"}),
+            json!({"command":r"scripts\probe.bat alpha","shell":"cmd"}),
+            json!({"command":r".\scripts\probe.ps1 alpha","shell":"windows_powershell"}),
+            json!({"command":r"& '.\scripts\probe.ps1' alpha","shell":"windows_powershell"}),
+        ] {
+            let decision = policy.decide_public(mode, "exec_command", &arguments);
+            assert!(
+                decision.allowed,
+                "static workspace development script was denied solely by extension: {arguments}"
+            );
+        }
+    }
+
+    for arguments in [
+        json!({"command":r"$p='.\scripts\probe.ps1'; & $p","shell":"windows_powershell"}),
+        json!({"command":r". .\scripts\probe.ps1","shell":"windows_powershell"}),
+        json!({"command":r"& (Join-Path . scripts\probe.ps1)","shell":"windows_powershell"}),
+        json!({"command":r"call scripts\probe.cmd","shell":"cmd"}),
+        json!({"command":r"%SCRIPT%.cmd","shell":"cmd"}),
+        json!({"command":r"echo ok & scripts\probe.cmd","shell":"cmd"}),
+    ] {
+        let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
+        assert!(
+            !decision.allowed,
+            "dynamic/chained script resolution escaped review: {arguments}"
+        );
+        assert_eq!(
+            decision.deny_reason,
+            Some(DenyReason::PrivilegedRouteNotAvailable)
+        );
+    }
 }
 
 #[test]
