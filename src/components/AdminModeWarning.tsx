@@ -11,7 +11,7 @@ export function adminWarningCanConfirm(startedAt: number, now: number): boolean 
 }
 
 const ADMIN_WARNING_CONSEQUENCES = [
-  "删除或覆盖重要文档",
+  "删除或覆盖重要文件",
   "修改系统关键配置",
   "软件或系统无法正常启动",
   "数据永久丢失",
