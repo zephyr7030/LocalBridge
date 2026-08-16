@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-014",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2590,5 +2590,25 @@
     "g3_generation_7_consumed": false,
     "g4_unlocked": false,
     "next_pr": "LB-014"
+  },
+  "lb014_schema34_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-014",
+    "product_patch_required": false,
+    "reacceptance_baseline_commit": "271f994807d13d05723c02f1ef23dbb0f41fee09",
+    "evidence": [
+      "Fresh LB-014 static contract PASS for pre-Tauri single-instance acquisition, existing-instance wake, HKCU Run autostart, background immediate startup, manual-stop persistence, workspace revalidation, Elevated Requested without UAC, UI-first typed UI-ready startup and duplicate-ready idempotence.",
+      "Fresh single-instance Rust tests PASS for primary/secondary ownership, wake and release semantics.",
+      "Fresh autostart and startup-profile Rust tests PASS for Windows login registration semantics, background startup and persisted startup configuration.",
+      "Fresh foreground UI-ready and startup Rust tests PASS for no service start before UI-ready, asynchronous backend start after UI-ready, duplicate-ready single ownership and background no-UAC behavior.",
+      "The immediately preceding full formal LB-013 repository Gate PASSed cargo test, clippy -D warnings, frontend tests/build, runtime-manifest, architecture, UI-language, G4 regression and git diff --check on the identical product tree; only governance files changed afterward."
+    ],
+    "group_transition": "G3_IN_PROGRESS",
+    "historical_g3_review_generation": 6,
+    "historical_generation6_preserved": true,
+    "next_required_g3_adversarial_generation": 7,
+    "g3_generation_7_consumed": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-015"
   }
 }
