@@ -2984,7 +2984,7 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "g3_public_mcp_output_schema_refinement_2026_08_16": {
-    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "status": "IMPLEMENTED_G3_GENERATION10_PASS",
     "source": "explicit_user_gpt_output_schema_feedback_2026_08_16",
     "contract_commit": "fcc9e89",
     "product_commit": "6e63b24",
@@ -3005,7 +3005,49 @@
     ],
     "next_required_adversarial_generation": 10,
     "human_review_generation": 3,
-    "human_review_blocked_until_generation10_pass": true,
+    "human_review_blocked_until_generation10_pass": false,
     "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_10_2026_08_16": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 10,
+    "baseline_commit": "15732bab7c694328e8a2f5f7bca81a053c732a6d",
+    "finding": "No blocking G3 defect was found on the revision32 public-MCP-output-schema baseline after fresh G3 contract gates, complete Group-Release verification, and first-principles attacks on public outputSchema ownership, structuredContent semantics and private-runtime schema isolation.",
+    "evidence": [
+      "Fresh LB-013 through LB-017 contract gates PASS and ARCH-030 PASS; every advertised LocalBridge public core tool declares a LocalBridge-owned outputSchema and elevated_exec declares its existing privileged result variants.",
+      "Fresh cargo test --locked PASS for 185 library tests plus all integration/unit/doc-test targets and cargo clippy --locked --all-targets --all-features -D warnings PASS in an isolated CARGO_TARGET_DIR.",
+      "Fresh frontend Vitest 4 files / 7 tests PASS, production build PASS, runtime-manifest PASS, architecture 30/30 PASS, UI-language PASS, G4 governance regression PASS and git diff --check PASS.",
+      "Fresh native Tauri/WebView E2E PASS at 150% DPI with onboarding and Dashboard logical 780x620 / physical 1170x930 and the existing G3 UI/window contracts intact.",
+      "Public runtime test PASS: a fresh served workspace_context identifies facade_revision 32 and the same tools/list response exposes agent_workflow.outputSchema with typed ok/data/error and data.state fields.",
+      "Public registry attack PASS: public_tool_schema constructs outputSchema through LocalBridge public_tool_output_schema rather than forwarding the upstream private runtime schema; the private runtime outputSchema remains internal.",
+      "Schema-quality attack PASS: the core schemas describe tool-specific stable data rather than an empty placeholder, while the public error schema enumerates stable typed error codes and elevated_exec outputSchema matches filesystem/process/elevation-error structured variants."
+    ],
+    "non_blocking_observations": [
+      "The currently connected @测试 client session was already terminated before the revision32 build, so the ChatGPT UI recommendation itself cannot be truthfully rechecked until a new LocalBridge instance/client connection performs tools/list; server-side fresh-session tests prove the new schema is advertised.",
+      "A separate previously verified Full-mode bug remains: absolute workdir D:\\project\\test can be rejected as WorkspaceDenied while relative test succeeds; it is outside this outputSchema root-cause fix and remains pending."
+    ],
+    "verified_passes": [
+      "LB-013 -> LB-017 current contracts",
+      "ARCH-030",
+      "cargo test --locked -- --test-threads=1",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "npm test",
+      "npm run build",
+      "npm run verify:runtime-manifest",
+      "npm run verify:architecture",
+      "npm run verify:ui-language",
+      "g4-human-gate.test.mjs",
+      "native fixed-window/WebView2 at 150% DPI",
+      "public outputSchema source and tools/list attack",
+      "git diff --check"
+    ],
+    "g3_generation_10_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": null,
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }
