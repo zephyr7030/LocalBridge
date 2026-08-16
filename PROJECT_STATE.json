@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -32,7 +32,6 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "Schema34 / LB-006 reacceptance: Edit must expose and authorize no ordinary shell/process execution, while Full ordinary cmd/PowerShell/development processes must run only under the current Windows ordinary-user token; LocalBridge structured path/workdir/Git/document/image/file/edit/directory inputs remain active-workspace-bound. Full child-process filesystem access outside the active workspace is not itself a defect when permitted by that ordinary-user token because schema34 makes no OS-level workspace-sandbox guarantee.",
     "G2 generation20 / LB-007: policy denials collapse to generic JSON-RPC -32001 instead of preserving stable typed denial reasons such as capability/privilege/elevation distinctions.",
     "G2 generation20 / LB-007: the fail-closed review_word extension rule blanket-classifies ordinary .ps1/.cmd/.bat script invocation as review-required, so Full lacks the expected ordinary workspace script execution path.",
     "Schema34 / LB-007 + LB-012 reacceptance: an already-connected MCP client must reliably discover elevated_exec after entering Elevated and Broker Active through protocol-correct tools/list refresh or controlled reconnect, and leaving Elevated must revoke/deny that capability while stale calls fail closed and ordinary exec_command remains current-user."
@@ -195,7 +194,7 @@
     "status": "PASS",
     "date": "2026-08-10",
     "baseline": "v9-FINAL",
-    "next_action": "Reaccept LB-006 against schema34: Edit must have no ordinary process route; Full ordinary cmd/PowerShell/development execution must remain current-Windows-user only; LocalBridge structured inputs and workdir remain active-workspace-bound; do not implement or require an OS-level Full child-process workspace sandbox. Then repair/reaccept LB-007 typed policy denial projection, validated workspace script execution and privileged tool catalog refresh lifecycle, continue strict LB-008 through LB-012 reacceptance including elevated_exec publication/revocation, then run fresh G2 adversarial generation21; G3 remains blocked."
+    "next_action": "LB-006 schema34 reacceptance completed. Repair/reaccept LB-007 typed policy denial projection, validated active-workspace script execution and privileged tool catalog refresh lifecycle, then continue strict LB-008 through LB-012 reacceptance including elevated_exec publication/revocation and real Broker/UAC administrator-token verification; afterwards run fresh G2 adversarial generation21. G3 remains blocked."
   },
   "current_task_ui": {
     "enabled": true,
@@ -2386,6 +2385,25 @@
     "g2_status": "REWORK_REQUIRED",
     "historical_review_generation": 20,
     "historical_review_status": "FAIL",
+    "next_required_g2_adversarial_generation": 21,
+    "g2_generation_21_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb006_schema34_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "reacceptance_baseline_commit": "dc3373cd69c7ea09ce24c828d3451ee6f1fde191",
+    "product_patch_required": false,
+    "generation20_full_sandbox_finding": "SUPERSEDED_BY_SCHEMA34_PRODUCT_POLICY",
+    "evidence": [
+      "The uncommitted generation20 Full OS-workspace-sandbox experiment was removed completely: windows_sandbox.py is absent, no windows_sandbox references remain, and tracked product/runtime files returned to the schema34 baseline.",
+      "Fresh cached-tools regression PASS proves a Full tools/list snapshot cannot bypass Edit tools/call authorization after the mode changes; denial occurs before ordinary process execution.",
+      "Fresh real bundled-runtime schema28 public runtime E2E PASS and the complete lb006_coding_runtime integration target PASS 5/5, preserving structured active-workspace path/runtime behavior without introducing a Full child-process OS sandbox.",
+      "Fresh elevated_exec Broker-only bundled-runtime test PASS and LB-011 UAC boundary verifier PASS prove administrator routing remains isolated to the explicit Broker route and whole-app elevation is not requested.",
+      "The development coding MCP host itself is High Integrity, so its token was explicitly not treated as proof that a production Full process is Medium Integrity; acceptance relies on the product routing boundary: ordinary exec uses the non-Broker runtime path, while only elevated_exec dispatches to the privileged gateway."
+    ],
+    "next_pr": "LB-007",
     "next_required_g2_adversarial_generation": 21,
     "g2_generation_21_consumed": false,
     "g3_unlocked": false,
