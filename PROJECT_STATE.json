@@ -55,6 +55,8 @@
     "Persistent state is schema-versioned and migrated sequentially",
     "External runtimes are isolated behind stable adapters",
     "Stable releases include SBOM, third-party notices, provenance and exact runtime manifest",
+    "Immutable application and bundled runtime payloads stay under the LocalBridge installation root; mutable non-secret user state is consolidated under one %LOCALAPPDATA%\\LocalBridge root and Runtime API Key stays in Windows Credential Manager",
+    "Ordinary foreground background and login-autostart launches stay current-user Medium Integrity without UAC; only the explicit Broker/UAC administrator route may become High Integrity",
     "Runtime API Key never persists in plaintext and never appears in process CLI arguments",
     "Remembered project list is not an authorization list",
     "Exactly zero or one active workspace is authorized at a time",
@@ -144,7 +146,26 @@
     "privileged_broker_install_root": "protected_machine_program_files",
     "privileged_broker_uac_target": "canonical_current_install_sibling",
     "privileged_broker_mutation_guard": "trusted_owner_and_dacl_no_untrusted_mutation_plus_current_unelevated_token_denied_each_dangerous_right_across_broker_install_ancestor_chain",
-    "privileged_broker_signature_or_hash_binding": false
+    "privileged_broker_signature_or_hash_binding": false,
+    "green_storage": {
+      "immutable_application_and_runtime_payload_root": "canonical_install_root",
+      "bundled_runtime_copy_to_user_data_for_execution": false,
+      "mutable_nonsecret_user_state_root": "%LOCALAPPDATA%\\LocalBridge",
+      "mutable_nonsecret_user_state_roots": 1,
+      "unnecessary_program_data_footprint": false,
+      "persistent_temp_runtime_payload": false,
+      "mutable_state_in_windows_system_directories": false,
+      "secret_store": "Windows Credential Manager",
+      "protected_per_machine_program_files_model_preserved": true
+    },
+    "ordinary_launch": {
+      "token": "current_windows_user",
+      "integrity": "medium",
+      "foreground_uac": false,
+      "background_uac": false,
+      "login_autostart_uac": false,
+      "high_integrity_route": "elevated_exec_broker_uac_only"
+    }
   },
   "ui_language_policy": {
     "default_locale": "zh-CN",
@@ -353,10 +374,22 @@
     "typography": {
       "tiers": [
         "title",
-        "secondary"
+        "body",
+        "auxiliary"
       ],
-      "secondary_non_title_font_size_unified": true,
-      "third_font_size_tier": false
+      "body_roles": [
+        "body",
+        "label",
+        "button",
+        "primary_status"
+      ],
+      "auxiliary_roles": [
+        "helper",
+        "metadata",
+        "time",
+        "secondary_status"
+      ],
+      "fourth_font_size_tier": false
     }
   },
   "pr_group_policy": {
@@ -2610,5 +2643,61 @@
     "g3_generation_7_consumed": false,
     "g4_unlocked": false,
     "next_pr": "LB-015"
+  },
+  "schema35_ui_green_storage_default_non_admin_2026_08_16": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "source": "explicit_user_product_contract_2026_08_16",
+    "contract_schema_version": 35,
+    "baseline_contract_schema_version": 34,
+    "architecture_rules_schema_version": 10,
+    "current_execution_pointer_unchanged": {
+      "current_group": "G3",
+      "current_pr": "LB-015"
+    },
+    "owner_prs": [
+      "LB-015",
+      "LB-016",
+      "LB-018",
+      "LB-019"
+    ],
+    "typography": {
+      "tiers": [
+        "title",
+        "body",
+        "auxiliary"
+      ],
+      "title": "page_and_major_heading",
+      "body": "ordinary_body_label_button_primary_status",
+      "auxiliary": "helper_metadata_time_secondary_status",
+      "fourth_tier_forbidden": true,
+      "earliest_owner_pr": "LB-015"
+    },
+    "green_storage": {
+      "immutable_application_and_bundled_runtime_payloads": "canonical_install_root",
+      "mutable_nonsecret_user_state": "%LOCALAPPDATA%\\LocalBridge",
+      "mutable_user_roots": 1,
+      "runtime_api_key": "Windows Credential Manager only",
+      "runtime_copy_to_appdata_programdata_system_temp_for_execution": "forbidden",
+      "unnecessary_program_data_footprint": "forbidden",
+      "protected_per_machine_program_files_broker_model": "preserved",
+      "primary_owner_pr": "LB-018",
+      "clean_machine_owner_pr": "LB-019"
+    },
+    "default_non_admin_launch": {
+      "foreground": "current_user_medium_no_uac",
+      "background": "current_user_medium_no_uac",
+      "login_autostart": "current_user_medium_no_uac",
+      "administrator_route": "elevated_exec -> Broker -> UAC -> High",
+      "whole_app_elevation": "forbidden",
+      "release_verification_owner_prs": [
+        "LB-018",
+        "LB-019"
+      ]
+    },
+    "historical_schema34_permission_model_preserved": true,
+    "g2_generation_21_invalidated": false,
+    "g3_current_lb015_requires_schema35_typography": true,
+    "g4_remains_blocked": true,
+    "next_action": "Implement the three-tier typography contract in current LB-015, carry the same typography into LB-016, and enforce green-storage plus ordinary Medium/no-UAC release behavior in LB-018/LB-019 after the G3 gates."
   }
 }

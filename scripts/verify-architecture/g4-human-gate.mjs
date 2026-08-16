@@ -702,6 +702,83 @@ const PERMISSION_EXECUTION_MODEL_AMENDMENT_2026_08_16 = Object.freeze({
   },
 });
 
+const UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16 = Object.freeze({
+  schemaVersion: 35,
+  baselineSchemaVersion: 34,
+  replacedRules: {
+    ui_typography_tiers: {
+      current: ["title", "body", "auxiliary"],
+      baseline: ["title", "secondary"],
+    },
+  },
+  removedBaselineRules: {
+    ui_secondary_non_title_font_size_unified_required: true,
+    ui_third_font_size_tier_forbidden: true,
+  },
+  addedRules: {
+    ui_body_font_size_unified_required: true,
+    ui_body_typography_roles: ["body", "label", "button", "primary_status"],
+    ui_auxiliary_font_size_unified_required: true,
+    ui_auxiliary_typography_roles: ["helper", "metadata", "time", "secondary_status"],
+    ui_fourth_font_size_tier_forbidden: true,
+    green_storage_layout_required: true,
+    green_storage_scope: "product_owned_files_and_runtime_payloads",
+    immutable_application_payload_install_root_required: true,
+    bundled_runtime_payload_install_root_required: true,
+    bundled_runtime_copy_to_user_data_for_execution_forbidden: true,
+    mutable_nonsecret_user_state_root: "%LOCALAPPDATA%\\LocalBridge",
+    mutable_nonsecret_user_state_single_root_required: true,
+    mutable_nonsecret_user_state_categories: ["settings", "workspace_registry", "task_state", "logs", "diagnostics"],
+    unnecessary_program_data_footprint_forbidden: true,
+    persistent_temp_product_payload_forbidden: true,
+    product_owned_mutable_state_in_windows_system_directories_forbidden: true,
+    runtime_api_key_windows_credential_manager_required: true,
+    protected_per_machine_program_files_install_preserved: true,
+    os_managed_installer_and_autostart_registration_allowed: true,
+    ordinary_application_launch_token: "current_windows_user",
+    ordinary_application_launch_integrity: "medium",
+    foreground_ordinary_launch_uac_forbidden: true,
+    background_ordinary_launch_uac_forbidden: true,
+    login_autostart_ordinary_launch_uac_forbidden: true,
+    only_privileged_broker_may_run_high_integrity: true,
+  },
+  lb015: {
+    artifactReplacements: [[
+      "three-tier typography system with exactly title, body and auxiliary font sizes and no fourth tier",
+      "two-tier typography system with exactly title and unified secondary non-title font sizes",
+    ]],
+    testReplacements: [[
+      "product typography uses exactly three font-size tiers: title for page/major headings, body for ordinary body labels buttons and primary status, and auxiliary for helper metadata time and secondary status; each non-title tier is internally unified and no fourth font-size tier exists",
+      "all non-title text uses one unified secondary font-size token across body helper status metadata labels and button text; no third font-size tier exists",
+    ]],
+  },
+  lb016: {
+    testReplacements: [[
+      "onboarding uses exactly three typography sizes: title for page/major headings, body for ordinary copy labels buttons and primary status, and auxiliary for helper metadata time and secondary status; no fourth font-size tier is introduced",
+      "onboarding uses exactly two typography sizes: title and the same unified secondary size for every other text role; helper copy status labels button text and metadata cannot introduce a third font-size tier",
+    ]],
+  },
+  lb018: {
+    addedArtifacts: [
+      "green-storage packaged layout with immutable application and bundled runtime payloads under the protected LocalBridge installation root, mutable non-secret per-user state under one %LOCALAPPDATA%\\LocalBridge root, and secrets remaining in Windows Credential Manager",
+    ],
+    addedTests: [
+      "packaged immutable application and bundled runtime payloads including Python coding runtime Tunnel Broker and static resources execute from the canonical LocalBridge installation root; ordinary launch does not copy or extract those payloads into LocalAppData ProgramData Windows system directories or persistent Temp merely for execution",
+      "mutable non-secret LocalBridge state including settings workspace registry task state logs and diagnostics persists under one %LOCALAPPDATA%\\LocalBridge root; product-owned persistent files do not create an unnecessary %ProgramData%\\LocalBridge footprint or mutable state in Windows system directories or persistent Temp",
+      "Runtime API Key remains solely in Windows Credential Manager and is absent from install-root LocalAppData ProgramData and Temp plaintext files",
+      "release-style foreground background and login-autostart ordinary LocalBridge launches use the current Windows user at Medium Integrity and do not trigger UAC; only explicit elevated_exec through Broker plus UAC may create High Integrity administrator execution while the main app and ordinary runtime routes remain Medium",
+    ],
+  },
+  lb019: {
+    addedTests: [
+      "clean-machine footprint audit after install launch normal use and reboot finds product-owned persistent files only under the canonical installation root and the single %LOCALAPPDATA%\\LocalBridge mutable-state root, with Runtime API Key only in Windows Credential Manager; no unnecessary ProgramData Windows-system-directory or persistent-Temp runtime copy exists, excluding normal OS-managed installer shortcut and autostart registration metadata",
+      "clean-machine foreground background and login-autostart launches complete without UAC and keep the LocalBridge application and ordinary runtime process tree at current-user Medium Integrity",
+      "after explicit administrator-mode consent and UAC, the LocalBridge application and ordinary routes remain Medium Integrity while only the separate privileged Broker administrator route is High Integrity",
+      "uninstall/orphan verification leaves no LocalBridge runtime executable or bundled-runtime copy in LocalAppData ProgramData Windows system directories or persistent Temp; any retained mutable user data stays confined to the documented single LocalAppData root",
+    ],
+  },
+});
+
 const ELEVATED_SCOPE_AND_UI_GEOMETRY_AMENDMENT_2026_08_15 = Object.freeze({
   schemaVersion: 33,
   baselineSchemaVersion: 32,
@@ -1441,6 +1518,54 @@ function normalizeReplacements(array, replacements) {
     const replacement = replacements.find(([current]) => current === item);
     return replacement ? replacement[1] : item;
   });
+}
+
+export function hasExactUiGreenStorageDefaultNonAdminAmendment20260816(contractsDoc) {
+  if (contractsDoc?.schema_version !== UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.schemaVersion) return false;
+  for (const [key, replacement] of Object.entries(UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.replacedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(replacement.current)) return false;
+  }
+  for (const key of Object.keys(UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.removedBaselineRules)) {
+    if (Object.hasOwn(contractsDoc?.rules ?? {}, key)) return false;
+  }
+  for (const [key, expected] of Object.entries(UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  const lb016 = contractsDoc?.prs?.["LB-016"];
+  const lb018 = contractsDoc?.prs?.["LB-018"];
+  const lb019 = contractsDoc?.prs?.["LB-019"];
+  if (!lb015 || !lb016 || !lb018 || !lb019) return false;
+  return hasReplacement(lb015.required_artifacts, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb015.artifactReplacements)
+    && hasReplacement(lb015.required_tests, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb015.testReplacements)
+    && hasReplacement(lb016.required_tests, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb016.testReplacements)
+    && containsAll(lb018.required_artifacts, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb018.addedArtifacts)
+    && containsAll(lb018.required_tests, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb018.addedTests)
+    && containsAll(lb019.required_tests, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb019.addedTests);
+}
+
+export function normalizeUiGreenStorageDefaultNonAdminAmendment20260816(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.baselineSchemaVersion;
+  for (const [key, replacement] of Object.entries(UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.replacedRules)) normalized.rules[key] = structuredClone(replacement.baseline);
+  for (const [key, value] of Object.entries(UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.removedBaselineRules)) normalized.rules[key] = structuredClone(value);
+  for (const key of Object.keys(UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.addedRules)) delete normalized.rules[key];
+  const lb015 = normalized.prs?.["LB-015"];
+  const lb016 = normalized.prs?.["LB-016"];
+  const lb018 = normalized.prs?.["LB-018"];
+  const lb019 = normalized.prs?.["LB-019"];
+  if (lb015) {
+    lb015.required_artifacts = normalizeReplacements(lb015.required_artifacts, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb015.artifactReplacements);
+    lb015.required_tests = normalizeReplacements(lb015.required_tests, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb015.testReplacements);
+  }
+  if (lb016) lb016.required_tests = normalizeReplacements(lb016.required_tests, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb016.testReplacements);
+  if (lb018) {
+    lb018.required_artifacts = removeItems(lb018.required_artifacts, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb018.addedArtifacts);
+    lb018.required_tests = removeItems(lb018.required_tests, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb018.addedTests);
+  }
+  if (lb019) lb019.required_tests = removeItems(lb019.required_tests, UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16.lb019.addedTests);
+  return normalized;
 }
 
 export function hasExactPermissionExecutionModelAmendment20260816(contractsDoc) {

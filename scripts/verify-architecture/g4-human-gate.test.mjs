@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLb007PolicyAndCmdCodepageAmendment20260815, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLb007PolicyAndCmdCodepageAmendment20260815, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
-import { hasExactPermissionExecutionModelAmendment20260816, normalizePermissionExecutionModelAmendment20260816, hasExactElevatedScopeAndUiGeometryAmendment20260815, normalizeElevatedScopeAndUiGeometryAmendment20260815, hasExactWindowsSystemManagementPrivilegeAmendment20260815, normalizeWindowsSystemManagementPrivilegeAmendment20260815 } from "./g4-human-gate.mjs";
+import { hasExactPermissionExecutionModelAmendment20260816, normalizePermissionExecutionModelAmendment20260816, hasExactElevatedScopeAndUiGeometryAmendment20260815, normalizeElevatedScopeAndUiGeometryAmendment20260815, hasExactWindowsSystemManagementPrivilegeAmendment20260815, normalizeWindowsSystemManagementPrivilegeAmendment20260815, hasExactUiGreenStorageDefaultNonAdminAmendment20260816, normalizeUiGreenStorageDefaultNonAdminAmendment20260816 } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -259,7 +259,10 @@ const schema19FullRollback = structuredClone(ratifiedContracts);
 schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
-const schema34Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+const schema35Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactUiGreenStorageDefaultNonAdminAmendment20260816(schema35Contracts), true);
+const schema34Contracts = normalizeUiGreenStorageDefaultNonAdminAmendment20260816(schema35Contracts);
+assert.equal(schema34Contracts.schema_version, 34);
 assert.equal(hasExactPermissionExecutionModelAmendment20260816(schema34Contracts), true);
 const schema33Contracts = normalizePermissionExecutionModelAmendment20260816(schema34Contracts);
 assert.equal(schema33Contracts.schema_version, 33);
@@ -437,6 +440,29 @@ assert.equal(hasExactPermissionExecutionModelAmendment20260816(schema34MissingEd
 const schema34MissingToolRefreshProof = structuredClone(schema34Contracts);
 schema34MissingToolRefreshProof.prs["LB-012"].required_tests = schema34MissingToolRefreshProof.prs["LB-012"].required_tests.filter((item) => !item.startsWith("an already-connected MCP session that enters Elevated"));
 assert.equal(hasExactPermissionExecutionModelAmendment20260816(schema34MissingToolRefreshProof), false);
+for (const [rule, drift] of [
+  ["ui_fourth_font_size_tier_forbidden", false],
+  ["green_storage_layout_required", false],
+  ["bundled_runtime_copy_to_user_data_for_execution_forbidden", false],
+  ["ordinary_application_launch_integrity", "high"],
+  ["login_autostart_ordinary_launch_uac_forbidden", false],
+]) {
+  const weakened = structuredClone(schema35Contracts);
+  weakened.rules[rule] = drift;
+  assert.equal(hasExactUiGreenStorageDefaultNonAdminAmendment20260816(weakened), false, rule);
+}
+const schema35WrongTypography = structuredClone(schema35Contracts);
+schema35WrongTypography.rules.ui_typography_tiers = ["title", "body"];
+assert.equal(hasExactUiGreenStorageDefaultNonAdminAmendment20260816(schema35WrongTypography), false);
+const schema35RestoredOldTypographyRule = structuredClone(schema35Contracts);
+schema35RestoredOldTypographyRule.rules.ui_third_font_size_tier_forbidden = true;
+assert.equal(hasExactUiGreenStorageDefaultNonAdminAmendment20260816(schema35RestoredOldTypographyRule), false);
+const schema35MissingGreenPackagingProof = structuredClone(schema35Contracts);
+schema35MissingGreenPackagingProof.prs["LB-018"].required_tests = schema35MissingGreenPackagingProof.prs["LB-018"].required_tests.filter((item) => !item.startsWith("packaged immutable application and bundled runtime payloads"));
+assert.equal(hasExactUiGreenStorageDefaultNonAdminAmendment20260816(schema35MissingGreenPackagingProof), false);
+const schema35MissingMediumLaunchProof = structuredClone(schema35Contracts);
+schema35MissingMediumLaunchProof.prs["LB-019"].required_tests = schema35MissingMediumLaunchProof.prs["LB-019"].required_tests.filter((item) => !item.startsWith("clean-machine foreground background and login-autostart"));
+assert.equal(hasExactUiGreenStorageDefaultNonAdminAmendment20260816(schema35MissingMediumLaunchProof), false);
 for (const rule of [
   "ui_text_button_content_sized_required",
   "ui_secondary_non_title_font_size_unified_required",

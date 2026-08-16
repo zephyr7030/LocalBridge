@@ -221,7 +221,7 @@
     },
     {
       "id": "ARCH-028",
-      "description": "Text-bearing button geometry is content-derived and product typography has exactly title plus one unified secondary non-title font-size tier",
+      "description": "Text-bearing button geometry is content-derived and product typography has exactly three font-size tiers: title, body and auxiliary; a fourth tier is forbidden",
       "severity": "error",
       "applies_to": ["src/**"],
       "verification": { "mode": "deferred", "activate_at_pr": "LB-015", "reason": "Product UI geometry and typography are implemented in LB-015", "type": "ui_content_geometry_and_typography" }
