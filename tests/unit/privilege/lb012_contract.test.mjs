@@ -104,8 +104,17 @@ const toolsListStart = server.indexOf('"tools/list" =>');
 const toolsCallStart = server.indexOf('"tools/call" =>', toolsListStart);
 if (toolsListStart < 0 || toolsCallStart <= toolsListStart) throw new Error("LB-012 tools/list branch missing");
 const toolsList = server.slice(toolsListStart, toolsCallStart);
-if (!toolsList.includes("gateway.state().accepts_privileged_calls()")) {
-  throw new Error("LB-012 tools/list exposes elevated_exec without an Active Broker state check");
+const catalogStart = server.indexOf("fn effective_tool_catalog(");
+const catalogEnd = server.indexOf("fn effective_tool_catalog_signature(", catalogStart);
+const effectiveCatalog = server.slice(catalogStart, catalogEnd);
+if (
+  !toolsList.includes("effective_tool_catalog(&guard, mode, privileged)") ||
+  catalogStart < 0 ||
+  catalogEnd <= catalogStart ||
+  !effectiveCatalog.includes("gateway.state().accepts_privileged_calls()") ||
+  !effectiveCatalog.includes('privileged_tool_visible(mode, "elevated_exec")')
+) {
+  throw new Error("LB-012 tools/list does not gate elevated_exec through the shared Active Broker catalog authority");
 }
 const gatewayImplStart = control.indexOf("impl PrivilegedExecutionGateway");
 const gatewayStateStart = control.indexOf("pub fn state(&self) -> PrivilegeState", gatewayImplStart);
