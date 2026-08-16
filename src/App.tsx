@@ -100,7 +100,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
     if (view !== "settings" || (projection && !projection.runtimeKeySaved)) setConfirmingKeyDelete(false);
   }, [view, projection?.runtimeKeySaved]);
   const task = projection?.currentTask ?? null;
-  const taskActive = task?.state === "running";
+  const taskState = task?.state ?? "idle";
   const activeProject = projection?.projects.find((item) => item.active) ?? null;
   const reconnectVisible = Boolean(projection?.reconnect && projection.reconnect.generation !== handledGeneration);
   const privilegeLabel = projection ? privilegeText[projection.privilege] : "未启用";
@@ -132,7 +132,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       <div className="row"><span className="label">管理员权限</span><span className="value service-value"><ServiceStatusDot service={privilegeService}/><span>{privilegeLabel}</span></span></div>
     </section>
     <div className="service-actions" aria-label="服务控制"><button className="secondary service-restart" onClick={() => void run(() => bridge.restartServices())}>重启服务</button><button className="secondary service-stop" onClick={() => void run(() => bridge.stopServices())}>关闭服务</button></div>
-    <div className="task-row" aria-live="polite"><span className={`activity-dot ${taskActive ? "active" : ""}`} aria-hidden="true"/><span>{taskText(task)}</span></div>
+    <div className="task-row" aria-live="polite"><span className={`activity-dot task-${taskState}`} aria-hidden="true"/><span>{taskText(task)}</span></div>
     {projection?.lastTool && <div className="last-tool-row"><span className="last-tool-label">{lastToolText(projection.lastTool)}</span><span className="last-tool-age">{formatLastToolAge(projection.lastTool.ageMs)}</span></div>}
     {error && <div className="error" role="alert">{error}</div>}
     {view === "settings" && <div className="sheet-backdrop" onMouseDown={() => setView("main")}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>{uiText.settings}</h2>

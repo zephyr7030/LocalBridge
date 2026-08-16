@@ -18,6 +18,10 @@ describe("LB-015 presentation", () => {
     expect(line).toContain("59S");
     expect(line).not.toContain("前");
     expect(taskText(null)).toBe("等待命令");
+    expect(taskText({ kind: "admin", summary: "安装设备驱动", state: "waiting", elapsedMs: null })).toBe("管理员操作  安装设备驱动  等待授权");
+    expect(taskText({ kind: "admin", summary: "安装设备驱动", state: "blocked", elapsedMs: null })).toBe("管理员操作  安装设备驱动  已阻止");
+    expect(taskText({ kind: "test", summary: "cargo test", state: "failed", elapsedMs: null })).toBe("运行测试  cargo test  执行失败");
+    expect(taskText({ kind: "command", summary: "cargo build", state: "cancelled", elapsedMs: null })).toBe("运行命令  cargo build  已取消");
     const last = { kind: "command" as const, summary: "git status", ageMs: 59_000 };
     expect(lastToolText(last)).toBe("上次执行工具：运行命令  git status");
     expect(formatLastToolAge(59_000)).toBe("59S前");

@@ -41,6 +41,16 @@ for (const required of ["const MIN_TASK_PRESENTATION: Duration = Duration::from_
 if (!mcp.includes("UI retention must not delay Broker response") || !mcp.includes("first_serialized_retired")) throw new Error("LB-015 Broker >=500ms/non-delaying burst regression missing");
 if (!backend.includes("last_tool: snapshot.last_tool.as_ref().map(last_tool_projection)") || !bridge.includes("lastTool: LastToolProjection | null")) throw new Error("LB-015 exactly-one last-tool typed projection missing");
 if (!app.includes("taskText(task)") || !app.includes('className="last-tool-row"') || !app.includes("lastToolText(projection.lastTool)") || !app.includes("formatLastToolAge(projection.lastTool.ageMs)")) throw new Error("LB-015 two-row current/last-tool presentation missing");
+if (!app.includes('const taskState = task?.state ?? "idle"') || !app.includes('className={`activity-dot task-${taskState}`}') || app.includes("taskActive")) throw new Error("LB-015 Dashboard CurrentTask visual state is not derived directly from typed backend task.state");
+const compactTaskCss = css.replace(/\s+/g, "");
+for (const marker of [
+  ".activity-dot.task-idle,.activity-dot.task-cancelled{background:var(--status-unknown)}",
+  ".activity-dot.task-running{background:var(--status-ready);animation:task-pulse",
+  ".activity-dot.task-waiting{background:var(--status-starting)}",
+  ".activity-dot.task-blocked,.activity-dot.task-failed{background:var(--status-fault)}",
+  ".activity-dot.task-running{animation:none;opacity:1;transform:none}",
+]) if (!compactTaskCss.includes(marker.replace(/\s+/g, ""))) throw new Error(`LB-015 concrete CurrentTask visual semantic missing: ${marker}`);
+for (const wording of ['waiting: "等待授权"', 'blocked: "已阻止"', 'failed: "执行失败"', 'cancelled: "已取消"']) if (!presentation.includes(wording)) throw new Error(`LB-015 concrete CurrentTask wording missing: ${wording}`);
 if (!presentation.includes('return "等待命令"') || presentation.includes("lastCommandAge")) throw new Error("LB-015 first current-task row still carries last-tool age");
 if (!presentation.includes("上次执行工具：") || !css.includes(".last-tool-age{flex:0 0 auto;text-align:right")) throw new Error("LB-015 last-tool label/age alignment missing");
 if (bridge.includes("enable_admin") || bridge.includes("disable_admin") || lib.includes("commands::ui::enable_admin") || lib.includes("commands::ui::disable_admin")) throw new Error("LB-015 obsolete standalone administrator command remains registered");

@@ -6,7 +6,7 @@ export const serviceText: Record<ServiceCode, string> = { off: "未启动", star
 export type ServiceVisualState = "ready" | "starting" | "fault" | "unknown";
 export const serviceVisualState: Record<ServiceCode, ServiceVisualState> = { off: "unknown", starting: "starting", online: "ready", recovering: "starting", fault: "fault" };
 const taskKindText = { read: "读取文件", search: "搜索代码", modify: "修改文件", command: "运行命令", git: "版本操作", build: "构建项目", test: "运行测试", admin: "管理员操作", other: "处理任务" } as const;
-const taskStateText = { idle: "等待命令", running: "", waiting: "等待授权", blocked: "已阻止", failed: "失败", cancelled: "已取消" } as const;
+const taskStateText = { idle: "等待命令", running: "", waiting: "等待授权", blocked: "已阻止", failed: "执行失败", cancelled: "已取消" } as const;
 function formatElapsed(ms: number): string { const seconds = Math.floor(Math.max(0, ms) / 1000); if (seconds < 60) return `${seconds}S`; const minutes = Math.floor(seconds / 60); if (minutes < 60) return `${minutes}分钟`; return `${Math.floor(minutes / 60)}小时`; }
 export function formatLastToolAge(ms: number): string { const bounded = Math.max(0, ms); if (bounded < 60_000) return `${Math.floor(bounded / 1000)}S前`; if (bounded < 3_600_000) return `${Math.floor(bounded / 60_000)}分钟前`; if (bounded < 86_400_000) return "大于1小时"; return `大于${Math.floor(bounded / 86_400_000)}天`; }
 export function lastToolText(tool: LastToolProjection): string { const detail = tool.summary ? `  ${tool.summary}` : ""; return `上次执行工具：${taskKindText[tool.kind]}${detail}`; }
