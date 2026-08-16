@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": "LB-011",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2463,6 +2463,24 @@
       "Fresh architecture verification and git diff check PASS; the earlier formal full serial Gate remains applicable because no product files changed after LB-007."
     ],
     "next_pr": "LB-010",
+    "next_required_g2_adversarial_generation": 21,
+    "g2_generation_21_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb010_schema34_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-010",
+    "product_patch_required": false,
+    "reacceptance_baseline_commit": "ff81457",
+    "evidence": [
+      "Fresh runtime::recovery::tests PASS 15/15: exactly five 1/2/5/10/30 attempts, typed retryability, non-retryable bypass, minimal-layer restart, cooperative cancellation, same-generation exhaustion, manual retry, permission/workspace interruption reconciliation, and 60-second stable Ready reset.",
+      "Fresh workspace::control::tests PASS 6/6: validation/de-duplication, two-phase candidate commit only after Ready, rollback, metadata-only non-active removal, active Tunnel->PEP->MCP stop, NoActiveWorkspace, and no remembered-project fallback authorization.",
+      "Fresh production watchdog contract PASS for cooperative bounded health probes, non-blocking snapshot cache, control/recovery single ownership and persistent manual retry.",
+      "Fresh ARCH-018, ARCH-020 and ARCH-022 each PASS explicitly; the first combined shell command had a PowerShell CommandNotFoundException for later loop paths and was not counted as evidence, then ARCH-020/022 were rerun separately to confirmed exit 0.",
+      "Fresh architecture, G4 regression and git diff check PASS; no LB-010 product patch required."
+    ],
+    "next_pr": "LB-011",
     "next_required_g2_adversarial_generation": 21,
     "g2_generation_21_consumed": false,
     "g3_unlocked": false,
