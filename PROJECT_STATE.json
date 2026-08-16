@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2726,5 +2726,13 @@
     "g3_generation_7_consumed": false,
     "g4_unlocked": false,
     "next_pr": "LB-016"
+  },
+  "lb015_dashboard_task_state_alignment_reopen_2026_08_16": {
+    "status": "REWORK_REQUIRED",
+    "owner_pr": "LB-015",
+    "source": "explicit_user_ui_feedback",
+    "finding": "Dashboard CurrentTask text is typed but the status indicator only distinguishes Running from every other backend CurrentTaskStatus, so Waiting Blocked Failed and Cancelled collapse to the same neutral gray visual state.",
+    "required_correction": "Derive the Dashboard status indicator directly from backend CurrentTaskStatus with Running green pulse, Waiting warning state, Blocked and Failed error state, Idle gray static, and Cancelled non-running terminal state; keep existing typed state text and do not add a parallel frontend task state machine.",
+    "next_action": "Repair and reaccept LB-015, then return execution to LB-016."
   }
 }
