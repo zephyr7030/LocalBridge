@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2427,6 +2427,24 @@
     ],
     "remaining_scope": "LB-012 still owns fresh real product/use-side verification that elevated_exec reaches the separate Broker/UAC Administrator Token and revokes correctly when Broker or Elevated mode is lost; generation20 historical FAIL remains preserved until G2 generation21 review.",
     "next_pr": "LB-008",
+    "next_required_g2_adversarial_generation": 21,
+    "g2_generation_21_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb008_schema34_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-008",
+    "product_patch_required": false,
+    "reacceptance_baseline_commit": "9cf4927",
+    "evidence": [
+      "Fresh LB-008 pinned tunnel contract PASS: tunnel-client 0.0.11 and cloudflared 2026.7.2 payload identities/hashes remain exact and ordinary Tunnel startup does not force optional managed Cloudflare flags.",
+      "Fresh ARCH-016 PASS with LB-008 activation environment: Runtime API Key remains child-environment-only, Tunnel ID remains child-environment-only, inherited override variables are removed before spawn, and command-line regression evidence remains present.",
+      "Fresh complete tunnel:: Rust test set PASS for bundle verification, config, readiness/control-plane metadata, stable typed auth/config/recoverability faults, transient CredentialStore reads, restart semantics, secret-redacted prepare path, and actual process command-line secret exclusion/job drain.",
+      "Fresh runtime-manifest and architecture verification PASS; git diff check PASS.",
+      "The formal full serial Cargo/Clippy/frontend/build/architecture Gate already PASSed on the same product commit 995c267; only LB-007 governance metadata changed afterward, so no LB-008 product patch was required."
+    ],
+    "next_pr": "LB-009",
     "next_required_g2_adversarial_generation": 21,
     "g2_generation_21_consumed": false,
     "g3_unlocked": false,
