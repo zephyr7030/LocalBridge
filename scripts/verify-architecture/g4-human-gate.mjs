@@ -733,6 +733,80 @@ const PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16 = Object.freeze
   },
 });
 
+const G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16 = Object.freeze({
+  schemaVersion: 35,
+  baselineSchemaVersion: 35,
+  replacedRules: {
+    dashboard_permission_mode_row_forbidden: { current: false, baseline: true },
+    dashboard_admin_privilege_status_read_only: { current: false, baseline: true },
+    onboarding_screen_4_plugin_management_guidance: {
+      current: "打开新建插件页后，选择隧道并选择刚刚添加的Tunel，创建插件",
+      baseline: "打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件",
+    },
+  },
+  addedRules: {
+    dashboard_permission_mode_read_only_row_required: true,
+    dashboard_permission_mode_row_label: "权限模式",
+    dashboard_permission_mode_row_values: ["编辑模式", "完整模式", "管理员模式"],
+    dashboard_permission_mode_status_dot_forbidden: true,
+    ui_panel_base_color_difference_required: false,
+    ui_flat_primary_surface_allowed: true,
+    ui_fake_elevation_through_near_invisible_surface_treatment_forbidden: true,
+    onboarding_screen_4_new_connector_action_label: "打开新建插件页",
+    onboarding_screen_4_new_connector_action_before_information_rows: true,
+    onboarding_screen_4_information_label_column_aligned: true,
+    onboarding_screen_4_copy_action_right_edge_aligned: true,
+    tray_icon_ico: "assets/icons/localbridge-tray.ico",
+    tray_icon_required_frame_sizes: [16, 20, 24, 32, 48],
+    tray_icon_small_frame_simplified_design_required: true,
+    tray_icon_runtime_resampling_forbidden: true,
+    tray_icon_exact_dpi_frame_mapping: { "1.0": 16, "1.25": 20, "1.5": 24, "2.0": 32 },
+    tray_icon_large_brand_art_direct_use_forbidden: true,
+  },
+  prs: {
+    "LB-013": {
+      addedWritablePaths: ["assets/icons/localbridge-tray.ico"],
+      artifactReplacements: [[
+        "system tray uses dedicated frozen LocalBridge small-size high-DPI tray icon family",
+        "system tray uses frozen LocalBridge brand icon",
+      ]],
+      testReplacements: [[
+        "tray icon derives from frozen assets/icons/localbridge-tray.ico with dedicated 16/20/24/32/48 small-size frames and exact 100/125/150/200% DPI selection without runtime resampling",
+        "tray icon derives from frozen localbridge.ico asset",
+      ]],
+      addedTests: [
+        "tray 16/20/24/32 frames use the simplified small-size LocalBridge glyph rather than the high-detail 1024px brand artwork directly",
+      ],
+    },
+    "LB-015": {
+      artifactReplacements: [[
+        "Dashboard read-only PermissionMode status",
+        "Dashboard privilege runtime status",
+      ]],
+      testReplacements: [
+        ["Dashboard 权限模式 row displays exactly 编辑模式 完整模式 or 管理员模式 from backend PermissionMode", "Dashboard shows privilege status independently from permission preference"],
+        ["Dashboard 权限模式 display is sourced from backend PermissionMode while Settings and onboarding administrator activation still use PrivilegeState for runtime elevation state", "Dashboard read-only administrator privilege status plus Settings and onboarding privilege runtime state are sourced from PrivilegeState rather than permission preference alone"],
+        ["Dashboard renders exactly one read-only 权限模式 row showing 编辑模式 完整模式 or 管理员模式 and renders no permission selection controls", "Dashboard renders no 权限模式 row and no 编辑模式 完整模式 管理员模式 selection controls"],
+        ["Dashboard 权限模式 row is read-only and cannot mutate PermissionMode or request UAC", "Dashboard administrator privilege status is read-only and sourced from PrivilegeState"],
+      ],
+      addedTests: [
+        "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode",
+        "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent",
+      ],
+    },
+    "LB-016": {
+      testReplacements: [
+        ["screen 4 shows 打开新建插件页后，选择隧道并选择刚刚添加的Tunel，创建插件 beneath the plugin-settings action", "screen 4 shows 打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件 beneath the plugin-settings action"],
+        ["screen 4 new-connector action label is 打开新建插件页", "screen 4 lower plugin action label is 打开插件管理页"],
+        ["screen 4 打开新建插件页 action is placed immediately above the 名称/Tunnel ID information rows in the left-side action flow", "screen 4 lower plugin-management action is placed in the left-side action flow"],
+      ],
+      addedTests: [
+        "screen 4 名称 and Tunnel ID rows share one aligned left label column/value start and their copy actions share one aligned right edge without fixed copy-button width",
+      ],
+    },
+  },
+});
+
 const UI_GREEN_STORAGE_DEFAULT_NON_ADMIN_AMENDMENT_2026_08_16 = Object.freeze({
   schemaVersion: 35,
   baselineSchemaVersion: 34,
@@ -1551,6 +1625,44 @@ function normalizeReplacements(array, replacements) {
   });
 }
 
+export function hasExactG3UiTrayRefinementAmendment20260816(contractsDoc) {
+  if (contractsDoc?.schema_version !== G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.schemaVersion) return false;
+  for (const [key, replacement] of Object.entries(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.replacedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(replacement.current)) return false;
+  }
+  for (const [key, expected] of Object.entries(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const [id, delta] of Object.entries(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.prs)) {
+    const pr = contractsDoc?.prs?.[id];
+    if (!pr) return false;
+    if (!containsAll(pr.writable_paths ?? [], delta.addedWritablePaths ?? [])) return false;
+    if (!hasReplacement(pr.required_artifacts, delta.artifactReplacements ?? [])) return false;
+    if (!hasReplacement(pr.required_tests, delta.testReplacements ?? [])) return false;
+    if (!containsAll(pr.required_tests ?? [], delta.addedTests ?? [])) return false;
+  }
+  return true;
+}
+
+export function normalizeG3UiTrayRefinementAmendment20260816(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.baselineSchemaVersion;
+  for (const [key, replacement] of Object.entries(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.replacedRules)) normalized.rules[key] = replacement.baseline;
+  for (const key of Object.keys(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.addedRules)) delete normalized.rules[key];
+  for (const [id, delta] of Object.entries(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.prs)) {
+    const pr = normalized.prs?.[id];
+    if (!pr) continue;
+    if (Array.isArray(pr.writable_paths)) pr.writable_paths = removeItems(pr.writable_paths, delta.addedWritablePaths);
+    if (Array.isArray(pr.required_artifacts)) pr.required_artifacts = normalizeReplacements(pr.required_artifacts, delta.artifactReplacements ?? []);
+    if (Array.isArray(pr.required_tests)) {
+      pr.required_tests = removeItems(pr.required_tests, delta.addedTests);
+      pr.required_tests = normalizeReplacements(pr.required_tests, delta.testReplacements ?? []);
+    }
+  }
+  return normalized;
+}
+
 export function hasExactPermissionModeEqualThirdsGeometryAmendment20260816(contractsDoc) {
   if (contractsDoc?.schema_version !== PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.schemaVersion) return false;
   for (const [key, expected] of Object.entries(PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.addedRules)) {
@@ -2028,6 +2140,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.schemaVersion) {
+    if (!hasExactG3UiTrayRefinementAmendment20260816(authorizationContracts)) {
+      findings.push(`${expected.id}:g3-ui-tray-refinement-20260816-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeG3UiTrayRefinementAmendment20260816(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16.schemaVersion) {
     if (!hasExactPermissionModeEqualThirdsGeometryAmendment20260816(authorizationContracts)) {
       findings.push(`${expected.id}:permission-mode-equal-thirds-20260816-contract-amendment-drift`);
