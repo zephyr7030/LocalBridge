@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { PRE_G4_GATE_AUTHORIZATION, hasExactAdminModeSafetyWarningAmendment20260814, hasExactCommandTaskStateAndWindowCenterAmendment20260815, hasExactG3HumanReviewAmendment, hasExactG3HumanReviewGeneration2Amendment, hasExactG3ManualPathExecutionCorrection20260814, hasExactG3ManualReviewRound2_20260814, hasExactG3ManualSupplement20260814, hasExactG3UiFirstScrollbarAmendment20260814, hasExactLb007PolicyAndCmdCodepageAmendment20260815, hasExactLocalBridgeAgentRuntimeFacadeAmendment20260814, hasExactNestedProjectPowershellWorkspaceWriteAmendment20260815, hasExactPublicFacadeRuntimeSemanticsAmendment20260814, hasExactTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, normalizeAdminModeSafetyWarningAmendment20260814, normalizeCommandTaskStateAndWindowCenterAmendment20260815, normalizeG3HumanReviewAmendment, normalizeG3HumanReviewGeneration2Amendment, normalizeG3ManualPathExecutionCorrection20260814, normalizeG3ManualReviewRound2_20260814, normalizeG3ManualSupplement20260814, normalizeG3UiFirstScrollbarAmendment20260814, normalizeLb007PolicyAndCmdCodepageAmendment20260815, normalizeLocalBridgeAgentRuntimeFacadeAmendment20260814, normalizeNestedProjectPowershellWorkspaceWriteAmendment20260815, normalizePublicFacadeRuntimeSemanticsAmendment20260814, normalizeTestOrchestrationAndPublicRuntimeCorrectionsAmendment20260814, validateG4HumanGate, validatePreG4GateAuthorization } from "./g4-human-gate.mjs";
-import { hasExactPermissionExecutionModelAmendment20260816, normalizePermissionExecutionModelAmendment20260816, hasExactElevatedScopeAndUiGeometryAmendment20260815, normalizeElevatedScopeAndUiGeometryAmendment20260815, hasExactWindowsSystemManagementPrivilegeAmendment20260815, normalizeWindowsSystemManagementPrivilegeAmendment20260815, hasExactUiGreenStorageDefaultNonAdminAmendment20260816, normalizeUiGreenStorageDefaultNonAdminAmendment20260816, hasExactPermissionModeEqualThirdsGeometryAmendment20260816, normalizePermissionModeEqualThirdsGeometryAmendment20260816, hasExactG3UiTrayRefinementAmendment20260816, normalizeG3UiTrayRefinementAmendment20260816 } from "./g4-human-gate.mjs";
+import { hasExactPermissionExecutionModelAmendment20260816, normalizePermissionExecutionModelAmendment20260816, hasExactElevatedScopeAndUiGeometryAmendment20260815, normalizeElevatedScopeAndUiGeometryAmendment20260815, hasExactWindowsSystemManagementPrivilegeAmendment20260815, normalizeWindowsSystemManagementPrivilegeAmendment20260815, hasExactUiGreenStorageDefaultNonAdminAmendment20260816, normalizeUiGreenStorageDefaultNonAdminAmendment20260816, hasExactPermissionModeEqualThirdsGeometryAmendment20260816, normalizePermissionModeEqualThirdsGeometryAmendment20260816, hasExactG3UiTrayRefinementAmendment20260816, normalizeG3UiTrayRefinementAmendment20260816, hasExactPublicMcpOutputSchemaAmendment20260816, normalizePublicMcpOutputSchemaAmendment20260816 } from "./g4-human-gate.mjs";
 
 const evidenceCommit = "a".repeat(40);
 const implementationCommit = "b".repeat(40);
@@ -260,6 +260,16 @@ schema19FullRollback.schema_version = 19;
 assert.match(validatePreG4GateAuthorization(schema19FullRollback, ratifiedGit, expected, ratification).join("|"), /human-review-contract-amendment-drift/);
 
 const schema35Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.json", import.meta.url), "utf8"));
+assert.equal(hasExactPublicMcpOutputSchemaAmendment20260816(schema35Contracts), true);
+const schema35MissingOutputArtifact = structuredClone(schema35Contracts);
+schema35MissingOutputArtifact.prs["LB-006"].required_artifacts = schema35MissingOutputArtifact.prs["LB-006"].required_artifacts.filter((item) => !item.startsWith("LocalBridge-owned MCP output schemas"));
+assert.equal(hasExactPublicMcpOutputSchemaAmendment20260816(schema35MissingOutputArtifact), false);
+const schema35MissingOutputProof = structuredClone(schema35Contracts);
+schema35MissingOutputProof.prs["LB-006"].required_tests = schema35MissingOutputProof.prs["LB-006"].required_tests.filter((item) => !item.startsWith("every advertised LocalBridge public tool including privileged extensions declares a non-empty LocalBridge-owned outputSchema"));
+assert.equal(hasExactPublicMcpOutputSchemaAmendment20260816(schema35MissingOutputProof), false);
+const schema35BeforePublicOutputSchema = normalizePublicMcpOutputSchemaAmendment20260816(schema35Contracts);
+assert.equal(schema35BeforePublicOutputSchema.prs["LB-006"].required_artifacts.some((item) => item.startsWith("LocalBridge-owned MCP output schemas")), false);
+assert.equal(schema35BeforePublicOutputSchema.prs["LB-006"].required_tests.some((item) => item.startsWith("every advertised LocalBridge public tool including privileged extensions declares a non-empty LocalBridge-owned outputSchema")), false);
 assert.equal(hasExactG3UiTrayRefinementAmendment20260816(schema35Contracts), true);
 for (const [rule, drift] of [
   ["dashboard_permission_mode_read_only_row_required", false],

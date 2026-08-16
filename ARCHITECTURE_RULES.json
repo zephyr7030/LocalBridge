@@ -232,6 +232,13 @@
       "severity": "error",
       "applies_to": ["src/**", "src-tauri/src/tray/**", "assets/icons/localbridge.png", "assets/icons/localbridge.ico", "assets/icons/localbridge-tray.ico", "scripts/icons/derive-tray-icon.ps1"],
       "verification": { "mode": "deferred", "activate_at_pr": "LB-013", "reason": "Tray and later G3 desktop/onboarding UI are complete within G3 and this explicit post-review amendment must remain machine-enforced", "type": "g3_ui_tray_refinement" }
+    },
+    {
+      "id": "ARCH-030",
+      "description": "Every advertised LocalBridge public MCP tool, including privileged extensions, declares a LocalBridge-owned outputSchema that matches the actual structuredContent contract; core tools expose the stable typed ok/data or ok/error envelope and upstream private output schemas are not forwarded as the public contract",
+      "severity": "error",
+      "applies_to": ["src-tauri/src/mcp/**"],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-006", "reason": "The versioned public ToolRegistry and result normalization facade are owned by LB-006", "type": "public_mcp_output_schema" }
     }
   ]
 }

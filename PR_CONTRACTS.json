@@ -977,7 +977,8 @@
         "owner-checked atomic task-state command finalizer with durable terminal snapshots",
         "agent_workflow workspace-relative nested-project selector with stable selected-path and enclosing-repository context",
         "trusted PowerShell standard cmdlet baseline loaded from validated first-party/system module identity before arbitrary module autoload is disabled",
-        "agent_workflow directory_changes structured active-workspace directory create and empty-directory cleanup route without adding a ninth public core tool"
+        "agent_workflow directory_changes structured active-workspace directory create and empty-directory cleanup route without adding a ninth public core tool",
+        "LocalBridge-owned MCP output schemas for every advertised public tool, matching the stable public structuredContent contract without exposing upstream private output schemas"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -1033,7 +1034,8 @@
         "windows_powershell and auto resolving to PowerShell provide a trusted standard coding cmdlet baseline including Get-Location Get-ChildItem and Test-Path while keeping arbitrary module autoload disabled; the preload source is fixed or identity-validated and cannot be redirected through user-controlled PSModulePath",
         "restoring standard PowerShell cmdlets does not weaken shell review: provider mutation and dynamic command-surface operations such as New-Item Set-Content Set-Item Alias or Function provider mutation remain subject to the existing LB-007 review-required classification",
         "agent_workflow exposes optional directory_changes as a bounded array of objects with exactly action plus path; action is only create_directory or remove_empty_directory and path is active-workspace-relative; with active workspace D:\\project, directory_changes can create D:\\project\\test and later remove that directory when empty without using process execution; Edit and Full both permit this reviewed workspace write, absolute or parent-traversal targets and reparse escapes are denied, non-empty recursive directory deletion is not implied, and the operation never mutates WorkspaceRegistry or active workspace control-plane",
-        "Elevated path authority is mode-aware rather than a lexical workspace bypass: LocalBridge structured ordinary routes stay workspace-bound, Full child-process filesystem authority remains the current ordinary-user token without an OS workspace-sandbox promise, and administrator-token operations outside the active workspace are dispatched only through a Broker-backed privileged filesystem or administrator execution route"
+        "Elevated path authority is mode-aware rather than a lexical workspace bypass: LocalBridge structured ordinary routes stay workspace-bound, Full child-process filesystem authority remains the current ordinary-user token without an OS workspace-sandbox promise, and administrator-token operations outside the active workspace are dispatched only through a Broker-backed privileged filesystem or administrator execution route",
+        "every advertised LocalBridge public tool including privileged extensions declares a non-empty LocalBridge-owned outputSchema matching its actual structuredContent; agent_workflow describes the stable ok/data/error envelope and action/state/workspace/project/commands result fields, elevated_exec describes its existing privileged result variants, and upstream private outputSchema is never exposed directly"
       ],
       "non_goals": [
         "policy enforcement",

@@ -733,6 +733,19 @@ const PERMISSION_MODE_EQUAL_THIRDS_GEOMETRY_AMENDMENT_2026_08_16 = Object.freeze
   },
 });
 
+const PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16 = Object.freeze({
+  schemaVersion: 35,
+  baselineSchemaVersion: 35,
+  lb006: {
+    addedArtifacts: [
+      "LocalBridge-owned MCP output schemas for every advertised public tool, matching the stable public structuredContent contract without exposing upstream private output schemas",
+    ],
+    addedTests: [
+      "every advertised LocalBridge public tool including privileged extensions declares a non-empty LocalBridge-owned outputSchema matching its actual structuredContent; agent_workflow describes the stable ok/data/error envelope and action/state/workspace/project/commands result fields, elevated_exec describes its existing privileged result variants, and upstream private outputSchema is never exposed directly",
+    ],
+  },
+});
+
 const G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16 = Object.freeze({
   schemaVersion: 35,
   baselineSchemaVersion: 35,
@@ -1641,6 +1654,26 @@ function normalizeReplacements(array, replacements) {
   });
 }
 
+export function hasExactPublicMcpOutputSchemaAmendment20260816(contractsDoc) {
+  if (contractsDoc?.schema_version !== PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16.schemaVersion) return false;
+  const lb006 = contractsDoc?.prs?.["LB-006"];
+  return Boolean(lb006)
+    && containsAll(lb006.required_artifacts, PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16.lb006.addedArtifacts)
+    && containsAll(lb006.required_tests, PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16.lb006.addedTests);
+}
+
+export function normalizePublicMcpOutputSchemaAmendment20260816(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16.baselineSchemaVersion;
+  const lb006 = normalized.prs?.["LB-006"];
+  if (lb006) {
+    lb006.required_artifacts = removeItems(lb006.required_artifacts, PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16.lb006.addedArtifacts);
+    lb006.required_tests = removeItems(lb006.required_tests, PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16.lb006.addedTests);
+  }
+  return normalized;
+}
+
 export function hasExactG3UiTrayRefinementAmendment20260816(contractsDoc) {
   if (contractsDoc?.schema_version !== G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.schemaVersion) return false;
   for (const [key, replacement] of Object.entries(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.replacedRules)) {
@@ -2156,6 +2189,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= PUBLIC_MCP_OUTPUT_SCHEMA_AMENDMENT_2026_08_16.schemaVersion) {
+    if (!hasExactPublicMcpOutputSchemaAmendment20260816(authorizationContracts)) {
+      findings.push(`${expected.id}:public-mcp-output-schema-20260816-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizePublicMcpOutputSchemaAmendment20260816(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.schemaVersion) {
     if (!hasExactG3UiTrayRefinementAmendment20260816(authorizationContracts)) {
       findings.push(`${expected.id}:g3-ui-tray-refinement-20260816-contract-amendment-drift`);
