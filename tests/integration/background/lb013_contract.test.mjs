@@ -12,6 +12,7 @@ const privilege = readFileSync("src-tauri/src/privilege/control.rs", "utf8");
 const orchestrator = readFileSync("src-tauri/src/runtime/orchestrator.rs", "utf8");
 const config = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
 const auth = JSON.parse(readFileSync("scripts/authorization-records/LB-013.json", "utf8"));
+const trayDeriver = readFileSync("scripts/icons/derive-tray-icon.ps1", "utf8");
 const normalized = (value) => value.replace(/\s+/g, " ");
 
 if ((config.app?.windows ?? []).length !== 0) throw new Error("LB-013 background startup still has a static Tauri main window");
@@ -72,10 +73,14 @@ if (!tray.includes("spawn_shutdown_then(move |_| exit_app.exit(0))") || tray.inc
 if (!config.bundle?.icon?.includes("../assets/icons/localbridge.ico")) throw new Error("LB-013 bundle icon is not frozen localbridge.ico");
 const ico = readFileSync("assets/icons/localbridge.ico");
 const hash = createHash("sha256").update(ico).digest("hex");
-if (hash !== "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78") throw new Error("LB-013 frozen tray icon hash drift");
+if (hash !== "c995d6af01ebc5031950eb9ea6415b58671b31f84ed6b55baabe80ea51e33f78") throw new Error("LB-013 frozen taskbar/left-bottom icon hash drift");
+const masterPng = readFileSync("assets/icons/localbridge.png");
+if (createHash("sha256").update(masterPng).digest("hex") !== "710690f2d70e3c69f13db9d4eaebc0bef5c80561c74acc7bc5a401c15c16e55a") throw new Error("LB-013 frozen master PNG hash drift");
 const trayIco = readFileSync("assets/icons/localbridge-tray.ico");
 const trayHash = createHash("sha256").update(trayIco).digest("hex");
-if (trayHash !== "1cbf7251fc08366b4107b633d0145886526ebec45f4c9d0d01c55c6e2683a06c") throw new Error("LB-013 dedicated tray icon hash drift");
+if (trayHash !== "5a9fce6e80050c9ce1620b8e28767052ece2536213ee04fe532596d3f4ec811d") throw new Error("LB-013 PNG-derived tray icon hash drift");
+for (const marker of ["assets/icons/localbridge.png", "$CropX = 90", "$CropY = 400", "$CropWidth = 390", "$CropHeight = 390", "$FrameSizes = @(16, 20, 24, 32, 48)", ".DrawImage($sourceBitmap", "HighQualityBicubic"]) if (!trayDeriver.includes(marker)) throw new Error(`LB-013 tray PNG derivation script missing: ${marker}`);
+if (/FillRectangle|FillEllipse|DrawString|DrawIcon|DrawLine|DrawPolygon|GraphicsPath/i.test(trayDeriver)) throw new Error("LB-013 tray derivation introduces newly authored graphics instead of source-PNG-only processing");
 const trayFrameSizes = [];
 const trayFrameCount = trayIco.readUInt16LE(4);
 for (let index = 0; index < trayFrameCount; index += 1) {

@@ -103,7 +103,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const taskState = task?.state ?? "idle";
   const activeProject = projection?.projects.find((item) => item.active) ?? null;
   const reconnectVisible = Boolean(projection?.reconnect && projection.reconnect.generation !== handledGeneration);
-  const elevatedFullAccess = projection?.permission === "admin" && projection?.privilege === "active";
+  const adminModeFullAccess = projection?.permission === "admin";
   const chooseAccess = (mode: AccessCode) => {
     if (mode === "admin" && projection?.privilege !== "active") {
       setAdminWarningOpen(true);
@@ -112,7 +112,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
     void run(() => bridge.setAccess(mode));
   };
   const openProjectPicker = () => {
-    if (elevatedFullAccess) {
+    if (adminModeFullAccess) {
       setFullAccessInfoOpen(true);
       return;
     }
@@ -123,7 +123,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   return <main className="shell">
     <header className="topbar"><div className="brand">{APP_NAME}</div><div className="top-actions"><button className="ghost" onClick={() => setView("settings")}>{uiText.settings}</button><button className="ghost" onClick={() => setView("diagnostics")}>{uiText.diagnostics}</button></div></header>
     <section className="card">
-      <div className="row"><span className="label">当前项目</span><div className="project-actions"><span className={`value ${elevatedFullAccess ? "full-access" : ""}`}>{elevatedFullAccess ? "全目录访问" : activeProject?.path ?? "未选择项目"}</span><button className="secondary" onClick={openProjectPicker}>{activeProject ? "切换" : "选择项目"}</button></div></div>
+      <div className="row"><span className="label">当前项目</span><div className="project-actions"><span className={`value ${adminModeFullAccess ? "full-access" : ""}`}>{adminModeFullAccess ? "全目录访问" : activeProject?.path ?? "未选择项目"}</span><button className="secondary" onClick={openProjectPicker}>{activeProject ? "切换" : "选择项目"}</button></div></div>
       <div className="row"><span className="label">本地运行环境</span><span className="value service-value"><ServiceStatusDot service={projection?.localEnvironmentService ?? null}/><span>{projection ? serviceText[projection.localEnvironmentService] : "正在读取"}</span></span></div>
       <div className="row"><span className="label">OpenAI 安全隧道</span><span className="value service-value"><ServiceStatusDot service={projection?.tunnelService ?? null}/><span>{projection ? serviceText[projection.tunnelService] : "正在读取"}</span></span></div>
       <div className="row"><span className="label">编码服务</span><span className="value service-value"><ServiceStatusDot service={projection?.codingService ?? null}/><span>{projection ? serviceText[projection.codingService] : "正在读取"}</span></span></div>
