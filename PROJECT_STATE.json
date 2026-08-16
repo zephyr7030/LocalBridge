@@ -2914,5 +2914,29 @@
     "g4_unlocked": false,
     "review_decision_commit": "c6d7ff74466e93f31439994ef9b6bc9d0980395a",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "g3_icon_scope_refinement_2026_08_16": {
+    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "source": "explicit_user_feedback_2026_08_16",
+    "contract_commit": "9ef24e0",
+    "product_commit": "b0789c6",
+    "invalidated_adversarial_generation": 8,
+    "invalidation_cause": "explicit_user_png_icon_and_permission_scope_binding_2026_08_16",
+    "changes": [
+      "Notification-area tray artwork no longer uses the independently authored simplified glyph; localbridge-tray.ico is deterministically derived only from assets/icons/localbridge.png crop 90,400,390,390 and downscaled into 16/20/24/32/48 native frames.",
+      "The accepted clear taskbar/left-bottom localbridge.ico remains unchanged and its frozen provenance is anchored to the same LocalBridge master PNG contract.",
+      "Dashboard current-project display and project-switch boundary are sourced from backend PermissionMode only: Edit/Full show active workspace path; Admin shows 全目录访问 and blocks switching regardless Broker/PrivilegeState."
+    ],
+    "verified_before_review": [
+      "PNG-derived tray script reproducibility/hash PASS and LB-013 contract PASS",
+      "LB-015 PermissionMode-bound project scope contract PASS",
+      "ARCH-029 and G4 fail-closed regression PASS",
+      "cargo test/clippy PASS in isolated CARGO_TARGET_DIR without stopping the user running LocalBridge instance",
+      "frontend test/build/runtime-manifest/architecture 29/29/UI-language/native 150% DPI WebView/diff check PASS"
+    ],
+    "next_required_adversarial_generation": 9,
+    "human_review_generation": 3,
+    "human_review_blocked_until_generation9_pass": true,
+    "g4_unlocked": false
   }
 }
