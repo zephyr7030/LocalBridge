@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2570,5 +2570,25 @@
     "g3_unlocked": true,
     "g4_unlocked": false,
     "review_decision_commit": "7ec09f2214c707eac83008639e7b8889c045685a"
+  },
+  "lb013_schema34_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-013",
+    "product_patch_required": false,
+    "reacceptance_baseline_commit": "619b6b8343ee72c4ba83b0f6179b9f5cbc7e9cba",
+    "evidence": [
+      "Fresh LB-013 static contract PASS for --background no-window startup, frozen localbridge.ico tray identity, cached close-to-hide versus asynchronous orderly exit, security-order Broker shutdown, persisted settings schema v4 and no pre-exhaustion notification surface.",
+      "Fresh DesktopLifecycle/background Rust behavior PASS, including the real bundled MCP/PEP/Tunnel production-adapter tray-exit path and non-blocking backend shutdown dispatch.",
+      "Fresh lb003_migration_matrix PASS, including v3 to v4 close_window_continue_running migration with the safe true default and migration backup behavior.",
+      "Fresh formal serial acceptance Gate PASS: cargo test --locked -- --test-threads=1, cargo clippy --locked --all-targets --all-features -D warnings, npm test, npm run build, runtime-manifest, architecture, UI-language, G4 human-gate regression and git diff --check.",
+      "No LB-013 product modification was required on the post-G2-generation21 schema34 baseline; tracked product diff remained empty throughout acceptance."
+    ],
+    "group_transition": "G3_IN_PROGRESS",
+    "historical_g3_review_generation": 6,
+    "historical_generation6_preserved": true,
+    "next_required_g3_adversarial_generation": 7,
+    "g3_generation_7_consumed": false,
+    "g4_unlocked": false,
+    "next_pr": "LB-014"
   }
 }
