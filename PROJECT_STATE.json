@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-009",
+  "current_pr": "LB-010",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2445,6 +2445,24 @@
       "The formal full serial Cargo/Clippy/frontend/build/architecture Gate already PASSed on the same product commit 995c267; only LB-007 governance metadata changed afterward, so no LB-008 product patch was required."
     ],
     "next_pr": "LB-009",
+    "next_required_g2_adversarial_generation": 21,
+    "g2_generation_21_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb009_schema34_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-009",
+    "product_patch_required": false,
+    "reacceptance_baseline_commit": "f103381",
+    "evidence": [
+      "Fresh LB-009 static orchestrator contract PASS: staged start, reverse stop, live CurrentTask-only projection, outage generation, and no LB-010 backoff/workspace-switch leakage.",
+      "Fresh complete runtime::orchestrator::tests PASS for MCP -> PEP -> Tunnel -> Ready, reverse Tunnel -> PEP -> MCP manual stop, deterministic fake sidecars, staged-start cleanup, duplicate start/stop failure handling, and production composition checks.",
+      "Fresh CurrentTask tests PASS: live projected task returns to Idle and no user-visible task history is accumulated.",
+      "Fresh outage-generation tests PASS for at-most-once final user-attention emission per generation and stale-generation rejection.",
+      "Fresh architecture verification and git diff check PASS; the earlier formal full serial Gate remains applicable because no product files changed after LB-007."
+    ],
+    "next_pr": "LB-010",
     "next_required_g2_adversarial_generation": 21,
     "g2_generation_21_consumed": false,
     "g3_unlocked": false,
