@@ -7,7 +7,7 @@ const css = readFileSync("src/styles.css", "utf8");
 
 for (const text of [
   "启用管理员权限后，错误或恶意操作可能导致：",
-  "删除或覆盖重要文档",
+  "删除或覆盖重要文件",
   "修改系统关键配置",
   "软件或系统无法正常启动",
   "数据永久丢失",
