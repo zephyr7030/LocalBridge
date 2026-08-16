@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -2481,6 +2481,24 @@
       "Fresh architecture, G4 regression and git diff check PASS; no LB-010 product patch required."
     ],
     "next_pr": "LB-011",
+    "next_required_g2_adversarial_generation": 21,
+    "g2_generation_21_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb011_schema34_reacceptance_2026_08_16": {
+    "status": "PASS",
+    "owner_pr": "LB-011",
+    "product_patch_required": false,
+    "reacceptance_baseline_commit": "f6f7f78",
+    "evidence": [
+      "Fresh LB-011 security-boundary and UAC-boundary static tests PASS: named-pipe-only local IPC, current-user SID/expected PID authentication, explicit ShellExecuteExW(runas) UAC only, no whole-app elevation, no secret-like Broker CLI parameters, and no background auto-UAC path.",
+      "Fresh actual separate Broker IPC integration PASS for handshake/ping/shutdown, stale generation and replay rejection, session-lifetime shutdown, bounded structured execution/cancel/timeout/redaction, and structured filesystem roundtrip.",
+      "Fresh complete privilege:: Rust unit tests PASS for protocol validation, Broker CLI, control-state fail-closed liveness, canonical protected sibling trust, development binary pin, and mutation guard behavior.",
+      "Fresh cargo check --release --lib --bins PASS, architecture verification PASS and git diff check PASS.",
+      "No LB-011 product patch required; the earlier formal full serial product Gate remains applicable to the same product tree."
+    ],
+    "next_pr": "LB-012",
     "next_required_g2_adversarial_generation": 21,
     "g2_generation_21_consumed": false,
     "g3_unlocked": false,
