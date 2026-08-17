@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3624,5 +3624,11 @@
     "review_decision_commit": null,
     "g3_unlocked_for_reacceptance": true,
     "g4_unlocked": false
+  },
+  "lb013_post_g2gen25_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "evidence": [
+      "LB-013 contract and ARCH-029 PASS on G2 generation25 baseline."
+    ]
   }
 }
