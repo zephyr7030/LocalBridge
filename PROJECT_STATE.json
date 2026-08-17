@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3282,7 +3282,7 @@
     },
     "current_pointer": {
       "group": "G3",
-      "pr": "LB-016"
+      "pr": "LB-017"
     },
     "g4": "BLOCKED",
     "human_gate_policy": "after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
@@ -3658,7 +3658,7 @@
     "next_action": "Run fresh G3 adversarial review generation13."
   },
   "g3_generation13_lb016_stale_consent_reopen_2026_08_17": {
-    "status": "REWORK_REQUIRED",
+    "status": "RESOLVED",
     "owner_pr": "LB-016",
     "finding": "Backend administrator consent gate stores only one global not_before deadline and no challenge identity, so a stale warning instance cannot be distinguished from the newest challenge and can consume a newer matured authorization window.",
     "evidence": [
@@ -3668,6 +3668,21 @@
     ],
     "g3_generation13_consumed": false,
     "g4_unlocked": false,
-    "next_action": "Bind begin cancel and confirmation to a fresh challenge identity and prove stale challenge rejection before rerunning LB-016 onward."
+    "next_action": "Bind begin cancel and confirmation to a fresh challenge identity and prove stale challenge rejection before rerunning LB-016 onward.",
+    "resolution_commit": "14686af"
+  },
+  "lb016_schema36_nonce_consent_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "product_commit": "14686af",
+    "evidence": [
+      "Reproduction test proved the previous global deadline could not distinguish stale warning A from newer warning B.",
+      "Backend consent now binds challenge_id plus monotonic not_before; stale confirm and stale cancel are rejected, matching challenge confirmation produces a one-shot confirmed ticket, and normal admin consumes it exactly once.",
+      "AdminModeWarning generates a fresh crypto.randomUUID challenge per mount and uses identity-bound begin/cancel/confirm intents while local countdown remains presentation only.",
+      "Fresh LB-016 contract, shared LB-015 warning regression, consent state-machine tests, full Rust, Clippy, Vitest/build, native onboarding E2E, architecture/UI-language/G4 regression and diff check PASS."
+    ],
+    "next_pr": "LB-017",
+    "g3_review_generation": 13,
+    "g4_unlocked": false
   }
 }
