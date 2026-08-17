@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3536,5 +3536,16 @@
       "LB-015 contract, ARCH-029, frontend tests/build, architecture and UI-language gates passed."
     ],
     "next_action": "Implement LB-016 backend-trusted 9000ms administrator consent challenge/not-before gate."
+  },
+  "lb016_schema36_backend_consent_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "product_commit": "f3f5469",
+    "evidence": [
+      "Backend std::time::Instant not-before gate enforces full 9000ms before administrator continuation.",
+      "Fresh begin resets the deadline; cancel invalidates; successful confirmation consumes once; frontend countdown is presentation-only and backend-ready gated.",
+      "LB-016 contract, backend gate tests, Clippy, frontend tests/build, ARCH-034, full architecture and UI-language passed."
+    ],
+    "next_action": "Reaccept LB-017 diagnostics and then run fresh G3 adversarial generation 13."
   }
 }
