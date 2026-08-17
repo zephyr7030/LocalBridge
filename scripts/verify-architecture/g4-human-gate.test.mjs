@@ -264,6 +264,9 @@ assert.equal(hasExactSchema36RuntimeObservabilityAmendment20260817(schema36Contr
 const schema36Drift = structuredClone(schema36Contracts);
 schema36Drift.rules.workspace_context_permission_mode_required = false;
 assert.equal(hasExactSchema36RuntimeObservabilityAmendment20260817(schema36Drift), false);
+const schema36LegacyDashboardRow = structuredClone(schema36Contracts);
+schema36LegacyDashboardRow.prs["LB-015"].required_tests.push("Dashboard renders exactly one read-only 权限模式 row showing 编辑模式 完整模式 or 管理员模式 and renders no permission selection controls");
+assert.equal(hasExactSchema36RuntimeObservabilityAmendment20260817(schema36LegacyDashboardRow), false);
 const schema35Contracts = normalizeSchema36RuntimeObservabilityAmendment20260817(schema36Contracts);
 assert.equal(schema35Contracts.schema_version, 35);
 assert.equal(hasExactFullModeConsistencyAmendment20260817(schema35Contracts), true);

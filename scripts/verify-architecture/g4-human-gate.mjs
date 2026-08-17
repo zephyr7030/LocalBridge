@@ -1853,6 +1853,16 @@ const SCHEMA36_LB015_TESTS = [
 const SCHEMA36_LB016_TESTS = [
   "administrator safety confirmation authorization truth is backend monotonic challenge/not-before; frontend countdown is presentation only and stale/early confirmation fails closed",
 ];
+const SCHEMA36_LB015_SUPERSEDED_ARTIFACTS = [
+  "Dashboard read-only PermissionMode status",
+];
+const SCHEMA36_LB015_SUPERSEDED_TESTS = [
+  "Dashboard 权限模式 row displays exactly 编辑模式 完整模式 or 管理员模式 from backend PermissionMode",
+  "Dashboard 权限模式 display is sourced from backend PermissionMode while Settings and onboarding administrator activation still use PrivilegeState for runtime elevation state",
+  "Dashboard renders exactly one read-only 权限模式 row showing 编辑模式 完整模式 or 管理员模式 and renders no permission selection controls",
+  "Dashboard 权限模式 row is read-only and cannot mutate PermissionMode or request UAC",
+];
+
 
 export function hasExactSchema36RuntimeObservabilityAmendment20260817(contractsDoc) {
   if (contractsDoc?.schema_version !== 36) return false;
@@ -1860,6 +1870,10 @@ export function hasExactSchema36RuntimeObservabilityAmendment20260817(contractsD
     if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
   }
   if (contractsDoc?.rules?.dashboard_permission_mode_row_label !== undefined || contractsDoc?.rules?.dashboard_permission_mode_row_values !== undefined) return false;
+  const lb015 = contractsDoc?.prs?.["LB-015"];
+  if (!lb015) return false;
+  if (SCHEMA36_LB015_SUPERSEDED_ARTIFACTS.some((item) => lb015.required_artifacts?.includes(item))) return false;
+  if (SCHEMA36_LB015_SUPERSEDED_TESTS.some((item) => lb015.required_tests?.includes(item))) return false;
   return containsAll(contractsDoc?.prs?.["LB-006"]?.required_artifacts ?? [], SCHEMA36_LB006_ARTIFACTS)
     && containsAll(contractsDoc?.prs?.["LB-006"]?.required_tests ?? [], SCHEMA36_LB006_TESTS)
     && containsAll(contractsDoc?.prs?.["LB-007"]?.required_tests ?? [], SCHEMA36_LB007_TESTS)
@@ -1881,6 +1895,8 @@ export function normalizeSchema36RuntimeObservabilityAmendment20260817(contracts
   normalized.prs["LB-006"].required_tests = removeItems(normalized.prs["LB-006"].required_tests, SCHEMA36_LB006_TESTS);
   normalized.prs["LB-007"].required_tests = removeItems(normalized.prs["LB-007"].required_tests, SCHEMA36_LB007_TESTS);
   normalized.prs["LB-015"].required_tests = removeItems(normalized.prs["LB-015"].required_tests, SCHEMA36_LB015_TESTS);
+  for (const item of SCHEMA36_LB015_SUPERSEDED_ARTIFACTS) if (!normalized.prs["LB-015"].required_artifacts.includes(item)) normalized.prs["LB-015"].required_artifacts.push(item);
+  for (const item of SCHEMA36_LB015_SUPERSEDED_TESTS) if (!normalized.prs["LB-015"].required_tests.includes(item)) normalized.prs["LB-015"].required_tests.push(item);
   normalized.prs["LB-016"].required_tests = removeItems(normalized.prs["LB-016"].required_tests, SCHEMA36_LB016_TESTS);
   const oldDashboardTest = "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode";
   if (!normalized.prs["LB-015"].required_tests.includes(oldDashboardTest)) normalized.prs["LB-015"].required_tests.push(oldDashboardTest);
