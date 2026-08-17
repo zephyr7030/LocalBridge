@@ -9,10 +9,10 @@ for (const [key, expected] of Object.entries({
   ui_panel_base_color_difference_required: false,
   ui_flat_primary_surface_allowed: true,
   ui_fake_elevation_through_near_invisible_surface_treatment_forbidden: true,
-  dashboard_permission_mode_row_forbidden: true,
-  dashboard_permission_mode_read_only_row_required: false,
+  dashboard_permission_mode_row_forbidden: false,
+  dashboard_permission_mode_read_only_row_required: true,
   dashboard_permission_mode_status_dot_forbidden: true,
-  dashboard_admin_privilege_status_read_only: true,
+  dashboard_admin_privilege_status_read_only: false,
   onboarding_screen_4_new_connector_action_label: "打开新建插件页",
   onboarding_screen_4_new_connector_action_before_information_rows: true,
   onboarding_screen_4_information_label_column_aligned: true,
@@ -46,7 +46,8 @@ const onboardingCss = readFileSync("src/features/onboarding/onboarding.css", "ut
 const tray = readFileSync("src-tauri/src/tray/mod.rs", "utf8");
 const trayDeriver = readFileSync("scripts/icons/derive-tray-icon.ps1", "utf8");
 const lb015Passed = progress.prs?.find?.((pr) => pr.id === "LB-015")?.status === "PASS";
-if (lb015Passed && (app.includes('>权限模式</span>') || app.includes('accessText[projection.permission]'))) throw new Error("ARCH-029 Dashboard PermissionMode row survived LB-015");
+if (lb015Passed && (!app.includes('>权限模式</span>') || !app.includes('accessText[projection.permission]'))) throw new Error("ARCH-029 Dashboard read-only PermissionMode row missing after LB-015");
+if (lb015Passed && app.includes('>管理员权限</span>')) throw new Error("ARCH-029 Dashboard regressed to PrivilegeState row");
 if (!app.includes('const adminModeFullAccess = projection?.permission === "admin"') || app.includes('projection?.permission === "admin" && projection?.privilege === "active"')) throw new Error("ARCH-029 Dashboard project scope still depends on PrivilegeState");
 if (!app.includes('adminModeFullAccess ? "全目录访问" : activeProject?.path ?? "未选择项目"') || !app.includes('if (adminModeFullAccess)')) throw new Error("ARCH-029 Dashboard project scope/switch is not PermissionMode-bound");
 const dashboardBeforeSettings = app.slice(0, app.indexOf('view === "settings"'));

@@ -1784,10 +1784,9 @@ export function normalizeStablePrivilegedToolCatalogAmendment20260816(contractsD
 }
 
 const SCHEMA36_RUNTIME_OBSERVABILITY_RULES = {
-  dashboard_permission_mode_row_forbidden: true,
-  dashboard_permission_mode_read_only_row_required: false,
-  dashboard_admin_privilege_status_read_only: true,
-  dashboard_permission_mode_legacy_row_contract_superseded_by_schema36: true,
+  dashboard_permission_mode_row_forbidden: false,
+  dashboard_permission_mode_read_only_row_required: true,
+  dashboard_admin_privilege_status_read_only: false,
   workspace_context_permission_mode_required: true,
   workspace_context_workspace_scope_required: true,
   workspace_context_ordinary_route_token_required: true,
@@ -1822,7 +1821,7 @@ const SCHEMA36_RUNTIME_OBSERVABILITY_RULES = {
   schema36_contract_ratified: true,
   schema36_earliest_owner_pr: "LB-006",
   schema36_next_g2_review_generation: 24,
-  schema36_next_g3_review_generation: 13,
+  schema36_next_g3_review_generation: 14,
 };
 const SCHEMA36_LB006_ARTIFACTS = [
   "enriched workspace_context observability and capability snapshot without adding a ninth core tool",
@@ -1846,21 +1845,18 @@ const SCHEMA36_LB007_TESTS = [
   "canonical public policy errors use PolicyDenied WorkspaceDenied RuntimeUnavailable InvalidShellSyntax PrivilegedRouteUnavailable ProcessTimedOut as applicable and include only safe rule/remediation metadata",
   "permission and Broker changes refresh capability snapshot while stale tools/list remains non-authoritative and tools/call always reauthorizes",
 ];
-const SCHEMA36_LB015_TESTS = [
-  "Dashboard contains no PermissionMode row or PermissionMode controls and retains only read-only actual administrator privilege state",
-  "AI/client PermissionMode observability is provided by workspace_context rather than Dashboard UI",
-];
-const SCHEMA36_LB016_TESTS = [
-  "administrator safety confirmation authorization truth is backend monotonic challenge/not-before; frontend countdown is presentation only and stale/early confirmation fails closed",
-];
-const SCHEMA36_LB015_SUPERSEDED_ARTIFACTS = [
+const SCHEMA36_LB015_ARTIFACTS = [
   "Dashboard read-only PermissionMode status",
 ];
-const SCHEMA36_LB015_SUPERSEDED_TESTS = [
+const SCHEMA36_LB015_TESTS = [
   "Dashboard 权限模式 row displays exactly 编辑模式 完整模式 or 管理员模式 from backend PermissionMode",
   "Dashboard 权限模式 display is sourced from backend PermissionMode while Settings and onboarding administrator activation still use PrivilegeState for runtime elevation state",
   "Dashboard renders exactly one read-only 权限模式 row showing 编辑模式 完整模式 or 管理员模式 and renders no permission selection controls",
   "Dashboard 权限模式 row is read-only and cannot mutate PermissionMode or request UAC",
+  "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode",
+];
+const SCHEMA36_LB016_TESTS = [
+  "administrator safety confirmation authorization truth is backend monotonic challenge/not-before; frontend countdown is presentation only and stale/early confirmation fails closed",
 ];
 
 
@@ -1869,14 +1865,14 @@ export function hasExactSchema36RuntimeObservabilityAmendment20260817(contractsD
   for (const [key, expected] of Object.entries(SCHEMA36_RUNTIME_OBSERVABILITY_RULES)) {
     if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
   }
-  if (contractsDoc?.rules?.dashboard_permission_mode_row_label !== undefined || contractsDoc?.rules?.dashboard_permission_mode_row_values !== undefined) return false;
+  if (contractsDoc?.rules?.dashboard_permission_mode_row_label !== "权限模式") return false;
+  if (canonicalJson(contractsDoc?.rules?.dashboard_permission_mode_row_values) !== canonicalJson(["编辑模式", "完整模式", "管理员模式"])) return false;
   const lb015 = contractsDoc?.prs?.["LB-015"];
   if (!lb015) return false;
-  if (SCHEMA36_LB015_SUPERSEDED_ARTIFACTS.some((item) => lb015.required_artifacts?.includes(item))) return false;
-  if (SCHEMA36_LB015_SUPERSEDED_TESTS.some((item) => lb015.required_tests?.includes(item))) return false;
   return containsAll(contractsDoc?.prs?.["LB-006"]?.required_artifacts ?? [], SCHEMA36_LB006_ARTIFACTS)
     && containsAll(contractsDoc?.prs?.["LB-006"]?.required_tests ?? [], SCHEMA36_LB006_TESTS)
     && containsAll(contractsDoc?.prs?.["LB-007"]?.required_tests ?? [], SCHEMA36_LB007_TESTS)
+    && containsAll(contractsDoc?.prs?.["LB-015"]?.required_artifacts ?? [], SCHEMA36_LB015_ARTIFACTS)
     && containsAll(contractsDoc?.prs?.["LB-015"]?.required_tests ?? [], SCHEMA36_LB015_TESTS)
     && containsAll(contractsDoc?.prs?.["LB-016"]?.required_tests ?? [], SCHEMA36_LB016_TESTS);
 }
@@ -1894,13 +1890,7 @@ export function normalizeSchema36RuntimeObservabilityAmendment20260817(contracts
   normalized.prs["LB-006"].required_artifacts = removeItems(normalized.prs["LB-006"].required_artifacts, SCHEMA36_LB006_ARTIFACTS);
   normalized.prs["LB-006"].required_tests = removeItems(normalized.prs["LB-006"].required_tests, SCHEMA36_LB006_TESTS);
   normalized.prs["LB-007"].required_tests = removeItems(normalized.prs["LB-007"].required_tests, SCHEMA36_LB007_TESTS);
-  normalized.prs["LB-015"].required_tests = removeItems(normalized.prs["LB-015"].required_tests, SCHEMA36_LB015_TESTS);
-  const restoreAt = (items, index, item) => { if (!items.includes(item)) items.splice(Math.min(index, items.length), 0, item); };
-  restoreAt(normalized.prs["LB-015"].required_artifacts, 4, SCHEMA36_LB015_SUPERSEDED_ARTIFACTS[0]);
-  for (const [index, item] of [[4, SCHEMA36_LB015_SUPERSEDED_TESTS[0]], [53, SCHEMA36_LB015_SUPERSEDED_TESTS[1]], [54, SCHEMA36_LB015_SUPERSEDED_TESTS[2]], [57, SCHEMA36_LB015_SUPERSEDED_TESTS[3]]]) restoreAt(normalized.prs["LB-015"].required_tests, index, item);
   normalized.prs["LB-016"].required_tests = removeItems(normalized.prs["LB-016"].required_tests, SCHEMA36_LB016_TESTS);
-  const oldDashboardTest = "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode";
-  restoreAt(normalized.prs["LB-015"].required_tests, 100, oldDashboardTest);
   return normalized;
 }
 

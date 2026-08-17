@@ -327,9 +327,9 @@ LB-000 real Tunnel 子 Gate 若唯一阻塞是缺真实 credential：
 - 不伪造 PASS。
 
 
-### Schema36 — Shell / observability / admin-consent contract reopen
+### Schema36 — Shell / observability / admin-consent contract reopen（历史执行，Dashboard 条款由后续纠正覆盖）
 
-Schema36 最早责任 PR 为 LB-006：public `workspace_context` observability、Shell fidelity、runtime discovery、stable error/session/output metadata、path authority 与 explain/diagnose contract。LB-007 随后重新验收 request-derived classifier、typed policy error 与 capability snapshot refresh。G3 的 LB-015/LB-016 重新验收 Dashboard 不显示 PermissionMode 与 backend 9 秒 admin-consent challenge。
+Schema36 最早责任 PR 为 LB-006：public `workspace_context` observability、Shell fidelity、runtime discovery、stable error/session/output metadata、path authority 与 explain/diagnose contract。LB-007 随后重新验收 request-derived classifier、typed policy error 与 capability snapshot refresh。LB-016 重新验收 backend 9 秒 admin-consent challenge。Schema36 当时把 LB-015 的只读 PermissionMode 行误判为缺陷并删除；该 UI 条款已被 2026-08-17 用户纠正明确覆盖，runtime observability 不构成删除用户可见只读模式投影的理由。
 
 当前 schema36 合同修订使此前 G2 generation 23、G3 generation 12 只能保留为历史 provenance，不能继续解锁后续。严格顺序：
 
@@ -343,3 +343,9 @@ LB-006 REWORK_REQUIRED
 ```
 
 G4/LB-018 在新的 G3 human Gate PASS 前继续 BLOCKED；智能体不能代替人工 Gate。
+
+### Schema36 Dashboard PermissionMode 回退纠正（current）
+
+2026-08-17 用户明确纠正 schema36 引入的 Dashboard 回退：主页恢复一个只读 `权限模式` 行，值直接来自 backend PermissionMode（编辑模式/完整模式/管理员模式），无状态点、无编辑控件、无 UAC 入口。Settings 与显式重新打开的 onboarding Screen3 仍是可编辑入口；`workspace_context` 的 AI/client observability 与 backend nonce-bound administrator consent 均保持不变。
+
+该纠正只重开 G3/LB-015，不重开 G2。G3 generation13 保留历史 provenance 但失去解锁效力；严格顺序为 `LB-015 → LB-016 → LB-017 → fresh G3 adversarial generation14 → human_review_status=REQUIRED`。G4/LB-018 继续 BLOCKED。

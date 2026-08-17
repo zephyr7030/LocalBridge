@@ -228,7 +228,7 @@
     },
     {
       "id": "ARCH-029",
-      "description": "G3 refined UI/icon contract: Dashboard uses a flat primary surface and no PermissionMode row or controls, while actual administrator privilege state remains read-only; onboarding Screen 4 places 打开新建插件页 above aligned 名称/Tunnel ID rows; Windows taskbar and notification-area tray icons derive only from the frozen LocalBridge master PNG, with the accepted taskbar ICO retained and tray frames produced by deterministic crop/downscale only",
+      "description": "G3 refined UI/icon contract: Dashboard uses a flat primary surface and exactly one read-only PermissionMode row without a status dot or mutation controls; onboarding Screen 4 places 打开新建插件页 above aligned 名称/Tunnel ID rows; Windows taskbar and notification-area tray icons derive only from the frozen LocalBridge master PNG, with the accepted taskbar ICO retained and tray frames produced by deterministic crop/downscale only",
       "severity": "error",
       "applies_to": ["src/**", "src-tauri/src/tray/**", "assets/icons/localbridge.png", "assets/icons/localbridge.ico", "assets/icons/localbridge-tray.ico", "scripts/icons/derive-tray-icon.ps1"],
       "verification": { "mode": "deferred", "activate_at_pr": "LB-013", "reason": "Tray and later G3 desktop/onboarding UI are complete within G3 and this explicit post-review amendment must remain machine-enforced", "type": "g3_ui_tray_refinement" }
@@ -263,7 +263,7 @@
     },
     {
       "id": "ARCH-034",
-      "description": "Schema36 public runtime observability and Windows shell fidelity: workspace_context exposes safe mode/capability/runtime discovery without adding a ninth core tool; Full ordinary diagnostics and native Windows shell syntax are not privilege-escalated by superficial tokens; stable typed errors and policy explanation remain non-authorizing; Dashboard has no PermissionMode row or controls; administrator consent authorization uses backend monotonic challenge/not-before",
+      "description": "Schema36 public runtime observability and Windows shell fidelity: workspace_context exposes safe mode/capability/runtime discovery without adding a ninth core tool; Full ordinary diagnostics and native Windows shell syntax are not privilege-escalated by superficial tokens; stable typed errors and policy explanation remain non-authorizing; Dashboard retains its read-only PermissionMode row and no mutation controls; administrator consent authorization uses backend monotonic challenge/not-before",
       "severity": "error",
       "applies_to": ["PR_CONTRACTS.json", "src-tauri/src/mcp/**", "src-tauri/src/commands/**", "src/**"],
       "verification": { "mode": "deferred", "activate_at_pr": "LB-006", "reason": "Schema36 begins in the public facade/ShellResolver and is completed by LB-007 plus LB-015/LB-016", "type": "schema36_runtime_observability_shell_and_ui_authority" }

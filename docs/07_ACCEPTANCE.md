@@ -90,13 +90,13 @@
 | A86 | elevated_exec | timeout/cancellation/output limit 生效 |
 | A87 | installer >100 MiB | 必须生成体积归因 |
 | A88 | installed >250 MiB | 必须生成体积归因 |
-| A89 | Dashboard 任意 PermissionMode | 不显示“权限模式”行，不显示编辑/完整/管理员三档选择控件；只读管理员权限状态仍可见 |
+| A89 | Dashboard 任意 PermissionMode | 显示且仅显示一个只读“权限模式”行，值精确为编辑模式/完整模式/管理员模式；无三档选择控件 |
 | A90 | Dashboard 权限交互 | 不能修改 PermissionMode，不能通过权限模式控件触发 UAC；权限编辑允许设置页“权限”或用户显式重新打开的 onboarding 第3屏 |
-| A91 | Dashboard + PrivilegeState::Requested | 只读显示“管理员权限：等待授权”，无模式选择器、无独立启用按钮 |
-| A92 | Dashboard + PrivilegeState::AwaitingUac | 只读显示“管理员权限：等待系统授权” |
-| A93 | Dashboard + PrivilegeState::Active | 只读显示“管理员权限：已启用”；切换权限模式使用合同允许的权限配置入口，Dashboard 本身不提供切换 |
-| A94 | Broker Active→Faulted | Dashboard 立即显示“故障” |
-| A95 | Dashboard privilege status | 由 PrivilegeState 驱动，不由 PermissionMode 猜测 |
+| A91 | Dashboard + PermissionMode=Admin + PrivilegeState::Requested | “权限模式”仍显示“管理员模式”，不因等待授权状态改写为 PrivilegeState 文案 |
+| A92 | Dashboard + PermissionMode=Admin + PrivilegeState::AwaitingUac | “权限模式”仍显示“管理员模式”；运行时授权状态不得替换该模式投影 |
+| A93 | Dashboard + PermissionMode=Admin + PrivilegeState::Active | “权限模式”仍显示“管理员模式”；Dashboard 本身不提供切换 |
+| A94 | Broker Active→Faulted | Dashboard 的“权限模式”仍仅由 PermissionMode 驱动；Broker/Privilege fault 由专用运行状态/诊断投影表达 |
+| A95 | Dashboard PermissionMode row | 由 backend PermissionMode 直接驱动，不由 PrivilegeState/Broker 状态猜测，且无 service/status dot |
 | A96 | Dashboard | 不显示 PID/nonce/SID/IPC 等内部字段 |
 | A97 | 主控界面 | 不出现 Dashboard/Settings/Diagnostics 等普通英文 |
 | A98 | 设置/首次引导权限模式 | 仅设置页与 onboarding 第3屏显示“编辑模式 / 完整模式 / 管理员模式”；主控界面不得显示 |
@@ -226,7 +226,7 @@
 | A222 | 诊断日志/动作 | 最近限量脱敏日志；页面动作仅“打开日志/导出诊断/完成”，无刷新/重试连接/打开欢迎页/工程 generation 字段 |
 | A223 | UI/backend 分离 | WebView 只 render typed projection + send typed intent；耗时 process/filesystem/credential/UAC/recovery 工作不占用 UI 事件线程 |
 | A224 | LB-018 Cloudflare retirement | 最终 bundle/runtime manifest/installer/launcher/fallback 不含 `cloudflared.exe`、Cloudflare managed tunnel 或 cloudflared manifest；历史 compatibility 证据不进入可执行发行物 |
-| A225 | Dashboard 权限边界 | 主页无“权限模式”及三档选项、不能修改 PermissionMode/UAC；只读管理员权限状态来自 PrivilegeState；设置页与显式重新打开的 onboarding 第3屏均可编辑权限 |
+| A225 | Dashboard 权限边界 | 主页有且仅有一个只读“权限模式”行，无三档选择器、不能修改 PermissionMode/UAC；设置页与显式重新打开的 onboarding 第3屏均可编辑权限 |
 | A226 | 临时操作提示 | `无法准备管理员权限`、一次性保存/选择失败等 one-shot 提示默认 3 秒自动清除；持续 runtime/reconnect Fault 不被临时规则隐藏 |
 | A227 | 短任务状态捕获 | 文件新建、删除、修改及普通命令等真实工具调用必须由 backend 唤醒式 delivery 捕获；不得把周期 polling 当作短任务主要传输 |
 | A228 | 执行持续时间 | 活动任务单行显示 backend-grounded elapsed duration；不得由前端伪造任务开始/结束状态 |
@@ -332,7 +332,7 @@
 | A327 | single path authority | document/image/Git/workflow/workspace validation 共享 LocalBridge-owned canonical containment/path authority；无 per-tool ad-hoc authorization |
 | A328 | explain/dry_run | 现有 `exec_command/agent_workflow` 的只读解释返回 ordinary/workspace_restricted/elevated_required/permanently_denied + safe rule category，且不执行、不授权 |
 | A329 | environment self-check | enriched `workspace_context` 与/或 `agent_workflow diagnose` 一次检查 workspace、trusted shells、Git、bundled runtimes、Broker/elevated route 与关键配置存在性，不泄漏 secret |
-| A330 | Dashboard PermissionMode authority | Dashboard 不显示 PermissionMode 行或模式控件，只显示实际管理员权限状态；AI/client mode observability 属于 `workspace_context` |
+| A330 | Dashboard PermissionMode authority | Dashboard 显示一个只读 PermissionMode 行且无模式控件；值直接来自 backend PermissionMode；AI/client 额外 mode observability 仍由 `workspace_context` 提供 |
 | A331 | backend admin consent truth | 9 秒 eligibility 由 backend monotonic challenge/not-before 判定；frontend timer 仅展示，early/stale/replay confirm fail-closed |
 | A332 | schema36 public surface conservation | v1 非特权 core 仍严格 8 个工具；capability/explain/diagnose 不新增第九 core tool |
 | A333 | schema36 green-storage conservation | immutable runtime=安装根，mutable state=`%LOCALAPPDATA%\LocalBridge`，secret=Credential Manager；普通启动/后台/自启动 Medium 且无 UAC |

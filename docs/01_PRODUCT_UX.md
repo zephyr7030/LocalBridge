@@ -68,11 +68,11 @@ icon package
 当前项目
 安全隧道状态
 编码服务状态
-管理员权限实际状态
+权限模式
 当前执行状态
 ```
 
-主控界面**不得显示 `权限模式`**，也不得放置 `编辑模式 / 完整模式 / 管理员模式` 三档选择控件。权限模式可在设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏修改；后者属于允许的同一配置流程，不视为非法第二入口。主控界面的 `管理员权限实际状态` 是只读 backend `PrivilegeState` 投影，不承担 PermissionMode 修改或 UAC 触发入口。管理员模式已经通过固定警告、9 秒红色确认、明确确认与 Windows UAC 且 Broker Active 时，当前项目区域不再暗示 active workspace 是文件访问边界，而必须以**黄色**显示 `全目录访问`。此时点击原“切换项目”入口不得切换 workspace，固定弹出：`管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式`。
+主控界面保留且仅保留一个只读 `权限模式` 行，直接投影 backend `PermissionMode`，值只能是 `编辑模式 / 完整模式 / 管理员模式`；该行无状态点、无选择器、无修改或 UAC 触发能力。权限模式仍只可在设置页“权限”以及用户显式重新打开欢迎/onboarding 后的第 3 屏修改；后者属于允许的同一配置流程，不视为非法第二入口。实际管理员授权/Broker 运行状态由诊断页等专用只读状态投影承担，不与 PermissionMode 混为同一 Dashboard 行。管理员模式已经通过固定警告、9 秒红色确认、明确确认与 Windows UAC 且 Broker Active 时，当前项目区域不再暗示 active workspace 是文件访问边界，而必须以**黄色**显示 `全目录访问`。此时点击原“切换项目”入口不得切换 workspace，固定弹出：`管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式`。
 
 必要动作按状态出现：
 
@@ -518,7 +518,7 @@ ICO  = 16/24/32/48/64/128/256 px
 
 ## Schema36 — 使用端可观测性与 Dashboard 权限显示收敛
 
-- Dashboard 不显示 PermissionMode 行，也不显示编辑/完整/管理员三档控件；只保留 backend `PrivilegeState` 驱动的管理员权限实际状态。
+- Dashboard 保留一个只读 PermissionMode 行，直接显示编辑模式/完整模式/管理员模式，但不提供模式选择控件、修改入口或 UAC 触发；schema36 的 runtime observability 不得覆盖这条已确认 UI。
 - Agent/AI 对当前 `Edit / Full / Elevated` 的直接可观测性由 public `workspace_context` 提供，不通过执行失败反推。
 - Settings 与用户显式重新打开 onboarding 第 3 屏仍是 PermissionMode 的唯一可见编辑入口。
 - schema26 管理员确认的 9 秒倒计时可由 React 显示，但授权资格必须来自 backend 单调计时 challenge/not-before；前端计时不得直接授权 UAC/Broker。

@@ -113,7 +113,7 @@ This section preserves prior G3 provenance but schema26 above supersedes any con
 - configured normal foreground launch is UI-first: create/show an interactive UI, emit one typed `UI-ready`, then backend asynchronously starts any stopped selected project/runtime/MCP/OpenAI Tunnel. Service startup before UI-ready is forbidden; duplicate ready is backend-idempotent/single-owner; `--background` does not wait for UI-ready and waking a healthy background runtime does not restart it merely for this gate; `开机启动` controls Windows login launch only;
 - frontend/WebView is presentation-only: typed projection + typed user intent. Runtime/readiness/retry/workspace/UAC/current-task state machines belong to backend workers/async tasks; intentionally slow backend operations must not make the UI unresponsive;
 - administrator-mode selection is no longer a direct-UAC action under current authority: schema26 warning + full red 9-second confirmation gate applies first; selecting Edit/Full still closes the privileged gate/Broker;
-- Dashboard/home contains no `权限模式` row and no Edit/Full/Admin selection controls, cannot change PermissionMode or trigger mode UAC, and retains only read-only administrator privilege runtime status from `PrivilegeState`; permission editing is allowed in Settings and an explicitly reopened onboarding screen 3;
+- Dashboard/home contains exactly one read-only `权限模式` row sourced from backend PermissionMode and no Edit/Full/Admin selection controls; it cannot change PermissionMode or trigger mode UAC. Actual administrator/Broker runtime state remains a separate diagnostics/runtime projection; permission editing is allowed in Settings and an explicitly reopened onboarding screen 3;
 - production MCP/Broker execution must wake Dashboard through backend push/event or equivalent rather than relying on periodic polling for short calls; every real tool call receives at least 500ms visible presentation without delaying its real response. The first row is current execution/`等待命令`; a second `上次执行工具：...` row retains only one secret-redacted last-tool label/summary with relative age aligned to the far right;
 - Dashboard add-project uses the native Windows folder picker, not a raw path-entry primary flow;
 - screen-3 `min-height >= 80px` remains only a minimum guard; real 780×620 computed geometry must prove every title+description button is at least 2× a single-line control with complete line boxes. The user accepted this scoped visual item on 2026-08-14; a later Screen3 layout change invalidates that evidence and requires re-review;
@@ -161,8 +161,11 @@ Schema30 ratifies A293–A295. Execution remains `G2 / LB-006 = REWORK_REQUIRED`
 
 ## Schema36 — Shell fidelity / runtime observability / admin consent（current）
 
-2026-08-17 使用端黑盒已真实复现：Full 下 `where cmd`、`where pwsh`、`echo %PATH%` 被错误返回 `PrivilegedRouteNotAvailable`。同时当前源码静态确认 Dashboard 仍渲染 PermissionMode 行，管理员 9 秒 eligibility 仍由 React `performance.now()` 决定并直接进入 `set_permission_mode → request_explicit_admin`。这些事实触发 schema36。
+2026-08-17 使用端黑盒已真实复现：Full 下 `where cmd`、`where pwsh`、`echo %PATH%` 被错误返回 `PrivilegedRouteNotAvailable`，且管理员 9 秒 eligibility 当时仍由 React `performance.now()` 决定并直接进入 `set_permission_mode → request_explicit_admin`；这些事实触发 schema36。schema36 同批执行曾把既有 Dashboard 只读 PermissionMode 行误判为缺陷并删除，该 UI 判断不是 runtime observability / admin-consent 修复所必需，已由 2026-08-17 用户明确纠正并从 LB-015 重开。
 
 schema36 不新增 public core tool；以 enriched `workspace_context`、现有 `agent_workflow diagnose` 与既有工具 dry_run/explain 承担可观测性。Shell 分类必须基于执行目标/参数/操作语义而不是关键词；Windows 原生常用 redirection/NUL/pipeline/quotes/conditional/env/script 语义恢复。错误合同、session/output metadata、single path authority 同步冻结为 A316–A333。
 
 实时治理必须回开到 G2/LB-006；G2 generation23 与 G3 generation12 保留历史但失去当前 unlock authority。完成 LB-006→LB-012 后执行 fresh G2 generation24，再重新 LB-013→LB-017 与 fresh G3 generation13。G3 结束仍进入独立 human Gate REQUIRED，不能由执行/审查智能体自行 PASS。
+
+
+Schema36 correction：G3 generation13 因 Dashboard PermissionMode 回退纠正而失去当前解锁效力。当前 UI 权威恢复只读 PermissionMode 行，保留 schema36 Shell/observability/backend-consent 安全修复；从 LB-015 严格重验并执行 fresh G3 generation14，之后仍只能进入 human Gate REQUIRED。

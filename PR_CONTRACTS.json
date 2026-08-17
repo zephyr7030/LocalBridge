@@ -323,7 +323,7 @@
     "onboarding_saved_tunnel_id_prefill_required": true,
     "onboarding_runtime_key_security_hint": "Runtime API Key 仅保存在 Windows 安全凭据中。",
     "dashboard_native_windows_folder_picker_required": true,
-    "dashboard_permission_mode_row_forbidden": true,
+    "dashboard_permission_mode_row_forbidden": false,
     "dashboard_permission_mode_controls_forbidden": true,
     "dashboard_permission_mode_change_forbidden": true,
     "dashboard_permission_mode_uac_trigger_forbidden": true,
@@ -336,7 +336,7 @@
       "explicitly_reopened_onboarding_screen_3"
     ],
     "reopened_onboarding_screen_3_permission_edit_allowed": true,
-    "dashboard_admin_privilege_status_read_only": true,
+    "dashboard_admin_privilege_status_read_only": false,
     "workspace_user_facing_verbatim_prefix_forbidden": true,
     "workspace_verbatim_path_allowed_only_for_internal_identity_validation": true,
     "workspace_tool_invocation_verbatim_prefix_forbidden": true,
@@ -692,7 +692,7 @@
     },
     "dashboard_project_switch_blocked_in_admin_mode": true,
     "admin_mode_user_consequence_acknowledgement_required": true,
-    "dashboard_permission_mode_read_only_row_required": false,
+    "dashboard_permission_mode_read_only_row_required": true,
     "dashboard_permission_mode_status_dot_forbidden": true,
     "ui_panel_base_color_difference_required": false,
     "ui_flat_primary_surface_allowed": true,
@@ -778,8 +778,13 @@
     "schema36_contract_ratified": true,
     "schema36_earliest_owner_pr": "LB-006",
     "schema36_next_g2_review_generation": 24,
-    "schema36_next_g3_review_generation": 13,
-    "dashboard_permission_mode_legacy_row_contract_superseded_by_schema36": true
+    "schema36_next_g3_review_generation": 14,
+    "dashboard_permission_mode_row_label": "权限模式",
+    "dashboard_permission_mode_row_values": [
+      "编辑模式",
+      "完整模式",
+      "管理员模式"
+    ]
   },
   "prs": {
     "LB-000": {
@@ -1395,6 +1400,7 @@
         "settings shell",
         "diagnostics entry",
         "post-onboarding Edit/Full/Elevated UI in Settings and explicitly reopened onboarding Screen3, with Dashboard remaining read-only",
+        "Dashboard read-only PermissionMode status",
         "PrivilegeState-to-UI projection",
         "centralized Chinese presentation mapper",
         "UI terminology map",
@@ -1430,6 +1436,7 @@
         "no redundant pages",
         "state rendering",
         "no admin time selector",
+        "Dashboard 权限模式 row displays exactly 编辑模式 完整模式 or 管理员模式 from backend PermissionMode",
         "Elevated+Requested shows waiting authorization",
         "Elevated+Active shows administrator enabled",
         "Broker Faulted updates dashboard status",
@@ -1478,8 +1485,11 @@
         "Dashboard does not maintain an independent conflicting service-status color state",
         "Settings has no separate 启用管理员权限 button; when Broker is not Active, visible 管理员模式 selection or reselection opens the safety warning gate and cannot request UAC before the enabled red 确认 action after the full 9000ms countdown",
         "leaving 管理员模式 closes the privileged call gate and disables the broker",
+        "Dashboard 权限模式 display is sourced from backend PermissionMode while Settings and onboarding administrator activation still use PrivilegeState for runtime elevation state",
+        "Dashboard renders exactly one read-only 权限模式 row showing 编辑模式 完整模式 or 管理员模式 and renders no permission selection controls",
         "Dashboard cannot change PermissionMode or request UAC through a permission-mode control",
         "Dashboard never edits PermissionMode; Settings and an explicitly reopened onboarding screen 3 are both permitted permission-mode editing surfaces",
+        "Dashboard 权限模式 row is read-only and cannot mutate PermissionMode or request UAC",
         "Dashboard no-task first row is always visible as 等待命令 and never 空闲; relative age is not appended to this first row",
         "real production MCP and Broker execution wakes the Dashboard through a backend push/event or equivalent wakeup path rather than waiting for the periodic projection poll",
         "every real tool call including create modify delete and ordinary command remains visibly represented for at least 500ms even when execution completes faster, without delaying the actual tool response solely for UI visibility",
@@ -1522,9 +1532,8 @@
         "every text-bearing button except the symmetric 编辑模式/完整模式/管理员模式 three-way PermissionMode selection group sizes from its own content metrics: width corresponds to the maximum visible character count on any single line and height corresponds to the actual rendered line count; arbitrary fixed button geometry that ignores text content is forbidden; the three-way PermissionMode group is explicitly exempt from content-derived width/height sizing and instead must render as exactly three symmetric equal-width equal-height cells with no clipped or overflowing text",
         "product typography uses exactly three font-size tiers: title for page/major headings, body for ordinary body labels buttons and primary status, and auxiliary for helper metadata time and secondary status; each non-title tier is internally unified and no fourth font-size tier exists",
         "Dashboard current-project scope is bound only to backend PermissionMode rather than Broker/PrivilegeState: Edit and Full display the active-workspace path, while Admin displays yellow 全目录访问 for the entire time Admin is the selected mode; Admin project switching remains blocked and shows exactly 管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
-        "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent",
-        "Dashboard contains no PermissionMode row or PermissionMode controls and retains only read-only actual administrator privilege state",
-        "AI/client PermissionMode observability is provided by workspace_context rather than Dashboard UI"
+        "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode",
+        "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent"
       ],
       "non_goals": [
         "wizard",

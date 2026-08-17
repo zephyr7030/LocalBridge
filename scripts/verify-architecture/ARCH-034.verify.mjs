@@ -4,7 +4,7 @@ const root=process.env.LOCALBRIDGE_REPO_ROOT||resolve(".");
 const c=JSON.parse(readFileSync(resolve(root,"PR_CONTRACTS.json"),"utf8"));
 const r=c.rules||{};
 const fail=[];
-const exact={workspace_context_permission_mode_required:true,workspace_context_workspace_scope_required:true,workspace_context_ordinary_route_token_required:true,workspace_context_elevated_route_available_required:true,workspace_context_privilege_state_summary_required:true,workspace_context_shell_discovery_summary_required:true,workspace_context_capability_snapshot_required:true,public_ninth_core_tool_for_schema36_forbidden:true,shell_ordinary_diagnostics_not_privileged_by_surface_tokens:true,shell_windows_native_syntax_compatibility_required:true,shell_cmd_nul_redirection_required:true,shell_bespoke_dsl_forbidden:true,policy_explain_via_existing_tools_required:true,policy_explain_must_not_execute_or_authorize:true,path_authority_single_localbridge_implementation_required:true,dashboard_permission_mode_row_forbidden:true,dashboard_permission_mode_controls_forbidden:true,dashboard_admin_privilege_status_read_only:true,admin_consent_backend_challenge_not_before_required:true};
+const exact={workspace_context_permission_mode_required:true,workspace_context_workspace_scope_required:true,workspace_context_ordinary_route_token_required:true,workspace_context_elevated_route_available_required:true,workspace_context_privilege_state_summary_required:true,workspace_context_shell_discovery_summary_required:true,workspace_context_capability_snapshot_required:true,public_ninth_core_tool_for_schema36_forbidden:true,shell_ordinary_diagnostics_not_privileged_by_surface_tokens:true,shell_windows_native_syntax_compatibility_required:true,shell_cmd_nul_redirection_required:true,shell_bespoke_dsl_forbidden:true,policy_explain_via_existing_tools_required:true,policy_explain_must_not_execute_or_authorize:true,path_authority_single_localbridge_implementation_required:true,dashboard_permission_mode_row_forbidden:false,dashboard_permission_mode_read_only_row_required:true,dashboard_permission_mode_controls_forbidden:true,dashboard_admin_privilege_status_read_only:false,admin_consent_backend_challenge_not_before_required:true};
 if(c.schema_version!==36)fail.push("schema");
 for(const [k,v] of Object.entries(exact))if(r[k]!==v)fail.push(k);
 const core=["workspace_context","agent_workflow","exec_command","command_control","task_control","git_workflow","document_workflow","view_image"];
@@ -19,7 +19,8 @@ const pr=(id)=>state.prs.find((item)=>item.id===id);
 const g3Reopened=state.execution?.current_group==="G3" || ["READY","IN_PROGRESS","REWORK_REQUIRED","PASS"].includes(pr("LB-015")?.status);
 if(g3Reopened){
   const app=readFileSync(resolve(root,"src/App.tsx"),"utf8");
-  if(app.includes(">权限模式</span>"))fail.push("dashboard-permission-row");
+  if(!app.includes(">权限模式</span>")||!app.includes("accessText[projection.permission]"))fail.push("dashboard-permission-row");
+  if(app.includes(">管理员权限</span>"))fail.push("dashboard-privilege-row");
 }
 const lb016Active=["READY","IN_PROGRESS","REWORK_REQUIRED","PASS"].includes(pr("LB-016")?.status);
 if(lb016Active){
