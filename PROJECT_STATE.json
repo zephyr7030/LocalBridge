@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -3246,5 +3246,43 @@
     "g4_unlocked": false,
     "review_decision_commit": "00cac45fc6581a83b5b946486131ba81d6a31b5d",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "schema36_shell_observability_admin_consent_2026_08_17": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "contract_commit": "85d8b8395a4b42c5292500dcd7ac9d85e98f69d4",
+    "earliest_owner_pr": "LB-006",
+    "affected_prs": [
+      "LB-006",
+      "LB-007",
+      "LB-015",
+      "LB-016"
+    ],
+    "revalidation_sequence": [
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-009",
+      "LB-010",
+      "LB-011",
+      "LB-012",
+      "G2 generation 24",
+      "LB-013",
+      "LB-014",
+      "LB-015",
+      "LB-016",
+      "LB-017",
+      "G3 generation 13"
+    ],
+    "invalidated_unlock_provenance": {
+      "g2_generation": 23,
+      "g3_generation": 12,
+      "preserve_history": true
+    },
+    "current_pointer": {
+      "group": "G2",
+      "pr": "LB-006"
+    },
+    "g4": "BLOCKED",
+    "human_gate_policy": "after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
   }
 }

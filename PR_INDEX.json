@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": null,
+    "current_pr": "LB-006",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -41,7 +41,7 @@
     ],
     "advance_only_after_acceptance": true,
     "governance_transition_updates_current_pr": true,
-    "current_group": "G3",
+    "current_group": "G2",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
     "pre_g4_human_review_gate_required": true,
@@ -125,7 +125,7 @@
         "LB-004"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-007",
@@ -135,7 +135,7 @@
         "LB-006"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-008",
@@ -147,7 +147,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-009",
@@ -159,7 +159,7 @@
         "LB-008"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-010",
@@ -169,7 +169,7 @@
         "LB-009"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-011",
@@ -181,7 +181,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-012",
@@ -192,7 +192,7 @@
         "LB-011"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-013",
@@ -202,7 +202,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-014",
@@ -211,7 +211,7 @@
         "LB-013"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-015",
@@ -223,7 +223,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-016",
@@ -234,7 +234,7 @@
         "LB-015"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-017",
@@ -246,7 +246,7 @@
         "LB-015"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-018",
@@ -327,8 +327,8 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "REWORK_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 23,
       "review_provenance": {
         "generation": 23,
@@ -354,9 +354,15 @@
             "generation": 22,
             "commit": "b5d1515c339c84a91a085fbfc1544c46630d71bf",
             "cause": "explicit_user_full_operation_consistency_2026_08_17"
+          },
+          {
+            "generation": 23,
+            "commit": "78534f2361cbdfa5553c26e4d281a1108e2c0380",
+            "cause": "schema36_shell_observability_and_admin_consent_contract_2026_08_17"
           }
         ]
-      }
+      },
+      "reopen_from_pr": "LB-006"
     },
     {
       "id": "G3",
@@ -368,10 +374,10 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
       "review_generation": 12,
-      "human_review_status": "REQUIRED",
+      "human_review_status": "BLOCKED",
       "human_review_generation": 3,
       "review_provenance": {
         "generation": 12,
@@ -407,9 +413,15 @@
             "generation": 11,
             "commit": "d88281f30a5024f65279b1bb24c414353a45f0f5",
             "cause": "upstream_g2_full_operation_consistency_2026_08_17"
+          },
+          {
+            "generation": 12,
+            "commit": "00cac45fc6581a83b5b946486131ba81d6a31b5d",
+            "cause": "schema36_shell_observability_and_admin_consent_contract_2026_08_17"
           }
         ]
-      }
+      },
+      "reopen_from_pr": "LB-013"
     },
     {
       "id": "G4",
@@ -423,5 +435,5 @@
       "review_generation": 0
     }
   ],
-  "current_pr": null
+  "current_pr": "LB-006"
 }
