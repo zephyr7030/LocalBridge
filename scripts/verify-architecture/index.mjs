@@ -18,7 +18,7 @@ const expectFailure = args.includes("--expect-failure");
 const expectedIds = new Set((valueAfter("--expected") ?? "").split(",").map((v) => v.trim()).filter(Boolean));
 const repoRoot = resolve(".");
 const rulesDoc = JSON.parse(readFileSync(join(repoRoot, "ARCHITECTURE_RULES.json"), "utf8"));
-if (rulesDoc.schema_version !== 10 || !Array.isArray(rulesDoc.rules) || rulesDoc.rules.length !== 31) throw new Error("architecture rule inventory must be schema 10 with exactly 31 rules");
+if (rulesDoc.schema_version !== 10 || !Array.isArray(rulesDoc.rules) || rulesDoc.rules.length !== 33) throw new Error("architecture rule inventory must be schema 10 with exactly 33 rules");
 const progressPath = resolve(progressArg && !progressArg.startsWith("--") ? progressArg : join(repoRoot, "PR_INDEX.json"));
 const progressDoc = JSON.parse(readFileSync(progressPath, "utf8"));
 const contractsDoc = JSON.parse(readFileSync(join(repoRoot, "PR_CONTRACTS.json"), "utf8"));

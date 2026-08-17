@@ -246,6 +246,20 @@
       "severity": "error",
       "applies_to": ["src-tauri/src/mcp/**", "runtime-policy.toml"],
       "verification": { "mode": "deferred", "activate_at_pr": "LB-012", "reason": "Stable privileged advertisement and Broker-gated administrator call authorization are completed by LB-012", "type": "stable_privileged_tool_catalog" }
+    },
+    {
+      "id": "ARCH-032",
+      "description": "LocalBridge public path and execution contracts are internally consistent: Edit/Full structured workspace inputs accept equivalent relative or ordinary Win32 absolute paths only when canonical containment resolves inside the active root; shell selectors keep exact trusted semantics; yield-time_ms=0 remains a valid asynchronous contract; elevated_exec exposes a discoverable top-level input object while retaining strict variants",
+      "severity": "error",
+      "applies_to": ["src-tauri/src/mcp/**"],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-006", "reason": "Public ToolRegistry, path authority, shell resolver and command session semantics are owned by LB-006", "type": "public_runtime_contract_consistency" }
+    },
+    {
+      "id": "ARCH-033",
+      "description": "Full-mode workflow and command policy derives authority from concrete request behavior rather than superficial action names, deletion verbs or script filename extensions; ordinary workspace development scripts and cleanup remain ordinary-user operations while dynamic indirection, provider/control-plane mutation and real system management remain fail-closed",
+      "severity": "error",
+      "applies_to": ["src-tauri/src/mcp/**", "tests/integration/policy/**"],
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-007", "reason": "Public capability classification and Full/Edit enforcement are owned by LB-007", "type": "full_request_derived_policy_consistency" }
     }
   ]
 }

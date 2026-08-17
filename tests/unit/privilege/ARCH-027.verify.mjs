@@ -22,18 +22,20 @@ const authority = read("src-tauri/src/mcp/path_authority.rs");
 for (const required of [
   "PathAuthorityScope::ActiveWorkspace",
   "PathAuthorityScope::BrokerAdministrator",
-  "workspace_relative_path_valid(raw)",
+  "workspace_input_path_valid(raw)",
+  "workspace_absolute_path_valid",
   "administrator_absolute_path_valid(raw)",
   "PathAuthorityScope::ActiveWorkspace => canonical.starts_with",
   "PathAuthorityScope::BrokerAdministrator => canonical.is_absolute()",
-  "active_workspace_is_relative_only_and_canonical_root_bound",
+  "active_workspace_accepts_relative_or_absolute_inside_and_is_canonical_root_bound",
   "broker_administrator_accepts_only_ordinary_absolute_dispatch_paths",
 ]) if (!authority.includes(required)) throw new Error(`ARCH-027 authority seam missing: ${required}`);
 
 const facade = read("src-tauri/src/mcp/facade.rs");
 for (const required of [
   "PathAuthority::active_workspace(&self.workspace)",
-  "workspace_relative_path_valid",
+  "workspace_input_path_valid",
+  "normalized_workspace_path",
 ]) if (!facade.includes(required)) throw new Error(`ARCH-027 ordinary facade authority missing: ${required}`);
 if (facade.includes("PathAuthority::broker_administrator()")) {
   throw new Error("ARCH-027 ordinary public facade constructs BrokerAdministrator authority");

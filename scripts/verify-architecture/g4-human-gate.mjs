@@ -782,6 +782,47 @@ const STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16 = Object.freeze({
   },
 });
 
+const FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17 = Object.freeze({
+  schemaVersion: 35,
+  baselineSchemaVersion: 35,
+  addedRules: {
+    active_workspace_absolute_input_equivalence_required: true,
+    agent_workflow_request_derived_capability_required: true,
+    ordinary_full_file_cleanup_not_privileged_by_surface_syntax: true,
+    elevated_exec_top_level_input_schema_required: true,
+    yield_zero_async_contract_required: true,
+    powershell_selector_exact_semantics_required: true,
+  },
+  prs: {
+    "LB-006": {
+      testReplacements: [[
+        "Edit and Full LocalBridge structured document image Git file edit directory and exec workdir/typed path inputs remain active-workspace-bound: workspace-relative inputs and ordinary Win32 absolute inputs that canonicalize to the same active root are accepted as equivalent and normalized before private runtime use; outside-root absolute paths, UNC, verbatim, POSIX absolute, ADS-like and parent traversal inputs are denied; this structured boundary does not sandbox Full child-process filesystem access, while Elevated privileged routes accept administrator-token-accessible absolute paths",
+        "Edit and Full LocalBridge structured document image Git file edit directory and exec workdir/typed path inputs remain active-workspace-relative and reject drive UNC verbatim POSIX absolute or parent traversal; this structured boundary does not sandbox Full child-process filesystem access, while Elevated privileged routes accept administrator-token-accessible absolute paths",
+      ]],
+      addedTests: [
+        "logical shell selector semantics are exact and trust-preserving: powershell chooses trusted PowerShell Core when available then falls back to trusted Windows PowerShell, pwsh means trusted PowerShell Core only and returns typed RuntimeUnavailable when none is installed, windows_powershell means trusted Windows PowerShell only, and PATH aliases are never shell trust authority",
+        "exec_command yield-time_ms=0 is a valid asynchronous contract matching the advertised schema: it returns a public running session/output handle without InvalidArgument and command_control can poll that session to terminal state",
+        "elevated_exec inputSchema is a discoverable top-level object contract exposing operation process shell filesystem argument properties while retaining strict process shell filesystem variant validation and the legacy reviewed direct-process form; clients do not need to provoke an argument error to discover the contract",
+      ],
+    },
+    "LB-007": {
+      testReplacements: [
+        [
+          "high-level agent_workflow capabilities are derived from the actual request contents rather than the action label: patch or directory_changes imply workspace write, actual commands imply process, and privilege/review is derived from the concrete command surface; Edit still denies actual process execution, Full permits ordinary current-user development commands, and genuinely privileged dynamic or system-management behavior remains fail-closed",
+          "high-level workflows declare and enforce all transitive write process network and privilege capabilities before execution",
+        ],
+        [
+          "Full ordinary invocation of a validated active-workspace .ps1 .cmd or .bat script, including literal cmd call of a workspace .cmd or .bat target, is not denied solely because of its file extension or the literal call keyword; dynamic script resolution unsafe indirection provider mutation and other independently review-required behavior remain fail-closed",
+          "Full ordinary invocation of a validated active-workspace .ps1 .cmd or .bat script is not denied solely because of its file extension; dynamic script resolution unsafe indirection provider mutation and other independently review-required behavior remain fail-closed",
+        ],
+      ],
+      addedTests: [
+        "Full ordinary active-workspace file cleanup is not classified privileged solely by surface syntax: cmd del and a normal language-runtime deletion such as Python os.remove may complete the create-test-cleanup loop under the current ordinary-user token; protected/system/provider/control-plane mutations and independently privileged behavior remain denied or reviewed",
+      ],
+    },
+  },
+});
+
 const G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16 = Object.freeze({
   schemaVersion: 35,
   baselineSchemaVersion: 35,
@@ -1742,6 +1783,34 @@ export function normalizeStablePrivilegedToolCatalogAmendment20260816(contractsD
   return normalized;
 }
 
+export function hasExactFullModeConsistencyAmendment20260817(contractsDoc) {
+  if (contractsDoc?.schema_version !== FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const [id, delta] of Object.entries(FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.prs)) {
+    const pr = contractsDoc?.prs?.[id];
+    if (!pr) return false;
+    if (!hasReplacement(pr.required_tests, delta.testReplacements ?? [])) return false;
+    if (!containsAll(pr.required_tests, delta.addedTests ?? [])) return false;
+  }
+  return true;
+}
+
+export function normalizeFullModeConsistencyAmendment20260817(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.baselineSchemaVersion;
+  for (const key of Object.keys(FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.addedRules)) delete normalized.rules[key];
+  for (const [id, delta] of Object.entries(FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.prs)) {
+    const pr = normalized.prs?.[id];
+    if (!pr) continue;
+    pr.required_tests = normalizeReplacements(pr.required_tests, delta.testReplacements ?? []);
+    pr.required_tests = removeItems(pr.required_tests, delta.addedTests ?? []);
+  }
+  return normalized;
+}
+
 export function hasExactG3UiTrayRefinementAmendment20260816(contractsDoc) {
   if (contractsDoc?.schema_version !== G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.schemaVersion) return false;
   for (const [key, replacement] of Object.entries(G3_UI_TRAY_REFINEMENT_AMENDMENT_2026_08_16.replacedRules)) {
@@ -2257,6 +2326,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.schemaVersion) {
+    if (!hasExactFullModeConsistencyAmendment20260817(authorizationContracts)) {
+      findings.push(`${expected.id}:full-mode-consistency-20260817-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeFullModeConsistencyAmendment20260817(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= STABLE_PRIVILEGED_TOOL_CATALOG_AMENDMENT_2026_08_16.schemaVersion) {
     if (!hasExactStablePrivilegedToolCatalogAmendment20260816(authorizationContracts)) {
       findings.push(`${expected.id}:stable-privileged-tool-catalog-20260816-contract-amendment-drift`);
