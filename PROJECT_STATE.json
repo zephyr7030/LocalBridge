@@ -4076,5 +4076,32 @@
       "facade/machine verification remains revision38"
     ],
     "g4_unlocked": false
+  },
+  "schema39_lb006_implementation_2026_08_17": {
+    "status": "IMPLEMENTED_BUT_DOWNSTREAM_ACCEPTANCE_BLOCKED",
+    "product_commit": "c0011fadea28b6fac73b9bb236a98d1ee7a6e1fa",
+    "owner_pr": "LB-006",
+    "resolved_findings": [
+      "agent_workflow resume now uses bounded user-DPAPI durable checkpoints and resumes only missing verified steps",
+      "task_control cancel always attempts active requests and current Task-owned public session through shared termination path",
+      "workspace_context now serves cached compact first-turn project Git runtime permission and current-task context without per-call private cwd probes",
+      "public facade revision39 advertises schema refresh and flat directly discoverable schemas with strict server validation",
+      "public process lifecycle is exactly running completed failed cancelled timed_out lost"
+    ],
+    "evidence": [
+      "Fresh full schema39 product gate PASS: 208 Rust library tests plus migration/integration/doc targets, Clippy -D warnings, frontend 4 files / 7 tests, production build, runtime-manifest, UI-language, schema39 machine acceptance and governance authorization tests.",
+      "Real bundled MCP E2E PASS: initialize advertises tools.listChanged=true and serverInfo +api39; command_control elevated_exec agent_workflow git_workflow document_workflow tools/list schemas are complete and strict cross-action invalid combinations are rejected.",
+      "Live running LocalBridge PEP initialize returned api39/listChanged=true and live tools/list returned complete schema39 flat fields before the Tunnel endpoint.",
+      "Live GET/SSE on the running PEP delivered notifications/tools/list_changed once and then 204, proving the LocalBridge refresh path is active.",
+      "Actual ChatGPT @测试 rediscovery still projects command_control and elevated_exec as generic {[key:string]:any} and shows stale pre-schema39 descriptions/fields for other multi-action tools.",
+      "A direct @测试 workspace_context attempt was disabled by the platform before any request reached LocalBridge, so no product result can be claimed from that call."
+    ],
+    "blocker": "schema39 requires actual downstream MCP client projection acceptance, but the current ChatGPT connector metadata cache has not consumed the schema39 tools/list/refresh state; coding_tools_MCP has no authority over that platform-side cache.",
+    "g2_generation_27_consumed": false,
+    "g3_generation_17_consumed": false,
+    "current_group": "G2",
+    "current_pr": "LB-006",
+    "g4_unlocked": false,
+    "next_action": "Re-run actual @测试 schema projection only after the platform exposes a refreshed connector metadata view; if command_control/elevated_exec and other multi-action schemas are then consumable, accept LB-006 and resume strict LB-007 -> LB-012 -> G2 generation27 -> LB-013 -> LB-017 -> G3 generation17 sequencing."
   }
 }
