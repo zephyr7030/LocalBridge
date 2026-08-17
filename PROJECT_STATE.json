@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-013",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G2",
+  "current_group": "G3",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -3473,5 +3473,30 @@
     "next_required_g2_adversarial_generation": 24,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_24_2026_08_17": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 24,
+    "baseline_commit": "2f4433efe2fb625460e2e2858c04fbe5ca65267f",
+    "finding": "No blocking G2 defect remained after schema36 runtime observability/shell fidelity repair and the ARCH-005/ARCH-031 verifier corrections; fresh formal and real-client adversarial verification passed.",
+    "evidence": [
+      "Fresh @测试 schema36 black-box PASS on the rebuilt current debug instance: workspace_context reports facade_revision 36/runtime ready/full/current_windows_user, where cmd + %PATH% + bare NUL redirection succeed, Windows PowerShell Get-Command pipeline succeeds, explicit pwsh fails with typed RuntimeUnavailable plus safe remediation, and Full reg/elevated_exec calls are canonical PrivilegedRouteUnavailable.",
+      "Fresh complete Rust Gate PASS including 194/194 main library tests plus all integration suites; live UAC test remains explicitly ignored in routine gates and prior real UAC proof is preserved.",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings PASS.",
+      "Frontend vitest 4 files / 7 tests PASS and production build PASS.",
+      "Runtime manifest, architecture with all active schema36 rules, UI-language, G4 fail-closed governance regression and git diff --check PASS.",
+      "First G2 gen24 attempt correctly found ARCH-031 historical verifier drift; LB-012 was reopened, verifier aligned to revision36/canonical PrivilegedRouteUnavailable without weakening authorization assertions, then the entire Gate passed on baseline 2f4433efe2fb625460e2e2858c04fbe5ca65267f."
+    ],
+    "non_blocking_observations": [
+      "PowerShell Core is not installed/trusted on this machine; deterministic fallback to Windows PowerShell is reported by workspace_context and explicit pwsh remains typed unavailable.",
+      "No fresh interactive UAC approval was fabricated; prior live UAC administrator-token acceptance remains historical evidence because schema36 changed public facade/observability, not Broker/UAC acquisition."
+    ],
+    "g2_generation_24_consumed": true,
+    "g3_unlocked_for_rework": true,
+    "g4_unlocked": false,
+    "review_decision_commit": null,
+    "next_action": "Reaccept G3 sequentially from LB-013 through LB-017 under schema36, then run independent G3 adversarial review generation 13. Human G3-to-G4 review and G4 remain blocked."
   }
 }
