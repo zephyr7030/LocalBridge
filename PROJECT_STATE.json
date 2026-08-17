@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3884,6 +3884,16 @@
     ],
     "next_pr": "LB-017",
     "g3_review_generation": 15,
+    "g4_unlocked": false
+  },
+  "lb017_post_task_projection_cursor_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-017",
+    "evidence": [
+      "LB-017 diagnostics contract PASS after the LB-015 task projection cursor fix.",
+      "Fresh four diagnostics Rust tests PASS for bounded redacted events, exact reconnect history, hidden broker internals and allowlisted export."
+    ],
+    "next_action": "Run independent G3 adversarial review generation15 with the CurrentTask snapshot/cursor regression included.",
     "g4_unlocked": false
   }
 }
