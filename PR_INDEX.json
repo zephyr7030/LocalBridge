@@ -327,13 +327,13 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
+      "status": "PASS",
+      "review_status": "PASS",
       "review_generation": 26,
       "review_provenance": {
-        "generation": 25,
+        "generation": 26,
         "kind": "independent_adversarial",
-        "commit": "5cfc5b086b9bd51eb7ad6a7bed664019104b3986",
+        "commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
         "invalidated_generations": [
           {
             "generation": 8,
