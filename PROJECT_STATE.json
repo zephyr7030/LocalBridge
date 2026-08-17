@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3547,5 +3547,15 @@
       "LB-016 contract, backend gate tests, Clippy, frontend tests/build, ARCH-034, full architecture and UI-language passed."
     ],
     "next_action": "Reaccept LB-017 diagnostics and then run fresh G3 adversarial generation 13."
+  },
+  "lb017_schema36_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-017",
+    "production_code_patch_required": false,
+    "evidence": [
+      "LB-017 diagnostics contract PASS.",
+      "Diagnostics Rust tests PASS; no schema36 diagnostics regression reproduced."
+    ],
+    "next_action": "Run fresh independent G3 adversarial review generation 13. Human G3-to-G4 generation 3 remains blocked until this review passes."
   }
 }
