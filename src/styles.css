@@ -73,6 +73,7 @@ button{cursor:pointer}
 .row+.row{border-top:1px solid rgba(0,0,0,.06)}
 .label{color:#6e6e73;font-size:var(--font-body)}
 .value{text-align:right;overflow-wrap:anywhere}
+.permission-mode-value{font-weight:500}
 .project-actions,.inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 select,input[type="text"],input[type="password"]{min-height:var(--control-height);border:1px solid rgba(0,0,0,.12);border-radius:var(--control-radius);background:#fff;padding:0 11px;color:#1d1d1f}
 .access-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
