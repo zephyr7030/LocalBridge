@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": "LB-011",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4162,6 +4162,16 @@
       "Fresh runtime::orchestrator Rust tests PASS 8/8 including production bundled MCP→PEP ownership, reverse shutdown and single CurrentTask projection."
     ],
     "next_pr": "LB-010",
+    "g4_unlocked": false
+  },
+  "schema39_lb010_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-010",
+    "evidence": [
+      "Production watchdog contract PASS.",
+      "Fresh recovery module PASS 15/15 and workspace module PASS 21/21, covering exact five-attempt recovery, typed retryability, rollback and two-phase workspace switching."
+    ],
+    "next_pr": "LB-011",
     "g4_unlocked": false
   }
 }
