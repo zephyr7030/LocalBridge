@@ -229,7 +229,7 @@ fn get_main_projection_blocking(
     lifecycle: &DesktopLifecycle,
 ) -> Result<MainProjection, String> {
     let (_, data) = load_app_data(&app)?;
-    let snapshot = lifecycle.runtime_snapshot();
+    let (snapshot, projection_revision) = lifecycle.runtime_snapshot_with_revision();
     let privilege = lifecycle.privilege().refresh_broker_state();
     record_runtime_user_events(
         &snapshot.state,
@@ -296,7 +296,7 @@ fn get_main_projection_blocking(
         projects,
         current_task: task_projection(&snapshot.current_task, snapshot.current_task_elapsed_ms),
         last_tool: snapshot.last_tool.as_ref().map(last_tool_projection),
-        projection_revision: lifecycle.projection_revision(),
+        projection_revision,
         tunnel_id,
         runtime_key_saved: metadata.has_runtime_key,
         auto_start: data.settings.auto_start_services,

@@ -144,6 +144,38 @@ fn shutdown_continues_after_each_stage_failure() {
 }
 
 #[test]
+fn projection_snapshot_cursor_cannot_advance_past_captured_state() {
+    let wake = ProjectionWake::default();
+    let worker_wake = wake.clone();
+    let (start_tx, start_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        start_rx.recv().unwrap();
+        worker_wake.notify();
+        done_tx.send(()).unwrap();
+    });
+    let attempts = std::cell::Cell::new(0_u8);
+
+    let (captured, revision) = wake.capture_revision(|| {
+        let attempt = attempts.get();
+        attempts.set(attempt + 1);
+        if attempt == 0 {
+            start_tx.send(()).unwrap();
+            done_rx.recv().unwrap();
+            "old-snapshot"
+        } else {
+            "new-snapshot"
+        }
+    });
+
+    worker.join().unwrap();
+    assert_eq!(captured, "new-snapshot");
+    assert_eq!(revision, 1);
+    assert_eq!(attempts.get(), 2);
+    assert_eq!(wake.wait_after(revision, std::time::Duration::from_millis(1)), 1);
+}
+
+#[test]
 fn close_window_policy_defaults_to_continue_running_and_is_memory_cached() {
     let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
     assert!(lifecycle.close_window_continue_running());

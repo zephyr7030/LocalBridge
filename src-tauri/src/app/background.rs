@@ -432,6 +432,17 @@ impl ProjectionWake {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    fn capture_revision<T>(&self, mut capture: impl FnMut() -> T) -> (T, u64) {
+        loop {
+            let before = self.revision();
+            let value = capture();
+            let after = self.revision();
+            if before == after {
+                return (value, after);
+            }
+        }
+    }
+
     fn notify(&self) {
         let (revision, wake) = &*self.0;
         let mut revision = revision
@@ -754,6 +765,11 @@ impl DesktopLifecycle {
 
     pub fn projection_revision(&self) -> u64 {
         self.projection_wake.revision()
+    }
+
+    pub fn runtime_snapshot_with_revision(&self) -> (DesktopRuntimeSnapshot, u64) {
+        self.projection_wake
+            .capture_revision(|| self.runtime_snapshot())
     }
 
     pub fn wait_projection_change_after(&self, since: u64) -> u64 {
