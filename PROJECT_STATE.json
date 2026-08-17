@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4253,7 +4253,7 @@
     "review_decision_commit": "2fab63e6b99a163a95571f2436aa5b39806e4039"
   },
   "schema39_g3_revalidation_2026_08_17": {
-    "status": "REWORK_REQUIRED",
+    "status": "REVIEW_REQUIRED",
     "owner_prs": [
       "LB-013",
       "LB-014",
@@ -4266,7 +4266,7 @@
     "next_required_g3_adversarial_generation": 17,
     "human_review_generation": 3,
     "g4_unlocked": false,
-    "next_action": "Reaccept LB-013 through LB-017 sequentially, then run fresh G3 independent adversarial review generation17."
+    "next_action": "Run fresh G3 independent adversarial review generation17; human review remains blocked until PASS."
   },
   "schema39_lb013_reacceptance_2026_08_17": {
     "status": "PASS",
@@ -4307,6 +4307,18 @@
       "Fresh admin consent challenge tests PASS 4/4: fresh begin resets deadline, early confirmation rejected, exact boundary one-shot consumption, matching cancel invalidates, stale identity cannot confirm/cancel newer challenge."
     ],
     "next_pr": "LB-017",
+    "g4_unlocked": false
+  },
+  "schema39_lb017_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-017",
+    "evidence": [
+      "LB017 diagnostics contract PASS.",
+      "Fresh diagnostics Rust filter PASS 6/6, including bounded/redacted events, typed broker/runtime checks and allowlisted export."
+    ],
+    "next_action": "Run fresh G3 independent adversarial review generation17.",
+    "g3_generation_17_consumed": false,
+    "human_review_status": "BLOCKED",
     "g4_unlocked": false
   }
 }
