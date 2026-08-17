@@ -3496,7 +3496,7 @@
     "g2_generation_24_consumed": true,
     "g3_unlocked_for_rework": true,
     "g4_unlocked": false,
-    "review_decision_commit": null,
+    "review_decision_commit": "9f0ff7caad7aeaba7d5c44c56d66d1d71e80cda8",
     "next_action": "Reaccept G3 sequentially from LB-013 through LB-017 under schema36, then run independent G3 adversarial review generation 13. Human G3-to-G4 review and G4 remain blocked."
   }
 }
