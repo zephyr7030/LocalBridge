@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3369,5 +3369,19 @@
     "status": "REWORK_REQUIRED",
     "reason": "ARCH-005 verifier still matched the pre-schema36 facade dispatch signature even though call-time policy enforcement remains present; reopen LB-007 to repair verifier provenance before continuing LB-010.",
     "evidence": "all ARCH-005 policy markers passed except exact self.dispatch(name, arguments, request_id) marker; current facade dispatch is self.dispatch(mode, name, arguments, request_id)."
+  },
+  "lb007_schema36_arch005_verifier_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "fix_commit": "1717a30",
+    "evidence": [
+      "ARCH-005 exact dispatch marker updated to schema36 mode-aware signature without weakening policy assertions.",
+      "npm run verify:architecture PASS.",
+      "lb007_policy_contracts 9/9 PASS and lb007_policy_enforcement 10/10 PASS."
+    ],
+    "next_pr": "LB-008",
+    "next_g2_review_generation": 24,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
