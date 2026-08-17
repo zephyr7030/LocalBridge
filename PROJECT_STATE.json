@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -15,8 +15,8 @@
     "System default browser only",
     "Single dashboard",
     "Tray-first background runtime",
-    "Dashboard always shows administrator privilege runtime status",
-    "Privilege status reflects actual PrivilegeState, not only selected permission mode",
+    "Dashboard always shows one read-only PermissionMode row with 编辑模式 / 完整模式 / 管理员模式",
+    "Dashboard PermissionMode row reflects backend PermissionMode directly and is independent of PrivilegeState/Broker runtime state",
     "User-facing UI uses Simplified Chinese except necessary professional abbreviations and proper names",
     "No unnecessary English UI labels or internal enum strings",
     "Dashboard exposes one current-task status panel",
@@ -25,14 +25,14 @@
     "Onboarding screen 4 uses Local Bridge as the user-facing connector term",
     "Ordinary primary and selected UI uses blue #0071e3; black is not the standard product accent",
     "Administrator mode controls use orange #ff9500 warning styling in onboarding and Settings; when Broker is inactive they open the fixed nine-second whole-red-confirm safety gate before any UAC",
-    "Dashboard does not show PermissionMode or Edit Full Elevated selection controls; permission editing may occur in Settings or an explicitly reopened onboarding Screen 3",
-    "Dashboard administrator privilege runtime status is read-only and sourced from PrivilegeState",
+    "Dashboard shows one read-only PermissionMode row but no Edit Full Elevated selection controls; permission editing may occur only in Settings or an explicitly reopened onboarding Screen 3",
+    "Administrator/Broker runtime status remains a separate read-only diagnostics/runtime projection and does not replace the Dashboard PermissionMode row",
     "Onboarding and Dashboard service-status dots use the same typed status source and Ready green Starting amber Fault red Unknown gray semantics",
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "G3 generation13 black-box found that explicit unavailable pwsh plus $PSVersionTable.PSVersion.ToString() is misclassified as PrivilegedRouteUnavailable before RuntimeUnavailable; LB-007 reopened."
+    "G3 generation13 was invalidated by the explicit Dashboard PermissionMode regression correction; LB-015 is reaccepted and strict revalidation continues from LB-016 before fresh G3 generation14."
   ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
@@ -711,11 +711,11 @@
     "administrator_mode_warning_confirmation_button_color": "red"
   },
   "dashboard_ui": {
-    "permission_mode_row": false,
+    "permission_mode_row": true,
     "permission_mode_controls": false,
     "permission_mode_change": false,
     "permission_mode_uac_trigger": false,
-    "administrator_privilege_status": "read_only_PrivilegeState_projection",
+    "administrator_privilege_status": "separate_diagnostics_runtime_projection",
     "post_onboarding_permission_edit_surfaces": [
       "settings",
       "explicitly_reopened_onboarding_screen_3"
@@ -741,7 +741,14 @@
       "accent": "yellow",
       "workspace_switch_blocked": true,
       "switch_dialog": "管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式"
-    }
+    },
+    "permission_mode_value_source": "backend_PermissionMode",
+    "permission_mode_values": [
+      "编辑模式",
+      "完整模式",
+      "管理员模式"
+    ],
+    "permission_mode_status_dot": false
   },
   "diagnostics_ui": {
     "sections": [
@@ -3750,5 +3757,20 @@
     },
     "g4": "BLOCKED",
     "human_gate_policy": "blocked during rework; after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
+  },
+  "lb015_dashboard_permission_mode_correction_acceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "source": "explicit_user_instruction_2026_08_17",
+    "contract_commit": "125f52dfdad00a9aee5d289e8cf2da18d6b38a3c",
+    "product_commit": "11c78745191a8c6dcc2d217c9c1646e6d3fe07e7",
+    "evidence": [
+      "Dashboard again renders exactly one read-only 权限模式 row sourced from backend PermissionMode and no administrator PrivilegeState replacement row.",
+      "The row has no status dot, no selector, no PermissionMode mutation and no UAC trigger; Settings and explicitly reopened onboarding Screen3 remain editing surfaces.",
+      "ARCH-029 and ARCH-034 targeted verifiers PASS; LB-015 contract PASS; frontend Vitest 4 files / 7 tests PASS; production frontend build PASS; UI-language PASS.",
+      "Fresh native Tauri/WebView2 fixed-window E2E PASS at 150% DPI for onboarding and Dashboard: logical 780x620, physical 1170x930, custom chrome, fixed geometry and rounded scrolling preserved.",
+      "G4 human-gate regression PASS and full architecture verifier PASS 34/34 after correcting the current schema36 composition while preserving historical amendment provenance."
+    ],
+    "next_action": "Strictly revalidate LB-016 on the corrected LB-015 baseline; then LB-017 and fresh G3 adversarial generation14."
   }
 }
