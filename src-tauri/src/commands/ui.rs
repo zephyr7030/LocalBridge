@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
 use crate::app::{
@@ -66,6 +67,60 @@ struct LastToolProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct ReconnectProjection {
     generation: u64,
+}
+
+const ADMIN_CONSENT_DURATION: Duration = Duration::from_millis(9000);
+
+#[derive(Debug, Default)]
+struct AdminConsentGate {
+    not_before: Option<Instant>,
+}
+
+impl AdminConsentGate {
+    fn begin_at(&mut self, now: Instant) {
+        self.not_before = Some(now + ADMIN_CONSENT_DURATION);
+    }
+
+    fn cancel(&mut self) {
+        self.not_before = None;
+    }
+
+    fn confirm_at(&mut self, now: Instant) -> bool {
+        let Some(not_before) = self.not_before else {
+            return false;
+        };
+        if now < not_before {
+            return false;
+        }
+        self.not_before = None;
+        true
+    }
+}
+
+fn admin_consent_gate() -> &'static Mutex<AdminConsentGate> {
+    static GATE: OnceLock<Mutex<AdminConsentGate>> = OnceLock::new();
+    GATE.get_or_init(|| Mutex::new(AdminConsentGate::default()))
+}
+
+fn begin_admin_consent_challenge() {
+    admin_consent_gate()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .begin_at(Instant::now());
+}
+
+fn cancel_admin_consent_challenge() {
+    admin_consent_gate()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .cancel();
+}
+
+fn consume_ready_admin_consent() -> bool {
+    admin_consent_gate()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .confirm_at(Instant::now())
 }
 
 #[tauri::command]
@@ -188,8 +243,27 @@ fn get_main_projection_blocking(
 #[tauri::command]
 pub async fn set_permission_mode(mode: String, app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
+        if mode == "admin-consent-begin" {
+            begin_admin_consent_challenge();
+            return Ok(());
+        }
+        if mode == "admin-consent-cancel" {
+            cancel_admin_consent_challenge();
+            return Ok(());
+        }
         let lifecycle = app.state::<DesktopLifecycle>();
         let requested = parse_permission(&mode)?;
+        if requested != PermissionMode::Elevated {
+            cancel_admin_consent_challenge();
+        }
+        let privilege_active =
+            matches!(lifecycle.privilege().state(), PrivilegeState::Active { .. });
+        if requested == PermissionMode::Elevated
+            && !privilege_active
+            && !consume_ready_admin_consent()
+        {
+            return Err("管理员确认尚未完成".to_string());
+        }
         let (store, mut data) = load_app_data(&app)?;
         let previous_stored = data.settings.permission_mode;
         let previous: PermissionMode = previous_stored.into();
@@ -213,7 +287,7 @@ pub async fn set_permission_mode(mode: String, app: AppHandle) -> Result<(), Str
             return Err("无法保存权限设置".to_string());
         }
         if requested == PermissionMode::Elevated
-            && !matches!(lifecycle.privilege().state(), PrivilegeState::Active { .. })
+            && !privilege_active
             && request_explicit_admin(&lifecycle).is_err()
         {
             data.settings.permission_mode = previous_stored;
@@ -866,6 +940,35 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../tests/unit/ui/backend_projection.rs"
     ));
+
+    #[test]
+    fn admin_consent_gate_rejects_early_and_consumes_exact_boundary() {
+        let start = Instant::now();
+        let mut gate = AdminConsentGate::default();
+        gate.begin_at(start);
+        assert!(!gate.confirm_at(start + Duration::from_millis(8_999)));
+        assert!(gate.confirm_at(start + ADMIN_CONSENT_DURATION));
+        assert!(!gate.confirm_at(start + ADMIN_CONSENT_DURATION));
+    }
+
+    #[test]
+    fn admin_consent_gate_fresh_begin_resets_full_deadline() {
+        let start = Instant::now();
+        let mut gate = AdminConsentGate::default();
+        gate.begin_at(start);
+        gate.begin_at(start + Duration::from_millis(8_500));
+        assert!(!gate.confirm_at(start + Duration::from_millis(9_000)));
+        assert!(gate.confirm_at(start + Duration::from_millis(17_500)));
+    }
+
+    #[test]
+    fn admin_consent_gate_cancel_invalidates_challenge() {
+        let start = Instant::now();
+        let mut gate = AdminConsentGate::default();
+        gate.begin_at(start);
+        gate.cancel();
+        assert!(!gate.confirm_at(start + ADMIN_CONSENT_DURATION));
+    }
 
     #[test]
     fn runtime_start_fault_messages_are_redacted_and_actionable() {

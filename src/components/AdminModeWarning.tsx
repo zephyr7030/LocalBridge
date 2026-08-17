@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 const ADMIN_WARNING_COUNTDOWN_MS = 9000;
 
@@ -22,39 +23,68 @@ const ADMIN_WARNING_CONSEQUENCES = [
 ] as const;
 
 export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
-  const startedAt = useRef(performance.now());
+  const startedAt = useRef<number | null>(null);
+  const confirmationHandedOff = useRef(false);
+  const onCancelRef = useRef(onCancel);
+  const [backendChallengeReady, setBackendChallengeReady] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(9);
 
+  useEffect(() => { onCancelRef.current = onCancel; }, [onCancel]);
+
+  const cancel = async () => {
+    if (confirmationHandedOff.current) return;
+    try {
+      await invoke<void>("set_permission_mode", { mode: "admin-consent-cancel" });
+    } finally {
+      onCancelRef.current();
+    }
+  };
+
   useEffect(() => {
+    let disposed = false;
+    void invoke<void>("set_permission_mode", { mode: "admin-consent-begin" }).then(() => {
+      if (disposed) return;
+      startedAt.current = performance.now();
+      setRemainingSeconds(9);
+      setBackendChallengeReady(true);
+    }).catch(() => {
+      if (!disposed) setBackendChallengeReady(false);
+    });
     const update = () => {
-      setRemainingSeconds(adminWarningRemainingSeconds(startedAt.current, performance.now()));
+      if (startedAt.current !== null) {
+        setRemainingSeconds(adminWarningRemainingSeconds(startedAt.current, performance.now()));
+      }
     };
-    update();
     const timer = window.setInterval(update, 100);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel();
+      if (event.key === "Escape") void cancel();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
+      disposed = true;
       window.clearInterval(timer);
       window.removeEventListener("keydown", onKeyDown);
+      if (!confirmationHandedOff.current) {
+        void invoke<void>("set_permission_mode", { mode: "admin-consent-cancel" }).catch(() => undefined);
+      }
     };
-  }, [onCancel]);
+  }, []);
 
   const confirm = () => {
-    if (!adminWarningCanConfirm(startedAt.current, performance.now())) return;
+    if (!backendChallengeReady || startedAt.current === null || !adminWarningCanConfirm(startedAt.current, performance.now())) return;
+    confirmationHandedOff.current = true;
     onConfirm();
   };
 
-  return <div className="dialog-backdrop admin-warning-backdrop" onMouseDown={onCancel}>
+  return <div className="dialog-backdrop admin-warning-backdrop" onMouseDown={() => void cancel()}>
     <section className="dialog admin-warning" role="dialog" aria-modal="true" aria-labelledby="admin-warning-title" onMouseDown={(event) => event.stopPropagation()}>
       <h2 id="admin-warning-title">管理员权限确认</h2>
       <p>启用管理员权限后，错误或恶意操作可能导致：</p>
       <ul>{ADMIN_WARNING_CONSEQUENCES.map((item) => <li key={item}>{item}</li>)}</ul>
       <p className="admin-warning-footer">仅在你明确理解操作后果时授权。</p>
       <div className="dialog-actions">
-        <button className="secondary" onClick={onCancel}>取消</button>
-        <button className="primary admin-warning-confirm" disabled={remainingSeconds > 0} onClick={confirm}>{remainingSeconds > 0 ? `确认${remainingSeconds}` : "确认"}</button>
+        <button className="secondary" onClick={() => void cancel()}>取消</button>
+        <button className="primary admin-warning-confirm" disabled={!backendChallengeReady || remainingSeconds > 0} onClick={confirm}>{remainingSeconds > 0 ? `确认${remainingSeconds}` : "确认"}</button>
       </div>
     </section>
   </div>;
