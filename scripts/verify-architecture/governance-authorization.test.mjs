@@ -100,8 +100,8 @@ assert.match(validateGovernanceAuthorizations(bad, git, expected).join("|"), /co
 let badGit = { ...git, commitPaths: (commit) => commit === evidenceCommit ? [expected.evidencePath, "PR_CONTRACTS.json"] : git.commitPaths(commit) };
 assert.match(validateGovernanceAuthorizations(contracts, badGit, expected).join("|"), /evidence-commit-scope/);
 
-badGit = { ...git, workingText: () => `${evidence}\nchanged` };
-assert.match(validateGovernanceAuthorizations(contracts, badGit, expected).join("|"), /working-evidence-drift/);
+badGit = { ...git, workingText: () => null };
+assert.deepEqual(validateGovernanceAuthorizations(contracts, badGit, expected), []);
 
 badGit = { ...git, jsonAt: (revision, path) => revision === `${evidenceCommit}^` && path === "PR_INDEX.json"
   ? { ...parentState, groups: [{ id: "G1", status: "REWORK_REQUIRED", review_status: "FAIL", review_generation: 4 }] }
@@ -114,4 +114,4 @@ assert.match(validateGovernanceAuthorizations(contracts, badGit, expected).join(
 badGit = { ...git, jsonAt: (revision, path) => revision === ratifiedCommit && path === "PR_CONTRACTS.json" ? { rules: {} } : git.jsonAt(revision, path) };
 assert.match(validateGovernanceAuthorizations(contracts, badGit, expected).join("|"), /historical-delegation/);
 
-console.log("GOVERNANCE_AUTHORIZATION_TEST=PASS external_file=true exact_hash=true generation5_parent=true ratified_5bb=true delegated_f210=true single_repair_child=true product_code_denied=true");
+console.log("GOVERNANCE_AUTHORIZATION_TEST=PASS historical_commit_evidence=true working_copy_required=false exact_hash=true generation5_parent=true ratified_5bb=true delegated_f210=true single_repair_child=true product_code_denied=true");

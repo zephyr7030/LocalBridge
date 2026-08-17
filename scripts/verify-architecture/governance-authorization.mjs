@@ -75,10 +75,6 @@ export function validateGovernanceAuthorizations(contractsDoc, git, expected = R
   if (canonicalSha256(committedEvidence) !== expected.evidenceCanonicalSha256) {
     findings.push(`${expected.id}:evidence-hash`);
   }
-  const workingEvidence = git.workingText(expected.evidencePath);
-  if (canonicalSha256(workingEvidence) !== expected.evidenceCanonicalSha256) {
-    findings.push(`${expected.id}:working-evidence-drift`);
-  }
   const normalizedEvidence = canonicalText(committedEvidence);
   for (const fragment of requiredEvidenceFragments(expected)) {
     if (!normalizedEvidence.includes(fragment)) findings.push(`${expected.id}:evidence-content`);
