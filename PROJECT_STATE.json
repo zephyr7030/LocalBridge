@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3281,8 +3281,8 @@
       "preserve_history": true
     },
     "current_pointer": {
-      "group": "G2",
-      "pr": "LB-006"
+      "group": "G3",
+      "pr": "LB-016"
     },
     "g4": "BLOCKED",
     "human_gate_policy": "after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
@@ -3656,5 +3656,18 @@
       "LB-017 diagnostics contract and Rust diagnostics tests PASS on G2 generation25 baseline."
     ],
     "next_action": "Run fresh G3 adversarial review generation13."
+  },
+  "g3_generation13_lb016_stale_consent_reopen_2026_08_17": {
+    "status": "REWORK_REQUIRED",
+    "owner_pr": "LB-016",
+    "finding": "Backend administrator consent gate stores only one global not_before deadline and no challenge identity, so a stale warning instance cannot be distinguished from the newest challenge and can consume a newer matured authorization window.",
+    "evidence": [
+      "src-tauri/src/commands/ui.rs AdminConsentGate contains only not_before: Option<Instant>.",
+      "AdminModeWarning begin/cancel/confirm intents contain no challenge nonce or identity.",
+      "Schema36 requires stale/early confirmation to fail closed."
+    ],
+    "g3_generation13_consumed": false,
+    "g4_unlocked": false,
+    "next_action": "Bind begin cancel and confirmation to a fresh challenge identity and prove stale challenge rejection before rerunning LB-016 onward."
   }
 }
