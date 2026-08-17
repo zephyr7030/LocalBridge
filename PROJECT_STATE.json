@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -4365,5 +4365,50 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS.",
     "g3_generation_17_consumed": true,
     "blackbox_connector_status": "SCHEMA39_DOWNSTREAM_SCHEMA_CONFIRMED_AND_EARLIER_CALL_SUCCEEDED_FINAL_FOCUSED_CALL_PLATFORM_DISABLED_BEFORE_LOCALBRIDGE"
+  },
+  "schema40_schema41_reopen_2026_08_17": {
+    "status": "REWORK_REQUIRED",
+    "contract_commit": "c3ed80205768fffaedad3ba9dabc0e66c51c17d1",
+    "schema40": {
+      "earliest_owner_pr": "LB-006",
+      "owner_prs": [
+        "LB-006",
+        "LB-010",
+        "LB-015"
+      ],
+      "invalidated_g2_generation": 27,
+      "invalidated_g3_generation": 17,
+      "next_required_g2_adversarial_generation": 28,
+      "next_required_g3_adversarial_generation": 18
+    },
+    "schema41": {
+      "status": "RATIFIED_PENDING_SCHEMA40_ACCEPTANCE",
+      "earliest_owner_pr": "LB-006",
+      "owner_prs": [
+        "LB-006"
+      ],
+      "next_required_g2_adversarial_generation": 29,
+      "next_required_g3_adversarial_generation": 19
+    },
+    "strict_sequence": [
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-009",
+      "LB-010",
+      "LB-011",
+      "LB-012",
+      "G2 generation 28",
+      "LB-013",
+      "LB-014",
+      "LB-015",
+      "LB-016",
+      "LB-017",
+      "G3 generation 18",
+      "schema41 G2 revalidation generation 29",
+      "schema41 G3 revalidation generation 19"
+    ],
+    "g4_unlocked": false,
+    "next_action": "Implement and reaccept schema40 from LB-006 through G3 generation18, then complete schema41 semantic compatibility and fresh G2 generation29/G3 generation19; human G3-to-G4 review remains required."
   }
 }
