@@ -72,6 +72,7 @@ struct ElevatedCallContext<'a> {
 }
 
 struct TaskControlContext<'a> {
+    guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     public_policy: &'a RwLock<CapabilityPolicy>,
     cancellation: &'a McpCancellationClient,
     current_task: &'a CurrentTaskProjection,
@@ -1065,6 +1066,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     mode,
                     arguments,
                     TaskControlContext {
+                        guard,
                         public_policy,
                         cancellation,
                         current_task,
@@ -1169,6 +1171,7 @@ fn handle_task_control(
     context: TaskControlContext<'_>,
 ) -> Result<(), ()> {
     let TaskControlContext {
+        guard,
         public_policy,
         cancellation,
         current_task,
@@ -1225,6 +1228,32 @@ fn handle_task_control(
                 };
                 if result.is_ok() {
                     cancelled = cancelled.saturating_add(1);
+                }
+            }
+            if cancelled == 0 {
+                if let Some(owner) = task_state.current_owner() {
+                    let cancelled_session = match guard.try_lock() {
+                        Ok(mut guard) => guard
+                            .cancel_public_command_session(&owner.session_id)
+                            .is_ok(),
+                        Err(TryLockError::WouldBlock) => false,
+                        Err(TryLockError::Poisoned(error)) => error
+                            .into_inner()
+                            .cancel_public_command_session(&owner.session_id)
+                            .is_ok(),
+                    };
+                    if cancelled_session {
+                        cancelled = cancelled.saturating_add(1);
+                        current_task.project(
+                            CurrentTaskStatus::project(
+                                TaskKind::ExecuteCommand,
+                                SafeTaskSummary::Omitted,
+                                TaskExecutionState::Cancelled,
+                            )
+                            .expect("cancelled command is a valid projected task"),
+                        );
+                        current_task.project(CurrentTaskStatus::Idle);
+                    }
                 }
             }
             if cancelled > 0 {
@@ -1394,26 +1423,7 @@ fn append_elevated_exec_tool(result: &mut Value) {
                 "timeout_ms": {"type": "integer", "minimum": 1, "description": "Execution timeout in milliseconds."},
                 "max_output_bytes": {"type": "integer", "minimum": 1, "description": "Maximum captured process/shell output bytes."}
             },
-            "additionalProperties": false,
-            "oneOf": [
-                {
-                    "not": {"required": ["operation"]},
-                    "required": ["program", "args", "timeout_ms", "max_output_bytes"],
-                    "description": "Legacy direct process form."
-                },
-                {
-                    "properties": {"operation": {"const": "process"}},
-                    "required": ["operation", "program", "args", "timeout_ms", "max_output_bytes"]
-                },
-                {
-                    "properties": {"operation": {"const": "shell"}},
-                    "required": ["operation", "shell", "command", "workdir", "timeout_ms", "max_output_bytes"]
-                },
-                {
-                    "properties": {"operation": {"const": "filesystem"}},
-                    "required": ["operation", "action", "path", "destination", "content_base64", "recursive"]
-                }
-            ]
+            "additionalProperties": false
         },
         "outputSchema": elevated_exec_output_schema()
     }));
@@ -2751,8 +2761,8 @@ mod tests {
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 36,
-            "fresh serving instance did not identify the revision34 facade: {:#?}",
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 38,
+            "fresh serving instance did not identify the revision38 facade: {:#?}",
             provenance.body
         );
         let served_tools = post(
@@ -2776,20 +2786,63 @@ mod tests {
             .as_array()
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "command_control"))
             .expect("fresh serving instance exposes command_control");
-        let command_control_variants = served_command_control["inputSchema"]["oneOf"]
-            .as_array()
-            .expect("command_control action-discriminated schema");
-        let read_variant = command_control_variants
-            .iter()
-            .find(|variant| variant["properties"]["action"]["const"] == "read")
-            .expect("command_control read schema");
-        assert!(
-            read_variant["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("output_ref"))
+        assert_eq!(served_command_control["inputSchema"]["type"], "object");
+        assert!(served_command_control["inputSchema"].get("oneOf").is_none());
+        assert_eq!(
+            served_command_control["inputSchema"]["properties"]["action"]["enum"],
+            json!(["poll", "read", "write", "kill"])
         );
-        assert!(read_variant["properties"].get("session_id").is_none());
+        for property in [
+            "session_id", "output_ref", "chars", "signal", "wait_ms", "stream", "offset", "limit",
+        ] {
+            assert!(
+                served_command_control["inputSchema"]["properties"][property].is_object(),
+                "served command_control schema lost {property}"
+            );
+        }
+
+        let served_document = served_tools.body["result"]["tools"]
+            .as_array()
+            .and_then(|tools| tools.iter().find(|tool| tool["name"] == "document_workflow"))
+            .expect("fresh serving instance exposes document_workflow");
+        assert!(served_document["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("rebuild requires an existing path+content")));
+        assert!(served_document["inputSchema"]["properties"]["path"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("already exist")));
+        assert!(served_document["inputSchema"]["properties"]["content"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("rebuild")));
+
+        let served_elevated = served_tools.body["result"]["tools"]
+            .as_array()
+            .and_then(|tools| tools.iter().find(|tool| tool["name"] == "elevated_exec"))
+            .expect("fresh serving instance exposes elevated_exec");
+        assert_eq!(served_elevated["inputSchema"]["type"], "object");
+        assert!(served_elevated["inputSchema"].get("oneOf").is_none());
+        for property in [
+            "operation", "program", "args", "shell", "command", "workdir", "action", "path",
+            "destination", "content_base64", "recursive", "timeout_ms", "max_output_bytes",
+        ] {
+            assert!(
+                served_elevated["inputSchema"]["properties"][property].is_object(),
+                "served elevated_exec schema lost {property}"
+            );
+        }
+        let invalid_control = public_tool_call(
+            pep.port(),
+            &session,
+            6881,
+            "command_control",
+            json!({"action":"read","output_ref":"lb-output-missing","session_id":"lb-session-cross-action"}),
+        );
+        assert_eq!(
+            invalid_control.body["result"]["structuredContent"]["error"]["code"],
+            "InvalidArgument",
+            "cross-action command_control fields were not rejected: {:#?}",
+            invalid_control.body
+        );
         let directory_schema = &served_agent["inputSchema"]["properties"]["directory_changes"];
         assert_eq!(directory_schema["type"], "array");
         assert_eq!(
@@ -3659,6 +3712,10 @@ mod tests {
                 "elevated_exec top-level property missing: {property}"
             );
         }
+        assert!(
+            elevated_schema["inputSchema"].get("oneOf").is_none(),
+            "elevated_exec public input schema must remain a directly projectable top-level object"
+        );
 
         for private in [
             "read_file",
@@ -4232,6 +4289,209 @@ mod tests {
     }
 
     #[test]
+    fn task_control_cancel_owns_detached_public_command_session() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP listener ready");
+        let initialized = initialize(pep.port(), 321);
+        let session = initialized.session.expect("downstream MCP session");
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+
+        let started = Instant::now();
+        let running = public_tool_call(
+            pep.port(),
+            &session,
+            322,
+            "exec_command",
+            json!({
+                "command":"Start-Sleep -Seconds 10; Write-Output SHOULD_NOT_COMPLETE",
+                "shell":"windows_powershell",
+                "yield_time_ms":0,
+                "timeout_ms":20000,
+                "max_output_bytes":4096
+            }),
+        );
+        assert_eq!(
+            running.body["result"]["structuredContent"]["data"]["status"],
+            "running",
+            "{:#?}",
+            running.body
+        );
+        let public_session = running.body["result"]["structuredContent"]["data"]["session_id"]
+            .as_str()
+            .expect("detached public session")
+            .to_string();
+
+        let cancel_started = Instant::now();
+        let cancel = public_tool_call(
+            pep.port(),
+            &session,
+            323,
+            "task_control",
+            json!({"action":"cancel"}),
+        );
+        assert!(
+            cancel_started.elapsed() < Duration::from_secs(2),
+            "detached task cancellation blocked"
+        );
+        assert_eq!(
+            cancel.body["result"]["structuredContent"]["data"]["state"],
+            "cancel_requested",
+            "{:#?}",
+            cancel.body
+        );
+        assert!(
+            cancel.body["result"]["structuredContent"]["data"]["cancelled_requests"]
+                .as_u64()
+                .is_some_and(|count| count >= 1),
+            "{:#?}",
+            cancel.body
+        );
+
+        let replay = public_tool_call(
+            pep.port(),
+            &session,
+            324,
+            "command_control",
+            json!({"action":"poll","session_id":public_session,"wait_ms":100}),
+        );
+        assert_eq!(
+            replay.body["result"]["structuredContent"]["error"]["code"],
+            "ProcessCancelled",
+            "{:#?}",
+            replay.body
+        );
+        assert_eq!(
+            replay.body["result"]["structuredContent"]["data"]["status"],
+            "cancelled"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "detached command ran near its natural duration"
+        );
+
+        let task = public_tool_call(
+            pep.port(),
+            &session,
+            325,
+            "task_control",
+            json!({"action":"get"}),
+        );
+        assert_eq!(
+            task.body["result"]["structuredContent"]["data"]["last_terminal_command"]["status"],
+            "cancelled",
+            "{:#?}",
+            task.body
+        );
+        assert_eq!(
+            task.body["result"]["structuredContent"]["data"]["last_terminal_command"]["error_code"],
+            "ProcessCancelled"
+        );
+        assert_eq!(pep.current_task_projection().actual_snapshot(), CurrentTaskStatus::Idle);
+
+        let mut coding = pep.stop().expect("PEP stop after detached cancellation");
+        coding.stop().expect("MCP Job stop after detached cancellation");
+        assert_eq!(coding.active_processes().unwrap(), 0);
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn public_timeout_converges_without_windows_ctrl_break_debug_mode() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP listener ready");
+        let initialized = initialize(pep.port(), 326);
+        let session = initialized.session.expect("downstream MCP session");
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+
+        let started = Instant::now();
+        let timed_out = public_tool_call(
+            pep.port(),
+            &session,
+            327,
+            "exec_command",
+            json!({
+                "command":"Start-Sleep -Seconds 10; Write-Output SHOULD_NOT_COMPLETE",
+                "shell":"windows_powershell",
+                "yield_time_ms":10000,
+                "timeout_ms":300,
+                "max_output_bytes":4096
+            }),
+        );
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_millis(1800),
+            "300ms timeout converged too slowly: {elapsed:?}; body={:#?}",
+            timed_out.body
+        );
+        assert_eq!(timed_out.body["result"]["isError"], true, "{:#?}", timed_out.body);
+        assert_eq!(
+            timed_out.body["result"]["structuredContent"]["error"]["code"],
+            "ProcessTimedOut",
+            "{:#?}",
+            timed_out.body
+        );
+        assert_eq!(
+            timed_out.body["result"]["structuredContent"]["data"]["status"],
+            "timed_out",
+            "{:#?}",
+            timed_out.body
+        );
+        let rendered = serde_json::to_string(&timed_out.body).unwrap();
+        assert!(
+            !rendered.contains("Entering debug mode"),
+            "Windows timeout leaked CTRL_BREAK PowerShell debug behavior: {rendered}"
+        );
+
+        let mut coding = pep.stop().expect("PEP stop after timeout");
+        coding.stop().expect("MCP Job stop after timeout");
+        assert_eq!(coding.active_processes().unwrap(), 0);
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
     fn elevated_exec_is_broker_only_mode_gated_cancelable_and_secret_safe() {
         let root = repo_root();
         let workspace = temp_workspace();
@@ -4732,7 +4992,12 @@ mod tests {
             .iter()
             .find(|tool| tool["name"] == "elevated_exec")
             .unwrap()["inputSchema"];
-        assert_eq!(schema["oneOf"].as_array().unwrap().len(), 4);
+        assert_eq!(schema["type"], "object");
+        assert!(schema.get("oneOf").is_none());
+        assert_eq!(schema["properties"]["operation"]["enum"], json!(["process", "shell", "filesystem"]));
+        for property in ["program", "shell", "action", "path", "timeout_ms", "max_output_bytes"] {
+            assert!(schema["properties"][property].is_object(), "elevated_exec schema lost {property}");
+        }
 
         let reviewed_program = super::super::policy::reviewed_elevated_program()
             .expect("trusted System32 diagnostic exists")

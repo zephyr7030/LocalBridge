@@ -53,9 +53,10 @@ for (const required of [
 
 const server = read("src-tauri/src/mcp/server.rs");
 for (const required of [
-  '"const": "process"',
-  '"const": "shell"',
-  '"const": "filesystem"',
+  '"enum": ["process", "shell", "filesystem"]',
+  'Some("process") =>',
+  'Some("shell") =>',
+  'Some("filesystem") =>',
   "if !matches!(privileged.state(), PrivilegeState::Active { .. })",
   "execution_guard.elevated_decision(mode, &reviewed_arguments)",
   "privileged.start_execute",
@@ -64,6 +65,7 @@ for (const required of [
   "broker_direct_spec(&shell_spec)",
   "typed_administrator_process_shell_and_filesystem_routes_are_broker_only",
 ]) if (!server.includes(required)) throw new Error(`ARCH-026 Broker route missing: ${required}`);
+const elevatedStart=server.indexOf('"name": "elevated_exec"'); const elevatedEnd=server.indexOf("fn elevated_exec_output_schema",elevatedStart); if(elevatedStart<0||elevatedEnd<=elevatedStart||server.slice(elevatedStart,elevatedEnd).includes('"oneOf"')) throw new Error("ARCH-026 elevated_exec input schema regressed to a client-hostile top-level combinator");
 if (server.slice(server.indexOf("fn handle_elevated_exec"), server.indexOf("fn request_id", server.indexOf("fn handle_elevated_exec"))).includes("guard.call_tool")) {
   throw new Error("ARCH-026 privileged administrator route reaches ordinary upstream MCP");
 }

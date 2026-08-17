@@ -254,6 +254,16 @@ impl CommandTaskStateStore {
             .cloned()
     }
 
+    pub(crate) fn current_owner(&self) -> Option<CommandOwner> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .state
+            .current_command
+            .as_ref()
+            .map(|current| current.owner.clone())
+    }
+
     #[cfg(test)]
     fn state_for_test(&self) -> PersistedTaskState {
         self.0

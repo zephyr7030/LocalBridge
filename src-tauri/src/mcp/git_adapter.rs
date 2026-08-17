@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -370,6 +370,7 @@ fn git_diff(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) ->
     let max_bytes =
         usize_arg(arguments, "max_bytes", DEFAULT_TEXT_BYTES).clamp(1, MAX_CAPTURE_BYTES);
     let mut combined = String::new();
+    let mut files = Vec::new();
     let mut command_truncated = false;
     for cached in [false, true] {
         if (!cached && !unstaged) || (cached && !staged) {
@@ -400,11 +401,41 @@ fn git_diff(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) ->
             combined.push('\n');
         }
         combined.push_str(&String::from_utf8_lossy(&output.output));
+
+        let mut name_args = vec![
+            os("--no-pager"),
+            os("diff"),
+            os("--no-ext-diff"),
+            os("--no-textconv"),
+            os("--name-status"),
+            os("-z"),
+        ];
+        let mut numstat_args = vec![
+            os("--no-pager"),
+            os("diff"),
+            os("--no-ext-diff"),
+            os("--no-textconv"),
+            os("--numstat"),
+            os("-z"),
+        ];
+        if cached {
+            name_args.push(os("--cached"));
+            numstat_args.push(os("--cached"));
+        }
+        if !pathspecs.is_empty() {
+            name_args.push(os("--"));
+            numstat_args.push(os("--"));
+            name_args.extend(pathspecs.iter().map(os));
+            numstat_args.extend(pathspecs.iter().map(os));
+        }
+        match machine_file_metadata(repository, &name_args, &numstat_args) {
+            Ok(mut batch) => files.append(&mut batch),
+            Err(error) => return Some(error),
+        }
     }
     let (diff, text_truncated, output_bytes, output_lines) =
         truncate_text(&combined, max_bytes, DEFAULT_MAX_LINES);
     let truncated = command_truncated || text_truncated;
-    let files = parse_diff_files(&diff);
     let warnings = if truncated {
         vec!["diff truncated"]
     } else {
@@ -539,6 +570,36 @@ fn git_show(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) ->
         Err(message) => return Some(tool_error("GIT_ERROR", &message)),
     };
     let raw = String::from_utf8_lossy(&output.output);
+    let mut name_args = vec![
+        os("--no-pager"),
+        os("show"),
+        os("--no-ext-diff"),
+        os("--no-textconv"),
+        os("--format="),
+        os("--name-status"),
+        os("-z"),
+        os(reference),
+    ];
+    let mut numstat_args = vec![
+        os("--no-pager"),
+        os("show"),
+        os("--no-ext-diff"),
+        os("--no-textconv"),
+        os("--format="),
+        os("--numstat"),
+        os("-z"),
+        os(reference),
+    ];
+    if !pathspecs.is_empty() {
+        name_args.push(os("--"));
+        numstat_args.push(os("--"));
+        name_args.extend(pathspecs.iter().map(os));
+        numstat_args.extend(pathspecs.iter().map(os));
+    }
+    let files = match machine_file_metadata(&context.repository, &name_args, &numstat_args) {
+        Ok(files) => files,
+        Err(error) => return Some(error),
+    };
     let (content, text_truncated, output_bytes, output_lines) =
         truncate_text(&raw, max_bytes, DEFAULT_MAX_LINES);
     let truncated = output.truncated || text_truncated;
@@ -548,7 +609,7 @@ fn git_show(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) ->
             "is_repo": true,
             "rev": reference,
             "content": content,
-            "files": parse_diff_files(&raw),
+            "files": files,
             "truncated": truncated,
             "truncated_by": if truncated { Value::String("bytes_or_lines".into()) } else { Value::Null },
             "output_bytes": output_bytes,
@@ -865,27 +926,112 @@ fn parse_branch_line(line: &str) -> (Option<String>, Option<String>, u64, u64) {
     )
 }
 
-fn parse_diff_files(diff: &str) -> Vec<Value> {
-    let mut files: Vec<Value> = Vec::new();
-    for line in diff.lines() {
-        if let Some(rest) = line.strip_prefix("diff --git a/") {
-            let path = rest.split(" b/").nth(1).unwrap_or(rest).to_string();
-            files.push(json!({"path":path,"status":"modified","binary":false}));
-        } else if line.starts_with("new file mode") {
-            if let Some(file) = files.last_mut() {
-                file["status"] = Value::String("added".into());
+fn machine_file_metadata(
+    repository: &GitRepository,
+    name_status_args: &[OsString],
+    numstat_args: &[OsString],
+) -> Result<Vec<Value>, Value> {
+    let names = run_git(repository, name_status_args, MAX_CAPTURE_BYTES)
+        .map_err(|message| tool_error("GIT_ERROR", &message))?;
+    if names.exit_code != 0 || names.timed_out {
+        return Err(git_failure(&names));
+    }
+    if names.truncated {
+        return Err(tool_error("GIT_ERROR", "Git file metadata exceeded the bounded capture limit"));
+    }
+    let numstat = run_git(repository, numstat_args, MAX_CAPTURE_BYTES)
+        .map_err(|message| tool_error("GIT_ERROR", &message))?;
+    if numstat.exit_code != 0 || numstat.timed_out {
+        return Err(git_failure(&numstat));
+    }
+    if numstat.truncated {
+        return Err(tool_error("GIT_ERROR", "Git binary metadata exceeded the bounded capture limit"));
+    }
+    let binaries = parse_numstat_binary_paths_z(&numstat.output);
+    let mut files = parse_name_status_z(&names.output);
+    for file in &mut files {
+        let path = file.get("path").and_then(Value::as_str).unwrap_or_default();
+        file["binary"] = Value::Bool(binaries.contains(path));
+    }
+    Ok(files)
+}
+
+fn parse_name_status_z(bytes: &[u8]) -> Vec<Value> {
+    let fields = bytes
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    let mut files = Vec::new();
+    let mut index = 0usize;
+    while index < fields.len() {
+        let status = String::from_utf8_lossy(fields[index]);
+        index += 1;
+        let kind = status.chars().next().unwrap_or('M');
+        let path = if matches!(kind, 'R' | 'C') {
+            if index + 1 >= fields.len() {
+                break;
             }
-        } else if line.starts_with("deleted file mode") {
-            if let Some(file) = files.last_mut() {
-                file["status"] = Value::String("deleted".into());
-            }
-        } else if line.starts_with("Binary files ") {
-            if let Some(file) = files.last_mut() {
-                file["binary"] = Value::Bool(true);
-            }
-        }
+            index += 1;
+            let destination = String::from_utf8_lossy(fields[index]).into_owned();
+            index += 1;
+            destination
+        } else {
+            let Some(field) = fields.get(index) else {
+                break;
+            };
+            index += 1;
+            String::from_utf8_lossy(field).into_owned()
+        };
+        let status = match kind {
+            'A' => "added",
+            'D' => "deleted",
+            'R' => "renamed",
+            'C' => "copied",
+            'T' => "type_changed",
+            'U' => "unmerged",
+            _ => "modified",
+        };
+        files.push(json!({"path":path,"status":status,"binary":false}));
     }
     files
+}
+
+fn parse_numstat_binary_paths_z(bytes: &[u8]) -> HashSet<String> {
+    let mut binaries = HashSet::new();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let Some(end) = bytes[cursor..].iter().position(|byte| *byte == 0) else {
+            break;
+        };
+        let record_end = cursor + end;
+        let record = &bytes[cursor..record_end];
+        cursor = record_end + 1;
+        if record.is_empty() {
+            continue;
+        }
+        let mut parts = record.splitn(3, |byte| *byte == b'\t');
+        let added = parts.next().unwrap_or_default();
+        let deleted = parts.next().unwrap_or_default();
+        let inline_path = parts.next().unwrap_or_default();
+        let path = if inline_path.is_empty() {
+            let Some(old_end) = bytes[cursor..].iter().position(|byte| *byte == 0) else {
+                break;
+            };
+            cursor += old_end + 1;
+            let Some(new_end) = bytes[cursor..].iter().position(|byte| *byte == 0) else {
+                break;
+            };
+            let new_path = &bytes[cursor..cursor + new_end];
+            cursor += new_end + 1;
+            new_path
+        } else {
+            inline_path
+        };
+        if added == b"-" && deleted == b"-" {
+            binaries.insert(String::from_utf8_lossy(path).into_owned());
+        }
+    }
+    binaries
 }
 
 fn parse_blame_porcelain(text: &str) -> Vec<Value> {
@@ -1166,6 +1312,40 @@ mod tests {
             invalid["structuredContent"]["error"]["code"],
             "INVALID_ARGUMENT"
         );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn git_show_unicode_deleted_path_uses_nul_delimited_machine_metadata() {
+        let root = temp_repo();
+        git(&root, &["init"]);
+        git(&root, &["config", "user.email", "unicode@example.invalid"]);
+        git(&root, &["config", "user.name", "LocalBridge Unicode"]);
+        git(&root, &["config", "core.autocrlf", "false"]);
+        fs::write(root.join("B.txt"), b"before\n").unwrap();
+        fs::write(root.join("中文.txt"), b"delete me\n").unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-m", "unicode base"]);
+        fs::write(root.join("B.txt"), b"after\n").unwrap();
+        fs::remove_file(root.join("中文.txt")).unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-m", "unicode delete"]);
+
+        let shown = handle_git_tool(
+            &root,
+            "git_show",
+            &json!({"path":".","rev":"HEAD","include_patch":true}),
+        )
+        .unwrap();
+        assert_eq!(shown["isError"], false, "{shown:#?}");
+        let files = shown["structuredContent"]["files"].as_array().unwrap();
+        assert!(files.iter().any(|file| file["path"] == "B.txt" && file["status"] == "modified"), "{files:#?}");
+        assert!(files.iter().any(|file| file["path"] == "中文.txt" && file["status"] == "deleted"), "{files:#?}");
+        assert!(!files.iter().any(|file| file["path"] == "B.txt" && file["status"] == "deleted"), "{files:#?}");
+        assert!(shown["structuredContent"]["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("deleted file mode")));
 
         fs::remove_dir_all(root).unwrap();
     }

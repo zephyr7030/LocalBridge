@@ -88,8 +88,13 @@ if (!(reviewSnapshot >= 0 && realArgumentDecision > reviewSnapshot && structured
   throw new Error("LB-012 policy decision does not consume real elevated_exec arguments before structured dispatch");
 }
 if (!handler.includes("let execution_guard = guard") || !handler.includes("drop(execution_guard)")) throw new Error("LB-012 elevated execution is not serialized by the Guard execution mutex");
-for (const required of ['"oneOf"', '"const": "process"', '"const": "shell"', '"const": "filesystem"']) {
+for (const required of ['"enum": ["process", "shell", "filesystem"]', 'Some("process") =>', 'Some("shell") =>', 'Some("filesystem") =>']) {
   if (!server.includes(required)) throw new Error(`LB-012 typed elevated_exec schema missing: ${required}`);
+}
+const elevatedToolStart = server.indexOf('"name": "elevated_exec"');
+const elevatedToolEnd = server.indexOf("fn elevated_exec_output_schema", elevatedToolStart);
+if (elevatedToolStart < 0 || elevatedToolEnd <= elevatedToolStart || server.slice(elevatedToolStart, elevatedToolEnd).includes('"oneOf"')) {
+  throw new Error("LB-012 elevated_exec public input schema regressed to a client-hostile top-level combinator");
 }
 if (!handler.includes("privileged.filesystem(spec)")) throw new Error("LB-012 privileged filesystem does not dispatch directly to Broker gateway");
 if (!server.includes("broker_direct_spec(&shell_spec)")) throw new Error("LB-012 shell route does not use Broker-only trusted shell preparation");

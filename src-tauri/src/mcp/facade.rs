@@ -27,7 +27,7 @@ use super::task_state::{
 };
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 36;
+pub const AGENT_API_REVISION: u32 = 38;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",
@@ -288,52 +288,20 @@ fn public_tool_schema(name: &str) -> Value {
         "command_control" => (
             "Read, write, poll, or terminate an existing LocalBridge command session.",
             json!({
-                "oneOf":[
-                    {
-                        "type":"object",
-                        "properties":{
-                            "action":{"const":"poll"},
-                            "session_id":{"type":"string","minLength":1},
-                            "wait_ms":{"type":"integer","minimum":0,"maximum":30000}
-                        },
-                        "required":["action","session_id"],
-                        "additionalProperties":false
-                    },
-                    {
-                        "type":"object",
-                        "properties":{
-                            "action":{"const":"read"},
-                            "output_ref":{"type":"string","minLength":1},
-                            "stream":{"type":"string","enum":["stdout","stderr"]},
-                            "offset":{"type":"integer","minimum":0},
-                            "limit":{"type":"integer","minimum":1,"maximum":1048576}
-                        },
-                        "required":["action","output_ref"],
-                        "additionalProperties":false
-                    },
-                    {
-                        "type":"object",
-                        "properties":{
-                            "action":{"const":"write"},
-                            "session_id":{"type":"string","minLength":1},
-                            "chars":{"type":"string","minLength":1},
-                            "wait_ms":{"type":"integer","minimum":0,"maximum":30000}
-                        },
-                        "required":["action","session_id","chars"],
-                        "additionalProperties":false
-                    },
-                    {
-                        "type":"object",
-                        "properties":{
-                            "action":{"const":"kill"},
-                            "session_id":{"type":"string","minLength":1},
-                            "signal":{"type":"string","enum":["TERM","KILL","INT"]},
-                            "wait_ms":{"type":"integer","minimum":0,"maximum":30000}
-                        },
-                        "required":["action","session_id"],
-                        "additionalProperties":false
-                    }
-                ]
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["poll","read","write","kill"],"description":"poll/write/kill use session_id; read uses output_ref."},
+                    "session_id":{"type":"string","minLength":1,"description":"Required for poll, write, and kill."},
+                    "output_ref":{"type":"string","minLength":1,"description":"Required for read."},
+                    "chars":{"type":"string","minLength":1,"description":"Required for write."},
+                    "signal":{"type":"string","enum":["TERM","KILL","INT"],"description":"Optional kill signal; defaults to TERM."},
+                    "wait_ms":{"type":"integer","minimum":0,"maximum":30000,"description":"Optional wait for poll/write/kill."},
+                    "stream":{"type":"string","enum":["stdout","stderr"],"description":"Optional read stream."},
+                    "offset":{"type":"integer","minimum":0,"description":"Optional read byte offset."},
+                    "limit":{"type":"integer","minimum":1,"maximum":1048576,"description":"Optional read byte limit."}
+                },
+                "required":["action"],
+                "additionalProperties":false
             }),
         ),
         "task_control" => (
@@ -372,14 +340,14 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "document_workflow" => (
-            "Inspect, create, convert, or rebuild UTF-8 workspace documents through a stable LocalBridge workflow.",
+            "Inspect, create, convert, or rebuild UTF-8 workspace documents. inspect requires path; create requires path+content; convert requires source+path; rebuild requires an existing path+content.",
             json!({
                 "type":"object",
                 "properties":{
-                    "action":{"type":"string","enum":["inspect","create","convert","rebuild"]},
-                    "path":{"type":"string"},
-                    "source":{"type":"string"},
-                    "content":{"type":"string"},
+                    "action":{"type":"string","enum":["inspect","create","convert","rebuild"],"description":"Action-specific required fields are documented on path/source/content."},
+                    "path":{"type":"string","description":"Required for inspect/create/convert/rebuild. rebuild requires this target to already exist."},
+                    "source":{"type":"string","description":"Required only for convert."},
+                    "content":{"type":"string","description":"Required for create and rebuild."},
                     "start_line":{"type":"integer","minimum":1},
                     "end_line":{"type":"integer","minimum":1},
                     "max_lines":{"type":"integer","minimum":1},
@@ -2675,6 +2643,17 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
         self.adapter.command_task_state()
     }
 
+    pub(crate) fn cancel_public_command_session(
+        &mut self,
+        session_id: &str,
+    ) -> Result<Value, FacadeError> {
+        self.adapter.control_command(
+            CommandControlAction::Kill,
+            json!({"session_id":session_id,"signal":"KILL","wait_ms":1000}),
+            None,
+        )
+    }
+
     pub fn into_runtime(self) -> CodingToolsRuntime {
         self.adapter.into_runtime()
     }
@@ -3255,6 +3234,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "kill" => CommandControlAction::Kill,
             _ => return Err(invalid_argument()),
         };
+        let allowed = match action {
+            CommandControlAction::Poll => &["action", "session_id", "wait_ms"][..],
+            CommandControlAction::Read => &["action", "output_ref", "stream", "offset", "limit"][..],
+            CommandControlAction::Write => &["action", "session_id", "chars", "wait_ms"][..],
+            CommandControlAction::Kill => &["action", "session_id", "signal", "wait_ms"][..],
+        };
+        ensure_only_keys(object, allowed)?;
         match action {
             CommandControlAction::Read => {
                 required_string(object, "output_ref")?;
@@ -3649,6 +3635,13 @@ fn public_patch_targets_valid(patch: &str) -> bool {
 
 fn object_args(value: &Value) -> Result<&Map<String, Value>, FacadeError> {
     value.as_object().ok_or_else(invalid_argument)
+}
+
+fn ensure_only_keys(object: &Map<String, Value>, allowed: &[&str]) -> Result<(), FacadeError> {
+    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
+        return Err(invalid_argument());
+    }
+    Ok(())
 }
 
 fn required_string<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a str, FacadeError> {
@@ -4708,57 +4701,48 @@ mod tests {
     }
 
     #[test]
-    fn command_control_schema_encodes_action_specific_handles() {
+    fn command_control_schema_exposes_all_action_fields_at_top_level() {
         let schema = public_tool_schema("command_control")["inputSchema"].clone();
-        let variants = schema["oneOf"].as_array().expect("command_control oneOf");
-        assert_eq!(variants.len(), 4);
-        let branch = |action: &str| {
-            variants
-                .iter()
-                .find(|variant| variant["properties"]["action"]["const"] == action)
-                .expect("action branch")
-        };
-        let read = branch("read");
-        assert!(
-            read["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("output_ref"))
+        assert_eq!(schema["type"], "object");
+        assert!(schema.get("oneOf").is_none());
+        assert_eq!(schema["required"], json!(["action"]));
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(
+            schema["properties"]["action"]["enum"],
+            json!(["poll", "read", "write", "kill"])
         );
-        assert!(read["properties"].get("session_id").is_none());
-        let poll = branch("poll");
-        assert!(
-            poll["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("session_id"))
-        );
-        assert!(poll["properties"].get("output_ref").is_none());
-        let write = branch("write");
-        assert!(
-            write["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("session_id"))
-        );
-        assert!(
-            write["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("chars"))
-        );
-        let kill = branch("kill");
-        assert!(
-            kill["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("session_id"))
-        );
-        assert!(
-            variants
-                .iter()
-                .all(|variant| variant["additionalProperties"] == false)
-        );
+        for property in [
+            "action", "session_id", "output_ref", "chars", "signal", "wait_ms", "stream",
+            "offset", "limit",
+        ] {
+            assert!(
+                schema["properties"][property].is_object(),
+                "command_control top-level property missing: {property}"
+            );
+        }
+        assert!(schema["properties"]["session_id"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("poll") && value.contains("write") && value.contains("kill")));
+        assert!(schema["properties"]["output_ref"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("read")));
+    }
+
+    #[test]
+    fn document_rebuild_schema_discloses_existing_path_and_content_requirements() {
+        let tool = public_tool_schema("document_workflow");
+        let schema = &tool["inputSchema"];
+        assert_eq!(schema["type"], "object");
+        assert!(schema.get("oneOf").is_none());
+        assert!(tool["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("rebuild requires an existing path+content")));
+        assert!(schema["properties"]["path"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("rebuild") && value.contains("already exist")));
+        assert!(schema["properties"]["content"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("rebuild")));
     }
 
     #[test]

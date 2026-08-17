@@ -1658,6 +1658,15 @@ fn flush_review_word(word: &mut String) -> bool {
     requires_review
 }
 
+fn flush_cmd_review_word(word: &mut String) -> bool {
+    let lower = word.to_ascii_lowercase();
+    if matches!(lower.as_str(), "rmdir" | "rd") {
+        word.clear();
+        return false;
+    }
+    flush_review_word(word)
+}
+
 fn powershell_simple_get_command_diagnostic(command: &str) -> bool {
     if command
         .chars()
@@ -1902,7 +1911,7 @@ fn cmd_invocation_requires_review(command: &str) -> bool {
                     }
                     word.push(escaped);
                     command_boundary = false;
-                } else if word_is_command && flush_review_word(&mut word) {
+                } else if word_is_command && flush_cmd_review_word(&mut word) {
                     return true;
                 }
             }
@@ -1910,7 +1919,7 @@ fn cmd_invocation_requires_review(command: &str) -> bool {
         }
         if ch == '"' {
             quoted = !quoted;
-            if word_is_command && flush_review_word(&mut word) {
+            if word_is_command && flush_cmd_review_word(&mut word) {
                 return true;
             }
             word.clear();
@@ -1930,7 +1939,7 @@ fn cmd_invocation_requires_review(command: &str) -> bool {
             if !word.is_empty() && word_is_command {
                 let lower = word.to_ascii_lowercase();
                 control_flow_command = matches!(lower.as_str(), "if" | "for");
-                if flush_review_word(&mut word) {
+                if flush_cmd_review_word(&mut word) {
                     return true;
                 }
             } else {
@@ -1943,7 +1952,7 @@ fn cmd_invocation_requires_review(command: &str) -> bool {
             }
         }
     }
-    word_is_command && flush_review_word(&mut word)
+    word_is_command && flush_cmd_review_word(&mut word)
 }
 
 fn is_control_plane_name(name: &str) -> bool {

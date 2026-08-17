@@ -23,7 +23,7 @@ const facade = readFileSync("src-tauri/src/mcp/facade.rs", "utf8");
 const policy = readFileSync("src-tauri/src/mcp/policy.rs", "utf8");
 const server = readFileSync("src-tauri/src/mcp/server.rs", "utf8");
 const runtimePolicy = readFileSync("runtime-policy.toml", "utf8");
-if (!facade.includes("pub const AGENT_API_REVISION: u32 = 36")) throw new Error("ARCH-031 facade revision36 missing");
+if (!facade.includes("pub const AGENT_API_REVISION: u32 = 38")) throw new Error("ARCH-031 facade revision38 missing");
 if (!policy.includes("pub fn privileged_tool_visible(&self, _mode: PermissionMode, tool_name: &str) -> bool")) throw new Error("ARCH-031 privileged visibility is still mode-dependent");
 const catalogStart = server.indexOf("fn effective_tool_catalog(");
 const signatureStart = server.indexOf("fn effective_tool_catalog_signature(");
@@ -43,4 +43,5 @@ for (const marker of [
   'assert_tool_error(&awaiting, "ElevationRequired")',
 ]) if (!server.includes(marker)) throw new Error(`ARCH-031 call-time denial proof missing: ${marker}`);
 if (!runtimePolicy.includes('elevated_exec_in_edit = "deny"') || !runtimePolicy.includes('elevated_exec_in_full = "deny"') || !runtimePolicy.includes('elevated_exec_in_elevated = "allow_if_reviewed_and_broker_active"')) throw new Error("ARCH-031 runtime policy call-time matrix drift");
+const elevatedToolStart = server.indexOf('"name": "elevated_exec"'); const elevatedToolEnd = server.indexOf("fn elevated_exec_output_schema", elevatedToolStart); if (elevatedToolStart < 0 || elevatedToolEnd <= elevatedToolStart || server.slice(elevatedToolStart, elevatedToolEnd).includes('"oneOf"')) throw new Error("ARCH-031 elevated_exec public input schema is not directly projectable");
 console.log("ARCH-031_VERIFY=PASS elevated_exec_always_advertised=true broker_state_independent_catalog=true call_time_policy=true edit_full_typed_denied=true elevated_requires_active_broker=true");

@@ -232,11 +232,22 @@ fn full_ordinary_workflow_scripts_and_file_cleanup_do_not_require_privileged_rou
     for arguments in [
         json!({"command":"call test\\lb_broad_tmp.cmd","shell":"cmd"}),
         json!({"command":"del /q test\\lb_broad_tmp.cmd","shell":"cmd"}),
+        json!({"command":"rmdir /s /q test\\lb_broad_tmp_dir","shell":"cmd"}),
         json!({"command":"python -c \"import os; os.remove(r'test\\lb_broad_tmp.cmd')\"","shell":"cmd"}),
     ] {
         let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
         assert!(decision.allowed, "ordinary Full operation was over-classified: {arguments}");
     }
+
+    let powershell_alias = policy.decide_public(
+        PermissionMode::Full,
+        "exec_command",
+        &json!({"command":"rmdir test\\lb_broad_tmp_dir","shell":"windows_powershell"}),
+    );
+    assert!(
+        !powershell_alias.allowed,
+        "PowerShell rmdir alias must remain review-required rather than inheriting cmd cleanup semantics"
+    );
 
     let ordinary_workflow = json!({
         "action":"custom",

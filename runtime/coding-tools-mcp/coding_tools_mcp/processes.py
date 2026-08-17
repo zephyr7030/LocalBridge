@@ -16,6 +16,26 @@ SESSION_BUFFER_BYTES = 524_288
 HARD_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 
+def _windows_force_kill_tree(process: subprocess.Popen[bytes]) -> None:
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    taskkill = os.path.join(system_root, "System32", "taskkill.exe")
+    try:
+        subprocess.run(
+            [taskkill, "/PID", str(process.pid), "/T", "/F"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=0.5,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            process.kill()
+        except OSError:
+            pass
+
+
 def terminate_process_group(
     process: subprocess.Popen[bytes],
     signum: signal.Signals,
@@ -23,15 +43,32 @@ def terminate_process_group(
     force: bool = False,
 ) -> None:
     if not hasattr(os, "killpg"):
-        if os.name == "nt" and not force:
-            event = getattr(signal, "CTRL_BREAK_EVENT", None)
-            if event is not None:
+        if os.name == "nt":
+            if not force and signum == signal.SIGINT:
+                event = getattr(signal, "CTRL_BREAK_EVENT", None)
+                if event is not None:
+                    try:
+                        process.send_signal(event)
+                        process.wait(timeout=0.15)
+                        return
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+            if not force:
                 try:
-                    process.send_signal(event)
-                    process.wait(timeout=1)
+                    process.terminate()
+                    process.wait(timeout=0.15)
                     return
-                except Exception:
+                except (OSError, subprocess.TimeoutExpired):
                     pass
+            _windows_force_kill_tree(process)
+            try:
+                process.wait(timeout=0.35)
+            except subprocess.TimeoutExpired:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
+            return
         try:
             if force:
                 process.kill()
@@ -54,7 +91,6 @@ def terminate_process_group(
             os.killpg(process.pid, HARD_KILL_SIGNAL)
         except Exception:
             process.kill()
-
 
 def spawn_process(
     command: Any,
