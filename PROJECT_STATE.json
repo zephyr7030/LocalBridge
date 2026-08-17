@@ -3842,7 +3842,7 @@
     "next_action": "Perform the separate G3-to-G4 human manual/detail review generation3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "g3_generation14_current_task_projection_race_reopen_2026_08_17": {
-    "status": "REWORK_REQUIRED",
+    "status": "RESOLVED_BY_G3_GENERATION15",
     "owner_pr": "LB-015",
     "source": "explicit_user_runtime_report_2026_08_17",
     "finding": "Dashboard can remain on 等待命令 because get_main_projection reads DesktopRuntimeSnapshot before projection_revision. A CurrentTask wake between those reads can return an old task snapshot paired with the new revision, after which the frontend waits from that new revision and misses the event.",
@@ -3895,5 +3895,42 @@
     ],
     "next_action": "Run independent G3 adversarial review generation15 with the CurrentTask snapshot/cursor regression included.",
     "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_15_2026_08_17": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 15,
+    "baseline_commit": "0da6eaf0a73deb14a8234ef05d0ca703c74af538",
+    "finding": "No blocking G3 defect remains after fixing the Dashboard CurrentTask lost-wakeup race: task projection data and its wake cursor are now captured with revision-before/revision-after retry so a concurrent tool event cannot be skipped as 等待命令.",
+    "evidence": [
+      "Fresh final-tree Rust gate PASS: 200 library tests plus migration/integration/doc targets; the new deterministic projection_snapshot_cursor_cannot_advance_past_captured_state race regression is included and PASS.",
+      "CurrentTask producer behavior PASS: real policy/MCP tests project actual running/blocked/terminal states, retain fast calls for at least 500ms without delaying responses, serialize burst calls and retire to one redacted last-tool record.",
+      "Fresh Clippy --all-targets --all-features -D warnings, frontend Vitest 4 files / 7 tests, production build, runtime-manifest and UI-language gates PASS.",
+      "Fresh LB-013 through LB-017 contracts PASS; LB-015 now machine-enforces atomic runtime_snapshot_with_revision use and forbids separate post-snapshot projection_revision cursor reads.",
+      "Fresh native onboarding/dashboard Tauri/WebView2 E2E PASS at 150% DPI with fixed 780x620 logical geometry, edge-to-edge custom chrome and Dashboard surface intact.",
+      "Fresh architecture verifier PASS 34/34, G4 human-gate fail-closed regression PASS and git diff --check PASS.",
+      "The @测试 connector was rediscovered but then disabled by the host before a call could reach LocalBridge; no @测试 PASS/FAIL is claimed for generation15."
+    ],
+    "verified_passes": [
+      "cargo test --locked (200 library tests plus integration/migration/doc)",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "npm test / npm run build",
+      "runtime-manifest",
+      "LB-013 -> LB-017 contracts",
+      "CurrentTask snapshot/cursor concurrent regression",
+      "native fixed-window/WebView2 E2E at 150% DPI",
+      "architecture 34/34",
+      "UI-language",
+      "G4 fail-closed regression",
+      "git diff --check"
+    ],
+    "g3_generation_15_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "blackbox_connector_status": "UNAVAILABLE_HOST_DISABLED_NOT_PRODUCT_RESULT",
+    "review_decision_commit": null,
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }

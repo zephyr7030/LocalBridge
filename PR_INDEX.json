@@ -378,15 +378,15 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
+      "status": "PASS",
+      "review_status": "PASS",
       "review_generation": 15,
-      "human_review_status": "BLOCKED",
+      "human_review_status": "REQUIRED",
       "human_review_generation": 3,
       "review_provenance": {
-        "generation": 14,
+        "generation": 15,
         "kind": "independent_adversarial",
-        "commit": "555c1cd3aa31237a5d5d43a2c2d4cbc36260892e",
+        "commit": null,
         "invalidated_generations": [
           {
             "generation": 6,
