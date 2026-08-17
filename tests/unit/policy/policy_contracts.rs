@@ -182,6 +182,28 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
             )
             .allowed
     );
+
+    let planner_verify = json!({
+        "action":"bugfix",
+        "phase":"verify",
+        "task_id":"lb-task-schema41"
+    });
+    let verify_descriptor = policy
+        .classify_public_action("agent_workflow", &planner_verify)
+        .expect("schema41 planner-owned verify action");
+    assert!(verify_descriptor.transitive.process_exec);
+    let edit_verify = policy.decide_public(
+        PermissionMode::Edit,
+        "agent_workflow",
+        &planner_verify,
+    );
+    assert!(!edit_verify.allowed);
+    assert_eq!(edit_verify.deny_reason, Some(DenyReason::IndirectProcessExecInEdit));
+    assert!(
+        policy
+            .decide_public(PermissionMode::Full, "agent_workflow", &planner_verify)
+            .allowed
+    );
     assert!(
         !policy
             .decide_public(
