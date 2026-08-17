@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3785,6 +3785,18 @@
     ],
     "next_pr": "LB-017",
     "g3_review_generation": 14,
+    "g4_unlocked": false
+  },
+  "lb017_post_dashboard_correction_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-017",
+    "product_patch_required": false,
+    "evidence": [
+      "Fresh LB-017 diagnostics contract PASS on the corrected Dashboard PermissionMode baseline.",
+      "Fresh isolated-target diagnostics Rust filter PASS: bounded redacted typed events, exact reconnect history, typed checks without Broker internals, allowlisted diagnostic export, gateway-state refresh and public shell diagnostic seam all passed.",
+      "No LB-017 product change was required; Dashboard PermissionMode presentation remains isolated from diagnostics administrator/Broker runtime state."
+    ],
+    "next_action": "Run independent G3 adversarial review generation14.",
     "g4_unlocked": false
   }
 }
