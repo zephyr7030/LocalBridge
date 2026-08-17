@@ -3934,7 +3934,7 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "schema38_g2_revalidation_2026_08_17": {
-    "status": "PASS_PENDING_PROVENANCE",
+    "status": "REVIEW_REQUIRED",
     "owner_prs": [
       "LB-006",
       "LB-007",
@@ -3954,11 +3954,12 @@
     ],
     "next_required_g2_adversarial_generation": 26,
     "g3_blocked_until_g2_generation26_pass": false,
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "g2_review_decision_commit": "5ee4bb04388bda30404e8f51cb1c3a74a6cdd497"
   },
   "g2_adversarial_review_generation_26_2026_08_17": {
-    "status": "PASS",
-    "decision": "PASS",
+    "status": "REVIEW_REQUIRED",
+    "decision": "PENDING",
     "generation": 26,
     "kind": "independent_adversarial",
     "baseline_commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",

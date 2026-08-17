@@ -327,13 +327,13 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 26,
       "review_provenance": {
-        "generation": 26,
+        "generation": 25,
         "kind": "independent_adversarial",
-        "commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
+        "commit": "5cfc5b086b9bd51eb7ad6a7bed664019104b3986",
         "invalidated_generations": [
           {
             "generation": 8,
@@ -383,15 +383,15 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
       "review_generation": 16,
-      "human_review_status": "REQUIRED",
+      "human_review_status": "BLOCKED",
       "human_review_generation": 3,
       "review_provenance": {
-        "generation": 16,
+        "generation": 15,
         "kind": "independent_adversarial",
-        "commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
+        "commit": "20ba80777ba07c3bd12740a91c03183a4f0f4a9a",
         "invalidated_generations": [
           {
             "generation": 6,
