@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3772,5 +3772,19 @@
       "G4 human-gate regression PASS and full architecture verifier PASS 34/34 after correcting the current schema36 composition while preserving historical amendment provenance."
     ],
     "next_action": "Strictly revalidate LB-016 on the corrected LB-015 baseline; then LB-017 and fresh G3 adversarial generation14."
+  },
+  "lb016_post_dashboard_correction_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "product_patch_required": false,
+    "evidence": [
+      "Fresh LB-016 five-screen onboarding contract PASS on the corrected Dashboard PermissionMode baseline.",
+      "Fresh isolated-target Rust admin_consent filter PASS: 4/4 tests cover early confirmation rejection, fresh-begin full deadline reset, stale challenge confirm/cancel rejection, matching cancel invalidation and one-shot confirmation consumption.",
+      "ARCH-034 PASS confirms schema36 runtime observability plus corrected Dashboard read-only PermissionMode composition and backend challenge/not-before requirement.",
+      "The earlier fresh native Tauri/WebView2 150% DPI E2E on the same corrected product tree PASSed onboarding/Dashboard fixed-window geometry and rounded scrolling."
+    ],
+    "next_pr": "LB-017",
+    "g3_review_generation": 14,
+    "g4_unlocked": false
   }
 }
