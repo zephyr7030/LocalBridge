@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -31,7 +31,9 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "G3 generation13 black-box found that explicit unavailable pwsh plus $PSVersionTable.PSVersion.ToString() is misclassified as PrivilegedRouteUnavailable before RuntimeUnavailable; LB-007 reopened."
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -274,7 +276,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -3557,5 +3559,13 @@
       "Diagnostics Rust tests PASS; no schema36 diagnostics regression reproduced."
     ],
     "next_action": "Run fresh independent G3 adversarial review generation 13. Human G3-to-G4 generation 3 remains blocked until this review passes."
+  },
+  "g3_generation13_upstream_reopen_2026_08_17": {
+    "status": "UPSTREAM_REWORK_REQUIRED",
+    "owner_pr": "LB-007",
+    "finding": "Explicit unavailable pwsh with read-only $PSVersionTable.PSVersion.ToString() is classified as privileged member invocation, preventing canonical RuntimeUnavailable shell discovery diagnostics.",
+    "g2_generation24_invalidated": true,
+    "next_required_g2_review_generation": 25,
+    "g3_generation13_consumed": false
   }
 }
