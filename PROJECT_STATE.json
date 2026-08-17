@@ -3212,7 +3212,7 @@
     "g2_generation_23_consumed": true,
     "g3_unlocked_for_review": true,
     "g4_unlocked": false,
-    "review_decision_commit": null,
+    "review_decision_commit": "78534f2361cbdfa5553c26e4d281a1108e2c0380",
     "next_action": "Run fresh independent G3 adversarial review generation 12 on the revision34/G2-generation23 baseline. Human G3-to-G4 review generation 3 and G4 remain blocked until generation12 passes."
   }
 }
