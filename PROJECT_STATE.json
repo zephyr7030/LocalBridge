@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4183,6 +4183,19 @@
       "Fresh broker IPC target PASS 6 with one explicit-UAC integration test ignored by design; named-pipe SID/PID authentication, generation/nonce replay protection and structured privileged execution/filesystem tests passed."
     ],
     "next_pr": "LB-012",
+    "g4_unlocked": false
+  },
+  "schema39_lb012_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "evidence": [
+      "LB012 current contract PASS and ARCH-031 stable privileged catalog verifier PASS after schema39 signature alignment.",
+      "Fresh administrator gateway policy tests PASS 2/2 and privilege control tests PASS 5/5.",
+      "Actual refreshed @测试 client exposes concrete elevated_exec schema while Full-mode runtime remains ordinary current-user route."
+    ],
+    "next_action": "Run fresh G2 independent adversarial review generation27.",
+    "g2_generation_27_consumed": false,
+    "g3_unlocked": false,
     "g4_unlocked": false
   }
 }
