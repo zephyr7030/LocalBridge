@@ -327,8 +327,8 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 22,
       "review_provenance": {
         "generation": 22,
@@ -349,6 +349,11 @@
             "generation": 21,
             "commit": "7ec09f2214c707eac83008639e7b8889c045685a",
             "cause": "explicit_user_stable_privileged_tool_catalog_2026_08_16"
+          },
+          {
+            "generation": 22,
+            "commit": "b5d1515c339c84a91a085fbfc1544c46630d71bf",
+            "cause": "explicit_user_full_operation_consistency_2026_08_17"
           }
         ]
       }
@@ -363,10 +368,10 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
       "review_generation": 11,
-      "human_review_status": "REQUIRED",
+      "human_review_status": "BLOCKED",
       "human_review_generation": 3,
       "review_provenance": {
         "generation": 11,
@@ -397,6 +402,11 @@
             "generation": 10,
             "commit": "344bd8ac670f51f863bc68741298642ae2a97537",
             "cause": "upstream_g2_stable_privileged_tool_catalog_2026_08_16"
+          },
+          {
+            "generation": 11,
+            "commit": "d88281f30a5024f65279b1bb24c414353a45f0f5",
+            "cause": "upstream_g2_full_operation_consistency_2026_08_17"
           }
         ]
       }

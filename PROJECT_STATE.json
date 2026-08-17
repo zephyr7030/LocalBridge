@@ -3145,5 +3145,37 @@
     "g4_unlocked": false,
     "review_decision_commit": "d88281f30a5024f65279b1bb24c414353a45f0f5",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "full_operation_consistency_revision34_2026_08_17": {
+    "status": "IMPLEMENTED_REVIEW_REQUIRED",
+    "source": "explicit_user_full_mode_consistency_feedback_2026_08_17",
+    "product_commit": "14d6c6e69e5d4b640d74dde8e6c23c157d77f11c",
+    "contract_commit": "6865f3f65f4bf05f9428541d1af82536fe70c967",
+    "invalidated_g2_adversarial_generation": 22,
+    "invalidated_downstream_g3_adversarial_generation": 11,
+    "changes": [
+      "Public Agent API advanced to facade revision34. Active-workspace structured inputs now accept either workspace-relative paths or ordinary Win32 absolute paths that canonicalize inside the same active root, while outside-root absolute, UNC, verbatim, ADS-like and parent-traversal forms remain denied.",
+      "agent_workflow capability classification is request-derived rather than action-label-derived: actual commands imply process, actual patch/directory changes imply write, and privilege review derives from concrete command behavior; malformed structured directory changes remain fail-closed.",
+      "Full permits literal active-workspace cmd/bat/ps1 development scripts and ordinary file cleanup such as cmd del or Python os.remove under the ordinary-user token; dynamic script resolution, chained script launch, provider/control-plane mutation and real system-management surfaces remain reviewed or denied.",
+      "Logical PowerShell selectors are exact: powershell may fall back to trusted Windows PowerShell, windows_powershell is exact Windows PowerShell, and pwsh requires trusted PowerShell Core and returns RuntimeUnavailable when it is not installed.",
+      "yield-time_ms=0 is explicitly frozen as a valid asynchronous session contract, and elevated_exec now publishes discoverable top-level process/shell/filesystem properties while retaining call-time authorization and strict runtime variant validation."
+    ],
+    "real_client_evidence": [
+      "Fresh @测试 workspace_context reports facade_revision=34 and workspace=D:\\project.",
+      "Fresh @测试 absolute exec workdir D:\\project, absolute document D:\\project\\LocalBridge\\AGENTS.md and absolute image D:\\project\\LocalBridge\\assets\\icons\\localbridge.png all PASS; C:\\Windows\\win.ini remains typed WorkspaceDenied.",
+      "Fresh @测试 ordinary custom workflow echo PASS, literal call test\\lb_broad_tmp.cmd PASS, cmd del of the exact 29-byte residual PASS and verified removed, and a fresh document-created cleanup probe was removed successfully by Python os.remove.",
+      "Fresh @测试 yield-time_ms=0 returned a running session and command_control poll completed it; powershell and windows_powershell PASS while exact pwsh returns RuntimeUnavailable because trusted PowerShell Core is not installed.",
+      "Fresh @测试 elevated_exec remains visible in Full and a direct whoami process request is denied typed PrivilegedRouteNotAvailable, proving visibility remains decoupled from authority."
+    ],
+    "verified_before_review": [
+      "Full revision34 formal gate PASS: cargo test, cargo clippy -D warnings, ARCH-032, ARCH-033, frontend tests/build, runtime-manifest, architecture 33/33, UI-language, G4 fail-closed regression and git diff --check.",
+      "New standalone bundled PEP regression proves absolute/relative active-workspace equivalence for document, exec workdir and image while outside absolute remains WorkspaceDenied.",
+      "LB-007 policy contracts/enforcement PASS for request-derived workflow capabilities, literal scripts, ordinary cleanup, Edit process denial, malformed workflow fail-closed and dynamic/provider/system-management review boundaries."
+    ],
+    "next_required_g2_adversarial_generation": 23,
+    "g3_blocked_until_g2_generation23_pass": true,
+    "g3_next_required_adversarial_generation_after_upstream_pass": 12,
+    "human_review_generation": 3,
+    "g4_unlocked": false
   }
 }
