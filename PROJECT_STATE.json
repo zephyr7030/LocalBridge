@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3567,5 +3567,15 @@
     "g2_generation24_invalidated": true,
     "next_required_g2_review_generation": 25,
     "g3_generation13_consumed": false
+  },
+  "lb007_pwsh_version_diagnostic_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "product_commit": "4517176",
+    "evidence": [
+      "schema36 shell classifier tests PASS; LB-007 policy contracts/enforcement PASS.",
+      "Fresh @测试 explicit pwsh $PSVersionTable.PSVersion.ToString() returns RuntimeUnavailable with trusted alternatives.",
+      "Dangerous suffix Start-Process remains PrivilegedRouteUnavailable."
+    ],
+    "next_action": "Reaccept LB-008 through LB-012, then run G2 generation25."
   }
 }
