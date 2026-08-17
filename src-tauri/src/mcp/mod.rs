@@ -9,6 +9,7 @@ mod runtime;
 mod server;
 mod shell;
 mod task_state;
+mod workflow_checkpoint;
 
 pub use facade::{
     AGENT_API_VERSION, AgentFacade, CodingToolsRuntimeAdapter, CommandControlAction,

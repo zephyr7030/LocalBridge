@@ -25,9 +25,10 @@ use super::task_state::{
     CommandOwner, CommandTaskStateError, CommandTaskStateStore, CommandTerminalStatus,
     TerminalCommandSnapshot,
 };
+use super::workflow_checkpoint::{WorkflowCheckpoint, WorkflowCheckpointStore};
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 38;
+pub const AGENT_API_REVISION: u32 = 39;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",
@@ -226,14 +227,14 @@ fn public_tool_schema(name: &str) -> Value {
             json!({"type":"object","properties":{},"additionalProperties":false}),
         ),
         "agent_workflow" => (
-            "Run a LocalBridge engineering workflow using stable actions.",
+            "Run a LocalBridge engineering workflow using stable actions. resume accepts only action and continues the latest durable incomplete workflow; other actions may use objective/path/directory_changes/patch/commands as permitted by policy.",
             json!({
                 "type":"object",
                 "properties":{
-                    "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"]},
-                    "objective":{"type":"string"},
-                    "path":{"type":"string","default":"."},
-                    "patch":{"type":"string","minLength":1},
+                    "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"],"description":"resume requires no other fields and never starts a new workflow; all other actions start or inspect a workflow."},
+                    "objective":{"type":"string","description":"Optional for non-resume actions; forbidden for resume."},
+                    "path":{"type":"string","default":".","description":"Optional project path for non-resume actions; forbidden for resume."},
+                    "patch":{"type":"string","minLength":1,"description":"Optional workspace patch for write-capable non-resume actions; forbidden for resume."},
                     "directory_changes":{
                         "type":"array","maxItems":32,
                         "items":{
@@ -246,7 +247,7 @@ fn public_tool_schema(name: &str) -> Value {
                             "additionalProperties":false
                         }
                     },
-                    "commands":{
+                    "commands":{"description":"Optional process steps for process-capable non-resume actions; forbidden for resume.",
                         "type":"array","maxItems":8,
                         "items":{
                             "type":"object",
@@ -314,26 +315,27 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "git_workflow" => (
-            "Run a stable LocalBridge Git workflow action.",
+            "Run a stable LocalBridge Git workflow action. blame requires path; status/diff/log/show default path to the active project. Action-specific optional fields are documented on each property.",
             json!({
                 "type":"object",
                 "properties":{
-                    "action":{"type":"string","enum":["status","diff","log","show","blame"]},
-                    "path":{"type":"string"},
-                    "paths":{"type":"array","items":{"type":"string"}},
-                    "ref":{"type":"string"},
-                    "rev":{"type":"string"},
-                    "staged":{"type":"boolean"},
-                    "unstaged":{"type":"boolean"},
-                    "include_untracked":{"type":"boolean"},
-                    "max_entries":{"type":"integer","minimum":1},
-                    "max_count":{"type":"integer","minimum":1},
-                    "skip":{"type":"integer","minimum":0},
-                    "start_line":{"type":"integer","minimum":1},
-                    "end_line":{"type":"integer","minimum":1},
-                    "max_lines":{"type":"integer","minimum":1},
-                    "context_lines":{"type":"integer","minimum":0},
-                    "max_bytes":{"type":"integer","minimum":1}
+                    "action":{"type":"string","enum":["status","diff","log","show","blame"],"description":"Selects the strict server-side argument contract."},
+                    "path":{"type":"string","description":"Required for blame; optional repository/project context for status/diff/log/show."},
+                    "paths":{"type":"array","items":{"type":"string"},"description":"Optional path filters for diff/show only."},
+                    "ref":{"type":"string","description":"Optional log starting ref only."},
+                    "rev":{"type":"string","description":"Optional revision for show/blame only."},
+                    "staged":{"type":"boolean","description":"Optional diff only."},
+                    "unstaged":{"type":"boolean","description":"Optional diff only."},
+                    "include_untracked":{"type":"boolean","description":"Optional status only."},
+                    "include_patch":{"type":"boolean","description":"Optional show only; defaults true."},
+                    "max_entries":{"type":"integer","minimum":1,"description":"Optional status limit only."},
+                    "max_count":{"type":"integer","minimum":1,"description":"Optional log count only."},
+                    "skip":{"type":"integer","minimum":0,"description":"Optional log offset only."},
+                    "start_line":{"type":"integer","minimum":1,"description":"Optional blame start line only."},
+                    "end_line":{"type":"integer","minimum":1,"description":"Optional blame end line only."},
+                    "max_lines":{"type":"integer","minimum":1,"description":"Optional blame line limit only."},
+                    "context_lines":{"type":"integer","minimum":0,"description":"Optional diff/show context only."},
+                    "max_bytes":{"type":"integer","minimum":1,"description":"Optional diff/show capture limit only."}
                 },
                 "required":["action"],
                 "additionalProperties":false
@@ -382,6 +384,15 @@ fn public_tool_schema(name: &str) -> Value {
     })
 }
 
+pub(crate) fn public_tools_for_policy(policy: &CapabilityPolicy, mode: PermissionMode) -> Value {
+    let tools = V1_CORE_TOOL_NAMES
+        .iter()
+        .filter(|name| policy.public_tool_allowed_for_list(mode, name))
+        .map(|name| public_tool_schema(name))
+        .collect::<Vec<_>>();
+    json!({"tools":tools})
+}
+
 fn public_tool_output_schema(name: &str) -> Value {
     let data_schema = match name {
         "workspace_context" => json!({
@@ -402,15 +413,28 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "administrator_token_available":{"type":"boolean"},
                 "selected_route":{"type":"string"},
                 "shell_discovery":{"type":"object","additionalProperties":true},
-                "capabilities":{"type":"object","additionalProperties":true}
+                "capabilities":{"type":"object","additionalProperties":true},
+                "project_name":{"type":["string","null"]},
+                "project_type":{"type":["string","null"]},
+                "project_version":{"type":["string","null"]},
+                "git_branch":{"type":["string","null"]},
+                "git_dirty":{"type":["boolean","null"]},
+                "git_changed_count":{"type":["integer","null"],"minimum":0},
+                "package_manager":{"type":["string","null"]},
+                "build_system":{"type":["string","null"]},
+                "test_system":{"type":["string","null"]},
+                "runtime_availability":{"type":"object","additionalProperties":true},
+                "trusted_shells":{"type":"array","items":{"type":"string"}},
+                "current_task":{"type":["object","null"],"additionalProperties":true}
             },
-            "required":["api_version","facade_revision","workspace","default_cwd","runtime","permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","privilege_state","shell_discovery","capabilities"],
+            "required":["api_version","facade_revision","workspace","default_cwd","runtime","permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","privilege_state","shell_discovery","capabilities","project_name","project_type","project_version","git_branch","git_dirty","git_changed_count","package_manager","build_system","test_system","runtime_availability","trusted_shells","current_task"],
             "additionalProperties":false
         }),
         "agent_workflow" => json!({
             "type":"object",
             "properties":{
                 "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"]},
+                "workflow_id":{"type":["string","null"]},
                 "objective":{"type":["string","null"]},
                 "state":{"type":"string","enum":["context_ready","running","completed"]},
                 "workspace":{"type":"object","additionalProperties":true},
@@ -419,7 +443,8 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "git_after":{"type":"object","additionalProperties":true},
                 "patch_applied":{"type":"boolean"},
                 "directory_changes":{"type":"array","items":{"type":"object","additionalProperties":true}},
-                "commands":{"type":"array","items":{"type":"object","additionalProperties":true}}
+                "commands":{"type":"array","items":{"type":"object","additionalProperties":true}},
+                "current_command":{"type":"object","additionalProperties":true}
             },
             "required":["action","state","workspace","project","git_before","patch_applied","directory_changes","commands"],
             "additionalProperties":false
@@ -531,7 +556,7 @@ fn command_output_data_schema() -> Value {
     json!({
         "type":"object",
         "properties":{
-            "status":{"type":"string","enum":["running","completed","failed","timed_out","cancelled","lost","explained"]},
+            "status":{"type":"string","enum":["running","completed","failed","cancelled","timed_out","lost"]},
             "task_id":{"type":"string"},
             "elapsed_ms":{"type":"integer","minimum":0},
             "exit_code":{"type":"integer"},
@@ -1060,6 +1085,18 @@ pub trait WorkspaceRuntimeAdapter {
     fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError>;
     fn reap_command_sessions(&mut self) -> Result<(), FacadeError>;
     fn has_running_command_session(&self) -> bool;
+    fn load_workflow_checkpoint(&self) -> Result<Option<Value>, FacadeError> {
+        Ok(None)
+    }
+    fn save_workflow_checkpoint(&self, _checkpoint: &Value) -> Result<(), FacadeError> {
+        Ok(())
+    }
+    fn clear_workflow_checkpoint(&self) -> Result<(), FacadeError> {
+        Ok(())
+    }
+    fn durable_command_terminal(&self, _session_id: &str) -> Option<Value> {
+        None
+    }
 }
 
 static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -1322,6 +1359,9 @@ pub struct CodingToolsRuntimeAdapter {
     shell_executor: ShellExecutor,
     public_commands: PublicCommandSessions,
     task_state: CommandTaskStateStore,
+    workflow_checkpoint: WorkflowCheckpointStore,
+    cached_default_cwd: Option<String>,
+    cached_project_discovery: Option<Value>,
 }
 
 impl CodingToolsRuntimeAdapter {
@@ -1329,12 +1369,17 @@ impl CodingToolsRuntimeAdapter {
         let workspace = runtime.workspace().to_path_buf();
         let task_state =
             CommandTaskStateStore::for_workspace(&workspace).map_err(normalize_task_state_error)?;
+        let workflow_checkpoint = WorkflowCheckpointStore::for_workspace(&workspace)
+            .map_err(workflow_checkpoint_error)?;
         Ok(Self {
             runtime,
             workspace,
             shell_executor: ShellExecutor::default(),
             public_commands: PublicCommandSessions::default(),
             task_state,
+            workflow_checkpoint,
+            cached_default_cwd: None,
+            cached_project_discovery: None,
         })
     }
 
@@ -1584,27 +1629,49 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         validate_runtime_capabilities(&catalog)?;
         let probe = self.private_call("get_default_cwd", json!({}), None)?;
         validate_workspace_context_probe(&probe, &self.workspace)?;
-        self.probe_private_result_semantics()
-    }
-
-    fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError> {
-        let cwd = self.private_call("get_default_cwd", json!({}), request_id)?;
-        validate_workspace_context_probe(&cwd, &self.workspace)?;
-        let structured = cwd
+        let structured = probe
             .get("structuredContent")
             .and_then(Value::as_object)
             .ok_or_else(runtime_capability_mismatch)?;
         let default_cwd = structured
             .get("default_cwd")
             .and_then(Value::as_str)
+            .ok_or_else(runtime_capability_mismatch)?
+            .to_string();
+        let runtime_discovery = self.runtime_discovery();
+        let git_status = self
+            .git_workflow(GitWorkflowAction::Status, json!({"path":default_cwd}), None)
+            .ok();
+        self.cached_project_discovery = Some(compact_project_discovery(
+            &self.workspace,
+            &default_cwd,
+            git_status.as_ref(),
+            &runtime_discovery,
+        ));
+        self.cached_default_cwd = Some(default_cwd);
+        self.probe_private_result_semantics()
+    }
+
+    fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {
+        let default_cwd = self
+            .cached_default_cwd
+            .as_deref()
             .ok_or_else(runtime_capability_mismatch)?;
-        let data = json!({
+        let mut data = json!({
             "api_version": AGENT_API_VERSION,
             "facade_revision": AGENT_API_REVISION,
             "workspace": self.workspace.to_string_lossy(),
             "default_cwd": default_cwd,
             "runtime": "ready"
         });
+        if let (Some(target), Some(discovery)) = (
+            data.as_object_mut(),
+            self.cached_project_discovery.as_ref().and_then(Value::as_object),
+        ) {
+            for (key, value) in discovery {
+                target.insert(key.clone(), value.clone());
+            }
+        }
         Ok(stable_success(data, "LocalBridge workspace context ready"))
     }
 
@@ -2188,6 +2255,75 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     fn has_running_command_session(&self) -> bool {
         self.public_commands.has_running_session()
     }
+
+    fn load_workflow_checkpoint(&self) -> Result<Option<Value>, FacadeError> {
+        self.workflow_checkpoint
+            .load()
+            .map_err(workflow_checkpoint_error)?
+            .map(|checkpoint| serde_json::to_value(checkpoint).map_err(workflow_checkpoint_error))
+            .transpose()
+    }
+
+    fn save_workflow_checkpoint(&self, checkpoint: &Value) -> Result<(), FacadeError> {
+        let checkpoint: WorkflowCheckpoint =
+            serde_json::from_value(checkpoint.clone()).map_err(workflow_checkpoint_error)?;
+        self.workflow_checkpoint
+            .save(&checkpoint)
+            .map_err(workflow_checkpoint_error)
+    }
+
+    fn clear_workflow_checkpoint(&self) -> Result<(), FacadeError> {
+        self.workflow_checkpoint
+            .clear()
+            .map_err(workflow_checkpoint_error)
+    }
+
+    fn durable_command_terminal(&self, session_id: &str) -> Option<Value> {
+        let terminal = self.task_state.terminal_for_session(session_id)?;
+        let mut data = Map::new();
+        data.insert("session_id".into(), Value::String(session_id.to_string()));
+        data.insert(
+            "status".into(),
+            Value::String(terminal.status.as_str().to_string()),
+        );
+        if let Some(exit_code) = terminal.exit_code {
+            data.insert("exit_code".into(), Value::from(exit_code));
+        }
+        if let Some(signal) = terminal.signal {
+            data.insert("signal".into(), Value::String(signal));
+        }
+        if !terminal.output_refs.is_empty() {
+            data.insert(
+                "output_refs".into(),
+                Value::Array(terminal.output_refs.into_iter().map(Value::String).collect()),
+            );
+        }
+        match terminal.status {
+            CommandTerminalStatus::Completed => {
+                Some(stable_success(Value::Object(data), "Command completed"))
+            }
+            CommandTerminalStatus::Failed => Some(stable_command_error(
+                FacadeErrorCode::ProcessFailed,
+                "命令执行失败",
+                data,
+            )),
+            CommandTerminalStatus::TimedOut => Some(stable_command_error(
+                FacadeErrorCode::ProcessTimedOut,
+                "命令执行超时",
+                data,
+            )),
+            CommandTerminalStatus::Cancelled => Some(stable_command_error(
+                FacadeErrorCode::ProcessCancelled,
+                "命令已取消",
+                data,
+            )),
+            CommandTerminalStatus::Lost => Some(stable_command_error(
+                FacadeErrorCode::SessionUnavailable,
+                "命令会话不可用",
+                data,
+            )),
+        }
+    }
 }
 
 impl CodingToolsRuntimeAdapter {
@@ -2463,6 +2599,14 @@ fn normalize_task_state_error(_error: CommandTaskStateError) -> FacadeError {
     command_state_internal_error()
 }
 
+fn workflow_checkpoint_error<E: std::fmt::Display>(_error: E) -> FacadeError {
+    FacadeError::new(
+        FacadeErrorCode::Internal,
+        "工作流恢复状态不可用",
+        false,
+    )
+}
+
 fn command_state_internal_error() -> FacadeError {
     FacadeError::new(
         FacadeErrorCode::RuntimeUnavailable,
@@ -2602,6 +2746,137 @@ fn validate_workspace_context_probe(
     Ok(())
 }
 
+fn compact_project_discovery(
+    workspace: &Path,
+    default_cwd: &str,
+    git_status: Option<&Value>,
+    runtime: &Value,
+) -> Value {
+    let project_root = PathAuthority::active_workspace(workspace)
+        .ok()
+        .and_then(|authority| authority.resolve_existing(default_cwd).ok())
+        .unwrap_or_else(|| workspace.to_path_buf());
+    let package_json = std::fs::read_to_string(project_root.join("package.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let cargo_toml = std::fs::read_to_string(project_root.join("Cargo.toml"))
+        .ok()
+        .and_then(|text| text.parse::<toml::Value>().ok());
+    let pyproject = std::fs::read_to_string(project_root.join("pyproject.toml"))
+        .ok()
+        .and_then(|text| text.parse::<toml::Value>().ok());
+
+    let package_field = |name: &str| {
+        package_json
+            .as_ref()
+            .and_then(|value| value.get(name))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    let toml_project_field = |document: &Option<toml::Value>, table: &str, name: &str| {
+        document
+            .as_ref()
+            .and_then(|value| value.get(table))
+            .and_then(|value| value.get(name))
+            .and_then(toml::Value::as_str)
+            .map(str::to_string)
+    };
+    let project_name = package_field("name")
+        .or_else(|| toml_project_field(&cargo_toml, "package", "name"))
+        .or_else(|| toml_project_field(&pyproject, "project", "name"))
+        .or_else(|| {
+            project_root
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_string)
+        });
+    let project_version = package_field("version")
+        .or_else(|| toml_project_field(&cargo_toml, "package", "version"))
+        .or_else(|| toml_project_field(&pyproject, "project", "version"));
+    let has_node = package_json.is_some();
+    let has_rust = cargo_toml.is_some();
+    let has_python = pyproject.is_some();
+    let project_type = match (has_node, has_rust, has_python) {
+        (true, true, _) => Some("node_rust"),
+        (true, false, false) => Some("node"),
+        (false, true, false) => Some("rust"),
+        (false, false, true) => Some("python"),
+        (true, false, true) => Some("node_python"),
+        (false, true, true) => Some("rust_python"),
+        (false, false, false) => None,
+    };
+    let package_manager = package_field("packageManager")
+        .and_then(|value| value.split('@').next().map(str::to_string))
+        .or_else(|| project_root.join("pnpm-lock.yaml").exists().then_some("pnpm".to_string()))
+        .or_else(|| project_root.join("yarn.lock").exists().then_some("yarn".to_string()))
+        .or_else(|| project_root.join("package-lock.json").exists().then_some("npm".to_string()))
+        .or_else(|| has_rust.then_some("cargo".to_string()));
+    let has_npm_build = package_json
+        .as_ref()
+        .and_then(|value| value.pointer("/scripts/build"))
+        .and_then(Value::as_str)
+        .is_some();
+    let has_npm_test = package_json
+        .as_ref()
+        .and_then(|value| value.pointer("/scripts/test"))
+        .and_then(Value::as_str)
+        .is_some();
+    let build_system = match (has_npm_build, has_rust) {
+        (true, true) => Some("npm+cargo"),
+        (true, false) => Some("npm"),
+        (false, true) => Some("cargo"),
+        _ if has_python => Some("python"),
+        _ => None,
+    };
+    let test_system = match (has_npm_test, has_rust) {
+        (true, true) => Some("npm+cargo"),
+        (true, false) => Some("npm"),
+        (false, true) => Some("cargo"),
+        _ if has_python => Some("python"),
+        _ => None,
+    };
+    let git_data = git_status.map(stable_data);
+    let git_object = git_data.as_ref().and_then(Value::as_object);
+    let git_branch = git_object
+        .and_then(|data| data.get("branch"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let git_dirty = git_object
+        .and_then(|data| data.get("clean"))
+        .and_then(Value::as_bool)
+        .map(|clean| !clean);
+    let git_changed_count = git_object
+        .and_then(|data| data.get("entries"))
+        .and_then(Value::as_array)
+        .map(|entries| entries.len() as u64);
+    let trusted_shells = ["cmd", "powershell_core", "windows_powershell"]
+        .into_iter()
+        .filter(|name| {
+            runtime
+                .pointer(&format!("/shells/{name}/trusted"))
+                .and_then(Value::as_bool)
+                == Some(true)
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "project_name": project_name,
+        "project_type": project_type,
+        "project_version": project_version,
+        "git_branch": git_branch,
+        "git_dirty": git_dirty,
+        "git_changed_count": git_changed_count,
+        "package_manager": package_manager,
+        "build_system": build_system,
+        "test_system": test_system,
+        "runtime_availability": {
+            "git": runtime.get("git").cloned().unwrap_or(Value::Null),
+            "bundled_python": runtime.get("bundled_python").cloned().unwrap_or(Value::Null),
+            "bundled_node": runtime.get("bundled_node").cloned().unwrap_or(Value::Null)
+        },
+        "trusted_shells": trusted_shells
+    })
+}
+
 fn ordinary_workspace_paths_match(expected: &Path, actual: &str) -> bool {
     fn normalize(value: &str) -> String {
         value.replace('/', "\\").trim_end_matches('\\').to_string()
@@ -2670,12 +2945,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
     }
 
     pub fn public_tools(&self, mode: PermissionMode) -> Value {
-        let tools = V1_CORE_TOOL_NAMES
-            .iter()
-            .filter(|name| self.policy.public_tool_allowed_for_list(mode, name))
-            .map(|name| public_tool_schema(name))
-            .collect::<Vec<_>>();
-        json!({"tools":tools})
+        public_tools_for_policy(&self.policy, mode)
     }
 
     pub fn replace_policy(&mut self, policy: CapabilityPolicy) {
@@ -2879,6 +3149,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 "elevated_route":{"available":false,"reason":"broker_state_required"}
             }),
         );
+        data.insert("current_task".into(), Value::Null);
         Ok(result)
     }
 
@@ -2951,6 +3222,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         ) {
             return Err(invalid_argument());
         }
+        if action == "resume" {
+            ensure_only_keys(object, &["action"])?;
+            return self.resume_agent_workflow(mode, request_id);
+        }
         let patch = object.get("patch").and_then(Value::as_str);
         let project_path = match object.get("path") {
             Some(value) => value.as_str().ok_or_else(invalid_argument)?,
@@ -3017,6 +3292,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         if !commands.is_empty() && !agent_action_allows_process(action) {
             return Err(invalid_argument());
         }
+        let has_work = !directory_changes.is_empty() || patch.is_some() || !commands.is_empty();
+        let mut checkpoint = has_work.then(|| {
+            WorkflowCheckpoint::new(next_public_handle("lb-workflow"), arguments.clone())
+        });
+        if let Some(checkpoint) = checkpoint.as_ref() {
+            persist_agent_checkpoint(&self.adapter, checkpoint)?;
+        }
         let workspace = self.adapter.workspace_context(request_id)?;
         let git_before = self.adapter.git_workflow(
             GitWorkflowAction::Status,
@@ -3042,11 +3324,21 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         }
 
         let mut directory_results = Vec::with_capacity(directory_changes.len());
-        for (directory_action, directory_path) in &directory_changes {
-            directory_results.push(
-                self.adapter
-                    .apply_directory_change(directory_action, directory_path)?,
-            );
+        for (index, (directory_action, directory_path)) in directory_changes.iter().enumerate() {
+            if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.directory_inflight = true;
+                persist_agent_checkpoint(&self.adapter, checkpoint)?;
+            }
+            let result = self
+                .adapter
+                .apply_directory_change(directory_action, directory_path)?;
+            directory_results.push(result.clone());
+            if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.directory_inflight = false;
+                checkpoint.directory_index = index + 1;
+                checkpoint.directory_results.push(result);
+                persist_agent_checkpoint(&self.adapter, checkpoint)?;
+            }
         }
 
         let mut applied_patch = false;
@@ -3058,13 +3350,22 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     false,
                 ));
             }
+            if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.patch_inflight = true;
+                persist_agent_checkpoint(&self.adapter, checkpoint)?;
+            }
             self.adapter
                 .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
             applied_patch = true;
+            if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.patch_inflight = false;
+                checkpoint.patch_applied = true;
+                persist_agent_checkpoint(&self.adapter, checkpoint)?;
+            }
         }
 
         let mut command_results = Vec::new();
-        for command in commands {
+        for (index, command) in commands.into_iter().enumerate() {
             let command = command.as_object().ok_or_else(invalid_argument)?;
             let text = required_string(command, "command")?;
             let shell: ShellSelector = serde_json::from_value(
@@ -3086,6 +3387,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ));
             }
             let effective_workdir = join_project_workdir(&selected_path, workdir)?;
+            if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.command_inflight = true;
+                checkpoint.current_session_id = None;
+                persist_agent_checkpoint(&self.adapter, checkpoint)?;
+            }
             let result = self.adapter.execute_shell(
                 ShellCommandRequest {
                     execution: ShellExecutionSpec {
@@ -3113,15 +3419,25 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 request_id,
             )?;
             if result.get("isError").and_then(Value::as_bool) == Some(true) {
+                self.adapter.clear_workflow_checkpoint()?;
                 return Ok(result);
             }
             let data = stable_data(&result);
             let running = data.get("status").and_then(Value::as_str) == Some("running");
             command_results.push(data.clone());
             if running {
+                let session_id = data
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(command_state_internal_error)?;
+                if let Some(checkpoint) = checkpoint.as_mut() {
+                    checkpoint.current_session_id = Some(session_id.to_string());
+                    persist_agent_checkpoint(&self.adapter, checkpoint)?;
+                }
                 return Ok(stable_success(
                     json!({
                         "action":action,
+                        "workflow_id":checkpoint.as_ref().map(|checkpoint| checkpoint.workflow_id.as_str()),
                         "objective":object.get("objective").and_then(Value::as_str),
                         "state":"running",
                         "workspace":stable_data(&workspace),
@@ -3133,6 +3449,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     }),
                     "Agent workflow command is running",
                 ));
+            }
+            if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.command_inflight = false;
+                checkpoint.current_session_id = None;
+                checkpoint.command_index = index + 1;
+                checkpoint.command_results.push(data);
+                persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
         }
 
@@ -3147,9 +3470,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         } else {
             "context_ready"
         };
+        if checkpoint.is_some() {
+            self.adapter.clear_workflow_checkpoint()?;
+        }
         Ok(stable_success(
             json!({
                 "action":action,
+                "workflow_id":checkpoint.as_ref().map(|checkpoint| checkpoint.workflow_id.as_str()),
                 "objective":object.get("objective").and_then(Value::as_str),
                 "state":state,
                 "workspace":stable_data(&workspace),
@@ -3161,6 +3488,294 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 "commands":command_results
             }),
             "Agent workflow completed",
+        ))
+    }
+
+    fn resume_agent_workflow(
+        &mut self,
+        mode: PermissionMode,
+        request_id: Option<&Value>,
+    ) -> Result<Value, FacadeError> {
+        let stored = self.adapter.load_workflow_checkpoint()?.ok_or_else(|| {
+            FacadeError::new(
+                FacadeErrorCode::NotFound,
+                "没有可恢复的工作流",
+                false,
+            )
+        })?;
+        let mut checkpoint: WorkflowCheckpoint =
+            serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
+        let original = object_args(&checkpoint.arguments)?;
+        let action = required_string(original, "action")?;
+        if action == "resume" {
+            return Err(invalid_argument());
+        }
+        if !self
+            .policy
+            .decide_public(mode, "agent_workflow", &checkpoint.arguments)
+            .allowed
+        {
+            return Err(FacadeError::new(
+                FacadeErrorCode::CapabilityDenied,
+                "当前权限模式不能恢复该工作流",
+                false,
+            ));
+        }
+        if checkpoint.directory_inflight || checkpoint.patch_inflight {
+            return Err(FacadeError::new(
+                FacadeErrorCode::SessionUnavailable,
+                "工作流包含完成状态不可验证的文件步骤，已停止以避免重复执行",
+                false,
+            ));
+        }
+        if checkpoint.command_inflight && checkpoint.current_session_id.is_none() {
+            return Err(FacadeError::new(
+                FacadeErrorCode::SessionUnavailable,
+                "工作流包含完成状态不可验证的命令步骤，已停止以避免重复执行",
+                false,
+            ));
+        }
+
+        let patch = original.get("patch").and_then(Value::as_str);
+        let project_path = original.get("path").and_then(Value::as_str).unwrap_or(".");
+        let mut project = self.adapter.project_context(project_path)?;
+        let selected_path = project
+            .get("selected_path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| FacadeError::new(FacadeErrorCode::Internal, "项目上下文无效", false))?
+            .to_string();
+        let directory_changes = parse_directory_changes(original)?;
+        let commands = original
+            .get("commands")
+            .map(|value| value.as_array().ok_or_else(invalid_argument))
+            .transpose()?
+            .cloned()
+            .unwrap_or_default();
+        if checkpoint.directory_index > directory_changes.len()
+            || checkpoint.command_index > commands.len()
+        {
+            return Err(workflow_checkpoint_error("checkpoint progress out of range"));
+        }
+
+        let workspace = self.adapter.workspace_context(request_id)?;
+        let git_before = self.adapter.git_workflow(
+            GitWorkflowAction::Status,
+            json!({"path":selected_path}),
+            request_id,
+        )?;
+        if let Some(project_object) = project.as_object_mut() {
+            let git_data = stable_data(&git_before);
+            project_object.insert(
+                "is_repo".into(),
+                git_data
+                    .get("is_repo")
+                    .cloned()
+                    .unwrap_or(Value::Bool(false)),
+            );
+            project_object.insert(
+                "repository_root".into(),
+                git_data
+                    .get("repository_root")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            );
+        }
+
+        if let Some(session_id) = checkpoint.current_session_id.clone() {
+            let polled = match self.adapter.control_command(
+                CommandControlAction::Poll,
+                json!({"session_id":session_id,"wait_ms":0}),
+                request_id,
+            ) {
+                Ok(result) => result,
+                Err(error) if error.code == FacadeErrorCode::SessionUnavailable => self
+                    .adapter
+                    .durable_command_terminal(&session_id)
+                    .unwrap_or_else(|| error.to_mcp_result()),
+                Err(error) => return Err(error),
+            };
+            if polled.get("isError").and_then(Value::as_bool) == Some(true) {
+                return Ok(polled);
+            }
+            let data = stable_data(&polled);
+            match data.get("status").and_then(Value::as_str) {
+                Some("running") => {
+                    return Ok(stable_success(
+                        json!({
+                            "action":"resume",
+                            "workflow_id":checkpoint.workflow_id,
+                            "objective":original.get("objective").and_then(Value::as_str),
+                            "state":"running",
+                            "workspace":stable_data(&workspace),
+                            "project":project,
+                            "git_before":stable_data(&git_before),
+                            "patch_applied":checkpoint.patch_applied,
+                            "directory_changes":checkpoint.directory_results,
+                            "commands":checkpoint.command_results,
+                            "current_command":data
+                        }),
+                        "Agent workflow command is still running",
+                    ));
+                }
+                Some("completed") => {
+                    checkpoint.command_inflight = false;
+                    checkpoint.current_session_id = None;
+                    checkpoint.command_index = checkpoint.command_index.saturating_add(1);
+                    checkpoint.command_results.push(data);
+                    persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+                }
+                _ => {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::SessionUnavailable,
+                        "工作流命令状态不可恢复",
+                        false,
+                    ));
+                }
+            }
+        }
+
+        for (index, (directory_action, directory_path)) in directory_changes
+            .iter()
+            .enumerate()
+            .skip(checkpoint.directory_index)
+        {
+            checkpoint.directory_inflight = true;
+            persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+            let result = self
+                .adapter
+                .apply_directory_change(directory_action, directory_path)?;
+            checkpoint.directory_inflight = false;
+            checkpoint.directory_index = index + 1;
+            checkpoint.directory_results.push(result);
+            persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+        }
+
+        if let Some(patch) = patch.filter(|_| !checkpoint.patch_applied) {
+            if !public_patch_targets_valid(patch) {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::WorkspaceDenied,
+                    "补丁目标不在当前工作区内",
+                    false,
+                ));
+            }
+            checkpoint.patch_inflight = true;
+            persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+            self.adapter
+                .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
+            checkpoint.patch_inflight = false;
+            checkpoint.patch_applied = true;
+            persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+        }
+
+        for (index, command) in commands.iter().enumerate().skip(checkpoint.command_index) {
+            let command = command.as_object().ok_or_else(invalid_argument)?;
+            let text = required_string(command, "command")?;
+            let shell: ShellSelector = serde_json::from_value(
+                command
+                    .get("shell")
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("auto".into())),
+            )
+            .map_err(|_| invalid_argument())?;
+            let workdir = command
+                .get("workdir")
+                .and_then(Value::as_str)
+                .unwrap_or(".");
+            if !workspace_input_path_valid(workdir) {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::WorkspaceDenied,
+                    "工作区路径参数无效",
+                    false,
+                ));
+            }
+            let effective_workdir = join_project_workdir(&selected_path, workdir)?;
+            checkpoint.command_inflight = true;
+            checkpoint.current_session_id = None;
+            persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+            let result = self.adapter.execute_shell(
+                ShellCommandRequest {
+                    execution: ShellExecutionSpec {
+                        shell,
+                        command: text.to_string(),
+                        cwd: effective_workdir,
+                        timeout_ms: command
+                            .get("timeout_ms")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(30_000),
+                        max_output_bytes: command
+                            .get("max_output_bytes")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(65_536) as usize,
+                    },
+                    yield_time_ms: command
+                        .get("yield_time_ms")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(10_000),
+                    stdin: command
+                        .get("stdin")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                },
+                request_id,
+            )?;
+            if result.get("isError").and_then(Value::as_bool) == Some(true) {
+                self.adapter.clear_workflow_checkpoint()?;
+                return Ok(result);
+            }
+            let data = stable_data(&result);
+            if data.get("status").and_then(Value::as_str) == Some("running") {
+                let session_id = data
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(command_state_internal_error)?;
+                checkpoint.current_session_id = Some(session_id.to_string());
+                persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+                let mut commands = checkpoint.command_results.clone();
+                commands.push(data);
+                return Ok(stable_success(
+                    json!({
+                        "action":"resume",
+                        "workflow_id":checkpoint.workflow_id,
+                        "objective":original.get("objective").and_then(Value::as_str),
+                        "state":"running",
+                        "workspace":stable_data(&workspace),
+                        "project":project,
+                        "git_before":stable_data(&git_before),
+                        "patch_applied":checkpoint.patch_applied,
+                        "directory_changes":checkpoint.directory_results,
+                        "commands":commands
+                    }),
+                    "Agent workflow resumed and command is running",
+                ));
+            }
+            checkpoint.command_inflight = false;
+            checkpoint.current_session_id = None;
+            checkpoint.command_index = index + 1;
+            checkpoint.command_results.push(data);
+            persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+        }
+
+        let git_after = self.adapter.git_workflow(
+            GitWorkflowAction::Status,
+            json!({"path":selected_path}),
+            request_id,
+        )?;
+        self.adapter.clear_workflow_checkpoint()?;
+        Ok(stable_success(
+            json!({
+                "action":"resume",
+                "workflow_id":checkpoint.workflow_id,
+                "objective":original.get("objective").and_then(Value::as_str),
+                "state":"completed",
+                "workspace":stable_data(&workspace),
+                "project":project,
+                "git_before":stable_data(&git_before),
+                "git_after":stable_data(&git_after),
+                "patch_applied":checkpoint.patch_applied,
+                "directory_changes":checkpoint.directory_results,
+                "commands":checkpoint.command_results
+            }),
+            "Agent workflow resumed and completed",
         ))
     }
 
@@ -3187,7 +3802,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             }
             let mut explanation = self.policy_explanation(mode, "exec_command", &actual);
             if let Some(data) = explanation.as_object_mut() {
-                data.insert("status".into(), Value::String("explained".into()));
+                data.insert("status".into(), Value::String("completed".into()));
             }
             return Ok(stable_success(explanation, "Command policy explained without execution"));
         }
@@ -3273,6 +3888,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "blame" => GitWorkflowAction::Blame,
             _ => return Err(invalid_argument()),
         };
+        let allowed = match action {
+            GitWorkflowAction::Status => &["action", "path", "include_untracked", "max_entries"][..],
+            GitWorkflowAction::Diff => &["action", "path", "paths", "staged", "unstaged", "context_lines", "max_bytes"][..],
+            GitWorkflowAction::Log => &["action", "path", "ref", "max_count", "skip"][..],
+            GitWorkflowAction::Show => &["action", "path", "paths", "rev", "context_lines", "max_bytes", "include_patch"][..],
+            GitWorkflowAction::Blame => &["action", "path", "rev", "start_line", "end_line", "max_lines"][..],
+        };
+        ensure_only_keys(object, allowed)?;
+        if action == GitWorkflowAction::Blame {
+            required_string(object, "path")?;
+        }
         let mut stable = object.clone();
         stable.remove("action");
         self.adapter
@@ -3287,6 +3913,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let object = object_args(&arguments)?;
         match required_string(object, "action")? {
             "inspect" => {
+                ensure_only_keys(
+                    object,
+                    &["action", "path", "start_line", "end_line", "max_lines", "max_bytes"],
+                )?;
                 let path = required_string(object, "path")?;
                 if let (Some(start), Some(end)) = (
                     object.get("start_line").and_then(Value::as_u64),
@@ -3305,6 +3935,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 self.adapter.inspect_document(private, request_id)
             }
             "create" => {
+                ensure_only_keys(object, &["action", "path", "content"])?;
                 let path = self
                     .adapter
                     .normalize_workspace_path(required_string(object, "path")?, true)?;
@@ -3321,6 +3952,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ))
             }
             "convert" => {
+                ensure_only_keys(object, &["action", "source", "path"])?;
                 let source = required_string(object, "source")?;
                 let path = self
                     .adapter
@@ -3339,6 +3971,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ))
             }
             "rebuild" => {
+                ensure_only_keys(object, &["action", "path", "content"])?;
                 let path = self
                     .adapter
                     .normalize_workspace_path(required_string(object, "path")?, false)?;
@@ -3635,6 +4268,14 @@ fn public_patch_targets_valid(patch: &str) -> bool {
 
 fn object_args(value: &Value) -> Result<&Map<String, Value>, FacadeError> {
     value.as_object().ok_or_else(invalid_argument)
+}
+
+fn persist_agent_checkpoint<A: WorkspaceRuntimeAdapter>(
+    adapter: &A,
+    checkpoint: &WorkflowCheckpoint,
+) -> Result<(), FacadeError> {
+    let value = serde_json::to_value(checkpoint).map_err(workflow_checkpoint_error)?;
+    adapter.save_workflow_checkpoint(&value)
 }
 
 fn ensure_only_keys(object: &Map<String, Value>, allowed: &[&str]) -> Result<(), FacadeError> {
@@ -4388,6 +5029,185 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct ResumeFixtureState {
+        checkpoint: std::sync::Arc<std::sync::Mutex<Option<Value>>>,
+        directory_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        patch_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        execute_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl ResumeFixtureState {
+        fn new() -> Self {
+            Self {
+                checkpoint: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                directory_calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                patch_calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                execute_calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            }
+        }
+    }
+
+    struct ResumeAdapter {
+        catalog: Value,
+        state: ResumeFixtureState,
+        first_execution_runs: bool,
+    }
+
+    impl WorkspaceRuntimeAdapter for ResumeAdapter {
+        fn negotiate(&mut self) -> Result<(), FacadeError> {
+            validate_runtime_capabilities(&self.catalog)
+        }
+
+        fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {
+            Ok(stable_success(json!({}), "ok"))
+        }
+
+        fn normalize_workspace_path(
+            &self,
+            path: &str,
+            _allow_missing_leaf: bool,
+        ) -> Result<String, FacadeError> {
+            Ok(path.replace('\\', "/"))
+        }
+
+        fn project_context(&self, path: &str) -> Result<Value, FacadeError> {
+            Ok(json!({"selected_path":path}))
+        }
+
+        fn apply_directory_change(
+            &mut self,
+            action: &str,
+            path: &str,
+        ) -> Result<Value, FacadeError> {
+            self.state
+                .directory_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(json!({"action":action,"path":path,"changed":true}))
+        }
+
+        fn execute_shell(
+            &mut self,
+            request: ShellCommandRequest,
+            _request_id: Option<&Value>,
+        ) -> Result<Value, FacadeError> {
+            let call = self
+                .state
+                .execute_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.first_execution_runs && call == 0 {
+                return Ok(stable_success(
+                    json!({"status":"running","session_id":"lb-session-resume-fixture","output":""}),
+                    "running",
+                ));
+            }
+            Ok(stable_success(
+                json!({
+                    "status":"completed",
+                    "session_id":format!("lb-session-completed-{call}"),
+                    "output":request.execution.command
+                }),
+                "completed",
+            ))
+        }
+
+        fn control_command(
+            &mut self,
+            _action: CommandControlAction,
+            _arguments: Value,
+            _request_id: Option<&Value>,
+        ) -> Result<Value, FacadeError> {
+            Err(session_unavailable())
+        }
+
+        fn git_workflow(
+            &mut self,
+            _action: GitWorkflowAction,
+            _arguments: Value,
+            _request_id: Option<&Value>,
+        ) -> Result<Value, FacadeError> {
+            Ok(stable_success(
+                json!({"is_repo":false,"repository_root":null,"clean":true,"entries":[]}),
+                "ok",
+            ))
+        }
+
+        fn inspect_document(
+            &mut self,
+            _arguments: Value,
+            _request_id: Option<&Value>,
+        ) -> Result<Value, FacadeError> {
+            Ok(stable_success(json!({"text":"old\n"}), "ok"))
+        }
+
+        fn apply_document_patch(
+            &mut self,
+            _arguments: Value,
+            _request_id: Option<&Value>,
+        ) -> Result<Value, FacadeError> {
+            self.state
+                .patch_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(stable_success(json!({"applied":true}), "ok"))
+        }
+
+        fn inspect_image(
+            &mut self,
+            _arguments: Value,
+            _request_id: Option<&Value>,
+        ) -> Result<Value, FacadeError> {
+            Ok(stable_success(json!({}), "ok"))
+        }
+
+        fn root_is_running(&self) -> Result<Option<bool>, CodingToolsRuntimeError> {
+            Ok(Some(true))
+        }
+
+        fn reap_command_sessions(&mut self) -> Result<(), FacadeError> {
+            Ok(())
+        }
+
+        fn has_running_command_session(&self) -> bool {
+            false
+        }
+
+        fn load_workflow_checkpoint(&self) -> Result<Option<Value>, FacadeError> {
+            Ok(self
+                .state
+                .checkpoint
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone())
+        }
+
+        fn save_workflow_checkpoint(&self, checkpoint: &Value) -> Result<(), FacadeError> {
+            *self
+                .state
+                .checkpoint
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(checkpoint.clone());
+            Ok(())
+        }
+
+        fn clear_workflow_checkpoint(&self) -> Result<(), FacadeError> {
+            *self
+                .state
+                .checkpoint
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            Ok(())
+        }
+
+        fn durable_command_terminal(&self, session_id: &str) -> Option<Value> {
+            (session_id == "lb-session-resume-fixture").then(|| {
+                stable_success(
+                    json!({"status":"completed","session_id":session_id,"output":"first completed"}),
+                    "completed",
+                )
+            })
+        }
+    }
+
     fn policy() -> CapabilityPolicy {
         CapabilityPolicy::from_toml(include_str!("../../../runtime-policy.toml")).unwrap()
     }
@@ -4397,6 +5217,121 @@ mod tests {
             "../../../compatibility/coding-tools/0.2.2/tools-list.json"
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn agent_workflow_resume_from_fresh_facade_continues_only_missing_steps() {
+        let state = ResumeFixtureState::new();
+        let initial_adapter = ResumeAdapter {
+            catalog: compatible_catalog(),
+            state: state.clone(),
+            first_execution_runs: true,
+        };
+        let mut initial = AgentFacade::with_adapter(initial_adapter, policy()).unwrap();
+        let started = initial
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({
+                    "action":"bugfix",
+                    "objective":"schema39 resume fixture",
+                    "path":".",
+                    "directory_changes":[{"action":"create_directory","path":"resume-dir"}],
+                    "patch":"*** Begin Patch\n*** Update File: safe/doc.txt\n@@\n-old\n+new\n*** End Patch",
+                    "commands":[
+                        {"command":"echo first","shell":"cmd","yield_time_ms":0},
+                        {"command":"echo second","shell":"cmd","yield_time_ms":1000}
+                    ]
+                }),
+                None,
+            )
+            .unwrap();
+        assert_eq!(stable_data(&started)["state"], "running", "{started:#?}");
+        assert!(stable_data(&started)["workflow_id"]
+            .as_str()
+            .is_some_and(|value| value.starts_with("lb-workflow-")));
+        assert_eq!(
+            state.directory_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        drop(initial);
+
+        let resumed_adapter = ResumeAdapter {
+            catalog: compatible_catalog(),
+            state: state.clone(),
+            first_execution_runs: false,
+        };
+        let mut resumed = AgentFacade::with_adapter(resumed_adapter, policy()).unwrap();
+        let completed = resumed
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"resume"}),
+                None,
+            )
+            .unwrap();
+        let data = stable_data(&completed);
+        assert_eq!(data["action"], "resume", "{completed:#?}");
+        assert_eq!(data["state"], "completed", "{completed:#?}");
+        assert_eq!(
+            state.directory_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "completed directory step was replayed"
+        );
+        assert_eq!(
+            state.patch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "completed patch was replayed"
+        );
+        assert_eq!(
+            state.execute_calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "resume did not execute exactly the one missing command"
+        );
+        assert_eq!(data["commands"].as_array().map(Vec::len), Some(2));
+        assert!(state
+            .checkpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_none());
+    }
+
+    #[test]
+    fn agent_workflow_resume_fails_closed_for_uncertain_inflight_file_step() {
+        let state = ResumeFixtureState::new();
+        let mut checkpoint = WorkflowCheckpoint::new(
+            "lb-workflow-uncertain".into(),
+            json!({
+                "action":"bugfix",
+                "path":".",
+                "patch":"*** Begin Patch\n*** Update File: safe/doc.txt\n@@\n-old\n+new\n*** End Patch"
+            }),
+        );
+        checkpoint.patch_inflight = true;
+        *state
+            .checkpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(serde_json::to_value(checkpoint).unwrap());
+        let adapter = ResumeAdapter {
+            catalog: compatible_catalog(),
+            state: state.clone(),
+            first_execution_runs: false,
+        };
+        let mut facade = AgentFacade::with_adapter(adapter, policy()).unwrap();
+        let error = facade
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"resume"}),
+                None,
+            )
+            .expect_err("uncertain file completion must never be blindly replayed");
+        assert_eq!(error.code, FacadeErrorCode::SessionUnavailable);
+        assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -5048,7 +5983,7 @@ mod tests {
     }
 
     #[test]
-    fn schema36_exec_dry_run_explains_without_creating_public_session() {
+    fn schema39_exec_dry_run_completes_without_creating_public_session() {
         let mut facade = AgentFacade::with_adapter(
             FakeAdapter { catalog: compatible_catalog() },
             policy(),
@@ -5064,7 +5999,7 @@ mod tests {
             )
             .unwrap();
         let data = stable_data(&result);
-        assert_eq!(data["status"], "explained");
+        assert_eq!(data["status"], "completed");
         assert_eq!(data["would_execute"], false);
         assert_eq!(data["route"], "ordinary");
         assert!(data.get("session_id").is_none());
@@ -5122,7 +6057,6 @@ mod tests {
             "test_failure",
             "build_release",
             "document",
-            "resume",
             "custom",
         ] {
             let result = facade
@@ -5134,6 +6068,10 @@ mod tests {
                 "action={action}"
             );
         }
+        let resume = facade
+            .dispatch(PermissionMode::Full, "agent_workflow", json!({"action":"resume"}), None)
+            .expect_err("resume without a durable checkpoint must not masquerade as context_ready");
+        assert_eq!(resume.code, FacadeErrorCode::NotFound);
         let diagnose_command = facade
             .dispatch(
                 PermissionMode::Full,

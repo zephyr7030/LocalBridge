@@ -23,7 +23,7 @@ use crate::state::{
 
 use super::facade::{
     AgentFacade, CodingToolsRuntimeAdapter, FacadeCallError, FacadeDenied, FacadeError,
-    FacadeErrorCode, V1_CORE_TOOL_NAMES,
+    FacadeErrorCode, AGENT_API_REVISION, public_tools_for_policy,
 };
 use super::http::McpCancellationClient;
 use super::policy::CapabilityPolicy;
@@ -46,6 +46,7 @@ static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 struct McpSession {
     protocol: String,
     tool_catalog_signature: String,
+    tools_list_changed_pending: bool,
 }
 
 struct ConnectionContext<'a> {
@@ -802,6 +803,49 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         }
         return write_empty(&mut stream, 404, None);
     }
+    if request.method == "GET" {
+        let Some(session) = request.header("mcp-session-id") else {
+            return write_empty(&mut stream, 400, None);
+        };
+        let mode = *permission_mode
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current_signature = {
+            let policy = public_policy
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            effective_tool_catalog_signature(&policy, mode)
+        };
+        let pending = {
+            let mut sessions = sessions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(stored) = sessions.get_mut(session) else {
+                return write_empty(&mut stream, 404, None);
+            };
+            if request
+                .header("mcp-protocol-version")
+                .is_some_and(|version| version != stored.protocol)
+            {
+                return write_empty(&mut stream, 400, Some(session));
+            }
+            if stored.tool_catalog_signature != current_signature {
+                stored.tool_catalog_signature = current_signature;
+                stored.tools_list_changed_pending = true;
+            }
+            let pending = stored.tools_list_changed_pending;
+            stored.tools_list_changed_pending = false;
+            pending
+        };
+        if pending {
+            return write_sse_notification(
+                &mut stream,
+                &json!({"jsonrpc":"2.0","method":"notifications/tools/list_changed"}),
+                session,
+            );
+        }
+        return write_empty(&mut stream, 204, Some(session));
+    }
     if request.method != "POST" {
         return write_empty(&mut stream, 405, None);
     }
@@ -888,6 +932,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 McpSession {
                     protocol: protocol.to_string(),
                     tool_catalog_signature,
+                    tools_list_changed_pending: true,
                 },
             );
         }
@@ -896,8 +941,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             id,
             json!({
                 "protocolVersion": protocol,
-                "capabilities": {"tools": {"listChanged": false}},
-                "serverInfo": {"name": "localbridge-mcp-guard", "version": env!("CARGO_PKG_VERSION")}
+                "capabilities": {"tools": {"listChanged": true}},
+                "serverInfo": {"name": "localbridge-mcp-guard", "version": format!("{}+api{}", env!("CARGO_PKG_VERSION"), AGENT_API_REVISION)}
             }),
             Some(&session),
         );
@@ -988,10 +1033,10 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             let mode = *permission_mode
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let guard = guard
-                .lock()
+            let policy = public_policy
+                .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let result = effective_tool_catalog(&guard, mode);
+            let result = effective_tool_catalog(&policy, mode);
             write_rpc_result(&mut stream, id, result, Some(session))
         }
         "tools/call" => {
@@ -1095,7 +1140,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             match result {
                 Ok(mut result) => {
                     if name == "workspace_context" {
-                        enrich_workspace_context_privilege(&mut result, mode, privileged);
+                        enrich_workspace_context_privilege(
+                            &mut result,
+                            mode,
+                            privileged,
+                            current_task,
+                        );
                     }
                     write_rpc_result(&mut stream, id, result, Some(session))
                 }
@@ -1112,6 +1162,7 @@ fn enrich_workspace_context_privilege(
     result: &mut Value,
     mode: PermissionMode,
     privileged: Option<&Arc<dyn PrivilegedExecution>>,
+    current_task: &CurrentTaskProjection,
 ) {
     let state = privileged
         .map(|gateway| gateway.state())
@@ -1139,6 +1190,10 @@ fn enrich_workspace_context_privilege(
     data.insert("privilege_state".into(), Value::String(privilege_state.into()));
     data.insert("broker_state".into(), Value::String(broker_state.into()));
     data.insert("uac_state".into(), Value::String(uac_state.into()));
+    data.insert(
+        "current_task".into(),
+        task_control_snapshot(&current_task.actual_snapshot()),
+    );
     data.insert(
         "administrator_token_available".into(),
         Value::Bool(administrator_token_available),
@@ -1214,48 +1269,31 @@ fn handle_task_control(
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
-            let mut cancelled = 0u64;
-            for request_id in active {
-                let result = if let Some(broker_request_id) =
-                    privileged_request_id(privileged_requests, &request_id)
-                {
-                    privileged
-                        .ok_or(())?
-                        .cancel_execute(broker_request_id)
-                        .map_err(|_| ())
-                } else {
-                    cancellation.cancel_request(&request_id).map_err(|_| ())
-                };
-                if result.is_ok() {
-                    cancelled = cancelled.saturating_add(1);
-                }
-            }
-            if cancelled == 0 {
-                if let Some(owner) = task_state.current_owner() {
-                    let cancelled_session = match guard.try_lock() {
-                        Ok(mut guard) => guard
-                            .cancel_public_command_session(&owner.session_id)
-                            .is_ok(),
-                        Err(TryLockError::WouldBlock) => false,
-                        Err(TryLockError::Poisoned(error)) => error
-                            .into_inner()
-                            .cancel_public_command_session(&owner.session_id)
-                            .is_ok(),
-                    };
-                    if cancelled_session {
-                        cancelled = cancelled.saturating_add(1);
-                        current_task.project(
-                            CurrentTaskStatus::project(
-                                TaskKind::ExecuteCommand,
-                                SafeTaskSummary::Omitted,
-                                TaskExecutionState::Cancelled,
-                            )
-                            .expect("cancelled command is a valid projected task"),
-                        );
-                        current_task.project(CurrentTaskStatus::Idle);
+            let owner = task_state.current_owner();
+            let cancelled = cancel_task_targets(
+                &active,
+                |request_id| {
+                    if let Some(broker_request_id) =
+                        privileged_request_id(privileged_requests, request_id)
+                    {
+                        privileged
+                            .ok_or(())?
+                            .cancel_execute(broker_request_id)
+                            .map_err(|_| ())
+                    } else {
+                        cancellation.cancel_request(request_id).map_err(|_| ())
                     }
-                }
-            }
+                },
+                owner.as_ref().map(|owner| owner.session_id.as_str()),
+                |session_id| match guard.try_lock() {
+                    Ok(mut guard) => guard.cancel_public_command_session(session_id).is_ok(),
+                    Err(TryLockError::WouldBlock) => false,
+                    Err(TryLockError::Poisoned(error)) => error
+                        .into_inner()
+                        .cancel_public_command_session(session_id)
+                        .is_ok(),
+                },
+            )?;
             if cancelled > 0 {
                 json!({"state":"cancel_requested","cancelled_requests":cancelled})
             } else {
@@ -1287,6 +1325,26 @@ fn handle_task_control(
         }),
         Some(session),
     )
+}
+
+fn cancel_task_targets(
+    active: &[Value],
+    mut cancel_active: impl FnMut(&Value) -> Result<(), ()>,
+    owner_session_id: Option<&str>,
+    mut cancel_owner_session: impl FnMut(&str) -> bool,
+) -> Result<u64, ()> {
+    let mut cancelled = 0u64;
+    for request_id in active {
+        if cancel_active(request_id).is_ok() {
+            cancelled = cancelled.saturating_add(1);
+        }
+    }
+    if let Some(session_id) = owner_session_id {
+        if cancel_owner_session(session_id) {
+            cancelled = cancelled.saturating_add(1);
+        }
+    }
+    Ok(cancelled)
 }
 
 fn task_control_snapshot_with_terminal(
@@ -1354,11 +1412,11 @@ const fn task_kind_name(kind: TaskKind) -> &'static str {
 }
 
 fn effective_tool_catalog(
-    guard: &AgentFacade<CodingToolsRuntimeAdapter>,
+    policy: &CapabilityPolicy,
     mode: PermissionMode,
 ) -> Value {
-    let mut result = guard.public_tools(mode);
-    if guard.privileged_tool_visible(mode, "elevated_exec") {
+    let mut result = public_tools_for_policy(policy, mode);
+    if policy.privileged_tool_visible(mode, "elevated_exec") {
         append_elevated_exec_tool(&mut result);
     }
     result
@@ -1368,16 +1426,11 @@ fn effective_tool_catalog_signature(
     policy: &CapabilityPolicy,
     mode: PermissionMode,
 ) -> String {
-    let mut names = V1_CORE_TOOL_NAMES
-        .iter()
-        .copied()
-        .filter(|name| policy.public_tool_allowed_for_list(mode, name))
-        .collect::<Vec<_>>();
-    if policy.privileged_tool_visible(mode, "elevated_exec") {
-        names.push("elevated_exec");
-    }
-    serde_json::to_string(&names)
-        .expect("LocalBridge public tool catalog signature is serializable")
+    serde_json::to_string(&json!({
+        "api_revision": AGENT_API_REVISION,
+        "catalog": effective_tool_catalog(policy, mode)
+    }))
+    .expect("LocalBridge public tool catalog signature is serializable")
 }
 
 fn elevation_required_result() -> Value {
@@ -1936,6 +1989,22 @@ fn write_empty(stream: &mut TcpStream, status: u16, session: Option<&str>) -> Re
     write_response(stream, status, None, &[], session)
 }
 
+fn write_sse_notification(
+    stream: &mut TcpStream,
+    notification: &Value,
+    session: &str,
+) -> Result<(), ()> {
+    let json = serde_json::to_string(notification).map_err(|_| ())?;
+    let body = format!("event: message\ndata: {json}\n\n");
+    write_response(
+        stream,
+        200,
+        Some("text/event-stream"),
+        body.as_bytes(),
+        Some(session),
+    )
+}
+
 fn write_response(
     stream: &mut TcpStream,
     status: u16,
@@ -1978,6 +2047,29 @@ fn write_response(
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_control_cancel_does_not_skip_owned_session_after_active_request_success() {
+        let active = vec![json!("active-a"), json!("active-b")];
+        let mut active_seen = Vec::new();
+        let mut owner_seen = Vec::new();
+        let cancelled = cancel_task_targets(
+            &active,
+            |request_id| {
+                active_seen.push(request_id.clone());
+                Ok(())
+            },
+            Some("lb-session-owned"),
+            |session_id| {
+                owner_seen.push(session_id.to_string());
+                true
+            },
+        )
+        .unwrap();
+        assert_eq!(cancelled, 3);
+        assert_eq!(active_seen, active);
+        assert_eq!(owner_seen, vec!["lb-session-owned"]);
+    }
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2212,6 +2304,13 @@ mod tests {
         body: Value,
     }
 
+    struct RawHttpResponse {
+        status: u16,
+        session: Option<String>,
+        content_type: Option<String>,
+        body: Vec<u8>,
+    }
+
     fn assert_tool_error(response: &ClientResponse, expected_code: &str) {
         assert_eq!(response.status, 200, "{:#?}", response.body);
         assert!(response.body.get("error").is_none(), "{:#?}", response.body);
@@ -2312,6 +2411,53 @@ mod tests {
         stream.write_all(request.as_bytes()).unwrap();
         stream.flush().unwrap();
         parse_client_response(stream).status
+    }
+
+    fn get_sse(port: u16, session: &str) -> RawHttpResponse {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let request = format!(
+            "GET /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: text/event-stream\r\nMCP-Protocol-Version: {CURRENT_PROTOCOL_VERSION}\r\nMcp-Session-Id: {session}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).unwrap();
+        stream.flush().unwrap();
+        parse_raw_http_response(stream)
+    }
+
+    fn parse_raw_http_response(mut stream: TcpStream) -> RawHttpResponse {
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        let split = bytes
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap();
+        let headers = std::str::from_utf8(&bytes[..split]).unwrap();
+        let mut lines = headers.split("\r\n");
+        let status = lines
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+        let mut session = None;
+        let mut content_type = None;
+        for line in lines {
+            if let Some((name, value)) = line.split_once(':') {
+                if name.eq_ignore_ascii_case("Mcp-Session-Id") {
+                    session = Some(value.trim().to_string());
+                } else if name.eq_ignore_ascii_case("Content-Type") {
+                    content_type = Some(value.trim().to_string());
+                }
+            }
+        }
+        RawHttpResponse {
+            status,
+            session,
+            content_type,
+            body: bytes[(split + 4)..].to_vec(),
+        }
     }
 
     fn parse_client_response(mut stream: TcpStream) -> ClientResponse {
@@ -2747,7 +2893,33 @@ mod tests {
         let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
             .expect("schema28 PEP ready after live private-result semantic probe");
         let initialized = initialize(pep.port(), 700);
+        assert_eq!(
+            initialized.body["result"]["capabilities"]["tools"]["listChanged"],
+            true,
+            "schema39 must explicitly advertise tool-schema change capability: {:#?}",
+            initialized.body
+        );
+        assert!(
+            initialized.body["result"]["serverInfo"]["version"]
+                .as_str()
+                .is_some_and(|value| value.ends_with("+api39")),
+            "schema39 serverInfo version must invalidate stale downstream metadata: {:#?}",
+            initialized.body
+        );
         let mut session = initialized.session.expect("schema28 downstream session");
+        let first_refresh = get_sse(pep.port(), &session);
+        assert_eq!(first_refresh.status, 200, "schema39 first GET did not deliver refresh");
+        assert_eq!(first_refresh.session.as_deref(), Some(session.as_str()));
+        assert_eq!(first_refresh.content_type.as_deref(), Some("text/event-stream"));
+        let first_refresh_body = String::from_utf8(first_refresh.body).unwrap();
+        assert!(
+            first_refresh_body.contains("event: message")
+                && first_refresh_body.contains("notifications/tools/list_changed"),
+            "schema39 refresh event missing: {first_refresh_body}"
+        );
+        let second_refresh = get_sse(pep.port(), &session);
+        assert_eq!(second_refresh.status, 204, "schema39 refresh was not one-shot");
+        assert!(second_refresh.body.is_empty());
         assert_eq!(
             post(
                 pep.port(),
@@ -2757,14 +2929,41 @@ mod tests {
             .status,
             202
         );
+        let post_refresh_tools = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":686,"method":"tools/list","params":{}}),
+        );
+        assert_eq!(post_refresh_tools.status, 200);
+        assert!(post_refresh_tools.body["result"]["tools"].is_array());
 
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 38,
-            "fresh serving instance did not identify the revision38 facade: {:#?}",
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 39,
+            "fresh serving instance did not identify the revision39 facade: {:#?}",
             provenance.body
         );
+        let first_turn = &provenance.body["result"]["structuredContent"]["data"];
+        for field in [
+            "project_name",
+            "project_type",
+            "project_version",
+            "git_branch",
+            "git_dirty",
+            "git_changed_count",
+            "package_manager",
+            "build_system",
+            "test_system",
+            "runtime_availability",
+            "trusted_shells",
+            "current_task",
+        ] {
+            assert!(
+                first_turn.get(field).is_some(),
+                "schema39 first-turn context lost {field}: {first_turn:#?}"
+            );
+        }
         let served_tools = post(
             pep.port(),
             Some(&session),
@@ -2775,6 +2974,9 @@ mod tests {
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "agent_workflow"))
             .expect("fresh serving instance exposes agent_workflow");
         assert!(served_agent["inputSchema"]["properties"]["path"].is_object());
+        assert!(served_agent["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("resume accepts only action")));
         assert_eq!(served_agent["outputSchema"]["type"], "object");
         assert_eq!(served_agent["outputSchema"]["properties"]["ok"]["type"], "boolean");
         assert_eq!(
@@ -2814,6 +3016,14 @@ mod tests {
         assert!(served_document["inputSchema"]["properties"]["content"]["description"]
             .as_str()
             .is_some_and(|value| value.contains("rebuild")));
+        let served_git = served_tools.body["result"]["tools"]
+            .as_array()
+            .and_then(|tools| tools.iter().find(|tool| tool["name"] == "git_workflow"))
+            .expect("fresh serving instance exposes git_workflow");
+        assert!(served_git["inputSchema"]["properties"]["path"]["description"]
+            .as_str()
+            .is_some_and(|value| value.contains("Required for blame")));
+        assert!(served_git["inputSchema"]["properties"]["include_patch"].is_object());
 
         let served_elevated = served_tools.body["result"]["tools"]
             .as_array()
@@ -2842,6 +3052,45 @@ mod tests {
             "InvalidArgument",
             "cross-action command_control fields were not rejected: {:#?}",
             invalid_control.body
+        );
+        let invalid_git = public_tool_call(
+            pep.port(),
+            &session,
+            6882,
+            "git_workflow",
+            json!({"action":"status","rev":"HEAD"}),
+        );
+        assert_eq!(
+            invalid_git.body["result"]["structuredContent"]["error"]["code"],
+            "InvalidArgument",
+            "cross-action git_workflow fields were not rejected: {:#?}",
+            invalid_git.body
+        );
+        let invalid_document = public_tool_call(
+            pep.port(),
+            &session,
+            6883,
+            "document_workflow",
+            json!({"action":"rebuild","path":"range.txt","content":"x","source":"range.txt"}),
+        );
+        assert_eq!(
+            invalid_document.body["result"]["structuredContent"]["error"]["code"],
+            "InvalidArgument",
+            "cross-action document_workflow fields were not rejected: {:#?}",
+            invalid_document.body
+        );
+        let invalid_resume = public_tool_call(
+            pep.port(),
+            &session,
+            6884,
+            "agent_workflow",
+            json!({"action":"resume","path":"."}),
+        );
+        assert_eq!(
+            invalid_resume.body["result"]["structuredContent"]["error"]["code"],
+            "InvalidArgument",
+            "resume accepted fields other than action: {:#?}",
+            invalid_resume.body
         );
         let directory_schema = &served_agent["inputSchema"]["properties"]["directory_changes"];
         assert_eq!(directory_schema["type"], "array");

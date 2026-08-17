@@ -13,7 +13,7 @@ if (!lb006?.required_tests?.includes(proof)) throw new Error("ARCH-030 LB-006 ou
 const facade = readFileSync("src-tauri/src/mcp/facade.rs", "utf8");
 const server = readFileSync("src-tauri/src/mcp/server.rs", "utf8");
 for (const marker of [
-  "pub const AGENT_API_REVISION: u32 = 38",
+  "pub const AGENT_API_REVISION: u32 = 39",
   '"outputSchema": public_tool_output_schema(name)',
   "fn public_tool_output_schema(name: &str) -> Value",
   '"agent_workflow" => json!({',

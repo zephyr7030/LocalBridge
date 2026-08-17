@@ -1831,6 +1831,122 @@ const SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17 = Object.freeze({
   },
 });
 
+const SCHEMA39_EXECUTION_PLATFORM_2026_08_17 = Object.freeze({
+  schemaVersion: 39,
+  baselineSchemaVersion: 38,
+  replacedRules: {
+    localbridge_agent_api_revision: { current: 39, baseline: 38 },
+  },
+  addedRules: {
+    public_typed_error_taxonomy: [
+      "InvalidArgument", "NotFound", "WorkspaceDenied", "CapabilityDenied", "PolicyDenied",
+      "InvalidShellSyntax", "PrivilegedRouteUnavailable", "ElevationRequired", "ProcessFailed",
+      "ProcessTimedOut", "ProcessCancelled", "SessionUnavailable", "OutputTruncated",
+      "RuntimeUnavailable", "RuntimeProtocolMismatch", "RuntimeCapabilityMismatch", "Internal",
+    ],
+    public_typed_error_existing_canonical_names_preserved: true,
+    public_typed_error_cross_entry_normalization_required: true,
+    public_typed_error_trial_and_error_discovery_forbidden: true,
+    workflow_owns_task_lifecycle_required: true,
+    process_backed_task_execution_resource_optional_required: true,
+    process_backed_execution_public_session_to_process_tree_required: true,
+    non_process_task_fake_session_forbidden: true,
+    task_control_remains_high_level_get_cancel_only: true,
+    task_control_ai_session_process_selection_forbidden: true,
+    public_schema_real_mcp_client_projection_acceptance_required: true,
+    public_schema_top_level_discoverable_properties_required: true,
+    server_action_operation_specific_validation_required: true,
+    agent_workflow_orchestration_only_required: true,
+    agent_workflow_shared_service_reuse_required: ["filesystem", "git", "process", "document", "image", "privilege"],
+    agent_workflow_duplicate_shell_file_git_semantics_forbidden: true,
+    workspace_context_compact_project_discovery_required: true,
+    workspace_context_compact_project_discovery_fields: [
+      "project_name", "project_type", "project_version", "git_branch", "git_dirty",
+      "git_changed_count", "package_manager", "build_system", "test_system",
+      "runtime_availability", "trusted_shells", "permission_mode", "current_task",
+    ],
+    workspace_context_cached_discovery_snapshot_required: true,
+    workspace_context_redundant_probe_process_spawn_forbidden: true,
+    public_process_lifecycle_states: ["running", "completed", "failed", "cancelled", "timed_out", "lost"],
+    public_process_terminal_truth_single_durable_required: true,
+    public_process_terminal_truth_client_poll_independent_required: true,
+    public_entry_permission_capability_classifier_single_implementation_required: true,
+    public_entry_workspace_path_authority_single_implementation_required: true,
+    workflow_resume_durable_recovery_required: true,
+    retained_output_continuation_recovery_required: true,
+    generic_process_pause_history_snapshot_rollback_v0_1_required: false,
+    file_workflow_v0_1_required: false,
+    existing_eight_core_tool_surface_preserved: true,
+    parallel_maturity_gate_taxonomy_forbidden: true,
+    schema39_contract_ratified: true,
+    schema39_revision_scope: [
+      "workflow-task-execution-ownership", "real-client-schema-consumability",
+      "typed-error-normalization", "agent-workflow-orchestration-boundary",
+      "compact-workspace-discovery", "durable-async-terminal-and-resume-recovery",
+      "public-surface-conservation",
+    ],
+    schema39_earliest_owner_pr: "LB-006",
+    schema39_next_g2_review_generation: 27,
+    schema39_next_g3_review_generation: 17,
+  },
+  prs: {
+    "LB-006": {
+      addedArtifacts: [
+        "Workflow-owned Task lifecycle with optional process Execution resources so process-backed Tasks own public Session to process-tree execution while Git document image and other non-process Tasks do not fabricate Sessions",
+        "one LocalBridge public typed-error normalization table preserving existing canonical codes across facade entry points",
+        "agent_workflow orchestration adapters that reuse the same filesystem Git process document image privilege path-authority capability and terminal-lifecycle services as direct public tools",
+        "compact cached workspace_context project discovery projection sufficient for first-turn development without redundant shell probing",
+        "durable workflow resume checkpoint plus retained-output continuation using existing public tools without adding task history UI or a ninth core tool",
+      ],
+      addedTests: [
+        "process-backed Workflow Task ownership is explicit: a running command Task owns one public execution Session and process tree while a Git document image or pure structured workspace Task returns no fabricated session_id and still reaches a terminal Task state",
+        "task_control public action set remains exactly get and cancel; cancel never requires the model to choose a session or process and resolves the currently owned execution through Task ownership before invoking the shared public-session terminator",
+        "the actual downstream MCP client projection of every public tool schema is executable in an integration fixture: command_control elevated_exec document_workflow and future multi-action schemas expose enough top-level fields and constraints for a client to construct legal calls without first provoking InvalidArgument",
+        "the same public failure condition maps to the same existing canonical LocalBridge error code through direct tools and agent_workflow indirection; schema39 does not rename PolicyDenied WorkspaceDenied RuntimeUnavailable InvalidShellSyntax PrivilegedRouteUnavailable ProcessTimedOut or the already-implemented ProcessFailed ProcessCancelled SessionUnavailable family",
+        "agent_workflow command execution uses the same public Session Manager terminal finalizer shell resolver path authority capability classifier and output retention as exec_command rather than a parallel implementation; Git document and image workflow steps reuse their direct shared services",
+        "one workspace_context call returns compact project name type version Git branch dirty state changed count package manager build and test system runtime availability trusted shells permission mode and current task when deterministically discoverable; cached discovery does not spawn redundant probe processes on every call and unavailable fields remain typed or explicitly unknown rather than guessed",
+        "public command lifecycle states are restricted to running completed failed cancelled timed_out or lost at the session boundary and every non-running state is durable terminal truth independent of client polling; no runtime error or handle loss can erase the terminal owner",
+        "agent_workflow resume can recover the last durable workflow checkpoint and continue only missing work after reconnect or interruption without adding a user-browsable task history surface; retained output can continue from output_ref offsets",
+        "schema39 preserves exactly eight non-privileged core tools plus elevated_exec privileged extension and does not add file_workflow generic process pause task history automatic filesystem snapshot or rollback requirements",
+      ],
+    },
+  },
+});
+
+export function hasExactSchema39ExecutionPlatform20260817(contractsDoc) {
+  if (contractsDoc?.schema_version !== SCHEMA39_EXECUTION_PLATFORM_2026_08_17.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(SCHEMA39_EXECUTION_PLATFORM_2026_08_17.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const [key, replacement] of Object.entries(SCHEMA39_EXECUTION_PLATFORM_2026_08_17.replacedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(replacement.current)) return false;
+  }
+  for (const [id, delta] of Object.entries(SCHEMA39_EXECUTION_PLATFORM_2026_08_17.prs)) {
+    const pr = contractsDoc?.prs?.[id];
+    if (!pr) return false;
+    for (const artifact of delta.addedArtifacts ?? []) if (!pr.required_artifacts?.includes(artifact)) return false;
+    for (const test of delta.addedTests ?? []) if (!pr.required_tests?.includes(test)) return false;
+  }
+  return true;
+}
+
+export function normalizeSchema39ExecutionPlatform20260817(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = SCHEMA39_EXECUTION_PLATFORM_2026_08_17.baselineSchemaVersion;
+  for (const key of Object.keys(SCHEMA39_EXECUTION_PLATFORM_2026_08_17.addedRules)) delete normalized.rules[key];
+  for (const [key, replacement] of Object.entries(SCHEMA39_EXECUTION_PLATFORM_2026_08_17.replacedRules)) normalized.rules[key] = replacement.baseline;
+  for (const [id, delta] of Object.entries(SCHEMA39_EXECUTION_PLATFORM_2026_08_17.prs)) {
+    const pr = normalized.prs?.[id];
+    if (!pr) continue;
+    const artifacts = new Set(delta.addedArtifacts ?? []);
+    const tests = new Set(delta.addedTests ?? []);
+    pr.required_artifacts = (pr.required_artifacts ?? []).filter((item) => !artifacts.has(item));
+    pr.required_tests = (pr.required_tests ?? []).filter((item) => !tests.has(item));
+  }
+  return normalized;
+}
+
 export function hasExactSchema38PublicControlRepair20260817(contractsDoc) {
   if (contractsDoc?.schema_version !== SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.schemaVersion) return false;
   for (const [key, expected] of Object.entries(SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.addedRules)) {
@@ -2603,6 +2719,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA39_EXECUTION_PLATFORM_2026_08_17.schemaVersion) {
+    if (!hasExactSchema39ExecutionPlatform20260817(authorizationContracts)) {
+      findings.push(`${expected.id}:schema39-execution-platform-20260817-drift`);
+    }
+    authorizationContracts = normalizeSchema39ExecutionPlatform20260817(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.schemaVersion) {
     if (!hasExactSchema38PublicControlRepair20260817(authorizationContracts)) {
       findings.push(`${expected.id}:schema38-public-control-repair-20260817-drift`);
