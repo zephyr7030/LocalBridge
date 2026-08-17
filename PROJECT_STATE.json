@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4480,6 +4480,17 @@
       "Architecture and diff check PASS."
     ],
     "next_pr": "LB-012",
+    "g4_unlocked": false
+  },
+  "schema40_schema41_lb012_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "evidence": [
+      "LB012 contract PASS and ARCH-031 PASS with current revision41.",
+      "Fresh privilege control 5/5 PASS and real MCP elevated_exec broker-only test PASS.",
+      "Architecture and diff check PASS."
+    ],
+    "next_action": "Run fresh schema40 G2 generation28 independent adversarial review.",
     "g4_unlocked": false
   }
 }
