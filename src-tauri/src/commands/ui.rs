@@ -71,30 +71,66 @@ struct ReconnectProjection {
 
 const ADMIN_CONSENT_DURATION: Duration = Duration::from_millis(9000);
 
+#[derive(Debug)]
+struct PendingAdminConsent {
+    challenge_id: String,
+    not_before: Instant,
+}
+
 #[derive(Debug, Default)]
 struct AdminConsentGate {
-    not_before: Option<Instant>,
+    pending: Option<PendingAdminConsent>,
+    confirmed: bool,
 }
 
 impl AdminConsentGate {
-    fn begin_at(&mut self, now: Instant) {
-        self.not_before = Some(now + ADMIN_CONSENT_DURATION);
+    fn begin_at(&mut self, challenge_id: &str, now: Instant) {
+        self.pending = Some(PendingAdminConsent {
+            challenge_id: challenge_id.to_string(),
+            not_before: now + ADMIN_CONSENT_DURATION,
+        });
+        self.confirmed = false;
     }
 
-    fn cancel(&mut self) {
-        self.not_before = None;
+    fn cancel(&mut self, challenge_id: &str) -> bool {
+        let matches = self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.challenge_id == challenge_id);
+        if matches {
+            self.pending = None;
+            self.confirmed = false;
+        }
+        matches
     }
 
-    fn confirm_at(&mut self, now: Instant) -> bool {
-        let Some(not_before) = self.not_before else {
+    fn confirm_at(&mut self, challenge_id: &str, now: Instant) -> bool {
+        let Some(pending) = self.pending.as_ref() else {
             return false;
         };
-        if now < not_before {
+        if pending.challenge_id != challenge_id || now < pending.not_before {
             return false;
         }
-        self.not_before = None;
+        self.pending = None;
+        self.confirmed = true;
         true
     }
+
+    fn consume_confirmed(&mut self) -> bool {
+        std::mem::take(&mut self.confirmed)
+    }
+
+    fn reset(&mut self) {
+        self.pending = None;
+        self.confirmed = false;
+    }
+}
+
+fn valid_admin_consent_challenge_id(challenge_id: &str) -> bool {
+    (16..=64).contains(&challenge_id.len())
+        && challenge_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn admin_consent_gate() -> &'static Mutex<AdminConsentGate> {
@@ -102,27 +138,56 @@ fn admin_consent_gate() -> &'static Mutex<AdminConsentGate> {
     GATE.get_or_init(|| Mutex::new(AdminConsentGate::default()))
 }
 
-fn begin_admin_consent_challenge() {
+fn begin_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
+    if !valid_admin_consent_challenge_id(challenge_id) {
+        return Err("管理员确认标识无效".to_string());
+    }
     admin_consent_gate()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .begin_at(Instant::now());
+        .begin_at(challenge_id, Instant::now());
+    Ok(())
 }
 
-fn cancel_admin_consent_challenge() {
+fn cancel_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
+    if !valid_admin_consent_challenge_id(challenge_id) {
+        return Err("管理员确认标识无效".to_string());
+    }
     admin_consent_gate()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .cancel();
+        .cancel(challenge_id);
+    Ok(())
 }
 
-fn consume_ready_admin_consent() -> bool {
+fn confirm_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
+    if !valid_admin_consent_challenge_id(challenge_id) {
+        return Err("管理员确认标识无效".to_string());
+    }
+    let confirmed = admin_consent_gate()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .confirm_at(challenge_id, Instant::now());
+    if confirmed {
+        Ok(())
+    } else {
+        Err("管理员确认无效或尚未完成".to_string())
+    }
+}
+
+fn consume_confirmed_admin_consent() -> bool {
     admin_consent_gate()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .confirm_at(Instant::now())
+        .consume_confirmed()
 }
 
+fn reset_admin_consent() {
+    admin_consent_gate()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .reset();
+}
 #[tauri::command]
 pub async fn get_main_projection(app: AppHandle) -> Result<MainProjection, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -243,24 +308,25 @@ fn get_main_projection_blocking(
 #[tauri::command]
 pub async fn set_permission_mode(mode: String, app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        if mode == "admin-consent-begin" {
-            begin_admin_consent_challenge();
-            return Ok(());
+        if let Some(challenge_id) = mode.strip_prefix("admin-consent-begin:") {
+            return begin_admin_consent_challenge(challenge_id);
         }
-        if mode == "admin-consent-cancel" {
-            cancel_admin_consent_challenge();
-            return Ok(());
+        if let Some(challenge_id) = mode.strip_prefix("admin-consent-cancel:") {
+            return cancel_admin_consent_challenge(challenge_id);
+        }
+        if let Some(challenge_id) = mode.strip_prefix("admin-consent-confirm:") {
+            return confirm_admin_consent_challenge(challenge_id);
         }
         let lifecycle = app.state::<DesktopLifecycle>();
         let requested = parse_permission(&mode)?;
         if requested != PermissionMode::Elevated {
-            cancel_admin_consent_challenge();
+            reset_admin_consent();
         }
         let privilege_active =
             matches!(lifecycle.privilege().state(), PrivilegeState::Active { .. });
         if requested == PermissionMode::Elevated
             && !privilege_active
-            && !consume_ready_admin_consent()
+            && !consume_confirmed_admin_consent()
         {
             return Err("管理员确认尚未完成".to_string());
         }
@@ -945,31 +1011,48 @@ mod tests {
     fn admin_consent_gate_rejects_early_and_consumes_exact_boundary() {
         let start = Instant::now();
         let mut gate = AdminConsentGate::default();
-        gate.begin_at(start);
-        assert!(!gate.confirm_at(start + Duration::from_millis(8_999)));
-        assert!(gate.confirm_at(start + ADMIN_CONSENT_DURATION));
-        assert!(!gate.confirm_at(start + ADMIN_CONSENT_DURATION));
+        gate.begin_at("challenge-a-0001", start);
+        assert!(!gate.confirm_at("challenge-a-0001", start + Duration::from_millis(8_999)));
+        assert!(gate.confirm_at("challenge-a-0001", start + ADMIN_CONSENT_DURATION));
+        assert!(gate.consume_confirmed());
+        assert!(!gate.consume_confirmed());
     }
 
     #[test]
     fn admin_consent_gate_fresh_begin_resets_full_deadline() {
         let start = Instant::now();
         let mut gate = AdminConsentGate::default();
-        gate.begin_at(start);
-        gate.begin_at(start + Duration::from_millis(8_500));
-        assert!(!gate.confirm_at(start + Duration::from_millis(9_000)));
-        assert!(gate.confirm_at(start + Duration::from_millis(17_500)));
+        gate.begin_at("challenge-a-0001", start);
+        gate.begin_at("challenge-b-0002", start + Duration::from_millis(8_500));
+        assert!(!gate.confirm_at("challenge-b-0002", start + Duration::from_millis(9_000)));
+        assert!(gate.confirm_at("challenge-b-0002", start + Duration::from_millis(17_500)));
+        assert!(gate.consume_confirmed());
     }
 
     #[test]
-    fn admin_consent_gate_cancel_invalidates_challenge() {
+    fn admin_consent_gate_stale_identity_cannot_confirm_or_cancel_newer_challenge() {
         let start = Instant::now();
         let mut gate = AdminConsentGate::default();
-        gate.begin_at(start);
-        gate.cancel();
-        assert!(!gate.confirm_at(start + ADMIN_CONSENT_DURATION));
+        gate.begin_at("challenge-a-0001", start);
+        gate.begin_at("challenge-b-0002", start + Duration::from_millis(500));
+        let ready = start + Duration::from_millis(500) + ADMIN_CONSENT_DURATION;
+        assert!(!gate.confirm_at("challenge-a-0001", ready));
+        assert!(!gate.cancel("challenge-a-0001"));
+        assert!(!gate.consume_confirmed());
+        assert!(gate.confirm_at("challenge-b-0002", ready));
+        assert!(gate.consume_confirmed());
+        assert!(!gate.confirm_at("challenge-b-0002", ready));
     }
 
+    #[test]
+    fn admin_consent_gate_matching_cancel_invalidates_challenge() {
+        let start = Instant::now();
+        let mut gate = AdminConsentGate::default();
+        gate.begin_at("challenge-a-0001", start);
+        assert!(gate.cancel("challenge-a-0001"));
+        assert!(!gate.confirm_at("challenge-a-0001", start + ADMIN_CONSENT_DURATION));
+        assert!(!gate.consume_confirmed());
+    }
     #[test]
     fn runtime_start_fault_messages_are_redacted_and_actionable() {
         assert_eq!(

@@ -23,6 +23,7 @@ const ADMIN_WARNING_CONSEQUENCES = [
 ] as const;
 
 export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  const challengeId = useRef(crypto.randomUUID());
   const startedAt = useRef<number | null>(null);
   const confirmationHandedOff = useRef(false);
   const onCancelRef = useRef(onCancel);
@@ -34,7 +35,7 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
   const cancel = async () => {
     if (confirmationHandedOff.current) return;
     try {
-      await invoke<void>("set_permission_mode", { mode: "admin-consent-cancel" });
+      await invoke<void>("set_permission_mode", { mode: `admin-consent-cancel:${challengeId.current}` });
     } finally {
       onCancelRef.current();
     }
@@ -42,7 +43,7 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
 
   useEffect(() => {
     let disposed = false;
-    void invoke<void>("set_permission_mode", { mode: "admin-consent-begin" }).then(() => {
+    void invoke<void>("set_permission_mode", { mode: `admin-consent-begin:${challengeId.current}` }).then(() => {
       if (disposed) return;
       startedAt.current = performance.now();
       setRemainingSeconds(9);
@@ -65,13 +66,19 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
       window.clearInterval(timer);
       window.removeEventListener("keydown", onKeyDown);
       if (!confirmationHandedOff.current) {
-        void invoke<void>("set_permission_mode", { mode: "admin-consent-cancel" }).catch(() => undefined);
+        void invoke<void>("set_permission_mode", { mode: `admin-consent-cancel:${challengeId.current}` }).catch(() => undefined);
       }
     };
   }, []);
 
-  const confirm = () => {
+  const confirm = async () => {
     if (!backendChallengeReady || startedAt.current === null || !adminWarningCanConfirm(startedAt.current, performance.now())) return;
+    try {
+      await invoke<void>("set_permission_mode", { mode: `admin-consent-confirm:${challengeId.current}` });
+    } catch {
+      setBackendChallengeReady(false);
+      return;
+    }
     confirmationHandedOff.current = true;
     onConfirm();
   };
@@ -84,7 +91,7 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
       <p className="admin-warning-footer">仅在你明确理解操作后果时授权。</p>
       <div className="dialog-actions">
         <button className="secondary" onClick={() => void cancel()}>取消</button>
-        <button className="primary admin-warning-confirm" disabled={!backendChallengeReady || remainingSeconds > 0} onClick={confirm}>{remainingSeconds > 0 ? `确认${remainingSeconds}` : "确认"}</button>
+        <button className="primary admin-warning-confirm" disabled={!backendChallengeReady || remainingSeconds > 0} onClick={() => void confirm()}>{remainingSeconds > 0 ? `确认${remainingSeconds}` : "确认"}</button>
       </div>
     </section>
   </div>;
