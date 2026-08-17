@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3523,5 +3523,18 @@
     "next_pr": "LB-015",
     "g3_review_generation": 13,
     "g4_unlocked": false
+  },
+  "lb015_schema36_dashboard_authority_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "product_commit": "27893a3",
+    "contract_cleanup_commit": "2d962ee",
+    "architecture_verifier_commit": "d15475f",
+    "evidence": [
+      "Dashboard PermissionMode row removed; read-only administrator privilege state is sourced from backend PrivilegeState projection.",
+      "Settings remains the PermissionMode editor and Dashboard project scope continues to follow backend PermissionMode.",
+      "LB-015 contract, ARCH-029, frontend tests/build, architecture and UI-language gates passed."
+    ],
+    "next_action": "Implement LB-016 backend-trusted 9000ms administrator consent challenge/not-before gate."
   }
 }
