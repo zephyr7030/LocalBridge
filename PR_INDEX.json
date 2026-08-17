@@ -394,10 +394,10 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
-      "review_generation": 17,
-      "human_review_status": "BLOCKED",
+      "status": "PASS",
+      "review_status": "PASS",
+      "review_generation": 18,
+      "human_review_status": "REQUIRED",
       "human_review_generation": 3,
       "review_provenance": {
         "generation": 17,

@@ -4579,5 +4579,37 @@
     ],
     "next_action": "Run fresh schema40 G3 generation18 independent adversarial review.",
     "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_18_2026_08_18": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 18,
+    "kind": "independent_adversarial",
+    "baseline_commit": "63dc10f8b7ea7fca0078fa818dc6467ba3cc7707",
+    "finding": "No blocking schema40 G3 defect found after fresh final-tree adversarial review; Dashboard and onboarding now project the same backend authenticated coding-service health truth.",
+    "evidence": [
+      "Fresh full cargo test PASS on final tree: 218 library tests plus all integration/migration targets; one explicit live-UAC test remains intentionally ignored.",
+      "Clippy --all-targets --all-features -D warnings PASS; frontend Vitest 4 files/7 tests and production build PASS.",
+      "LB-015/016/017 contracts, runtime manifest, UI-language, schema41 coding-agent machine acceptance, architecture and G4 fail-closed PASS.",
+      "Real Tauri/WebView2 fixed-window E2E PASS for onboarding and dashboard at 780x620 logical, 1170x930 physical, DPR 1.5; Dashboard settings alignment/rounded scroll also PASS."
+    ],
+    "verified_passes": [
+      "cargo test --locked",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "frontend Vitest 7 tests and production build",
+      "LB-015/LB-016/LB-017 contracts",
+      "runtime-manifest",
+      "UI-language",
+      "schema41 coding-agent machine acceptance",
+      "architecture",
+      "G4 fail-closed",
+      "real fixed-window WebView2 E2E",
+      "git diff --check"
+    ],
+    "g3_generation_18_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": null
   }
 }
