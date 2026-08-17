@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4297,6 +4297,16 @@
       "Fresh CurrentTask projection tests PASS 3/3 and projection snapshot/cursor atomic regression PASS 1/1, preserving wake-driven tool-call visibility."
     ],
     "next_pr": "LB-016",
+    "g4_unlocked": false
+  },
+  "schema39_lb016_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "evidence": [
+      "LB016 onboarding contract PASS.",
+      "Fresh admin consent challenge tests PASS 4/4: fresh begin resets deadline, early confirmation rejected, exact boundary one-shot consumption, matching cancel invalidates, stale identity cannot confirm/cancel newer challenge."
+    ],
+    "next_pr": "LB-017",
     "g4_unlocked": false
   }
 }
