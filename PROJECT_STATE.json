@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-013",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G2",
+  "current_group": "G3",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -4199,7 +4199,7 @@
     "g4_unlocked": false
   },
   "schema39_g2_revalidation_2026_08_17": {
-    "status": "PASS_PENDING_PROVENANCE",
+    "status": "PASS",
     "owner_prs": [
       "LB-006",
       "LB-007",
@@ -4220,7 +4220,7 @@
     "g2_generation_27_consumed": true,
     "g3_blocked_until_g2_generation27_pass": false,
     "g4_unlocked": false,
-    "g2_review_decision_commit": "PENDING"
+    "g2_review_decision_commit": "2fab63e6b99a163a95571f2436aa5b39806e4039"
   },
   "g2_adversarial_review_generation_27_2026_08_17": {
     "status": "PASS",
@@ -4248,8 +4248,24 @@
       "git diff --check"
     ],
     "g2_generation_27_consumed": true,
-    "g3_unlocked_for_reacceptance": false,
+    "g3_unlocked_for_reacceptance": true,
     "g4_unlocked": false,
-    "review_decision_commit": "PENDING"
+    "review_decision_commit": "2fab63e6b99a163a95571f2436aa5b39806e4039"
+  },
+  "schema39_g3_revalidation_2026_08_17": {
+    "status": "REWORK_REQUIRED",
+    "owner_prs": [
+      "LB-013",
+      "LB-014",
+      "LB-015",
+      "LB-016",
+      "LB-017"
+    ],
+    "upstream_g2_generation": 27,
+    "product_commit": "c0011fadea28b6fac73b9bb236a98d1ee7a6e1fa",
+    "next_required_g3_adversarial_generation": 17,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "next_action": "Reaccept LB-013 through LB-017 sequentially, then run fresh G3 independent adversarial review generation17."
   }
 }
