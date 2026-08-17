@@ -4383,7 +4383,7 @@
       "status": "PASS"
     },
     "schema41": {
-      "status": "G2_REVALIDATION_REQUIRED",
+      "status": "G2_REVALIDATION_BLOCKED_ON_DOWNSTREAM_PROJECTION",
       "earliest_owner_pr": "LB-006",
       "owner_prs": [
         "LB-006"
@@ -4410,7 +4410,7 @@
       "schema41 G3 revalidation generation 19"
     ],
     "g4_unlocked": false,
-    "next_action": "Run fresh schema41 G2 revalidation generation29."
+    "next_action": "Obtain fresh real downstream schema41 projection, then finish G2 generation29 and G3 generation19."
   },
   "schema40_schema41_lb006_reacceptance_2026_08_18": {
     "status": "PASS",
@@ -4631,6 +4631,31 @@
     "product_revision": 41,
     "reason": "schema41 strict sequence requires fresh coding-agent semantic revalidation after schema40 acceptance; no PR product reopen is required because schema41 product implementation is already on the accepted tree.",
     "g3_blocked_until_g2_generation29_pass": true,
+    "g4_unlocked": false
+  },
+  "schema41_g2_generation29_pending_2026_08_18": {
+    "status": "REVIEW_REQUIRED",
+    "generation": 29,
+    "generation_consumed": false,
+    "baseline_commit": "09bf28f97471be1ad012ac3e6a0008c27f8707b3",
+    "product_revision": 41,
+    "local_engineering_gate": "PASS",
+    "evidence": [
+      "schema41 focused machine capability matrix PASS; MCP module, policy and full cargo test PASS; Clippy all-targets/all-features -D warnings PASS; frontend 7/7 and production build PASS; runtime manifest, UI-language, architecture, G4 fail-closed and diff check PASS.",
+      "Live production PEP initialize on current Tunnel endpoint returned serverInfo.version=0.1.0+api41 and tools.listChanged=true.",
+      "Live production PEP tools/list returned workspace_context.detail=compact|full and agent_workflow.phase/task_id/expected_files; current runtime/tunnel therefore serves schema41 correctly.",
+      "Controlled termination of only the confirmed LocalBridge Tunnel child was recovered automatically to a new Tunnel PID by schema40 recovery, but ChatGPT connector projection still exposed the older schema39 agent_workflow/workspace_context fields.",
+      "A direct @测试 call was disabled by the platform before reaching LocalBridge; no product result is inferred from that routing failure."
+    ],
+    "blocker": {
+      "code": "DOWNSTREAM_CLIENT_METADATA_STALE",
+      "contract": "A345 / public_schema_real_mcp_client_projection_acceptance_required",
+      "scope": "ChatGPT current connector projection still lacks schema41 workspace_context.detail and agent_workflow phase/task_id/expected_files although live LocalBridge serves them",
+      "product_fix_remaining": false,
+      "requires_fresh_downstream_projection": true
+    },
+    "next_action": "Retry/refresh the real @测试 connector projection. If schema41 fields are visible and a legal call reaches LocalBridge, finish G2 generation29 decision/provenance, then run G3 generation19.",
+    "g3_generation19_blocked": true,
     "g4_unlocked": false
   }
 }
