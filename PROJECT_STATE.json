@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": "LB-011",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4456,6 +4456,19 @@
       "Architecture PASS."
     ],
     "next_pr": "LB-010",
+    "g4_unlocked": false
+  },
+  "schema40_schema41_lb010_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-010",
+    "product_commit": "2af9360f9a6dcd48a2cd21913e3e53896597e22c",
+    "evidence": [
+      "Process-alive authenticated-MCP-unresponsive regression PASS: Ready exits immediately to CodingRuntime recovering attempt0 and existing full-runtime recovery succeeds on attempt1.",
+      "Fresh runtime::recovery 16/16 PASS preserving exact 1/2/5/10/30 backoff, five-attempt budget, typed retryability and minimal-layer semantics.",
+      "Production watchdog contract PASS now consumes pending typed MCP faults and bounded authenticated coding_runtime_health; busy facade lock defers one tick rather than false outage.",
+      "Clippy lib -D warnings, architecture and git diff --check PASS."
+    ],
+    "next_pr": "LB-011",
     "g4_unlocked": false
   }
 }
