@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4103,5 +4103,32 @@
     "current_pr": "LB-006",
     "g4_unlocked": false,
     "next_action": "Re-run actual @测试 schema projection only after the platform exposes a refreshed connector metadata view; if command_control/elevated_exec and other multi-action schemas are then consumable, accept LB-006 and resume strict LB-007 -> LB-012 -> G2 generation27 -> LB-013 -> LB-017 -> G3 generation17 sequencing."
+  },
+  "schema39_lb006_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commit": "c0011fadea28b6fac73b9bb236a98d1ee7a6e1fa",
+    "acceptance": [
+      "A343",
+      "A344",
+      "A345",
+      "A346",
+      "A347",
+      "A348",
+      "A349",
+      "A350",
+      "A351"
+    ],
+    "evidence": [
+      "Actual @测试 rediscovery now exposes facade_revision=39 and workspace_context first-turn project/Git/runtime/permission/current-task fields; command_control and elevated_exec are projected with concrete fields rather than generic objects.",
+      "Actual @测试 exec_command completed through the refreshed connector and returned stable task_id/session_id/output_ref/status metadata.",
+      "Fresh schema39 machine acceptance PASS; runtime-manifest PASS; G4 human-gate fail-closed PASS; current architecture verifier PASS.",
+      "Fresh Rust facade/server/task_state/workflow_checkpoint acceptance PASS on an isolated Cargo target, including durable resume, dual-path task cancellation, schema refresh and strict action validation."
+    ],
+    "next_pr": "LB-007",
+    "next_required_g2_adversarial_generation": 27,
+    "g2_generation_27_consumed": false,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
