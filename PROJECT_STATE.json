@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-014",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3509,6 +3509,18 @@
       "Fresh background and tray Rust filters PASS."
     ],
     "next_pr": "LB-014",
+    "g3_review_generation": 13,
+    "g4_unlocked": false
+  },
+  "lb014_schema36_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-014",
+    "evidence": [
+      "LB014 contract PASS.",
+      "Fresh autostart/single-instance/ui_ready Rust filters PASS.",
+      "No LB-014 product change required by schema36."
+    ],
+    "next_pr": "LB-015",
     "g3_review_generation": 13,
     "g4_unlocked": false
   }
