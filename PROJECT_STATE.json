@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4410,5 +4410,20 @@
     ],
     "g4_unlocked": false,
     "next_action": "Implement and reaccept schema40 from LB-006 through G3 generation18, then complete schema41 semantic compatibility and fresh G2 generation29/G3 generation19; human G3-to-G4 review remains required."
+  },
+  "schema40_schema41_lb006_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commit": "bfc2536f175b9105ca83f9f3967e102c0e6804cf",
+    "evidence": [
+      "schema41 coding-agent-v1 capability matrix PASS: exactly eight core tools and 12 required semantic capabilities mapped to existing LocalBridge surfaces.",
+      "Fresh MCP module PASS 84/84 including phased durable task identity/resume no replay, ContextService/EditService/VerificationPlanner, live authenticated runtime health and real task_control nine-field envelope.",
+      "Fresh cargo clippy --locked --lib -- -D warnings PASS; runtime-manifest PASS; architecture PASS; G4 human gate remains fail-closed; git diff --check PASS.",
+      "Real @测试 rediscovery was still showing pre-schema41 metadata and then the host disabled the tool before a call reached LocalBridge; this external metadata state is not counted as product PASS or FAIL and will be retried before final group review."
+    ],
+    "next_pr": "LB-007",
+    "schema40_g2_generation": 28,
+    "schema41_g2_generation": 29,
+    "g4_unlocked": false
   }
 }
