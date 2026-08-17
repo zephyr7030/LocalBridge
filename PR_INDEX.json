@@ -327,13 +327,13 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
+      "status": "PASS",
+      "review_status": "PASS",
       "review_generation": 27,
       "review_provenance": {
-        "generation": 26,
+        "generation": 27,
         "kind": "independent_adversarial",
-        "commit": "4bd2db334f12325fe1d04e36cf0356002fbbc0cc",
+        "commit": "4a193714c15c434eda268e6291d5d0e997278fe7",
         "invalidated_generations": [
           {
             "generation": 8,
@@ -369,6 +369,11 @@
             "generation": 25,
             "commit": "5cfc5b086b9bd51eb7ad6a7bed664019104b3986",
             "cause": "schema38_public_control_runtime_audit_repair_2026_08_17"
+          },
+          {
+            "generation": 26,
+            "commit": "4bd2db334f12325fe1d04e36cf0356002fbbc0cc",
+            "cause": "schema39_public_projection_durable_resume_cancel_context_contract_2026_08_17"
           }
         ]
       }

@@ -4197,5 +4197,59 @@
     "g2_generation_27_consumed": false,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "schema39_g2_revalidation_2026_08_17": {
+    "status": "PASS_PENDING_PROVENANCE",
+    "owner_prs": [
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-009",
+      "LB-010",
+      "LB-011",
+      "LB-012"
+    ],
+    "product_commit": "c0011fadea28b6fac73b9bb236a98d1ee7a6e1fa",
+    "evidence": [
+      "Actual refreshed @测试 client exposed facade_revision=39, concrete command_control/elevated_exec schemas and first-turn workspace_context; actual exec_command completed with stable task/session/output handles.",
+      "Fresh final-tree cargo test PASS: 208 library tests plus all migration/integration targets; Clippy --all-targets --all-features -D warnings PASS.",
+      "Frontend Vitest 4 files/7 tests and production build PASS; runtime-manifest, UI-language and schema39 machine acceptance PASS.",
+      "Architecture and G4 human-gate fail-closed PASS; adversarial source checks confirm no cancelled==0 gate, catalog signature avoids execution lock, DPAPI checkpointing and control-plane deny remain enforced."
+    ],
+    "next_required_g2_adversarial_generation": 27,
+    "g2_generation_27_consumed": true,
+    "g3_blocked_until_g2_generation27_pass": false,
+    "g4_unlocked": false,
+    "g2_review_decision_commit": "PENDING"
+  },
+  "g2_adversarial_review_generation_27_2026_08_17": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 27,
+    "kind": "independent_adversarial",
+    "baseline_commit": "4a193714c15c434eda268e6291d5d0e997278fe7",
+    "finding": "No blocking schema39 G2 defect found after fresh final-tree adversarial review.",
+    "evidence": [
+      "Actual refreshed @测试 client exposed facade_revision=39, concrete command_control/elevated_exec schemas and first-turn workspace_context; actual exec_command completed with stable task/session/output handles.",
+      "Fresh final-tree cargo test PASS: 208 library tests plus all migration/integration targets; Clippy --all-targets --all-features -D warnings PASS.",
+      "Frontend Vitest 4 files/7 tests and production build PASS; runtime-manifest, UI-language and schema39 machine acceptance PASS.",
+      "Architecture and G4 human-gate fail-closed PASS; adversarial source checks confirm no cancelled==0 gate, catalog signature avoids execution lock, DPAPI checkpointing and control-plane deny remain enforced."
+    ],
+    "verified_passes": [
+      "actual @测试 schema39 downstream projection and execution",
+      "cargo test --locked (208 library tests plus integration/migration targets)",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "frontend Vitest 7 tests and production build",
+      "runtime-manifest",
+      "UI-language",
+      "schema39 execution platform machine acceptance",
+      "architecture",
+      "G4 fail-closed",
+      "git diff --check"
+    ],
+    "g2_generation_27_consumed": true,
+    "g3_unlocked_for_reacceptance": false,
+    "g4_unlocked": false,
+    "review_decision_commit": "PENDING"
   }
 }
