@@ -4,14 +4,15 @@ import { readFileSync } from "node:fs";
 const ruleId = process.env.LOCALBRIDGE_ARCH_RULE_ID;
 if (ruleId && ruleId !== "ARCH-029") throw new Error(`ARCH-029 invoked as ${ruleId}`);
 const contracts = JSON.parse(readFileSync("PR_CONTRACTS.json", "utf8"));
+const progress = JSON.parse(readFileSync("PR_INDEX.json", "utf8"));
 for (const [key, expected] of Object.entries({
   ui_panel_base_color_difference_required: false,
   ui_flat_primary_surface_allowed: true,
   ui_fake_elevation_through_near_invisible_surface_treatment_forbidden: true,
-  dashboard_permission_mode_row_forbidden: false,
-  dashboard_permission_mode_read_only_row_required: true,
-  dashboard_permission_mode_row_label: "权限模式",
+  dashboard_permission_mode_row_forbidden: true,
+  dashboard_permission_mode_read_only_row_required: false,
   dashboard_permission_mode_status_dot_forbidden: true,
+  dashboard_admin_privilege_status_read_only: true,
   onboarding_screen_4_new_connector_action_label: "打开新建插件页",
   onboarding_screen_4_new_connector_action_before_information_rows: true,
   onboarding_screen_4_information_label_column_aligned: true,
@@ -32,7 +33,6 @@ for (const [key, expected] of Object.entries({
   dashboard_project_scope_display_privilege_state_independent: true,
   dashboard_project_switch_blocked_in_admin_mode: true,
 })) if (JSON.stringify(contracts.rules?.[key]) !== JSON.stringify(expected)) throw new Error(`ARCH-029 contract drift: ${key}`);
-if (JSON.stringify(contracts.rules.dashboard_permission_mode_row_values) !== JSON.stringify(["编辑模式","完整模式","管理员模式"])) throw new Error("ARCH-029 permission-mode value inventory drift");
 if (JSON.stringify(contracts.rules.tray_icon_required_frame_sizes) !== JSON.stringify([16,20,24,32,48])) throw new Error("ARCH-029 tray frame inventory drift");
 if (JSON.stringify(contracts.rules.tray_icon_exact_dpi_frame_mapping) !== JSON.stringify({"1.0":16,"1.25":20,"1.5":24,"2.0":32})) throw new Error("ARCH-029 tray DPI mapping drift");
 if (JSON.stringify(contracts.rules.tray_icon_allowed_processing) !== JSON.stringify(["crop","downscale","ico-packaging"])) throw new Error("ARCH-029 tray allowed processing drift");
@@ -45,7 +45,8 @@ const onboarding = readFileSync("src/features/onboarding/Onboarding.tsx", "utf8"
 const onboardingCss = readFileSync("src/features/onboarding/onboarding.css", "utf8").replace(/\s+/g, "");
 const tray = readFileSync("src-tauri/src/tray/mod.rs", "utf8");
 const trayDeriver = readFileSync("scripts/icons/derive-tray-icon.ps1", "utf8");
-if (!app.includes('>权限模式</span>') || !app.includes('accessText[projection.permission]') || app.includes('>管理员权限</span>')) throw new Error("ARCH-029 Dashboard PermissionMode projection drift");
+const lb015Passed = progress.prs?.find?.((pr) => pr.id === "LB-015")?.status === "PASS";
+if (lb015Passed && (app.includes('>权限模式</span>') || app.includes('accessText[projection.permission]'))) throw new Error("ARCH-029 Dashboard PermissionMode row survived LB-015");
 if (!app.includes('const adminModeFullAccess = projection?.permission === "admin"') || app.includes('projection?.permission === "admin" && projection?.privilege === "active"')) throw new Error("ARCH-029 Dashboard project scope still depends on PrivilegeState");
 if (!app.includes('adminModeFullAccess ? "全目录访问" : activeProject?.path ?? "未选择项目"') || !app.includes('if (adminModeFullAccess)')) throw new Error("ARCH-029 Dashboard project scope/switch is not PermissionMode-bound");
 const dashboardBeforeSettings = app.slice(0, app.indexOf('view === "settings"'));
