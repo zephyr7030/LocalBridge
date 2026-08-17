@@ -514,3 +514,11 @@ ICO  = 16/24/32/48/64/128/256 px
 - 从网络下载“临时图标”进入正式构建。
 
 除非后续有明确品牌变更合同，否则这两份文件是 LocalBridge v0.1 的唯一正式图标源。
+
+
+## Schema36 — 使用端可观测性与 Dashboard 权限显示收敛
+
+- Dashboard 不显示 PermissionMode 行，也不显示编辑/完整/管理员三档控件；只保留 backend `PrivilegeState` 驱动的管理员权限实际状态。
+- Agent/AI 对当前 `Edit / Full / Elevated` 的直接可观测性由 public `workspace_context` 提供，不通过执行失败反推。
+- Settings 与用户显式重新打开 onboarding 第 3 屏仍是 PermissionMode 的唯一可见编辑入口。
+- schema26 管理员确认的 9 秒倒计时可由 React 显示，但授权资格必须来自 backend 单调计时 challenge/not-before；前端计时不得直接授权 UAC/Broker。

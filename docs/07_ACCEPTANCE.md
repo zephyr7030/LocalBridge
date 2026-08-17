@@ -317,3 +317,22 @@
 | A313 | administrator consequence acknowledgement | 授权前明确说明系统修改后果由用户知悉并自主承担；该确认不允许 AI/MCP 批准自身提权或修改 LocalBridge control-plane |
 | A314 | green-storage layout | LocalBridge 主程序、Python/coding runtime/Tunnel/Broker/静态资源等不可变载荷保留并直接从 canonical 安装根运行；可变非密钥状态只集中在 `%LOCALAPPDATA%\LocalBridge`；Runtime API Key 只在 Windows Credential Manager；不得仅为执行把 bundled runtime 复制/解压到 LocalAppData、ProgramData、Windows 系统目录或持久 Temp，也不得建立无必要 ProgramData footprint |
 | A315 | ordinary launch integrity | foreground、`--background` 与登录自启动 ordinary LocalBridge 都必须使用当前 Windows 普通用户 Token / Medium Integrity 且不触发 UAC；进入管理员模式后主应用与 ordinary route 仍保持 Medium，只有显式 `elevated_exec → Broker → UAC` 管理员 route 可获得 High Integrity |
+
+| A316 | Full ordinary shell diagnostics | `where cmd`、`where pwsh`、`echo %PATH%` 不得仅因表面 token 被判管理员 route；Full 下按真实 executable/参数/操作语义分类 |
+| A317 | cmd NUL/redirection compatibility | `>nul`、`2>nul`、pipe、redirect、quotes、`&&`、`||`、环境变量按 Windows 原生语义工作，不被自定义 DSL 拒绝 |
+| A318 | workspace script compatibility | 已验证 active-workspace 内 `.cmd/.bat/.ps1` 不得仅因扩展名或普通 `call` 被升级权限；动态/越界行为仍 fail-closed |
+| A319 | canonical typed shell/policy errors | 稳定区分 `PolicyDenied / WorkspaceDenied / RuntimeUnavailable / InvalidShellSyntax / PrivilegedRouteUnavailable / ProcessTimedOut`；安全 rule category/remediation 可见，私有 matcher 不泄漏 |
+| A320 | workspace_context mode visibility | 返回 `permission_mode/workspace_scope/ordinary_route_token/elevated_route_available/privilege_state`，不需通过失败调用反推模式 |
+| A321 | workspace_context capability snapshot | 返回当前 policy 下 public tools/actions、trusted cmd/PowerShell Core/Windows PowerShell/Git/bundled Python/Node 和 elevated route 的安全 availability/reason；snapshot 不授权 |
+| A322 | explicit pwsh unavailable diagnostics | trusted PowerShell Core 不存在时返回 `RuntimeUnavailable` + 安全 discovery/alternative 摘要；未验证 PATH 候选不得 probe |
+| A323 | permission/capability freshness | PermissionMode/Broker 变化立即反映在 snapshot；缓存 `tools/list` 不具 authority，`tools/call` 服务端重新授权 |
+| A324 | elevated route diagnostics | 只读暴露 mode/Broker/UAC/admin-token availability/最终 route 等安全 typed state；不得泄漏 secret/nonce |
+| A325 | command lifecycle envelope | 适用时统一 `task_id/session_id/status/elapsed_ms/exit_code/output_ref`；public PID 非强制字段 |
+| A326 | retained output paging metadata | 每次 read 返回 `total_bytes/offset/returned_bytes/truncated`，支持按 offset 继续读取 |
+| A327 | single path authority | document/image/Git/workflow/workspace validation 共享 LocalBridge-owned canonical containment/path authority；无 per-tool ad-hoc authorization |
+| A328 | explain/dry_run | 现有 `exec_command/agent_workflow` 的只读解释返回 ordinary/workspace_restricted/elevated_required/permanently_denied + safe rule category，且不执行、不授权 |
+| A329 | environment self-check | enriched `workspace_context` 与/或 `agent_workflow diagnose` 一次检查 workspace、trusted shells、Git、bundled runtimes、Broker/elevated route 与关键配置存在性，不泄漏 secret |
+| A330 | Dashboard PermissionMode authority | Dashboard 不显示 PermissionMode 行或模式控件，只显示实际管理员权限状态；AI/client mode observability 属于 `workspace_context` |
+| A331 | backend admin consent truth | 9 秒 eligibility 由 backend monotonic challenge/not-before 判定；frontend timer 仅展示，early/stale/replay confirm fail-closed |
+| A332 | schema36 public surface conservation | v1 非特权 core 仍严格 8 个工具；capability/explain/diagnose 不新增第九 core tool |
+| A333 | schema36 green-storage conservation | immutable runtime=安装根，mutable state=`%LOCALAPPDATA%\LocalBridge`，secret=Credential Manager；普通启动/后台/自启动 Medium 且无 UAC |

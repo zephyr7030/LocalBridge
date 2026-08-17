@@ -254,3 +254,10 @@ MCP 无权变更 registry/active root。
 - 手动导出；
 - 零遥测；
 - 无自动 crash upload。
+
+
+### Schema36 Shell classification / explain 安全边界
+
+Full 的普通开发、查询和诊断命令默认走 ordinary current-user route；是否需要管理员 route 由真实 executable、参数语义、目标对象和操作类型决定，不能仅靠关键词或 shell 表面语法。`where cmd`、`where pwsh`、`echo %PATH%`、literal `Get-Command <name>` 等只读发现不能仅因命令名被升级。真实系统管理、LocalBridge control-plane、动态命令构造、provider/command-engine mutation 继续 fail-closed。
+
+policy explain/dry_run 和 capability snapshot 都是 non-authorizing projection；调用时 mandatory PEP 仍重新授权。错误解释只允许返回稳定 rule category/remediation，不返回 matcher 私有细节、nonce、secret 或可用于绕过策略的内部状态。管理员模式安全确认必须由 backend challenge identity + monotonic not-before 重新校验；early/stale/replayed confirm 永远不能触发 UAC。

@@ -1783,6 +1783,110 @@ export function normalizeStablePrivilegedToolCatalogAmendment20260816(contractsD
   return normalized;
 }
 
+const SCHEMA36_RUNTIME_OBSERVABILITY_RULES = {
+  dashboard_permission_mode_row_forbidden: true,
+  dashboard_permission_mode_read_only_row_required: false,
+  dashboard_admin_privilege_status_read_only: true,
+  dashboard_permission_mode_legacy_row_contract_superseded_by_schema36: true,
+  workspace_context_permission_mode_required: true,
+  workspace_context_workspace_scope_required: true,
+  workspace_context_ordinary_route_token_required: true,
+  workspace_context_elevated_route_available_required: true,
+  workspace_context_privilege_state_summary_required: true,
+  workspace_context_shell_discovery_summary_required: true,
+  workspace_context_capability_snapshot_required: true,
+  capability_snapshot_informational_only: true,
+  capability_snapshot_call_time_reauthorization_required: true,
+  capability_snapshot_refresh_on_permission_or_broker_change: true,
+  shell_ordinary_diagnostics_not_privileged_by_surface_tokens: true,
+  shell_windows_native_syntax_compatibility_required: true,
+  shell_cmd_nul_redirection_required: true,
+  shell_cmd_pipe_redirect_and_or_env_expansion_required: true,
+  shell_validated_workspace_script_compatibility_required: true,
+  shell_bespoke_dsl_forbidden: true,
+  stable_public_error_codes: ["PolicyDenied", "WorkspaceDenied", "RuntimeUnavailable", "InvalidShellSyntax", "PrivilegedRouteUnavailable", "ProcessTimedOut"],
+  legacy_privileged_route_not_available_public_canonical_forbidden: true,
+  typed_error_safe_rule_category_allowed: true,
+  typed_error_safe_remediation_allowed: true,
+  pwsh_unavailable_discovery_summary_required: true,
+  policy_explain_via_existing_tools_required: true,
+  policy_explain_must_not_execute_or_authorize: true,
+  environment_self_check_via_existing_tools_required: true,
+  public_command_lifecycle_consistent_metadata_required: true,
+  public_command_pid_required: false,
+  public_output_paging_range_metadata_required: true,
+  path_authority_single_localbridge_implementation_required: true,
+  admin_consent_backend_challenge_not_before_required: true,
+  workspace_context_public_core_tool_extension_only: true,
+  public_ninth_core_tool_for_schema36_forbidden: true,
+  schema36_contract_ratified: true,
+  schema36_earliest_owner_pr: "LB-006",
+  schema36_next_g2_review_generation: 24,
+  schema36_next_g3_review_generation: 13,
+};
+const SCHEMA36_LB006_ARTIFACTS = [
+  "enriched workspace_context observability and capability snapshot without adding a ninth core tool",
+  "stable shell/runtime discovery diagnostics and canonical typed-error normalization",
+  "consistent command lifecycle and retained-output paging metadata",
+  "read-only policy explanation/dry-run contract on existing public tools",
+  "single LocalBridge path-authority implementation shared across structured public tools",
+];
+const SCHEMA36_LB006_TESTS = [
+  "Full ordinary where cmd, where pwsh, and echo %PATH% are not privilege-required solely by surface tokens",
+  "cmd NUL redirection pipes redirects quotes && || environment expansion Unicode paths and validated workspace cmd bat ps1 execute with native Windows shell semantics rather than a bespoke DSL",
+  "workspace_context reports permission_mode workspace_scope ordinary_route_token elevated_route_available safe privilege state trusted shell discovery and bounded capability snapshot",
+  "explicit pwsh RuntimeUnavailable includes safe trusted-shell discovery alternatives without executing untrusted PATH aliases",
+  "public command/session results expose consistent task/session/status/elapsed/exit/output metadata and retained output exposes total/offset/returned/truncated metadata",
+  "document image Git workflow and workspace validation share the same LocalBridge path-authority/canonical-containment implementation",
+  "exec_command and agent_workflow read-only explain/dry_run performs no execution and returns stable route classification plus safe rule category",
+  "agent_workflow diagnose or workspace_context supplies one-shot safe environment self-check without secrets",
+];
+const SCHEMA36_LB007_TESTS = [
+  "semantic command classifier distinguishes executable/argument effects from inert diagnostic/data tokens",
+  "canonical public policy errors use PolicyDenied WorkspaceDenied RuntimeUnavailable InvalidShellSyntax PrivilegedRouteUnavailable ProcessTimedOut as applicable and include only safe rule/remediation metadata",
+  "permission and Broker changes refresh capability snapshot while stale tools/list remains non-authoritative and tools/call always reauthorizes",
+];
+const SCHEMA36_LB015_TESTS = [
+  "Dashboard contains no PermissionMode row or PermissionMode controls and retains only read-only actual administrator privilege state",
+  "AI/client PermissionMode observability is provided by workspace_context rather than Dashboard UI",
+];
+const SCHEMA36_LB016_TESTS = [
+  "administrator safety confirmation authorization truth is backend monotonic challenge/not-before; frontend countdown is presentation only and stale/early confirmation fails closed",
+];
+
+export function hasExactSchema36RuntimeObservabilityAmendment20260817(contractsDoc) {
+  if (contractsDoc?.schema_version !== 36) return false;
+  for (const [key, expected] of Object.entries(SCHEMA36_RUNTIME_OBSERVABILITY_RULES)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  if (contractsDoc?.rules?.dashboard_permission_mode_row_label !== undefined || contractsDoc?.rules?.dashboard_permission_mode_row_values !== undefined) return false;
+  return containsAll(contractsDoc?.prs?.["LB-006"]?.required_artifacts ?? [], SCHEMA36_LB006_ARTIFACTS)
+    && containsAll(contractsDoc?.prs?.["LB-006"]?.required_tests ?? [], SCHEMA36_LB006_TESTS)
+    && containsAll(contractsDoc?.prs?.["LB-007"]?.required_tests ?? [], SCHEMA36_LB007_TESTS)
+    && containsAll(contractsDoc?.prs?.["LB-015"]?.required_tests ?? [], SCHEMA36_LB015_TESTS)
+    && containsAll(contractsDoc?.prs?.["LB-016"]?.required_tests ?? [], SCHEMA36_LB016_TESTS);
+}
+
+export function normalizeSchema36RuntimeObservabilityAmendment20260817(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = 35;
+  for (const key of Object.keys(SCHEMA36_RUNTIME_OBSERVABILITY_RULES)) delete normalized.rules[key];
+  normalized.rules.dashboard_permission_mode_row_forbidden = false;
+  normalized.rules.dashboard_permission_mode_read_only_row_required = true;
+  normalized.rules.dashboard_admin_privilege_status_read_only = false;
+  normalized.rules.dashboard_permission_mode_row_label = "权限模式";
+  normalized.rules.dashboard_permission_mode_row_values = ["编辑模式", "完整模式", "管理员模式"];
+  normalized.prs["LB-006"].required_artifacts = removeItems(normalized.prs["LB-006"].required_artifacts, SCHEMA36_LB006_ARTIFACTS);
+  normalized.prs["LB-006"].required_tests = removeItems(normalized.prs["LB-006"].required_tests, SCHEMA36_LB006_TESTS);
+  normalized.prs["LB-007"].required_tests = removeItems(normalized.prs["LB-007"].required_tests, SCHEMA36_LB007_TESTS);
+  normalized.prs["LB-015"].required_tests = removeItems(normalized.prs["LB-015"].required_tests, SCHEMA36_LB015_TESTS);
+  normalized.prs["LB-016"].required_tests = removeItems(normalized.prs["LB-016"].required_tests, SCHEMA36_LB016_TESTS);
+  const oldDashboardTest = "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode";
+  if (!normalized.prs["LB-015"].required_tests.includes(oldDashboardTest)) normalized.prs["LB-015"].required_tests.push(oldDashboardTest);
+  return normalized;
+}
+
 export function hasExactFullModeConsistencyAmendment20260817(contractsDoc) {
   if (contractsDoc?.schema_version !== FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.schemaVersion) return false;
   for (const [key, expected] of Object.entries(FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.addedRules)) {
@@ -2326,6 +2430,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= 36) {
+    if (!hasExactSchema36RuntimeObservabilityAmendment20260817(authorizationContracts)) {
+      findings.push(`${expected.id}:schema36-runtime-observability-contract-amendment-drift`);
+    }
+    authorizationContracts = normalizeSchema36RuntimeObservabilityAmendment20260817(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= FULL_MODE_CONSISTENCY_AMENDMENT_2026_08_17.schemaVersion) {
     if (!hasExactFullModeConsistencyAmendment20260817(authorizationContracts)) {
       findings.push(`${expected.id}:full-mode-consistency-20260817-contract-amendment-drift`);

@@ -392,3 +392,18 @@ LocalBridge.exe --background
 `--background` 从入口不创建/显示主窗口。
 
 开机启动使用 `--background`；管理员偏好不自动显示安全确认、不自动 UAC。
+
+
+### Schema36 — Runtime observability / shell fidelity / stable diagnostics
+
+Public v1 core Registry 仍严格为 8 个工具；不得为了 capability discovery、policy explain 或环境自检新增第九个 core tool。
+
+`workspace_context` 在原 workspace/default_cwd 之外增加只读 typed projection：`permission_mode / workspace_scope / ordinary_route_token / elevated_route_available / privilege_state / shell_discovery / capabilities`。该 snapshot 只用于观察，不能授权；PermissionMode/Broker 状态变化后必须刷新，同一 `tools/call` 仍在服务端重新判定。capabilities 至少安全表达当前 public tools/actions、trusted cmd、PowerShell Core、Windows PowerShell、Git、bundled Python/Node（若存在）以及 elevated route 可用性/原因。
+
+Full ordinary Shell 分类以 executable + 参数/操作语义为依据，不因 `where`、环境变量展开、脚本扩展名或普通重定向表面文字自动升级管理员权限。`where cmd`、`where pwsh`、`echo %PATH%` 属于普通只读诊断。cmd/PowerShell 必须保持 Windows 原生常用语义，包括 NUL 重定向、管道、`>`/`2>`、引号、`&&`/`||`、环境变量、Unicode 路径以及已验证 workspace 内 `.cmd/.bat/.ps1`；禁止把 Shell 收缩成自定义 DSL。
+
+canonical public errors 至少稳定区分 `PolicyDenied / WorkspaceDenied / RuntimeUnavailable / InvalidShellSyntax / PrivilegedRouteUnavailable / ProcessTimedOut`。可附带脱敏 `rule_category` 与 remediation；不得泄漏私有 policy internals。历史 `PrivilegedRouteNotAvailable` 仅可作内部/兼容别名，新的 public canonical 输出使用 `PrivilegedRouteUnavailable`。显式 `shell=pwsh` 不可用时，`RuntimeUnavailable` 同时返回可信发现摘要和可用 fallback。
+
+`exec_command` 与 `agent_workflow` 可在既有 schema 上提供只读 `dry_run/explain`：只返回 `ordinary / workspace_restricted / elevated_required / permanently_denied` 与安全规则类别，不执行、不授权。统一环境自检由 enriched `workspace_context` 与/或 `agent_workflow(action=diagnose)` 承担。
+
+command/session 稳定结果在适用时统一 `task_id/session_id/status/elapsed_ms/exit_code/output_ref`；retained output 分页增加 `total_bytes/offset/returned_bytes/truncated`。public contract 不要求暴露 OS PID。所有 document/image/Git/workflow/workspace structured path authority 继续由单一 LocalBridge-owned canonical containment/path-authority 实现。

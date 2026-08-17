@@ -1,5 +1,5 @@
 {
-  "schema_version": 35,
+  "schema_version": 36,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -323,7 +323,7 @@
     "onboarding_saved_tunnel_id_prefill_required": true,
     "onboarding_runtime_key_security_hint": "Runtime API Key 仅保存在 Windows 安全凭据中。",
     "dashboard_native_windows_folder_picker_required": true,
-    "dashboard_permission_mode_row_forbidden": false,
+    "dashboard_permission_mode_row_forbidden": true,
     "dashboard_permission_mode_controls_forbidden": true,
     "dashboard_permission_mode_change_forbidden": true,
     "dashboard_permission_mode_uac_trigger_forbidden": true,
@@ -336,7 +336,7 @@
       "explicitly_reopened_onboarding_screen_3"
     ],
     "reopened_onboarding_screen_3_permission_edit_allowed": true,
-    "dashboard_admin_privilege_status_read_only": false,
+    "dashboard_admin_privilege_status_read_only": true,
     "workspace_user_facing_verbatim_prefix_forbidden": true,
     "workspace_verbatim_path_allowed_only_for_internal_identity_validation": true,
     "workspace_tool_invocation_verbatim_prefix_forbidden": true,
@@ -685,16 +685,14 @@
     "dashboard_elevated_project_switch_dialog": "管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
     "dashboard_project_scope_display_source": "permission_mode",
     "dashboard_project_scope_display_privilege_state_independent": true,
-    "dashboard_project_scope_by_permission_mode": { "edit": "active_workspace_path", "full": "active_workspace_path", "admin": "全目录访问" },
+    "dashboard_project_scope_by_permission_mode": {
+      "edit": "active_workspace_path",
+      "full": "active_workspace_path",
+      "admin": "全目录访问"
+    },
     "dashboard_project_switch_blocked_in_admin_mode": true,
     "admin_mode_user_consequence_acknowledgement_required": true,
-    "dashboard_permission_mode_read_only_row_required": true,
-    "dashboard_permission_mode_row_label": "权限模式",
-    "dashboard_permission_mode_row_values": [
-      "编辑模式",
-      "完整模式",
-      "管理员模式"
-    ],
+    "dashboard_permission_mode_read_only_row_required": false,
     "dashboard_permission_mode_status_dot_forbidden": true,
     "ui_panel_base_color_difference_required": false,
     "ui_flat_primary_surface_allowed": true,
@@ -727,9 +725,61 @@
     "windows_taskbar_icon_master_png_derivation_required": true,
     "tray_icon_master_png_derivation_required": true,
     "tray_icon_new_authored_graphics_forbidden": true,
-    "tray_icon_allowed_processing": ["crop", "downscale", "ico-packaging"],
-    "tray_icon_source_crop_rect": { "x": 90, "y": 400, "width": 390, "height": 390 },
-    "tray_icon_derived_sha256": "5a9fce6e80050c9ce1620b8e28767052ece2536213ee04fe532596d3f4ec811d"
+    "tray_icon_allowed_processing": [
+      "crop",
+      "downscale",
+      "ico-packaging"
+    ],
+    "tray_icon_source_crop_rect": {
+      "x": 90,
+      "y": 400,
+      "width": 390,
+      "height": 390
+    },
+    "tray_icon_derived_sha256": "5a9fce6e80050c9ce1620b8e28767052ece2536213ee04fe532596d3f4ec811d",
+    "workspace_context_permission_mode_required": true,
+    "workspace_context_workspace_scope_required": true,
+    "workspace_context_ordinary_route_token_required": true,
+    "workspace_context_elevated_route_available_required": true,
+    "workspace_context_privilege_state_summary_required": true,
+    "workspace_context_shell_discovery_summary_required": true,
+    "workspace_context_capability_snapshot_required": true,
+    "capability_snapshot_informational_only": true,
+    "capability_snapshot_call_time_reauthorization_required": true,
+    "capability_snapshot_refresh_on_permission_or_broker_change": true,
+    "shell_ordinary_diagnostics_not_privileged_by_surface_tokens": true,
+    "shell_windows_native_syntax_compatibility_required": true,
+    "shell_cmd_nul_redirection_required": true,
+    "shell_cmd_pipe_redirect_and_or_env_expansion_required": true,
+    "shell_validated_workspace_script_compatibility_required": true,
+    "shell_bespoke_dsl_forbidden": true,
+    "stable_public_error_codes": [
+      "PolicyDenied",
+      "WorkspaceDenied",
+      "RuntimeUnavailable",
+      "InvalidShellSyntax",
+      "PrivilegedRouteUnavailable",
+      "ProcessTimedOut"
+    ],
+    "legacy_privileged_route_not_available_public_canonical_forbidden": true,
+    "typed_error_safe_rule_category_allowed": true,
+    "typed_error_safe_remediation_allowed": true,
+    "pwsh_unavailable_discovery_summary_required": true,
+    "policy_explain_via_existing_tools_required": true,
+    "policy_explain_must_not_execute_or_authorize": true,
+    "environment_self_check_via_existing_tools_required": true,
+    "public_command_lifecycle_consistent_metadata_required": true,
+    "public_command_pid_required": false,
+    "public_output_paging_range_metadata_required": true,
+    "path_authority_single_localbridge_implementation_required": true,
+    "admin_consent_backend_challenge_not_before_required": true,
+    "workspace_context_public_core_tool_extension_only": true,
+    "public_ninth_core_tool_for_schema36_forbidden": true,
+    "schema36_contract_ratified": true,
+    "schema36_earliest_owner_pr": "LB-006",
+    "schema36_next_g2_review_generation": 24,
+    "schema36_next_g3_review_generation": 13,
+    "dashboard_permission_mode_legacy_row_contract_superseded_by_schema36": true
   },
   "prs": {
     "LB-000": {
@@ -988,7 +1038,12 @@
         "agent_workflow workspace-relative nested-project selector with stable selected-path and enclosing-repository context",
         "trusted PowerShell standard cmdlet baseline loaded from validated first-party/system module identity before arbitrary module autoload is disabled",
         "agent_workflow directory_changes structured active-workspace directory create and empty-directory cleanup route without adding a ninth public core tool",
-        "LocalBridge-owned MCP output schemas for every advertised public tool, matching the stable public structuredContent contract without exposing upstream private output schemas"
+        "LocalBridge-owned MCP output schemas for every advertised public tool, matching the stable public structuredContent contract without exposing upstream private output schemas",
+        "enriched workspace_context observability and capability snapshot without adding a ninth core tool",
+        "stable shell/runtime discovery diagnostics and canonical typed-error normalization",
+        "consistent command lifecycle and retained-output paging metadata",
+        "read-only policy explanation/dry-run contract on existing public tools",
+        "single LocalBridge path-authority implementation shared across structured public tools"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -1048,7 +1103,15 @@
         "restoring standard PowerShell cmdlets does not weaken shell review: provider mutation and dynamic command-surface operations such as New-Item Set-Content Set-Item Alias or Function provider mutation remain subject to the existing LB-007 review-required classification",
         "agent_workflow exposes optional directory_changes as a bounded array of objects with exactly action plus path; action is only create_directory or remove_empty_directory and path is active-workspace-relative; with active workspace D:\\project, directory_changes can create D:\\project\\test and later remove that directory when empty without using process execution; Edit and Full both permit this reviewed workspace write, absolute or parent-traversal targets and reparse escapes are denied, non-empty recursive directory deletion is not implied, and the operation never mutates WorkspaceRegistry or active workspace control-plane",
         "Elevated path authority is mode-aware rather than a lexical workspace bypass: LocalBridge structured ordinary routes stay workspace-bound, Full child-process filesystem authority remains the current ordinary-user token without an OS workspace-sandbox promise, and administrator-token operations outside the active workspace are dispatched only through a Broker-backed privileged filesystem or administrator execution route",
-        "every advertised LocalBridge public tool including privileged extensions declares a non-empty LocalBridge-owned outputSchema matching its actual structuredContent; agent_workflow describes the stable ok/data/error envelope and action/state/workspace/project/commands result fields, elevated_exec describes its existing privileged result variants, and upstream private outputSchema is never exposed directly"
+        "every advertised LocalBridge public tool including privileged extensions declares a non-empty LocalBridge-owned outputSchema matching its actual structuredContent; agent_workflow describes the stable ok/data/error envelope and action/state/workspace/project/commands result fields, elevated_exec describes its existing privileged result variants, and upstream private outputSchema is never exposed directly",
+        "Full ordinary where cmd, where pwsh, and echo %PATH% are not privilege-required solely by surface tokens",
+        "cmd NUL redirection pipes redirects quotes && || environment expansion Unicode paths and validated workspace cmd bat ps1 execute with native Windows shell semantics rather than a bespoke DSL",
+        "workspace_context reports permission_mode workspace_scope ordinary_route_token elevated_route_available safe privilege state trusted shell discovery and bounded capability snapshot",
+        "explicit pwsh RuntimeUnavailable includes safe trusted-shell discovery alternatives without executing untrusted PATH aliases",
+        "public command/session results expose consistent task/session/status/elapsed/exit/output metadata and retained output exposes total/offset/returned/truncated metadata",
+        "document image Git workflow and workspace validation share the same LocalBridge path-authority/canonical-containment implementation",
+        "exec_command and agent_workflow read-only explain/dry_run performs no execution and returns stable route classification plus safe rule category",
+        "agent_workflow diagnose or workspace_context supplies one-shot safe environment self-check without secrets"
       ],
       "non_goals": [
         "policy enforcement",
@@ -1103,7 +1166,10 @@
         "public MCP policy denial preserves stable typed LocalBridge reason categories so capability or policy denial workspace denial and privileged-route or elevation requirements do not collapse into one generic JSON-RPC denial",
         "Full ordinary invocation of a validated active-workspace .ps1 .cmd or .bat script, including literal cmd call of a workspace .cmd or .bat target, is not denied solely because of its file extension or the literal call keyword; dynamic script resolution unsafe indirection provider mutation and other independently review-required behavior remain fail-closed",
         "Full ordinary active-workspace file cleanup is not classified privileged solely by surface syntax: cmd del and a normal language-runtime deletion such as Python os.remove may complete the create-test-cleanup loop under the current ordinary-user token; protected/system/provider/control-plane mutations and independently privileged behavior remain denied or reviewed",
-        "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteNotAvailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility"
+        "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteNotAvailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility",
+        "semantic command classifier distinguishes executable/argument effects from inert diagnostic/data tokens",
+        "canonical public policy errors use PolicyDenied WorkspaceDenied RuntimeUnavailable InvalidShellSyntax PrivilegedRouteUnavailable ProcessTimedOut as applicable and include only safe rule/remediation metadata",
+        "permission and Broker changes refresh capability snapshot while stale tools/list remains non-authoritative and tools/call always reauthorizes"
       ],
       "non_goals": [
         "Tunnel",
@@ -1461,8 +1527,9 @@
         "every text-bearing button except the symmetric 编辑模式/完整模式/管理员模式 three-way PermissionMode selection group sizes from its own content metrics: width corresponds to the maximum visible character count on any single line and height corresponds to the actual rendered line count; arbitrary fixed button geometry that ignores text content is forbidden; the three-way PermissionMode group is explicitly exempt from content-derived width/height sizing and instead must render as exactly three symmetric equal-width equal-height cells with no clipped or overflowing text",
         "product typography uses exactly three font-size tiers: title for page/major headings, body for ordinary body labels buttons and primary status, and auxiliary for helper metadata time and secondary status; each non-title tier is internally unified and no fourth font-size tier exists",
         "Dashboard current-project scope is bound only to backend PermissionMode rather than Broker/PrivilegeState: Edit and Full display the active-workspace path, while Admin displays yellow 全目录访问 for the entire time Admin is the selected mode; Admin project switching remains blocked and shows exactly 管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
-        "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode",
-        "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent"
+        "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent",
+        "Dashboard contains no PermissionMode row or PermissionMode controls and retains only read-only actual administrator privilege state",
+        "AI/client PermissionMode observability is provided by workspace_context rather than Dashboard UI"
       ],
       "non_goals": [
         "wizard",
@@ -1549,7 +1616,8 @@
         "backend start/readiness delay does not make the onboarding UI unresponsive",
         "administrator warning is a narrow safety consent dialog and does not permit the five-screen onboarding shell to regress into a centered card modal or dialog layout",
         "onboarding uses exactly three typography sizes: title for page/major headings, body for ordinary copy labels buttons and primary status, and auxiliary for helper metadata time and secondary status; no fourth font-size tier is introduced",
-        "screen 4 名称 and Tunnel ID rows share one aligned left label column/value start and their copy actions share one aligned right edge without fixed copy-button width"
+        "screen 4 名称 and Tunnel ID rows share one aligned left label column/value start and their copy actions share one aligned right edge without fixed copy-button width",
+        "administrator safety confirmation authorization truth is backend monotonic challenge/not-before; frontend countdown is presentation only and stale/early confirmation fails closed"
       ],
       "non_goals": [
         "new dashboard pages",

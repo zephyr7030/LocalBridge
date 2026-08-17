@@ -325,3 +325,21 @@ LB-000 real Tunnel 子 Gate 若唯一阻塞是缺真实 credential：
 - deterministic/spike 仍必须完成；
 - 明确记录 external blocker；
 - 不伪造 PASS。
+
+
+### Schema36 — Shell / observability / admin-consent contract reopen
+
+Schema36 最早责任 PR 为 LB-006：public `workspace_context` observability、Shell fidelity、runtime discovery、stable error/session/output metadata、path authority 与 explain/diagnose contract。LB-007 随后重新验收 request-derived classifier、typed policy error 与 capability snapshot refresh。G3 的 LB-015/LB-016 重新验收 Dashboard 不显示 PermissionMode 与 backend 9 秒 admin-consent challenge。
+
+当前 schema36 合同修订使此前 G2 generation 23、G3 generation 12 只能保留为历史 provenance，不能继续解锁后续。严格顺序：
+
+```text
+LB-006 REWORK_REQUIRED
+→ LB-007 ... LB-012 strict reacceptance
+→ fresh G2 adversarial generation 24
+→ LB-013 ... LB-017 reacceptance
+→ fresh G3 adversarial generation 13
+→ G3 human_review_status = REQUIRED
+```
+
+G4/LB-018 在新的 G3 human Gate PASS 前继续 BLOCKED；智能体不能代替人工 Gate。

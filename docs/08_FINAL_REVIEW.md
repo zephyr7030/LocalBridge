@@ -157,3 +157,12 @@ After schema29 task-state implementation was accepted, a fresh LB-006 scoped pro
 Schema30 also clarifies the permission model: active workspace is an authorized read/write root, not a read-only root. Creating `D:\project\test` and removing it when empty is an ordinary reviewed workspace write and is frozen as process-free `agent_workflow.directory_changes[]`, with only `create_directory` / `remove_empty_directory`. This does **not** require weakening PowerShell provider review: generic provider mutations such as `New-Item`/`Set-Content` may remain review-required because they can target `Alias:`/`Function:`; arbitrary module autoload remains forbidden and standard PowerShell capability must come from a fixed/identity-validated trusted preload.
 
 Schema30 ratifies A293–A295. Execution remains `G2 / LB-006 = REWORK_REQUIRED`; LB-007 stays blocked until LB-006 passes the new runtime behavior, after which LB-007 must reaccept the structured-write transitive capability boundary. G2 adversarial generation 18 remains unconsumed.
+
+
+## Schema36 — Shell fidelity / runtime observability / admin consent（current）
+
+2026-08-17 使用端黑盒已真实复现：Full 下 `where cmd`、`where pwsh`、`echo %PATH%` 被错误返回 `PrivilegedRouteNotAvailable`。同时当前源码静态确认 Dashboard 仍渲染 PermissionMode 行，管理员 9 秒 eligibility 仍由 React `performance.now()` 决定并直接进入 `set_permission_mode → request_explicit_admin`。这些事实触发 schema36。
+
+schema36 不新增 public core tool；以 enriched `workspace_context`、现有 `agent_workflow diagnose` 与既有工具 dry_run/explain 承担可观测性。Shell 分类必须基于执行目标/参数/操作语义而不是关键词；Windows 原生常用 redirection/NUL/pipeline/quotes/conditional/env/script 语义恢复。错误合同、session/output metadata、single path authority 同步冻结为 A316–A333。
+
+实时治理必须回开到 G2/LB-006；G2 generation23 与 G3 generation12 保留历史但失去当前 unlock authority。完成 LB-006→LB-012 后执行 fresh G2 generation24，再重新 LB-013→LB-017 与 fresh G3 generation13。G3 结束仍进入独立 human Gate REQUIRED，不能由执行/审查智能体自行 PASS。

@@ -1,0 +1,20 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+const root=process.env.LOCALBRIDGE_REPO_ROOT||resolve(".");
+const c=JSON.parse(readFileSync(resolve(root,"PR_CONTRACTS.json"),"utf8"));
+const r=c.rules||{};
+const fail=[];
+const exact={workspace_context_permission_mode_required:true,workspace_context_workspace_scope_required:true,workspace_context_ordinary_route_token_required:true,workspace_context_elevated_route_available_required:true,workspace_context_privilege_state_summary_required:true,workspace_context_shell_discovery_summary_required:true,workspace_context_capability_snapshot_required:true,public_ninth_core_tool_for_schema36_forbidden:true,shell_ordinary_diagnostics_not_privileged_by_surface_tokens:true,shell_windows_native_syntax_compatibility_required:true,shell_cmd_nul_redirection_required:true,shell_bespoke_dsl_forbidden:true,policy_explain_via_existing_tools_required:true,policy_explain_must_not_execute_or_authorize:true,path_authority_single_localbridge_implementation_required:true,dashboard_permission_mode_row_forbidden:true,dashboard_permission_mode_controls_forbidden:true,dashboard_admin_privilege_status_read_only:true,admin_consent_backend_challenge_not_before_required:true};
+if(c.schema_version!==36)fail.push("schema");
+for(const [k,v] of Object.entries(exact))if(r[k]!==v)fail.push(k);
+const core=["workspace_context","agent_workflow","exec_command","command_control","task_control","git_workflow","document_workflow","view_image"];
+if(JSON.stringify(r.localbridge_agent_api_v1_core_tools)!==JSON.stringify(core))fail.push("core-tools");
+for(const e of ["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","InvalidShellSyntax","PrivilegedRouteUnavailable","ProcessTimedOut"])if(!(r.stable_public_error_codes||[]).includes(e))fail.push("error:"+e);
+const app=readFileSync(resolve(root,"src/App.tsx"),"utf8");
+if(app.includes(">权限模式</span>"))fail.push("dashboard-permission-row");
+const facade=readFileSync(resolve(root,"src-tauri/src/mcp/facade.rs"),"utf8");
+for(const m of ["permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","capabilities"])if(!facade.includes(m))fail.push("workspace-context:"+m);
+const ui=readFileSync(resolve(root,"src-tauri/src/commands/ui.rs"),"utf8");
+if(!/(challenge|not_before|not-before)/i.test(ui))fail.push("backend-admin-consent-challenge");
+if(fail.length){console.error("ARCH-034 "+fail.join("|"));process.exit(1);}
+console.log("ARCH-034 PASS");

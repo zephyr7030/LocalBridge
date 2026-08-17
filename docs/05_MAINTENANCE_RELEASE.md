@@ -155,3 +155,10 @@ scope
 owner PR
 exit condition
 ```
+
+
+## Schema36 诊断与绿色化补充
+
+Schema36 不改变 schema35 绿色化边界：immutable app/runtime 直接从 canonical install root 运行；mutable non-secret state 集中在 `%LOCALAPPDATA%\LocalBridge`；Runtime API Key 只在 Credential Manager。普通 foreground、`--background` 和登录自启动保持当前普通用户/Medium Integrity 且无 UAC。
+
+新增 runtime/capability/policy explain 属于只读诊断，不得安装 PowerShell/Python/Node、修改 PATH、注册系统服务、写计划任务或为自检产生系统级副作用。
