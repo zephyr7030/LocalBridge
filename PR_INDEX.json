@@ -41,7 +41,7 @@
     ],
     "advance_only_after_acceptance": true,
     "governance_transition_updates_current_pr": true,
-    "current_group": "G3",
+    "current_group": "G2",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
     "pre_g4_human_review_gate_required": true,
@@ -329,11 +329,11 @@
       ],
       "status": "PASS",
       "review_status": "PASS",
-      "review_generation": 25,
+      "review_generation": 26,
       "review_provenance": {
-        "generation": 25,
+        "generation": 26,
         "kind": "independent_adversarial",
-        "commit": "5cfc5b086b9bd51eb7ad6a7bed664019104b3986",
+        "commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
         "invalidated_generations": [
           {
             "generation": 8,
@@ -364,6 +364,11 @@
             "generation": 24,
             "commit": "9f0ff7caad7aeaba7d5c44c56d66d1d71e80cda8",
             "cause": "g3_generation13_pwsh_version_diagnostic_classifier_precedence_2026_08_17"
+          },
+          {
+            "generation": 25,
+            "commit": "5cfc5b086b9bd51eb7ad6a7bed664019104b3986",
+            "cause": "schema38_public_control_runtime_audit_repair_2026_08_17"
           }
         ]
       }
@@ -378,15 +383,15 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
-      "review_generation": 15,
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
+      "review_generation": 16,
       "human_review_status": "REQUIRED",
       "human_review_generation": 3,
       "review_provenance": {
-        "generation": 15,
+        "generation": 16,
         "kind": "independent_adversarial",
-        "commit": "20ba80777ba07c3bd12740a91c03183a4f0f4a9a",
+        "commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
         "invalidated_generations": [
           {
             "generation": 6,
@@ -432,6 +437,11 @@
             "generation": 14,
             "commit": "555c1cd3aa31237a5d5d43a2c2d4cbc36260892e",
             "cause": "user_reported_dashboard_current_task_projection_revision_race_2026_08_17"
+          },
+          {
+            "generation": 15,
+            "commit": "20ba80777ba07c3bd12740a91c03183a4f0f4a9a",
+            "cause": "upstream_g2_schema38_public_control_runtime_audit_repair_2026_08_17"
           }
         ]
       },
@@ -450,5 +460,5 @@
     }
   ],
   "current_pr": null,
-  "current_group": "G3"
+  "current_group": "G2"
 }

@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -3932,5 +3932,58 @@
     "blackbox_connector_status": "UNAVAILABLE_HOST_DISABLED_NOT_PRODUCT_RESULT",
     "review_decision_commit": "20ba80777ba07c3bd12740a91c03183a4f0f4a9a",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "schema38_g2_revalidation_2026_08_17": {
+    "status": "PASS_PENDING_PROVENANCE",
+    "owner_prs": [
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-009",
+      "LB-010",
+      "LB-011",
+      "LB-012"
+    ],
+    "product_baseline": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
+    "evidence": [
+      "P0 detached public-session cancellation real bundled MCP regression PASS: task_control cancel finds current owner session, cancelled_requests>=1, command_control replay ProcessCancelled, durable terminal cancelled.",
+      "Git Unicode metadata regression PASS using NUL-delimited machine status: B.txt modified and 中文.txt deleted independently from patch text.",
+      "Actual served tools/list PASS: command_control/elevated_exec top-level directly projectable schemas; document rebuild requirements disclosed; cross-action command_control fields fail InvalidArgument.",
+      "Windows timeout_ms=300 real bundled PowerShell regression PASS under 1800ms with ProcessTimedOut and no Entering debug mode; cmd rmdir Full classifier regression PASS while PowerShell alias remains reviewed.",
+      "Complete final-tree gate PASS: 204 Rust tests, Clippy -D warnings, frontend 7 tests/build, runtime manifest, LB-008/009/012 contracts, architecture 34/34 and G4 fail-closed."
+    ],
+    "next_required_g2_adversarial_generation": 26,
+    "g3_blocked_until_g2_generation26_pass": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_26_2026_08_17": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 26,
+    "kind": "independent_adversarial",
+    "baseline_commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
+    "finding": "No blocking G2 defect remains on schema38 after repairing detached task cancellation, Unicode-safe Git metadata, public schema discoverability, Windows timeout termination convergence and cmd rmdir classifier false-positive.",
+    "evidence": [
+      "P0 detached public-session cancellation real bundled MCP regression PASS: task_control cancel finds current owner session, cancelled_requests>=1, command_control replay ProcessCancelled, durable terminal cancelled.",
+      "Git Unicode metadata regression PASS using NUL-delimited machine status: B.txt modified and 中文.txt deleted independently from patch text.",
+      "Actual served tools/list PASS: command_control/elevated_exec top-level directly projectable schemas; document rebuild requirements disclosed; cross-action command_control fields fail InvalidArgument.",
+      "Windows timeout_ms=300 real bundled PowerShell regression PASS under 1800ms with ProcessTimedOut and no Entering debug mode; cmd rmdir Full classifier regression PASS while PowerShell alias remains reviewed.",
+      "Complete final-tree gate PASS: 204 Rust tests, Clippy -D warnings, frontend 7 tests/build, runtime manifest, LB-008/009/012 contracts, architecture 34/34 and G4 fail-closed."
+    ],
+    "verified_passes": [
+      "cargo test --locked (204 library tests plus integration/migration/doc)",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "real bundled MCP detached cancel/timeout/tools-list regressions",
+      "Git Unicode metadata regression",
+      "LB-007 policy enforcement including cmd rmdir",
+      "runtime-manifest",
+      "architecture 34/34",
+      "G4 fail-closed",
+      "git diff --check"
+    ],
+    "g2_generation_26_consumed": true,
+    "g3_unlocked_for_reacceptance": true,
+    "g4_unlocked": false,
+    "review_decision_commit": "PENDING"
   }
 }
