@@ -3988,7 +3988,7 @@
     "review_decision_commit": "4bd2db334f12325fe1d04e36cf0356002fbbc0cc"
   },
   "schema38_g3_revalidation_2026_08_17": {
-    "status": "REVIEW_REQUIRED",
+    "status": "PASS_PENDING_PROVENANCE",
     "owner_prs": [
       "LB-013",
       "LB-014",
@@ -4010,12 +4010,12 @@
     "g4_unlocked": false
   },
   "g3_adversarial_review_generation_16_2026_08_17": {
-    "status": "REVIEW_REQUIRED",
-    "decision": "PENDING",
+    "status": "PASS",
+    "decision": "PASS",
     "kind": "independent_adversarial",
     "generation": 16,
     "baseline_commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
-    "finding": "Pending fresh independent G3 review on the schema38/G2 generation26 baseline.",
+    "finding": "No blocking G3 defect remains on the schema38/G2 generation26 baseline; upstream public-control/runtime repairs preserve the desktop lifecycle, UI contracts, diagnostics and fixed-window behavior.",
     "evidence": [
       "Fresh LB-013 through LB-017 contract gates PASS on schema38/G2 generation26 baseline.",
       "Fresh native fixed-window Tauri/WebView2 E2E PASS at 150% DPI for onboarding and dashboard 780x620 logical / 1170x930 physical.",
@@ -4039,6 +4039,6 @@
     "human_review_generation": 3,
     "g4_unlocked": false,
     "review_decision_commit": "PENDING",
-    "next_action": "Complete fresh G3 adversarial generation16; if PASS remain at human review REQUIRED generation3 with G4 blocked."
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }

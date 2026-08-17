@@ -383,15 +383,15 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
+      "status": "PASS",
+      "review_status": "PASS",
       "review_generation": 16,
-      "human_review_status": "BLOCKED",
+      "human_review_status": "REQUIRED",
       "human_review_generation": 3,
       "review_provenance": {
-        "generation": 15,
+        "generation": 16,
         "kind": "independent_adversarial",
-        "commit": "20ba80777ba07c3bd12740a91c03183a4f0f4a9a",
+        "commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
         "invalidated_generations": [
           {
             "generation": 6,
@@ -444,8 +444,7 @@
             "cause": "upstream_g2_schema38_public_control_runtime_audit_repair_2026_08_17"
           }
         ]
-      },
-      "reopen_from_pr": "LB-015"
+      }
     },
     {
       "id": "G4",
