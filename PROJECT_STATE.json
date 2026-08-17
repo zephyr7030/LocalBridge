@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4286,6 +4286,17 @@
       "Fresh app::autostart 1/1, app::single_instance 1/1 and startup/startup_profile 8/8 Rust tests PASS on schema39 baseline."
     ],
     "next_pr": "LB-015",
+    "g4_unlocked": false
+  },
+  "schema39_lb015_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "evidence": [
+      "Dashboard contract, hardening, window chrome and all LB015 UI contract scripts PASS; dashboard exposes read-only PermissionMode while Settings remains the unique editor.",
+      "Frontend Vitest 4 files/7 tests and production build PASS.",
+      "Fresh CurrentTask projection tests PASS 3/3 and projection snapshot/cursor atomic regression PASS 1/1, preserving wake-driven tool-call visibility."
+    ],
+    "next_pr": "LB-016",
     "g4_unlocked": false
   }
 }
