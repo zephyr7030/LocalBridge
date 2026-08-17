@@ -339,6 +339,9 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
             }
         }
         self.controller.current_attempt = 0;
+        if outage.component == RuntimeComponent::CodingRuntime {
+            self.runtime.mark_detected_coding_runtime_recovery();
+        }
         self.pending_auto = Some(PendingAutoRecovery {
             generation,
             component: outage.component,

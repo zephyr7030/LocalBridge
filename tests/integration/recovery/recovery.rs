@@ -34,6 +34,7 @@ struct RecoveryDriver {
     cancel_on_tunnel_recovery_ready: SharedCancellation,
     pep_healthy: SharedHealth,
     mcp_healthy: SharedHealth,
+    mcp_fault: SharedFault,
     tunnel_healthy: SharedHealth,
     workspace: PathBuf,
 }
@@ -47,6 +48,7 @@ impl RecoveryDriver {
         let cancel_on_tunnel_recovery_ready = Rc::new(RefCell::new(None));
         let pep_healthy = Rc::new(RefCell::new(true));
         let mcp_healthy = Rc::new(RefCell::new(true));
+        let mcp_fault = Rc::new(RefCell::new(RuntimeFault::McpExited));
         let tunnel_healthy = Rc::new(RefCell::new(true));
         (
             Self {
@@ -57,6 +59,7 @@ impl RecoveryDriver {
                 cancel_on_tunnel_recovery_ready,
                 pep_healthy: pep_healthy.clone(),
                 mcp_healthy: mcp_healthy.clone(),
+                mcp_fault,
                 tunnel_healthy,
                 workspace: PathBuf::from(r"D:\project\active"),
             },
@@ -72,6 +75,9 @@ impl RecoveryDriver {
     }
     fn cancel_during_tunnel_recovery_ready(&self, cancellation: RecoveryCancellation) {
         *self.cancel_on_tunnel_recovery_ready.borrow_mut() = Some(cancellation);
+    }
+    fn set_mcp_fault(&self, fault: RuntimeFault) {
+        *self.mcp_fault.borrow_mut() = fault;
     }
 }
 
@@ -91,7 +97,7 @@ impl RuntimeDriver for RecoveryDriver {
     }
     fn confirm_mcp_ready(&mut self, _mcp: &mut Self::Mcp) -> Result<(), RuntimeFault> {
         self.event("mcp.ready");
-        if *self.mcp_healthy.borrow() { Ok(()) } else { Err(RuntimeFault::McpExited) }
+        if *self.mcp_healthy.borrow() { Ok(()) } else { Err(self.mcp_fault.borrow().clone()) }
     }
     fn start_pep(&mut self, _mcp: Self::Mcp) -> Result<Self::Pep, RuntimeFault> { self.event("pep.start"); Ok("pep") }
     fn confirm_pep_ready(&mut self, _pep: &Self::Pep) -> Result<(), RuntimeFault> {
@@ -128,7 +134,7 @@ impl RuntimeDriver for RecoveryDriver {
     fn current_task(&self, _pep: &Self::Pep) -> CurrentTaskStatus { CurrentTaskStatus::Idle }
     fn probe_mcp_health(&mut self, _pep: &Self::Pep) -> Result<(), RuntimeFault> {
         self.event("mcp.monitor");
-        if *self.mcp_healthy.borrow() { Ok(()) } else { Err(RuntimeFault::McpExited) }
+        if *self.mcp_healthy.borrow() { Ok(()) } else { Err(self.mcp_fault.borrow().clone()) }
     }
     fn probe_pep_health(&mut self, _pep: &Self::Pep) -> Result<(), RuntimeFault> {
         self.event("pep.monitor");
@@ -719,6 +725,44 @@ fn unhealthy_dependencies_escalate_once_per_attempt_without_recursive_restart_st
     assert!(observed.windows(4).any(|window| window == ["tunnel.stop", "pep.ready", "pep.stop", "mcp.ready"]));
     assert_eq!(observed.iter().filter(|event| **event == "tunnel.stop").count(), 1);
     assert_eq!(observed.iter().filter(|event| **event == "mcp.start").count(), 5);
+}
+
+#[test]
+fn process_alive_but_authenticated_mcp_unresponsive_recovers_through_existing_full_runtime_path() {
+    let (driver, events, _, _, mcp_healthy) = RecoveryDriver::new();
+    driver.set_mcp_fault(RuntimeFault::McpHealthTimeout);
+    let mut runtime = RuntimeOrchestrator::new(driver);
+    runtime.start().unwrap();
+    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
+    events.borrow_mut().clear();
+
+    *mcp_healthy.borrow_mut() = false;
+    assert!(monitored.monitor_once().is_none());
+    assert!(matches!(
+        monitored.runtime().state(),
+        RuntimeState::Recovering {
+            component: RuntimeComponent::CodingRuntime,
+            attempt: 0,
+        }
+    ));
+    assert_eq!(
+        monitored.runtime().active_outage().unwrap().fault,
+        RuntimeFault::McpHealthTimeout
+    );
+
+    *mcp_healthy.borrow_mut() = true;
+    monitored.recovery_clock_mut().advance(Duration::from_secs(1));
+    let outcome = monitored.monitor_once().expect("first MCP recovery attempt completes");
+    assert!(matches!(outcome, RecoveryOutcome::Recovered { attempt: 1, .. }));
+    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
+
+    let observed = events.borrow();
+    for marker in [
+        "tunnel.stop", "pep.stop", "mcp.stop", "mcp.start", "mcp.ready", "pep.start",
+        "pep.ready", "tunnel.start", "tunnel.ready",
+    ] {
+        assert!(observed.contains(&marker), "missing recovery step {marker}: {observed:?}");
+    }
 }
 
 #[test]

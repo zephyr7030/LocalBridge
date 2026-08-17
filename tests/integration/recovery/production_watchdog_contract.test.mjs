@@ -88,10 +88,12 @@ if (snapshot.includes("self.runtime\n") || snapshot.includes(".lock()")) throw n
 for (const required of ["probe_mcp_health", "probe_pep_health", "probe_tunnel_health", "probe_ready_health"]) {
   if (!orchestrator.includes(required)) throw new Error(`LB-010 production health probe missing: ${required}`);
 }
-if (!orchestrator.includes("upstream_root_is_running()")) throw new Error("LB-010 MCP liveness is not checked through PEP");
+for (const required of ["take_coding_runtime_fault()", "coding_runtime_health()", "CodingRuntimeHealthState::Ready", "health.authenticated_mcp", "RuntimeFault::McpHealthTimeout"]) {
+  if (!orchestrator.includes(required)) throw new Error(`LB-010 authenticated MCP watchdog bridge missing: ${required}`);
+}
 if (!orchestrator.includes("wait_ready_for_recovery(Duration::ZERO, Duration::from_millis(250), || false)")) throw new Error("LB-010 Tunnel watchdog probe is not transport-bounded");
 if (!guard.includes("runtime_root_is_running")) throw new Error("LB-010 McpGuard liveness seam missing");
-if (!server.includes("upstream_root_is_running")) throw new Error("LB-010 PEP upstream MCP liveness accessor missing");
+if (!server.includes("coding_runtime_health") || !server.includes("take_coding_runtime_fault")) throw new Error("LB-010 PEP authenticated MCP health/fault accessors missing");
 if (!server.includes("TryLockError::WouldBlock") || !server.includes("Ok(None)")) throw new Error("LB-010 busy MCP guard must defer health judgment instead of causing a false outage");
 
 for (const required of ["start_for_recovery", "wait_ready_for_recovery", "initialize_with_timeout", "post_json_with_timeouts"]) {

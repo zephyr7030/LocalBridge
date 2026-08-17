@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use crate::credentials::CredentialStore;
 use crate::mcp::{
-    CapabilityPolicy, CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,
-    CurrentTaskWake, InternalBearer, PolicyEnforcementError, PolicyEnforcementRuntime,
+    CapabilityPolicy, CodingRuntimeHealthState, CodingToolsPermissionMode, CodingToolsRuntime,
+    CodingToolsRuntimeConfig, CurrentTaskWake, InternalBearer, PolicyEnforcementError,
+    PolicyEnforcementRuntime,
 };
 use crate::privilege::PrivilegedExecution;
 use crate::state::{
@@ -470,6 +471,13 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
 
     pub fn record_fault(&mut self, fault: RuntimeFault) {
         self.state = RuntimeState::Faulted(fault);
+    }
+
+    pub(crate) fn mark_detected_coding_runtime_recovery(&mut self) {
+        self.state = RuntimeState::Recovering {
+            component: RuntimeComponent::CodingRuntime,
+            attempt: 0,
+        };
     }
 
     pub fn recover_minimal(
@@ -1471,12 +1479,18 @@ where
     }
 
     fn probe_mcp_health(&mut self, pep: &Self::Pep) -> Result<(), RuntimeFault> {
-        match pep
-            .upstream_root_is_running()
-            .map_err(|error| error.runtime_fault())?
-        {
-            Some(true) | None => Ok(()),
-            Some(false) => Err(RuntimeFault::McpExited),
+        if let Some(fault) = pep.take_coding_runtime_fault() {
+            return Err(fault);
+        }
+        match pep.coding_runtime_health() {
+            Ok(Some(health))
+                if health.state == CodingRuntimeHealthState::Ready && health.authenticated_mcp =>
+            {
+                Ok(())
+            }
+            Ok(Some(health)) => Err(health.fault.unwrap_or(RuntimeFault::McpHealthTimeout)),
+            Ok(None) => Ok(()),
+            Err(_) => Err(RuntimeFault::McpHealthTimeout),
         }
     }
 
