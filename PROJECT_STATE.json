@@ -4379,10 +4379,11 @@
       "invalidated_g2_generation": 27,
       "invalidated_g3_generation": 17,
       "next_required_g2_adversarial_generation": 28,
-      "next_required_g3_adversarial_generation": 18
+      "next_required_g3_adversarial_generation": 18,
+      "status": "PASS"
     },
     "schema41": {
-      "status": "RATIFIED_PENDING_SCHEMA40_ACCEPTANCE",
+      "status": "READY_FOR_G2_REVALIDATION",
       "earliest_owner_pr": "LB-006",
       "owner_prs": [
         "LB-006"
@@ -4409,7 +4410,7 @@
       "schema41 G3 revalidation generation 19"
     ],
     "g4_unlocked": false,
-    "next_action": "Implement and reaccept schema40 from LB-006 through G3 generation18, then complete schema41 semantic compatibility and fresh G2 generation29/G3 generation19; human G3-to-G4 review remains required."
+    "next_action": "Run schema41 G2 revalidation generation29, then schema41 G3 revalidation generation19; human G3-to-G4 review remains required."
   },
   "schema40_schema41_lb006_reacceptance_2026_08_18": {
     "status": "PASS",
@@ -4610,6 +4611,15 @@
     "human_review_required": true,
     "human_review_generation": 3,
     "g4_unlocked": false,
-    "review_decision_commit": null
+    "review_decision_commit": "1c5eb4ef6a729c6e07eca02f71e7365b8154775b"
+  },
+  "schema40_g3_generation_18_provenance_2026_08_18": {
+    "status": "PASS",
+    "generation": 18,
+    "decision_commit": "1c5eb4ef6a729c6e07eca02f71e7365b8154775b",
+    "human_review_status": "REQUIRED",
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "next_action": "Run schema41 G2 revalidation generation29, then schema41 G3 revalidation generation19 before human G3-to-G4 review."
   }
 }
