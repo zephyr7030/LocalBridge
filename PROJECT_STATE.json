@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -4043,5 +4043,38 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS.",
     "g3_generation_16_consumed": true,
     "blackbox_connector_status": "NOT_CLAIMED_REAL_BUNDLED_MCP_E2E_USED"
+  },
+  "schema39_reopen_2026_08_17": {
+    "status": "REWORK_REQUIRED",
+    "contract_commit": "af0869a",
+    "earliest_owner_pr": "LB-006",
+    "invalidated_g2_generation": 26,
+    "invalidated_g3_generation": 16,
+    "next_required_g2_adversarial_generation": 27,
+    "next_required_g3_adversarial_generation": 17,
+    "strict_sequence": [
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-009",
+      "LB-010",
+      "LB-011",
+      "LB-012",
+      "G2 generation 27",
+      "LB-013",
+      "LB-014",
+      "LB-015",
+      "LB-016",
+      "LB-017",
+      "G3 generation 17"
+    ],
+    "findings": [
+      "real downstream MCP schema projection not proven consumable",
+      "agent_workflow resume has no durable checkpoint recovery",
+      "task_control cancel can skip current owned public session when another active request cancellation succeeds",
+      "workspace_context lacks schema39 compact cached first-turn discovery",
+      "facade/machine verification remains revision38"
+    ],
+    "g4_unlocked": false
   }
 }
