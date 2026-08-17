@@ -3621,7 +3621,7 @@
       "Fresh LB-007 classifier/policy suites and LB-008 through LB-012 targeted reacceptance PASS.",
       "Complete post-fix formal gate PASS: cargo test --locked, clippy -D warnings, frontend tests/build, runtime-manifest, architecture, UI-language, G4 fail-closed regression and git diff --check."
     ],
-    "review_decision_commit": null,
+    "review_decision_commit": "5cfc5b086b9bd51eb7ad6a7bed664019104b3986",
     "g3_unlocked_for_reacceptance": true,
     "g4_unlocked": false
   },
