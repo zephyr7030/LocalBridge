@@ -51,6 +51,8 @@
 ## Workspace
 
 - [ ] desired/candidate/active semantics pass
+- [ ] workspace-bound inputs accept safe relative paths and ordinary Win32 absolute paths resolving to the same validated active workspace identity
+- [ ] outside-root absolute/UNC/verbatim/POSIX absolute/ADS-like/parent-traversal/reparse escape inputs fail closed
 - [ ] shutdown order Tunnel→PEP→MCP
 - [ ] candidate only commits after Ready
 - [ ] failure rollback works
@@ -96,7 +98,7 @@
 
 - [ ] LocalBridge main process remains non-elevated
 - [ ] only Broker receives Administrator token
-- [ ] visible 管理员模式 selection/reselection in Settings/onboarding is the explicit UAC activation; no separate enable-admin button
+- [ ] visible 管理员模式 selection/reselection in Settings/onboarding opens the fixed safety warning; backend monotonic 9000ms not-before + enabled user confirmation must complete before any UAC request; no separate enable-admin button
 - [ ] no TTL/time selector
 - [ ] disable closes privileged gate immediately
 - [ ] no automatic UAC on background startup
@@ -143,7 +145,7 @@
 - [ ] Dashboard always exposes administrator privilege runtime status
 - [ ] status comes from PrivilegeState
 - [ ] Elevated preference alone does not display Active
-- [ ] Dashboard has no 权限模式 row and no 编辑/完整/管理员 mode selection controls
+- [ ] Dashboard has exactly one read-only 权限模式 row sourced from backend PermissionMode and no 编辑/完整/管理员 mode selection controls
 - [ ] Dashboard cannot change PermissionMode or trigger UAC through a permission-mode control
 - [ ] Requested shows read-only waiting authorization; mode activation is performed in Settings/onboarding, not Dashboard
 - [ ] Dashboard has no permission-mode editing; Settings and an explicitly reopened onboarding screen 3 remain the allowed permission-mode editing surfaces
@@ -162,6 +164,7 @@
 ## Maintainability
 
 - [ ] architecture verification passes
+- [ ] public privileged-route unavailable error is canonically `PrivilegedRouteUnavailable`; legacy `PrivilegedRouteNotAvailable` is not a public expected code
 - [ ] compatibility baseline matches packaged runtimes
 - [ ] stable adapter boundary respected
 - [ ] settings schema/migrations pass historical fixtures

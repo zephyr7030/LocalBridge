@@ -1783,6 +1783,94 @@ export function normalizeStablePrivilegedToolCatalogAmendment20260816(contractsD
   return normalized;
 }
 
+const SCHEMA37_CONTRACT_CLEANUP_2026_08_17 = Object.freeze({
+  schemaVersion: 37,
+  baselineSchemaVersion: 36,
+  addedRules: {
+    workspace_bound_public_path_inputs_must_resolve_within_active_workspace: true,
+    workspace_safe_ordinary_win32_absolute_input_allowed: true,
+    workspace_safe_relative_and_absolute_input_equivalent_after_identity_validation: true,
+    workspace_public_outside_root_absolute_input_forbidden: true,
+    workspace_public_unc_verbatim_posix_ads_input_forbidden: true,
+    workspace_public_reparse_escape_forbidden: true,
+    agent_workflow_workspace_bound_project_path_selector_required: true,
+    schema37_contract_ratified: true,
+    schema37_revision_scope: [
+      "workspace-safe-absolute-path-equivalence",
+      "dashboard-read-only-permission-mode-row",
+      "canonical-privileged-route-error",
+      "administrator-consent-ui-contract-alignment",
+    ],
+  },
+  removedRules: {
+    workspace_bound_public_path_inputs_relative_only: true,
+    workspace_public_absolute_path_input_forbidden: true,
+    agent_workflow_workspace_relative_project_path_selector_required: true,
+  },
+  prs: {
+    "LB-006": {
+      artifactReplacements: [[
+        "agent_workflow workspace-bound nested-project selector with safe workspace-relative and ordinary Win32 absolute input equivalence plus stable selected-path and enclosing-repository context",
+        "agent_workflow workspace-relative nested-project selector with stable selected-path and enclosing-repository context",
+      ]],
+      testReplacements: [
+        [
+          "agent_workflow project selection is active-workspace-bound: workspace-relative inputs and ordinary Win32 absolute inputs resolving to the same validated active-workspace identity are accepted as equivalent, and selection changes only workflow/project context; it never changes WorkspaceRegistry or the active workspace authorization root; the stable result exposes the selected path and enclosing repository/project context without raw private resolver state",
+          "agent_workflow project selection is workspace-relative and changes only workflow/project context: it never changes WorkspaceRegistry or the active workspace authorization root; the stable result exposes the selected path and enclosing repository/project context without raw private resolver state",
+        ],
+        [
+          "agent_workflow exposes optional directory_changes as a bounded array of objects with exactly action plus path; action is only create_directory or remove_empty_directory and path is active-workspace-bound; workspace-relative inputs and ordinary Win32 absolute inputs that resolve after identity validation to the same active workspace are accepted as equivalent; with active workspace D:\\project, directory_changes can create D:\\project\\test and later remove that directory when empty without using process execution; Edit and Full both permit this reviewed workspace write, while outside-root absolute paths, UNC, verbatim, POSIX absolute, ADS-like, parent-traversal targets and reparse escapes are denied; non-empty recursive directory deletion is not implied, and the operation never mutates WorkspaceRegistry or active workspace control-plane",
+          "agent_workflow exposes optional directory_changes as a bounded array of objects with exactly action plus path; action is only create_directory or remove_empty_directory and path is active-workspace-relative; with active workspace D:\\project, directory_changes can create D:\\project\\test and later remove that directory when empty without using process execution; Edit and Full both permit this reviewed workspace write, absolute or parent-traversal targets and reparse escapes are denied, non-empty recursive directory deletion is not implied, and the operation never mutates WorkspaceRegistry or active workspace control-plane",
+        ],
+      ],
+    },
+    "LB-007": {
+      testReplacements: [
+        [
+          "Full ordinary exec_command treats static Windows system-management targets reg.exe schtasks.exe sc.exe netsh.exe bcdedit.exe and dism.exe, including exact System32 paths and case-insensitive executable names, as requiring the privileged route; ordinary execution returns PrivilegedRouteUnavailable and cannot cross the administrator boundary",
+          "Full ordinary exec_command treats static Windows system-management targets reg.exe schtasks.exe sc.exe netsh.exe bcdedit.exe and dism.exe, including exact System32 paths and case-insensitive executable names, as requiring the privileged route; ordinary execution returns PrivilegedRouteNotAvailable and cannot cross the administrator boundary",
+        ],
+        [
+          "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteUnavailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility",
+          "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteNotAvailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility",
+        ],
+      ],
+    },
+  },
+});
+
+export function hasExactSchema37ContractCleanup20260817(contractsDoc) {
+  if (contractsDoc?.schema_version !== SCHEMA37_CONTRACT_CLEANUP_2026_08_17.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(SCHEMA37_CONTRACT_CLEANUP_2026_08_17.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const key of Object.keys(SCHEMA37_CONTRACT_CLEANUP_2026_08_17.removedRules)) {
+    if (Object.hasOwn(contractsDoc?.rules ?? {}, key)) return false;
+  }
+  for (const [id, delta] of Object.entries(SCHEMA37_CONTRACT_CLEANUP_2026_08_17.prs)) {
+    const pr = contractsDoc?.prs?.[id];
+    if (!pr) return false;
+    if (!hasReplacement(pr.required_artifacts, delta.artifactReplacements ?? [])) return false;
+    if (!hasReplacement(pr.required_tests, delta.testReplacements ?? [])) return false;
+  }
+  return true;
+}
+
+export function normalizeSchema37ContractCleanup20260817(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = SCHEMA37_CONTRACT_CLEANUP_2026_08_17.baselineSchemaVersion;
+  for (const key of Object.keys(SCHEMA37_CONTRACT_CLEANUP_2026_08_17.addedRules)) delete normalized.rules[key];
+  for (const [key, baseline] of Object.entries(SCHEMA37_CONTRACT_CLEANUP_2026_08_17.removedRules)) normalized.rules[key] = baseline;
+  for (const [id, delta] of Object.entries(SCHEMA37_CONTRACT_CLEANUP_2026_08_17.prs)) {
+    const pr = normalized.prs?.[id];
+    if (!pr) continue;
+    pr.required_artifacts = normalizeReplacements(pr.required_artifacts, delta.artifactReplacements ?? []);
+    pr.required_tests = normalizeReplacements(pr.required_tests, delta.testReplacements ?? []);
+  }
+  return normalized;
+}
+
 const SCHEMA36_RUNTIME_OBSERVABILITY_RULES = {
   dashboard_permission_mode_row_forbidden: false,
   dashboard_permission_mode_read_only_row_required: true,
@@ -2437,6 +2525,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA37_CONTRACT_CLEANUP_2026_08_17.schemaVersion) {
+    if (!hasExactSchema37ContractCleanup20260817(authorizationContracts)) {
+      findings.push(`${expected.id}:schema37-contract-cleanup-20260817-drift`);
+    }
+    authorizationContracts = normalizeSchema37ContractCleanup20260817(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= 36) {
     if (!hasExactSchema36RuntimeObservabilityAmendment20260817(authorizationContracts)) {
       findings.push(`${expected.id}:schema36-runtime-observability-contract-amendment-drift`);

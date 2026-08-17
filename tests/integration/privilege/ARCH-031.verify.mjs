@@ -14,7 +14,7 @@ for (const key of [
 
 const lb007 = contracts.prs?.["LB-007"];
 const lb012 = contracts.prs?.["LB-012"];
-const lb007Proof = "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteNotAvailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility";
+const lb007Proof = "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteUnavailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility";
 const lb012Proof = "an already-connected MCP session sees elevated_exec continuously before and after entering Elevated or Broker activation; Full and Edit calls remain typed denied, Elevated without Active Broker remains awaiting authorization, Active Broker enables only reviewed administrator operations, and ordinary exec_command remains current-user throughout";
 if (!lb007?.required_tests?.includes(lb007Proof)) throw new Error("ARCH-031 LB-007 stable advertisement proof missing");
 if (!lb012?.required_tests?.includes(lb012Proof)) throw new Error("ARCH-031 LB-012 stable Broker-gated proof missing");

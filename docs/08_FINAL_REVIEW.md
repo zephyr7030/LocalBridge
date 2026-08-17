@@ -130,7 +130,7 @@ ShellResolver accepts only logical selector `auto/powershell/pwsh/windows_powers
 
 Unfrozen v0.1 non-goals remain WSL/container/remote shell, custom shell registry, environment-manager abstraction and exact internal directory layout. The final design guidance also defines the longer-term System Maintenance domain (`system_inspect` / `system_manage`, structured privileged operations and user authorization), but those future capabilities do not override current PR sequencing or claim implementation before their contracts are reached.
 
-The Agent Runtime foundation currently reopens execution at `G2 / LB-006`. G2 adversarial generation 9 has been consumed as **FAIL / REWORK_REQUIRED**. Schema27 freezes the resulting public-facade/session/workspace-path/nested-Git corrections into LB-006: LocalBridge-owned public session/output handles with terminal convergence, correct `command_control` live-poll/read/write/kill semantics, non-empty ordinary `workspace_context.workspace`, deterministic private-result semantic probes where upstream outputSchema is insufficient, nonzero-exit `ProcessFailed`, no advertised-but-unavailable v1 action, relative-only workspace-bound public path inputs, and one workspace-bounded nested-repository resolver for all Git actions. LB-006→LB-012 must be strictly revalidated, followed by fresh G2 adversarial generation 10; historical G2 generation 8 and G3 generation 6 are provenance only. G3 must then be re-executed on the new G2 baseline, and G3→G4 human Gate is not currently actionable. Schema26 administrator safety confirmation is queued for LB-015/LB-016 when strict sequencing reaches them; it does not move the current pointer.
+The Agent Runtime foundation currently reopens execution at `G2 / LB-006`. G2 adversarial generation 9 has been consumed as **FAIL / REWORK_REQUIRED**. Schema27 historically froze the resulting public-facade/session/workspace-path/nested-Git corrections into LB-006: LocalBridge-owned public session/output handles with terminal convergence, correct `command_control` live-poll/read/write/kill semantics, non-empty ordinary `workspace_context.workspace`, deterministic private-result semantic probes where upstream outputSchema is insufficient, nonzero-exit `ProcessFailed`, no advertised-but-unavailable v1 action, the then-current relative-only workspace-bound public path rule (superseded by schema37 safe absolute-path equivalence), and one workspace-bounded nested-repository resolver for all Git actions. LB-006→LB-012 must be strictly revalidated, followed by fresh G2 adversarial generation 10; historical G2 generation 8 and G3 generation 6 are provenance only. G3 must then be re-executed on the new G2 baseline, and G3→G4 human Gate is not currently actionable. Schema26 administrator safety confirmation is queued for LB-015/LB-016 when strict sequencing reaches them; it does not move the current pointer.
 
 ## Schema28 — Test Orchestration + Public Runtime Corrections（historical）
 
@@ -169,3 +169,13 @@ schema36 不新增 public core tool；以 enriched `workspace_context`、现有 
 
 
 Schema36 correction：G3 generation13 因 Dashboard PermissionMode 回退纠正而失去当前解锁效力。当前 UI 权威恢复只读 PermissionMode 行，保留 schema36 Shell/observability/backend-consent 安全修复；从 LB-015 严格重验并执行 fresh G3 generation14，之后仍只能进入 human Gate REQUIRED。
+
+## Schema37 — Contract contradiction cleanup（current）
+
+2026-08-17 独立磁盘审查发现 schema36 机器合同与当前文档仍残留三类互斥旧语义；用户已明确最终解释并授权合同修订。schema37 只做合同去歧义，不以旧报告或历史 PASS 作为事实：
+
+- active-workspace-bound public path/workdir 的授权边界是 canonical containment + validated filesystem identity，而不是字符串必须相对路径。安全 workspace-relative 与普通 Win32 absolute 若解析为同一 active workspace 对象则等价允许；workspace 外 absolute、UNC、verbatim public input、POSIX absolute、ADS-like、越界 parent traversal 与 reparse escape fail-closed；
+- Dashboard 显示且仅显示一个 backend PermissionMode 驱动的只读 `权限模式` 行；“主控界面不显示三种模式”精确定义为不显示三档选择/切换控件，而不是不显示当前模式。Dashboard 不得修改 PermissionMode 或触发模式 UAC；权限编辑仅在 Settings 与用户显式重新打开的 onboarding Screen3；
+- public privileged-route unavailable canonical error 统一为 `PrivilegedRouteUnavailable`；历史/内部 `PrivilegedRouteNotAvailable` 不得再作为 public required-test 期望；
+- UI skill 与 schema26/schema36 已冻结管理员流程对齐：管理员入口橙色 `#ff9500`，Broker 未 Active 时固定风险警告 → backend monotonic 9000ms not-before → enabled 用户确认 → 安全校验 → Windows UAC；frontend countdown 仅展示；
+- schema37 修订本身不修改 `PR_INDEX.json` / `PROJECT_STATE.json`，不自动推进、回退或重开任何 PR/Gate；G3 human review 仍为 REQUIRED，G4 仍须等待该 Gate 的真实结论。

@@ -139,7 +139,7 @@ v1 core registry = workspace_context / agent_workflow / exec_command / command_c
 Runtime adapter  = coding-tools-mcp 为内部可替换 backend；启动必须做 mandatory capability negotiation，缺失/不兼容 fail-closed
 Public session    = LocalBridge-owned opaque session/output handles；禁止 raw upstream session/output handle；poll/read/write/kill 必须闭环且 terminal lifecycle 后台收敛
 workspace_context = active workspace 时返回非空 ordinary absolute workspace + workspace-relative default_cwd；不得静默 workspace=""
-Public path input = exec workdir / git / document / image 等 workspace-bound 参数统一 active-workspace-relative；absolute/traversal typed deny
+Public path input = exec workdir / git / document / image 等 workspace-bound 参数必须解析在 active workspace 内；安全 relative 与普通 Win32 absolute 经 identity validation 指向同一 active workspace 对象时等价；workspace 外 absolute / UNC / verbatim public input / POSIX absolute / ADS-like / 越界 traversal / reparse escape typed deny
 Process outcome   = exit_code=0 才是普通 success；任何非零 exit（包括无 stdout/stderr）= ProcessFailed / Failed task
 Facade completeness = public schema 已广告 action 必须真实可执行；禁止“先暴露、调用时 unavailable”
 Git nested repo   = 五个 git_workflow action 共用 workspace-bounded repo resolver；已发现 repo 时 diff 禁止 non-git fallback
@@ -187,16 +187,24 @@ G3 owner           = 居中项归 LB-015，不得提前混入 G2 产品修改
 Schema30 nested-project / PowerShell / workspace-write 补充：
 
 ```text
-agent_workflow.path = active-workspace-relative nested-project selector；默认 .；只改变 project context，不改变 active workspace authority
+agent_workflow.path = active-workspace-bound nested-project selector；默认 .；安全 relative 与普通 Win32 absolute 若解析到同一 active workspace 内对象则等价；只改变 project context，不改变 active workspace authority
 nested repo          = path=LocalBridge 或 LocalBridge/src 时与 git_workflow 使用一致 enclosing-repo 语义，最多向上到 active workspace
 PowerShell baseline  = arbitrary module autoload 继续关闭；固定/身份验证的可信标准模块提供 Get-Location / Get-ChildItem / Test-Path 等基础 cmdlet
 provider hardening   = New-Item / Set-Content / Set-Item / Alias / Function 等动态 provider surface 继续 review-required
-workspace dir write  = agent_workflow.directory_changes[]；仅 create_directory / remove_empty_directory；active-root-relative；Edit/Full reviewed write；不依赖 process exec；absolute/../reparse escape deny
+workspace dir write  = agent_workflow.directory_changes[]；仅 create_directory / remove_empty_directory；必须 active-root-bound；安全 relative 与同根普通 Win32 absolute 等价；Edit/Full reviewed write；不依赖 process exec；workspace 外 absolute / UNC / verbatim / POSIX absolute / ADS-like / 越界 ../reparse escape deny
 control-plane        = WorkspaceRegistry / active workspace mutation 仍永久 deny；nested-project/path 与目录写入均不能扩大授权根
 current              = G2 / LB-006 REWORK_REQUIRED；LB-007 BLOCKED；generation18 未消费
 ```
 
 Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订，**不改变当前执行入口**：当前仍为 `G2 / LB-006`，必须继续严格顺序推进，不能因本合同提前跳到 G3。
+
+## Schema37 — Contract contradiction cleanup（current）
+
+- active-workspace-bound public path/workdir 输入以 canonical containment + validated filesystem identity 为授权真相；安全相对路径与普通 Win32 绝对路径若指向同一 active workspace 对象则等价允许，禁止再使用 `relative-only` 或“一切 absolute 均拒绝”的旧规则。
+- Dashboard/主控界面显示且仅显示一个 backend PermissionMode 驱动的只读 `权限模式` 行；“不显示三种模式”仅指不显示三档切换控件，不是隐藏当前模式状态。权限编辑仍只在 Settings 与用户显式重新打开的 onboarding 第3屏。
+- public privileged-route unavailable canonical code 固定为 `PrivilegedRouteUnavailable`；`PrivilegedRouteNotAvailable` 不再允许作为 public required-test 期望。
+- 管理员模式入口固定橙色 `#ff9500`；Broker 未 Active 时必须先走固定风险警告 + backend monotonic 9000ms not-before + 用户 enabled `确认`，之后才可请求 UAC；frontend 倒计时不具授权权威。
+- 本次 schema37 只清理当前合同矛盾，不自动推进、回退或重开 `PR_INDEX.json` / `PROJECT_STATE.json` 中的 PR/Gate 状态；现有 G3 human review 要求保持不变。
 
 ```text
 品牌图标       = assets/icons/localbridge.ico

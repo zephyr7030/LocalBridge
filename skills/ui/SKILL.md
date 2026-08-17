@@ -16,9 +16,9 @@
 
 禁止第 6 屏；旧 `Local Bridge 使用确认` 整页已删除。除第 1 屏外，第 2/3/4/5 屏都必须有明确 `返回`，任何保存、启动或配置失败不得锁死用户。
 
-第 3 屏新项目使用原生 Windows 文件夹选择器。三个权限模式按钮不得固定高度压缩说明；换行必须安全自动增高，并具备 `min-height >= 80px` 或等效可证明结构高度。780×620 下两行按钮真实 rendered 高度必须至少为单行控件 2 倍且文本完整；2026-08-14 用户已通过该视觉审核，后续若该布局变化须复验。普通 selected 使用蓝色 `#0071e3`；管理员模式在 onboarding 与设置页使用黄色/琥珀逻辑色，不得被普通蓝色 selected 覆盖。可见用户在 onboarding 第 3 屏或设置页点击/重新点击管理员模式就是显式 UAC 动作，若 Broker 未 Active 必须立即请求 Windows 授权；禁止额外“启用管理员权限”按钮。后台恢复管理员偏好仍不得自动 UAC。
+第 3 屏新项目使用原生 Windows 文件夹选择器。编辑模式/完整模式/管理员模式三档按钮是通用 content-sized button 规则的明确例外：在 780×620 下必须是对称三列、等宽等高，标题/说明完整可见且不得 clipping/overflow；最终视觉验收不能只凭 CSS marker。普通 selected 使用蓝色 `#0071e3`；管理员模式在 onboarding 与设置页统一使用橙色 `#ff9500` 警告色，不得被普通蓝色 selected 覆盖。Broker 未 Active 时，可见用户在 onboarding 第 3 屏或设置页点击/重新点击管理员模式必须先打开固定安全警告；backend 以可信 monotonic challenge/not-before 保证完整 9000ms，期间红色确认按钮 disabled，达到 eligibility 后只有用户点击 enabled `确认` 才允许进入既有安全校验并随后请求 Windows UAC。禁止额外“启用管理员权限”按钮；frontend timer 仅负责展示，不得成为授权真相。后台恢复管理员偏好不得显示 warning 或自动 UAC，Broker 已 Active 时重选不得重复 UAC。
 
-Dashboard/主控界面不得显示 `权限模式` 行，也不得显示编辑/完整/管理员三档选项；完成 onboarding 后设置页是唯一权限模式编辑入口。Dashboard 只能显示只读 `管理员权限` 实际运行状态，并直接消费 `PrivilegeState`；不得从 Dashboard 修改 PermissionMode 或触发模式 UAC。
+Dashboard/主控界面必须显示且仅显示一个只读 `权限模式` 行，值直接来自 backend `PermissionMode` 并显示为编辑模式/完整模式/管理员模式；不得显示三档切换控件，不得从 Dashboard 修改 PermissionMode 或触发模式 UAC。管理员/Broker 的实际运行状态属于独立 typed runtime/diagnostics projection，不得覆盖或猜测 `权限模式`。权限模式编辑只允许设置页，以及用户显式重新打开的 onboarding 第 3 屏。
 
 第 4 屏标题固定为 `创建自定义插件`，提示固定表达 `在插件设置页面最底端，打开“开发者模式”`。`打开 ChatGPT插件设置` 必须位于左侧操作流，其下固定显示 `打开插件管理页后，选择隧道并选择刚刚添加的Tunel，创建插件`。中部严格只有 `名称 = Local Bridge` 与 `Tunnel ID = 当前持久化保存值` 两行，禁止“本地服务”；两行独立复制反馈绿色 `已复制` 精确保持 3 秒且不得位移。
 
@@ -32,7 +32,7 @@ Dashboard/主控界面不得显示 `权限模式` 行，也不得显示编辑/�
 
 必须由用户点击“确定”进入主界面，不自动跳转。
 
-按钮必须统一且可辨识，禁止白底白按钮；普通 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；管理员模式使用黄色/琥珀逻辑色。提示只保留当前动作所需的最少信息，状态/复制反馈不得造成布局位移。
+按钮必须统一且可辨识，禁止白底白按钮；普通 primary、普通 selected 与主要交互统一使用原方案蓝色 `#0071e3`，黑色不得作为普通产品 accent；管理员模式入口统一使用橙色 `#ff9500` 警告色。提示只保留当前动作所需的最少信息，状态/复制反馈不得造成布局位移。
 
 窗口固定 780×620；minimum/maximum inner size 都是 780×620，`resizable=false`、`maximizable=false`。native `decorations=false`；只允许一层 edge-to-edge 自定义 chrome，必须贴满 client area，禁止双边框。自定义 chrome 提供拖拽、最小化、关闭，无最大化。Dashboard 和 onboarding 必须在固定 client area 内完整可操作。
 
