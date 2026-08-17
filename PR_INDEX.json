@@ -202,7 +202,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "READY"
+      "status": "PASS"
     },
     {
       "id": "LB-014",
@@ -211,7 +211,7 @@
         "LB-013"
       ],
       "gate": "G3",
-      "status": "BLOCKED"
+      "status": "READY"
     },
     {
       "id": "LB-015",
@@ -434,6 +434,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "current_group": "G3"
 }
