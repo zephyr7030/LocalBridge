@@ -1895,11 +1895,12 @@ export function normalizeSchema36RuntimeObservabilityAmendment20260817(contracts
   normalized.prs["LB-006"].required_tests = removeItems(normalized.prs["LB-006"].required_tests, SCHEMA36_LB006_TESTS);
   normalized.prs["LB-007"].required_tests = removeItems(normalized.prs["LB-007"].required_tests, SCHEMA36_LB007_TESTS);
   normalized.prs["LB-015"].required_tests = removeItems(normalized.prs["LB-015"].required_tests, SCHEMA36_LB015_TESTS);
-  for (const item of SCHEMA36_LB015_SUPERSEDED_ARTIFACTS) if (!normalized.prs["LB-015"].required_artifacts.includes(item)) normalized.prs["LB-015"].required_artifacts.push(item);
-  for (const item of SCHEMA36_LB015_SUPERSEDED_TESTS) if (!normalized.prs["LB-015"].required_tests.includes(item)) normalized.prs["LB-015"].required_tests.push(item);
+  const restoreAt = (items, index, item) => { if (!items.includes(item)) items.splice(Math.min(index, items.length), 0, item); };
+  restoreAt(normalized.prs["LB-015"].required_artifacts, 4, SCHEMA36_LB015_SUPERSEDED_ARTIFACTS[0]);
+  for (const [index, item] of [[4, SCHEMA36_LB015_SUPERSEDED_TESTS[0]], [53, SCHEMA36_LB015_SUPERSEDED_TESTS[1]], [54, SCHEMA36_LB015_SUPERSEDED_TESTS[2]], [57, SCHEMA36_LB015_SUPERSEDED_TESTS[3]]]) restoreAt(normalized.prs["LB-015"].required_tests, index, item);
   normalized.prs["LB-016"].required_tests = removeItems(normalized.prs["LB-016"].required_tests, SCHEMA36_LB016_TESTS);
   const oldDashboardTest = "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode";
-  if (!normalized.prs["LB-015"].required_tests.includes(oldDashboardTest)) normalized.prs["LB-015"].required_tests.push(oldDashboardTest);
+  restoreAt(normalized.prs["LB-015"].required_tests, 100, oldDashboardTest);
   return normalized;
 }
 

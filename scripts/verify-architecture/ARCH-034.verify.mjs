@@ -20,6 +20,9 @@ const g3Reopened=state.execution?.current_group==="G3" || ["READY","IN_PROGRESS"
 if(g3Reopened){
   const app=readFileSync(resolve(root,"src/App.tsx"),"utf8");
   if(app.includes(">权限模式</span>"))fail.push("dashboard-permission-row");
+}
+const lb016Active=["READY","IN_PROGRESS","REWORK_REQUIRED","PASS"].includes(pr("LB-016")?.status);
+if(lb016Active){
   const ui=readFileSync(resolve(root,"src-tauri/src/commands/ui.rs"),"utf8");
   if(!/(challenge|not_before|not-before)/i.test(ui))fail.push("backend-admin-consent-challenge");
 }
