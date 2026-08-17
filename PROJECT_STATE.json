@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3445,6 +3445,17 @@
       "Historical live UAC acceptance commit 692a131 remains preserved for the real Broker->UAC->Administrator token proof; schema36 did not alter privileged Broker/UAC implementation and fresh Broker/privilege tests cover the changed public facade/server boundary."
     ],
     "group_transition": "G2_REVIEW_REQUIRED",
+    "next_required_g2_adversarial_generation": 24,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb012_schema36_arch031_verifier_reopen_2026_08_17": {
+    "status": "REWORK_REQUIRED",
+    "reason": "G2 generation24 architecture Gate found ARCH-031 verifier hard-coded facade revision34 after schema36 raised the public facade revision to 36.",
+    "evidence": [
+      "Current facade has AGENT_API_REVISION 36.",
+      "Stable privileged visibility/catalog/signature markers remain present and fresh @测试 workspace_context advertises elevated_exec in Full while calls are reauthorized and denied."
+    ],
     "next_required_g2_adversarial_generation": 24,
     "g3_unlocked": false,
     "g4_unlocked": false
