@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3284,5 +3284,36 @@
     },
     "g4": "BLOCKED",
     "human_gate_policy": "after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
+  },
+  "lb006_schema36_rework_acceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "implementation_commit": "f57efffecb889447c541663ae816afb6832c791f",
+    "acceptance": [
+      "A316",
+      "A317",
+      "A318",
+      "A319",
+      "A320",
+      "A321",
+      "A322",
+      "A325",
+      "A326",
+      "A327",
+      "A328",
+      "A329",
+      "A332"
+    ],
+    "evidence": [
+      "Actual @测试 workspace_context served facade_revision=36 with permission_mode=full, active_workspace scope, current_windows_user ordinary route, Broker/UAC state, trusted shell discovery and capability snapshot.",
+      "Actual @测试 allowed where cmd, where pwsh, echo %PATH%, bare NUL redirection, literal Get-Command projection, verified .cmd/.bat/.ps1 scripts, Unicode paths, long session poll and retained-output paging.",
+      "Actual @测试 denied reg query and dynamic %COMSPEC% with canonical PrivilegedRouteUnavailable plus safe rule/remediation; workdir traversal remained WorkspaceDenied; explicit pwsh absence returned RuntimeUnavailable with trusted-shell alternative guidance.",
+      "Retained output paging returned total_bytes=85157 with contiguous 512-byte pages and stable output_ref.",
+      "Fresh cargo test --locked full suite PASS; cargo clippy --locked --all-targets -- -D warnings PASS; npm test PASS; npm run build PASS; runtime-manifest, architecture, activation, PR-scoped, negative and UI-language verifiers PASS; git diff --check PASS."
+    ],
+    "next_pr": "LB-007",
+    "next_g2_review_generation": 24,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
