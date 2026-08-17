@@ -4253,7 +4253,7 @@
     "review_decision_commit": "2fab63e6b99a163a95571f2436aa5b39806e4039"
   },
   "schema39_g3_revalidation_2026_08_17": {
-    "status": "REVIEW_REQUIRED",
+    "status": "PASS_PENDING_PROVENANCE",
     "owner_prs": [
       "LB-013",
       "LB-014",
@@ -4266,7 +4266,15 @@
     "next_required_g3_adversarial_generation": 17,
     "human_review_generation": 3,
     "g4_unlocked": false,
-    "next_action": "Run fresh G3 independent adversarial review generation17; human review remains blocked until PASS."
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3; G4 and LB-018 remain blocked until explicit human PASS.",
+    "evidence": [
+      "Fresh schema39 G3 final-tree cargo test PASS: 208 library tests plus all migration/settings/workspace/process/runtime/credentials/MCP/policy/Broker targets; explicit live-UAC target remains intentionally ignored in routine gates.",
+      "Fresh cargo clippy --locked --all-targets --all-features -- -D warnings PASS; frontend Vitest 4 files/7 tests and production build PASS.",
+      "Fresh LB-013 through LB-017 contracts PASS; dashboard read-only PermissionMode and CurrentTask wake/cursor regressions remain fixed; admin consent challenge identity/9000ms stale-replay guards remain enforced.",
+      "Fresh runtime-manifest, UI-language, schema39 execution-platform machine acceptance, architecture 34/34 and G4 human-gate fail-closed PASS.",
+      "Fresh native Tauri/WebView2 fixed-window E2E PASS for onboarding and dashboard at 150% DPI: 780x620 logical / 1170x930 physical, native_scale=1.5, dpr=1.5.",
+      "Actual @测试 schema39 downstream rediscovery exposes concrete command_control/elevated_exec schemas and action-specific agent/git/document fields; earlier actual schema39 workspace_context and exec_command calls succeeded. A final focused call was disabled by the platform before reaching LocalBridge and was not counted as a product failure."
+    ]
   },
   "schema39_lb013_reacceptance_2026_08_17": {
     "status": "PASS",
@@ -4320,5 +4328,39 @@
     "g3_generation_17_consumed": false,
     "human_review_status": "BLOCKED",
     "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_17_2026_08_17": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 17,
+    "baseline_commit": "d485085e992b702de15822fd6040cc2db090bc56",
+    "finding": "No blocking G3 defect remains on the schema39/G2 generation27 baseline after fresh independent adversarial review.",
+    "evidence": [
+      "Fresh schema39 G3 final-tree cargo test PASS: 208 library tests plus all migration/settings/workspace/process/runtime/credentials/MCP/policy/Broker targets; explicit live-UAC target remains intentionally ignored in routine gates.",
+      "Fresh cargo clippy --locked --all-targets --all-features -- -D warnings PASS; frontend Vitest 4 files/7 tests and production build PASS.",
+      "Fresh LB-013 through LB-017 contracts PASS; dashboard read-only PermissionMode and CurrentTask wake/cursor regressions remain fixed; admin consent challenge identity/9000ms stale-replay guards remain enforced.",
+      "Fresh runtime-manifest, UI-language, schema39 execution-platform machine acceptance, architecture 34/34 and G4 human-gate fail-closed PASS.",
+      "Fresh native Tauri/WebView2 fixed-window E2E PASS for onboarding and dashboard at 150% DPI: 780x620 logical / 1170x930 physical, native_scale=1.5, dpr=1.5.",
+      "Actual @测试 schema39 downstream rediscovery exposes concrete command_control/elevated_exec schemas and action-specific agent/git/document fields; earlier actual schema39 workspace_context and exec_command calls succeeded. A final focused call was disabled by the platform before reaching LocalBridge and was not counted as a product failure."
+    ],
+    "verified_passes": [
+      "LB-013 -> LB-017 fresh contracts",
+      "cargo test --locked (208 library tests plus all explicit integration/migration targets)",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "frontend Vitest 7 tests and production build",
+      "runtime-manifest",
+      "UI-language",
+      "schema39 execution platform machine acceptance",
+      "native fixed-window Tauri/WebView2 E2E at 150% DPI",
+      "architecture 34/34",
+      "G4 fail-closed",
+      "git diff --check"
+    ],
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": "PENDING",
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }
