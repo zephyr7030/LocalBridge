@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3431,6 +3431,21 @@
     ],
     "next_pr": "LB-012",
     "next_g2_review_generation": 24,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb012_schema36_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "evidence": [
+      "Fresh privilege filter: 25 passed, 0 failed; privileged policy filter: 4 passed, 0 failed.",
+      "Architecture Gate PASS with schema36 permission-scope/stable privileged catalog rules active.",
+      "Fresh @测试 workspace_context on restarted current debug instance reports facade_revision 36, runtime ready, permission_mode full, ordinary_route_token current_windows_user, elevated_exec continuously advertised, elevated_route unavailable because mode is not elevated.",
+      "Fresh @测试 elevated_exec and reg system-management calls in Full return canonical PrivilegedRouteUnavailable; ordinary where/%PATH%/NUL and Windows PowerShell diagnostics execute successfully; explicit pwsh returns RuntimeUnavailable with trusted-shell remediation.",
+      "Historical live UAC acceptance commit 692a131 remains preserved for the real Broker->UAC->Administrator token proof; schema36 did not alter privileged Broker/UAC implementation and fresh Broker/privilege tests cover the changed public facade/server boundary."
+    ],
+    "group_transition": "G2_REVIEW_REQUIRED",
+    "next_required_g2_adversarial_generation": 24,
     "g3_unlocked": false,
     "g4_unlocked": false
   }
