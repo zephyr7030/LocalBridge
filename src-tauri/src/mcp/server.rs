@@ -22,8 +22,8 @@ use crate::state::{
 };
 
 use super::facade::{
-    AgentFacade, CodingToolsRuntimeAdapter, FacadeCallError, FacadeDenied, FacadeError,
-    FacadeErrorCode, AGENT_API_REVISION, public_tools_for_policy,
+    AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter, FacadeCallError, FacadeDenied,
+    FacadeError, FacadeErrorCode, AGENT_API_REVISION, public_tools_for_policy, stable_success,
 };
 use super::http::McpCancellationClient;
 use super::policy::CapabilityPolicy;
@@ -583,6 +583,26 @@ impl PolicyEnforcementRuntime {
             Ok(guard) => guard.runtime_root_is_running(),
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Poisoned(error)) => error.into_inner().runtime_root_is_running(),
+        }
+    }
+
+    pub fn coding_runtime_health(&self) -> Result<Option<CodingRuntimeHealth>, FacadeError> {
+        let Some(guard) = self.guard.as_ref() else {
+            return Ok(None);
+        };
+        match guard.try_lock() {
+            Ok(mut guard) => guard.live_runtime_health().map(Some),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Poisoned(error)) => error.into_inner().live_runtime_health().map(Some),
+        }
+    }
+
+    pub fn take_coding_runtime_fault(&self) -> Option<crate::state::RuntimeFault> {
+        let guard = self.guard.as_ref()?;
+        match guard.try_lock() {
+            Ok(mut guard) => guard.take_runtime_fault(),
+            Err(TryLockError::WouldBlock) => None,
+            Err(TryLockError::Poisoned(error)) => error.into_inner().take_runtime_fault(),
         }
     }
 
@@ -1263,7 +1283,29 @@ fn handle_task_control(
     let action = arguments.get("action").and_then(Value::as_str).ok_or(())?;
     let before = current_task.actual_snapshot();
     let data = match action {
-        "get" => task_control_snapshot_with_terminal(&before, task_state),
+        "get" => {
+            let mut data = task_control_snapshot_with_terminal(&before, task_state);
+            if matches!(before, CurrentTaskStatus::Idle) {
+                let durable = match guard.try_lock() {
+                    Ok(guard) => guard.durable_coding_task_snapshot(),
+                    Err(TryLockError::WouldBlock) => None,
+                    Err(TryLockError::Poisoned(error)) => {
+                        error.into_inner().durable_coding_task_snapshot()
+                    }
+                };
+                if let Some(durable) = durable {
+                    let terminal = data
+                        .get("last_terminal_command")
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    data = durable;
+                    if let Some(object) = data.as_object_mut() {
+                        object.insert("last_terminal_command".into(), terminal);
+                    }
+                }
+            }
+            data
+        }
         "cancel" => {
             let active = active_requests
                 .lock()
@@ -1294,8 +1336,21 @@ fn handle_task_control(
                         .is_ok(),
                 },
             )?;
+            let durable_cancelled = match guard.try_lock() {
+                Ok(mut guard) => guard.cancel_durable_coding_task().unwrap_or(false),
+                Err(TryLockError::WouldBlock) => false,
+                Err(TryLockError::Poisoned(error)) => error
+                    .into_inner()
+                    .cancel_durable_coding_task()
+                    .unwrap_or(false),
+            };
+            let cancelled = cancelled.saturating_add(u64::from(durable_cancelled));
             if cancelled > 0 {
-                json!({"state":"cancel_requested","cancelled_requests":cancelled})
+                json!({
+                    "state":"cancel_requested",
+                    "cancelled_requests":cancelled,
+                    "durable_task_cancelled":durable_cancelled
+                })
             } else {
                 let after = current_task.actual_snapshot();
                 let mut data = task_control_snapshot_with_terminal(&after, task_state);
@@ -1318,11 +1373,7 @@ fn handle_task_control(
     write_rpc_result(
         stream,
         id,
-        json!({
-            "content":[{"type":"text","text":"Task control completed"}],
-            "structuredContent":{"ok":true,"data":data},
-            "isError":false
-        }),
+        stable_success(data, "Task control completed"),
         Some(session),
     )
 }
@@ -2706,6 +2757,16 @@ mod tests {
             json!({"action":"get"}),
         );
         assert_eq!(task.body["result"]["structuredContent"]["ok"], true);
+        for field in [
+            "ok", "state", "summary", "task_id", "warnings", "next_step", "output_refs",
+            "data", "error",
+        ] {
+            assert!(
+                task.body["result"]["structuredContent"].get(field).is_some(),
+                "task_control real MCP response lost schema41 envelope field {field}: {:#?}",
+                task.body
+            );
+        }
         assert!(matches!(
             task.body["result"]["structuredContent"]["data"]["state"].as_str(),
             Some("idle") | Some("active")
@@ -2902,8 +2963,8 @@ mod tests {
         assert!(
             initialized.body["result"]["serverInfo"]["version"]
                 .as_str()
-                .is_some_and(|value| value.ends_with("+api39")),
-            "schema39 serverInfo version must invalidate stale downstream metadata: {:#?}",
+                .is_some_and(|value| value.ends_with(&format!("+api{AGENT_API_REVISION}"))),
+            "serverInfo version must track the current LocalBridge API revision and invalidate stale downstream metadata: {:#?}",
             initialized.body
         );
         let mut session = initialized.session.expect("schema28 downstream session");
@@ -2940,8 +3001,8 @@ mod tests {
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 39,
-            "fresh serving instance did not identify the revision39 facade: {:#?}",
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], AGENT_API_REVISION,
+            "fresh serving instance did not identify the current LocalBridge facade revision: {:#?}",
             provenance.body
         );
         let first_turn = &provenance.body["result"]["structuredContent"]["data"];
@@ -2979,11 +3040,20 @@ mod tests {
             .is_some_and(|value| value.contains("resume accepts only action")));
         assert_eq!(served_agent["outputSchema"]["type"], "object");
         assert_eq!(served_agent["outputSchema"]["properties"]["ok"]["type"], "boolean");
+        let agent_data_schema = served_agent["outputSchema"]["properties"]["data"]["anyOf"]
+            .as_array()
+            .and_then(|branches| branches.iter().find(|branch| branch["type"] == "object"))
+            .expect("agent_workflow nullable data keeps an object domain branch");
         assert_eq!(
-            served_agent["outputSchema"]["properties"]["data"]["properties"]["state"]["type"],
+            agent_data_schema["properties"]["state"]["type"],
             "string"
         );
-        assert!(served_agent["outputSchema"]["properties"]["error"].is_object());
+        assert!(
+            served_agent["outputSchema"]["properties"]["error"]["anyOf"]
+                .as_array()
+                .is_some_and(|branches| branches.iter().any(|branch| branch["type"] == "object")),
+            "agent_workflow nullable error must retain a typed object branch"
+        );
         let served_command_control = served_tools.body["result"]["tools"]
             .as_array()
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "command_control"))

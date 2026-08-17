@@ -13,12 +13,13 @@ if (!lb006?.required_tests?.includes(proof)) throw new Error("ARCH-030 LB-006 ou
 const facade = readFileSync("src-tauri/src/mcp/facade.rs", "utf8");
 const server = readFileSync("src-tauri/src/mcp/server.rs", "utf8");
 for (const marker of [
-  "pub const AGENT_API_REVISION: u32 = 39",
+  `pub const AGENT_API_REVISION: u32 = ${contracts.rules?.localbridge_agent_api_revision}`,
   '"outputSchema": public_tool_output_schema(name)',
   "fn public_tool_output_schema(name: &str) -> Value",
   '"agent_workflow" => json!({',
-  '"state":{"type":"string","enum":["context_ready","running","completed"]}',
-  '"error":public_error_output_schema()',
+  '"state":{"type":"string","enum":["context_ready","prepared","editing","verifying","persisted","running","completed","cancelled","failed"]}',
+  '"required":["ok","state","summary","task_id","warnings","next_step","output_refs","data","error"]',
+  '"error":{"anyOf":[public_error_output_schema(),{"type":"null"}]}',
 ]) if (!facade.includes(marker)) throw new Error(`ARCH-030 public facade outputSchema marker missing: ${marker}`);
 for (const marker of [
   '"outputSchema": elevated_exec_output_schema()',

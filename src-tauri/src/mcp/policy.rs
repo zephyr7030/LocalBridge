@@ -774,7 +774,13 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             let shell_review_required = workflow_commands_require_review(arguments);
             let workflow_action = action?;
             let object = arguments.as_object()?;
-            let commands_present = match object.get("commands") {
+            let phase = object.get("phase").and_then(Value::as_str);
+            if object.get("phase").is_some()
+                && !matches!(phase, Some("prepare" | "edit" | "verify" | "persist"))
+            {
+                return None;
+            }
+            let commands_present = phase == Some("verify") || match object.get("commands") {
                 None => false,
                 Some(commands) => !commands.as_array()?.is_empty(),
             };

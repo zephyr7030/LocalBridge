@@ -1,4 +1,6 @@
 mod bundle;
+mod context_service;
+mod edit_service;
 mod facade;
 mod git_adapter;
 mod guard;
@@ -9,11 +11,13 @@ mod runtime;
 mod server;
 mod shell;
 mod task_state;
+mod verification_planner;
 mod workflow_checkpoint;
 
 pub use facade::{
-    AGENT_API_VERSION, AgentFacade, CodingToolsRuntimeAdapter, CommandControlAction,
-    FacadeCallError, FacadeDenied, FacadeError, FacadeErrorCode, GitWorkflowAction,
+    AGENT_API_VERSION, AgentFacade, CodingRuntimeHealth, CodingRuntimeHealthState,
+    CodingToolsRuntimeAdapter, CommandControlAction, FacadeCallError, FacadeDenied, FacadeError,
+    FacadeErrorCode, GitWorkflowAction,
     ShellCommandRequest, ToolRegistry, V1_CORE_TOOL_NAMES, WorkspaceRuntimeAdapter,
     validate_runtime_capabilities,
 };

@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-const CHECKPOINT_VERSION: u32 = 1;
+const CHECKPOINT_VERSION: u32 = 2;
+const LEGACY_CHECKPOINT_VERSION: u32 = 1;
 const MAX_CHECKPOINT_PLAINTEXT_BYTES: usize = 262_144;
 const MAX_CHECKPOINT_CIPHERTEXT_BYTES: usize = 524_288;
 
@@ -16,6 +17,36 @@ pub(crate) struct WorkflowCheckpoint {
     pub version: u32,
     pub workflow_id: String,
     pub arguments: Value,
+    #[serde(default)]
+    pub coding_profile: Option<String>,
+    #[serde(default)]
+    pub objective: Option<String>,
+    #[serde(default)]
+    pub current_step: Option<String>,
+    #[serde(default)]
+    pub next_step: Option<String>,
+    #[serde(default)]
+    pub files_read: Vec<Value>,
+    #[serde(default)]
+    pub modified_files: Vec<String>,
+    #[serde(default)]
+    pub commands: Vec<Value>,
+    #[serde(default)]
+    pub test_results: Vec<Value>,
+    #[serde(default)]
+    pub build_results: Vec<Value>,
+    #[serde(default)]
+    pub failure: Option<Value>,
+    #[serde(default)]
+    pub output_refs: Vec<String>,
+    #[serde(default)]
+    pub git_before: Option<Value>,
+    #[serde(default)]
+    pub git_after: Option<Value>,
+    #[serde(default)]
+    pub verification_plan: Vec<Value>,
+    #[serde(default)]
+    pub completed: bool,
     pub directory_index: usize,
     pub directory_results: Vec<Value>,
     pub directory_inflight: bool,
@@ -33,6 +64,21 @@ impl WorkflowCheckpoint {
             version: CHECKPOINT_VERSION,
             workflow_id,
             arguments,
+            coding_profile: None,
+            objective: None,
+            current_step: None,
+            next_step: None,
+            files_read: Vec::new(),
+            modified_files: Vec::new(),
+            commands: Vec::new(),
+            test_results: Vec::new(),
+            build_results: Vec::new(),
+            failure: None,
+            output_refs: Vec::new(),
+            git_before: None,
+            git_after: None,
+            verification_plan: Vec::new(),
+            completed: false,
             directory_index: 0,
             directory_results: Vec::new(),
             directory_inflight: false,
@@ -43,6 +89,23 @@ impl WorkflowCheckpoint {
             current_session_id: None,
             command_results: Vec::new(),
         }
+    }
+
+    pub(crate) fn new_coding(
+        workflow_id: String,
+        arguments: Value,
+        objective: String,
+    ) -> Self {
+        let mut checkpoint = Self::new(workflow_id, arguments);
+        checkpoint.coding_profile = Some("coding-agent-v1".into());
+        checkpoint.objective = Some(objective);
+        checkpoint.current_step = Some("prepare".into());
+        checkpoint.next_step = Some("edit".into());
+        checkpoint
+    }
+
+    pub(crate) fn is_coding_task(&self) -> bool {
+        self.coding_profile.as_deref() == Some("coding-agent-v1")
     }
 }
 
@@ -97,10 +160,20 @@ impl WorkflowCheckpointStore {
         if plain.len() > MAX_CHECKPOINT_PLAINTEXT_BYTES {
             return Err("checkpoint plaintext exceeds bounded size".into());
         }
-        let checkpoint: WorkflowCheckpoint =
+        let mut checkpoint: WorkflowCheckpoint =
             serde_json::from_slice(&plain).map_err(|_| "checkpoint decode failed")?;
-        if checkpoint.version != CHECKPOINT_VERSION || checkpoint.workflow_id.is_empty() {
+        if checkpoint.workflow_id.is_empty()
+            || !matches!(checkpoint.version, LEGACY_CHECKPOINT_VERSION | CHECKPOINT_VERSION)
+        {
             return Err("checkpoint version or identity invalid".into());
+        }
+        if checkpoint.version == LEGACY_CHECKPOINT_VERSION {
+            checkpoint.version = CHECKPOINT_VERSION;
+            checkpoint.objective = checkpoint
+                .arguments
+                .get("objective")
+                .and_then(Value::as_str)
+                .map(str::to_string);
         }
         Ok(Some(checkpoint))
     }
@@ -291,7 +364,39 @@ mod tests {
         assert_eq!(loaded.directory_index, 1);
         assert!(loaded.patch_applied);
         assert_eq!(loaded.command_index, 1);
+        assert_eq!(loaded.version, CHECKPOINT_VERSION);
         reopened.clear().unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn coding_checkpoint_persists_required_task_state_without_plaintext() {
+        let path = temp_path("coding-v2");
+        let store = WorkflowCheckpointStore::open_at(path.clone());
+        let mut checkpoint = WorkflowCheckpoint::new_coding(
+            "lb-workflow-coding".into(),
+            json!({"action":"bugfix","objective":"repair durable task"}),
+            "repair durable task".into(),
+        );
+        checkpoint.files_read.push(json!({"path":"src/a.rs","start_line":1,"end_line":4,"content_sha256":"a".repeat(64)}));
+        checkpoint.modified_files.push("src/a.rs".into());
+        checkpoint.commands.push(json!({"command":"cargo test","source":"verification_plan"}));
+        checkpoint.test_results.push(json!({"command":"cargo test","status":"passed"}));
+        checkpoint.git_before = Some(json!({"clean":true}));
+        checkpoint.current_step = Some("verify".into());
+        checkpoint.next_step = Some("persist".into());
+        store.save(&checkpoint).unwrap();
+
+        let raw = fs::read(store.path_for_test()).unwrap();
+        assert!(!raw.windows(b"repair durable task".len()).any(|window| window == b"repair durable task"));
+        let loaded = store.load().unwrap().unwrap();
+        assert!(loaded.is_coding_task());
+        assert_eq!(loaded.objective.as_deref(), Some("repair durable task"));
+        assert_eq!(loaded.current_step.as_deref(), Some("verify"));
+        assert_eq!(loaded.next_step.as_deref(), Some("persist"));
+        assert_eq!(loaded.modified_files, vec!["src/a.rs"]);
+        assert_eq!(loaded.commands.len(), 1);
+        assert_eq!(loaded.test_results.len(), 1);
+        store.clear().unwrap();
     }
 }
