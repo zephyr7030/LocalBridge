@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4547,6 +4547,17 @@
       "Architecture PASS."
     ],
     "next_pr": "LB-015",
+    "g4_unlocked": false
+  },
+  "schema40_g3_lb015_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB015 Dashboard/hardening/status-accent/button/admin-warning contracts PASS.",
+      "Backend projection tests prove CodingRuntime and PolicyEnforcement Recovering map codingService to recovering; onboarding readiness proves CodingRuntime Recovering or MCP health Fault is not ready.",
+      "Dashboard and onboarding Screen5 both consume backend codingService projection; no frontend readiness state machine added.",
+      "Fresh commands::ui and commands::onboarding tests PASS; frontend 7/7 and production build PASS; architecture PASS."
+    ],
+    "next_pr": "LB-016",
     "g4_unlocked": false
   }
 }
