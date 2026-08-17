@@ -23,7 +23,7 @@ const facade = readFileSync("src-tauri/src/mcp/facade.rs", "utf8");
 const policy = readFileSync("src-tauri/src/mcp/policy.rs", "utf8");
 const server = readFileSync("src-tauri/src/mcp/server.rs", "utf8");
 const runtimePolicy = readFileSync("runtime-policy.toml", "utf8");
-if (!facade.includes("pub const AGENT_API_REVISION: u32 = 39")) throw new Error("ARCH-031 facade revision39 missing");
+if (!facade.includes(`pub const AGENT_API_REVISION: u32 = ${contracts.rules?.localbridge_agent_api_revision}`)) throw new Error("ARCH-031 current facade revision missing");
 if (!policy.includes("pub fn privileged_tool_visible(&self, _mode: PermissionMode, tool_name: &str) -> bool")) throw new Error("ARCH-031 privileged visibility is still mode-dependent");
 const catalogStart = server.indexOf("fn effective_tool_catalog(");
 const signatureStart = server.indexOf("fn effective_tool_catalog_signature(");
