@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G2",
+  "current_group": "G3",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -3934,7 +3934,7 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "schema38_g2_revalidation_2026_08_17": {
-    "status": "PASS_PENDING_PROVENANCE",
+    "status": "PASS",
     "owner_prs": [
       "LB-006",
       "LB-007",
@@ -3955,7 +3955,7 @@
     "next_required_g2_adversarial_generation": 26,
     "g3_blocked_until_g2_generation26_pass": false,
     "g4_unlocked": false,
-    "g2_review_decision_commit": "5ee4bb04388bda30404e8f51cb1c3a74a6cdd497"
+    "g2_review_decision_commit": "4bd2db334f12325fe1d04e36cf0356002fbbc0cc"
   },
   "g2_adversarial_review_generation_26_2026_08_17": {
     "status": "PASS",
@@ -3985,6 +3985,60 @@
     "g2_generation_26_consumed": true,
     "g3_unlocked_for_reacceptance": true,
     "g4_unlocked": false,
-    "review_decision_commit": "PENDING"
+    "review_decision_commit": "4bd2db334f12325fe1d04e36cf0356002fbbc0cc"
+  },
+  "schema38_g3_revalidation_2026_08_17": {
+    "status": "REVIEW_REQUIRED",
+    "owner_prs": [
+      "LB-013",
+      "LB-014",
+      "LB-015",
+      "LB-016",
+      "LB-017"
+    ],
+    "upstream_g2_generation": 26,
+    "product_baseline": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
+    "evidence": [
+      "Fresh LB-013 through LB-017 contract gates PASS on schema38/G2 generation26 baseline.",
+      "Fresh native fixed-window Tauri/WebView2 E2E PASS at 150% DPI for onboarding and dashboard 780x620 logical / 1170x930 physical.",
+      "Fresh full final-tree cargo test PASS: 204 library tests plus migration/integration/doc targets; Clippy -D warnings PASS.",
+      "Frontend Vitest 4 files / 7 tests and production build PASS; runtime-manifest and UI-language PASS.",
+      "Architecture 34/34 and G4 human-gate fail-closed PASS."
+    ],
+    "next_required_g3_adversarial_generation": 16,
+    "human_review_generation": 3,
+    "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_16_2026_08_17": {
+    "status": "REVIEW_REQUIRED",
+    "decision": "PENDING",
+    "kind": "independent_adversarial",
+    "generation": 16,
+    "baseline_commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
+    "finding": "Pending fresh independent G3 review on the schema38/G2 generation26 baseline.",
+    "evidence": [
+      "Fresh LB-013 through LB-017 contract gates PASS on schema38/G2 generation26 baseline.",
+      "Fresh native fixed-window Tauri/WebView2 E2E PASS at 150% DPI for onboarding and dashboard 780x620 logical / 1170x930 physical.",
+      "Fresh full final-tree cargo test PASS: 204 library tests plus migration/integration/doc targets; Clippy -D warnings PASS.",
+      "Frontend Vitest 4 files / 7 tests and production build PASS; runtime-manifest and UI-language PASS.",
+      "Architecture 34/34 and G4 human-gate fail-closed PASS."
+    ],
+    "verified_passes": [
+      "LB-013 -> LB-017 contracts",
+      "cargo test --locked (204 library tests plus integration/migration/doc)",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "frontend Vitest 7 tests and production build",
+      "runtime-manifest",
+      "UI-language",
+      "native fixed-window/WebView2 E2E at 150% DPI",
+      "architecture 34/34",
+      "G4 fail-closed",
+      "git diff --check"
+    ],
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": "PENDING",
+    "next_action": "Complete fresh G3 adversarial generation16; if PASS remain at human review REQUIRED generation3 with G4 blocked."
   }
 }

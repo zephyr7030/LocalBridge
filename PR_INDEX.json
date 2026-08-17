@@ -41,7 +41,7 @@
     ],
     "advance_only_after_acceptance": true,
     "governance_transition_updates_current_pr": true,
-    "current_group": "G2",
+    "current_group": "G3",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
     "pre_g4_human_review_gate_required": true,
@@ -333,7 +333,7 @@
       "review_provenance": {
         "generation": 26,
         "kind": "independent_adversarial",
-        "commit": "7694fe8a37977ac135024b1a24ba5c3999befaf7",
+        "commit": "4bd2db334f12325fe1d04e36cf0356002fbbc0cc",
         "invalidated_generations": [
           {
             "generation": 8,
@@ -383,8 +383,8 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "BLOCKED",
-      "review_status": "BLOCKED",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 16,
       "human_review_status": "BLOCKED",
       "human_review_generation": 3,
@@ -460,5 +460,5 @@
     }
   ],
   "current_pr": null,
-  "current_group": "G2"
+  "current_group": "G3"
 }
