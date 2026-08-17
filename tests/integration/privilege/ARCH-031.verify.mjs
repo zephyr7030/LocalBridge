@@ -32,7 +32,7 @@ if (!catalogSlice.includes("append_elevated_exec_tool(&mut result)")) throw new 
 if (catalogSlice.includes("accepts_privileged_calls")) throw new Error("ARCH-031 catalog still depends on Broker Active state");
 const signatureEnd = server.indexOf("fn elevation_required_result", signatureStart);
 const signatureSlice = server.slice(signatureStart, signatureEnd);
-if (!signatureSlice.includes('names.push("elevated_exec")')) throw new Error("ARCH-031 catalog signature omits stable elevated_exec");
+if (!signatureSlice.includes("effective_tool_catalog(policy, mode)") || !signatureSlice.includes("AGENT_API_REVISION")) throw new Error("ARCH-031 catalog signature is not derived from the complete effective catalog plus API revision");
 if (signatureSlice.includes("accepts_privileged_calls")) throw new Error("ARCH-031 signature still depends on Broker state");
 const setterStart = server.indexOf("pub fn set_permission_mode(&self, mode: PermissionMode)");
 const setterEnd = server.indexOf("pub fn replace_policy", setterStart);

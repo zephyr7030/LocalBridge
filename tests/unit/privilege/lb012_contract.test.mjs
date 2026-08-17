@@ -113,7 +113,7 @@ const catalogStart = server.indexOf("fn effective_tool_catalog(");
 const catalogEnd = server.indexOf("fn effective_tool_catalog_signature(", catalogStart);
 const effectiveCatalog = server.slice(catalogStart, catalogEnd);
 if (
-  !toolsList.includes("effective_tool_catalog(&guard, mode)") ||
+  !toolsList.includes("effective_tool_catalog(&policy, mode)") ||
   catalogStart < 0 ||
   catalogEnd <= catalogStart ||
   effectiveCatalog.includes("accepts_privileged_calls()") ||
