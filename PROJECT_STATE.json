@@ -3250,7 +3250,7 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "schema36_shell_observability_admin_consent_2026_08_17": {
-    "status": "RATIFIED_REWORK_REQUIRED",
+    "status": "IMPLEMENTED_G3_GENERATION13_PASS",
     "contract_commit": "85d8b8395a4b42c5292500dcd7ac9d85e98f69d4",
     "earliest_owner_pr": "LB-006",
     "affected_prs": [
@@ -3285,7 +3285,8 @@
       "pr": null
     },
     "g4": "BLOCKED",
-    "human_gate_policy": "after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
+    "human_gate_policy": "after fresh G3 PASS return to REQUIRED; AI cannot self-PASS",
+    "g4_unlocked": false
   },
   "lb006_schema36_rework_acceptance_2026_08_17": {
     "status": "PASS",
@@ -3694,5 +3695,40 @@
     ],
     "next_action": "Run independent G3 adversarial review generation13.",
     "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_13_2026_08_17": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 13,
+    "baseline_commit": "24bd39e251520e47709b0415329ae4258130f59c",
+    "finding": "No blocking G3 defect remains after the schema36 Dashboard authority correction, G2 generation25 pwsh diagnostic correction, and nonce-bound administrator consent repair.",
+    "evidence": [
+      "Fresh final-tree Rust gate PASS: 199 library tests plus all migration/integration/doc tests, including stale administrator challenge identity rejection.",
+      "Fresh Clippy -D warnings, frontend Vitest 4 files / 7 tests, production build and runtime-manifest verification PASS.",
+      "Fresh LB-013 through LB-017 contracts PASS; native onboarding/dashboard WebView E2E PASS at 150% DPI with fixed 780x620 logical geometry, custom chrome, permission geometry and rounded scrolling intact.",
+      "Fresh architecture verifier PASS 34/34, UI-language PASS, G4 human-gate fail-closed regression PASS and git diff --check PASS.",
+      "Adversarial source review found and fixed the global admin-consent deadline defect: each warning now carries a fresh crypto.randomUUID challenge bound to backend monotonic not_before; stale confirm and stale cancel cannot affect a newer challenge.",
+      "Fresh @测试 final-tree smoke PASS: facade revision36/runtime ready; ordinary where cmd and NUL redirection execute; unavailable pwsh version query returns RuntimeUnavailable; reg system-management remains PrivilegedRouteUnavailable."
+    ],
+    "verified_passes": [
+      "cargo test --locked",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "npm test / npm run build",
+      "runtime-manifest",
+      "LB-013 -> LB-017 contracts",
+      "native fixed-window/WebView2 E2E at 150% DPI",
+      "architecture 34/34",
+      "UI-language",
+      "G4 fail-closed regression",
+      "final @测试 allow/deny/runtime-unavailable smoke",
+      "git diff --check"
+    ],
+    "g3_generation_13_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": null,
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }
