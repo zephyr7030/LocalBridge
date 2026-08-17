@@ -6,10 +6,10 @@ const read=(p)=>readFileSync(join(root,p),"utf8");
 for(const p of ["src-tauri/src/mcp/policy.rs","src-tauri/src/mcp/facade.rs","src-tauri/src/mcp/server.rs","tests/integration/policy/policy_enforcement.rs"])if(!existsSync(join(root,p)))process.exit(3);
 const policy=read("src-tauri/src/mcp/policy.rs"), facade=read("src-tauri/src/mcp/facade.rs"), server=read("src-tauri/src/mcp/server.rs");
 for(const x of ["request_permissions","workspace_select","workspace_add","workspace_remove","permission_mode_change","credential_reset","tunnel_config_write","mcp_config_write","Capability::ControlPlane","DenyReason::ControlPlane","DenyReason::UnknownTool","IndirectProcessExecInEdit","PublicCapabilityDeclaration","NetworkRouteNotAvailable","PrivilegedRouteNotAvailable","decide_public","public_tool_allowed_for_list"])if(!policy.includes(x))process.exit(4);
-for(const x of ["TaskExecutionState::Blocked","TaskExecutionState::Running","self.policy.decide_public(mode, name, arguments)","self.policy.public_tool_allowed_for_list(mode, name)","self.dispatch(name, arguments, request_id)"])if(!facade.includes(x))process.exit(5);
+for(const x of ["TaskExecutionState::Blocked","TaskExecutionState::Running","self.policy.decide_public(mode, name, arguments)","self.policy.public_tool_allowed_for_list(mode, name)","self.dispatch(mode, name, arguments, request_id)"])if(!facade.includes(x))process.exit(5);
 if(facade.includes("coding_tools_policy_anchor_for_list")||facade.includes("coding_tools_policy_anchor_for_call"))process.exit(6);
 const decisionMatch=/self\.policy\.decide_public\(mode, name, arguments\)/.exec(facade);
-const forwardMatch=/self\.dispatch\(name, arguments, request_id\)/.exec(facade);
+const forwardMatch=/self\.dispatch\(mode, name, arguments, request_id\)/.exec(facade);
 if(!decisionMatch||!forwardMatch||decisionMatch.index>forwardMatch.index)process.exit(6);
 for(const x of [
   "PolicyEnforcementRuntime",
