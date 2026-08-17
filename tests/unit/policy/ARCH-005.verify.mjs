@@ -16,7 +16,7 @@ for(const x of [
   "TcpListener::bind((Ipv4Addr::LOCALHOST, 0))",
   "MAX_CONNECTION_WORKERS",
   "AgentFacade::from_coding_runtime(coding_runtime, policy)",
-  "guard.public_tools(mode)",
+  "effective_tool_catalog(&policy, mode)",
   "guard.call_tool(mode, name, arguments, Some(&id)",
   '"notifications/cancelled"',
   "McpCancellationClient",
