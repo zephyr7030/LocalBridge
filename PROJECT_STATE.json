@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4267,5 +4267,15 @@
     "human_review_generation": 3,
     "g4_unlocked": false,
     "next_action": "Reaccept LB-013 through LB-017 sequentially, then run fresh G3 independent adversarial review generation17."
+  },
+  "schema39_lb013_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-013",
+    "evidence": [
+      "LB013 background contract PASS.",
+      "Fresh app::background Rust tests PASS 14/14 including atomic projection cursor, asynchronous lifecycle control, production runtime ownership and tray-exit shutdown order."
+    ],
+    "next_pr": "LB-014",
+    "g4_unlocked": false
   }
 }
