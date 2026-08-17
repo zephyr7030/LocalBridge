@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-009",
+  "current_pr": "LB-010",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4445,6 +4445,17 @@
       "Architecture PASS."
     ],
     "next_pr": "LB-009",
+    "g4_unlocked": false
+  },
+  "schema40_schema41_lb009_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-009",
+    "evidence": [
+      "LB009 orchestrator contract PASS.",
+      "Fresh runtime::orchestrator 8/8 PASS including real bundled MCP→PEP ownership, staged start, reverse stop and CurrentTask projection.",
+      "Architecture PASS."
+    ],
+    "next_pr": "LB-010",
     "g4_unlocked": false
   }
 }
