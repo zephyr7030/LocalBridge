@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3635,6 +3635,13 @@
     "status": "PASS",
     "evidence": [
       "LB-014 contract PASS on G2 generation25 baseline."
+    ]
+  },
+  "lb015_post_g2gen25_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "test_alignment_commit": "584ebfa",
+    "evidence": [
+      "LB-015 Dashboard contract, warning regression and ARCH-029 PASS on G2 generation25 baseline."
     ]
   }
 }
