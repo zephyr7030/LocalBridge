@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4172,6 +4172,17 @@
       "Fresh recovery module PASS 15/15 and workspace module PASS 21/21, covering exact five-attempt recovery, typed retryability, rollback and two-phase workspace switching."
     ],
     "next_pr": "LB-011",
+    "g4_unlocked": false
+  },
+  "schema39_lb011_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-011",
+    "evidence": [
+      "LB011 security boundary verifier PASS.",
+      "Fresh privilege Rust set PASS 25/25.",
+      "Fresh broker IPC target PASS 6 with one explicit-UAC integration test ignored by design; named-pipe SID/PID authentication, generation/nonce replay protection and structured privileged execution/filesystem tests passed."
+    ],
+    "next_pr": "LB-012",
     "g4_unlocked": false
   }
 }

@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": "LB-011",
+    "current_pr": "LB-012",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -181,7 +181,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "READY"
+      "status": "PASS"
     },
     {
       "id": "LB-012",
@@ -192,7 +192,7 @@
         "LB-011"
       ],
       "gate": "G2",
-      "status": "BLOCKED"
+      "status": "READY"
     },
     {
       "id": "LB-013",
@@ -459,6 +459,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "current_group": "G2"
 }
