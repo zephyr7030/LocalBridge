@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -4383,7 +4383,7 @@
       "status": "PASS"
     },
     "schema41": {
-      "status": "READY_FOR_G2_REVALIDATION",
+      "status": "G2_REVALIDATION_REQUIRED",
       "earliest_owner_pr": "LB-006",
       "owner_prs": [
         "LB-006"
@@ -4410,7 +4410,7 @@
       "schema41 G3 revalidation generation 19"
     ],
     "g4_unlocked": false,
-    "next_action": "Run schema41 G2 revalidation generation29, then schema41 G3 revalidation generation19; human G3-to-G4 review remains required."
+    "next_action": "Run fresh schema41 G2 revalidation generation29."
   },
   "schema40_schema41_lb006_reacceptance_2026_08_18": {
     "status": "PASS",
@@ -4621,5 +4621,16 @@
     "human_review_generation": 3,
     "g4_unlocked": false,
     "next_action": "Run schema41 G2 revalidation generation29, then schema41 G3 revalidation generation19 before human G3-to-G4 review."
+  },
+  "schema41_g2_revalidation_open_2026_08_18": {
+    "status": "REVIEW_REQUIRED",
+    "generation": 29,
+    "kind": "independent_adversarial",
+    "baseline_schema40_g2_generation": 28,
+    "baseline_schema40_g3_generation": 18,
+    "product_revision": 41,
+    "reason": "schema41 strict sequence requires fresh coding-agent semantic revalidation after schema40 acceptance; no PR product reopen is required because schema41 product implementation is already on the accepted tree.",
+    "g3_blocked_until_g2_generation29_pass": true,
+    "g4_unlocked": false
   }
 }

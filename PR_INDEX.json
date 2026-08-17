@@ -41,7 +41,7 @@
     ],
     "advance_only_after_acceptance": true,
     "governance_transition_updates_current_pr": true,
-    "current_group": "G3",
+    "current_group": "G2",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
     "pre_g4_human_review_gate_required": true,
@@ -327,8 +327,8 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 28,
       "review_provenance": {
         "generation": 28,
@@ -394,10 +394,10 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
       "review_generation": 18,
-      "human_review_status": "REQUIRED",
+      "human_review_status": "BLOCKED",
       "human_review_generation": 3,
       "review_provenance": {
         "generation": 18,
@@ -481,5 +481,5 @@
     }
   ],
   "current_pr": null,
-  "current_group": "G3"
+  "current_group": "G2"
 }
