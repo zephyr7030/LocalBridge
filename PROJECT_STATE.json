@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3417,6 +3417,19 @@
       "Fresh workspace filter: 21 passed, 0 failed, with persistence and broker filesystem boundary checks also passing."
     ],
     "next_pr": "LB-011",
+    "next_g2_review_generation": 24,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb011_schema36_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-011",
+    "evidence": [
+      "lb011_broker_ipc: 6 passed, 0 failed, 1 explicit-UAC test ignored as designed.",
+      "Fresh broker filter: 14 passed, 0 failed; broker IPC subfilter 5 passed.",
+      "Architecture Gate PASS with ARCH-025 active."
+    ],
+    "next_pr": "LB-012",
     "next_g2_review_generation": 24,
     "g3_unlocked": false,
     "g4_unlocked": false
