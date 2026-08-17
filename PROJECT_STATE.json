@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3730,5 +3730,25 @@
     "g4_unlocked": false,
     "review_decision_commit": "d5706eb61a7f36d144ce40d99190e15860ff0cf5",
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "schema37_dashboard_permission_mode_correction_reopen_2026_08_17": {
+    "status": "REWORK_REQUIRED",
+    "source": "explicit_user_instruction_2026_08_17",
+    "owner_pr": "LB-015",
+    "finding": "Schema36 incorrectly superseded the user-approved Dashboard read-only PermissionMode row and restored the older read-only administrator PrivilegeState row. The schema36 runtime observability and backend consent changes did not require that UI reversal.",
+    "required_correction": [
+      "Restore one read-only Dashboard 权限模式 row sourced directly from backend PermissionMode and showing 编辑模式 完整模式 or 管理员模式.",
+      "Keep Dashboard free of PermissionMode mutation controls and UAC-trigger controls; Settings and explicitly reopened onboarding Screen3 remain the editing surfaces.",
+      "Preserve schema36 workspace_context observability, shell fidelity, canonical errors, and nonce-bound backend administrator consent.",
+      "Correct all current human/machine authority and verifiers that encoded the accidental Dashboard reversal."
+    ],
+    "invalidated_g3_review_generation": 13,
+    "next_g3_review_generation": 14,
+    "current_pointer": {
+      "group": "G3",
+      "pr": "LB-015"
+    },
+    "g4": "BLOCKED",
+    "human_gate_policy": "blocked during rework; after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
   }
 }
