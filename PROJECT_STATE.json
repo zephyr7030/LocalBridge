@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3859,5 +3859,19 @@
     },
     "g4": "BLOCKED",
     "human_gate_policy": "blocked during rework; after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
+  },
+  "g3_generation15_lb015_current_task_projection_race_acceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "product_commit": "d33242f59ca7023f0d044d3301520c927ad1bf86",
+    "evidence": [
+      "Reproduction contract failed before the fix because get_main_projection paired an earlier DesktopRuntimeSnapshot with a later projection revision.",
+      "ProjectionWake capture_revision now uses a revision-before/revision-after retry so any wake during snapshot capture forces a fresh snapshot instead of advancing the frontend cursor past unseen task state.",
+      "get_main_projection_blocking now consumes lifecycle.runtime_snapshot_with_revision() and no longer reads projection_revision separately after CurrentTask data.",
+      "Deterministic concurrent Rust regression projection_snapshot_cursor_cannot_advance_past_captured_state PASS; CurrentTask projection tests PASS including 500ms minimum visibility and burst serialization.",
+      "LB-015 contract, frontend Vitest 4 files / 7 tests, production build, Clippy -D warnings, architecture 34/34, UI-language and native onboarding/dashboard WebView2 fixed-window E2E at 150% DPI PASS."
+    ],
+    "next_action": "Strictly revalidate LB-016 nonce-bound administrator consent on the corrected CurrentTask projection baseline, then LB-017 and fresh G3 adversarial generation15.",
+    "g4_unlocked": false
   }
 }
