@@ -4492,5 +4492,34 @@
     ],
     "next_action": "Run fresh schema40 G2 generation28 independent adversarial review.",
     "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_28_2026_08_18": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 28,
+    "kind": "independent_adversarial",
+    "baseline_commit": "0c5b10f22b446aa6dfba1b80cd886710a26e33c2",
+    "finding": "No blocking schema40 G2 defect found after fresh final-tree adversarial review; authenticated MCP health now participates in the existing typed recovery lifecycle.",
+    "evidence": [
+      "Fresh full cargo test PASS on final tree: 218 library tests plus all integration/migration targets; one explicit live-UAC test remains intentionally ignored.",
+      "Clippy --all-targets --all-features -D warnings PASS; frontend Vitest 4 files/7 tests and production build PASS.",
+      "Runtime manifest, UI-language, schema41 coding-agent capability matrix, architecture and G4 human-gate fail-closed PASS.",
+      "Schema40 process-alive/MCP-unresponsive recovery is covered by deterministic CodingRuntime attempt0 -> existing full-runtime attempt1 recovery and production watchdog contract."
+    ],
+    "verified_passes": [
+      "cargo test --locked",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "frontend Vitest 7 tests and production build",
+      "runtime-manifest",
+      "UI-language",
+      "schema41 coding-agent machine acceptance",
+      "architecture",
+      "G4 fail-closed",
+      "git diff --check"
+    ],
+    "g2_generation_28_consumed": true,
+    "g3_unlocked_for_reacceptance": false,
+    "g4_unlocked": false,
+    "review_decision_commit": null
   }
 }

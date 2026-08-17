@@ -327,9 +327,9 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
-      "review_generation": 27,
+      "status": "PASS",
+      "review_status": "PASS",
+      "review_generation": 28,
       "review_provenance": {
         "generation": 27,
         "kind": "independent_adversarial",
