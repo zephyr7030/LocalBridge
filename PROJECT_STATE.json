@@ -4253,7 +4253,7 @@
     "review_decision_commit": "2fab63e6b99a163a95571f2436aa5b39806e4039"
   },
   "schema39_g3_revalidation_2026_08_17": {
-    "status": "PASS_PENDING_PROVENANCE",
+    "status": "PASS",
     "owner_prs": [
       "LB-013",
       "LB-014",
@@ -4274,7 +4274,8 @@
       "Fresh runtime-manifest, UI-language, schema39 execution-platform machine acceptance, architecture 34/34 and G4 human-gate fail-closed PASS.",
       "Fresh native Tauri/WebView2 fixed-window E2E PASS for onboarding and dashboard at 150% DPI: 780x620 logical / 1170x930 physical, native_scale=1.5, dpr=1.5.",
       "Actual @测试 schema39 downstream rediscovery exposes concrete command_control/elevated_exec schemas and action-specific agent/git/document fields; earlier actual schema39 workspace_context and exec_command calls succeeded. A final focused call was disabled by the platform before reaching LocalBridge and was not counted as a product failure."
-    ]
+    ],
+    "g3_review_decision_commit": "1c9f2864943d2fa62828dc841ce0c006265d27c6"
   },
   "schema39_lb013_reacceptance_2026_08_17": {
     "status": "PASS",
@@ -4360,7 +4361,9 @@
     "human_review_required": true,
     "human_review_generation": 3,
     "g4_unlocked": false,
-    "review_decision_commit": "PENDING",
-    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+    "review_decision_commit": "1c9f2864943d2fa62828dc841ce0c006265d27c6",
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS.",
+    "g3_generation_17_consumed": true,
+    "blackbox_connector_status": "SCHEMA39_DOWNSTREAM_SCHEMA_CONFIRMED_AND_EARLIER_CALL_SUCCEEDED_FINAL_FOCUSED_CALL_PLATFORM_DISABLED_BEFORE_LOCALBRIDGE"
   }
 }
