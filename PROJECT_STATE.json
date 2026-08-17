@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3312,6 +3312,28 @@
       "Fresh cargo test --locked full suite PASS; cargo clippy --locked --all-targets -- -D warnings PASS; npm test PASS; npm run build PASS; runtime-manifest, architecture, activation, PR-scoped, negative and UI-language verifiers PASS; git diff --check PASS."
     ],
     "next_pr": "LB-007",
+    "next_g2_review_generation": 24,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb007_schema36_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "baseline_product_commit": "f57efffecb889447c541663ae816afb6832c791f",
+    "acceptance": [
+      "A319",
+      "A323",
+      "A299",
+      "A305",
+      "A306"
+    ],
+    "evidence": [
+      "Fresh final-tree lb007_policy_contracts and lb007_policy_enforcement suites PASS.",
+      "Actual @测试 Full reg query and dynamic %COMSPEC% command remain denied with canonical PrivilegedRouteUnavailable, safe privileged_route category and remediation.",
+      "Actual @测试 ordinary where/echo/Get-Command diagnostics succeed, proving request-derived classifier no longer promotes inert argument tokens.",
+      "Final-tree cargo test --locked PASS; prior same-tree Clippy -D warnings, frontend, manifest, architecture/UI-language/governance Gates remain current because no product tree changed after them."
+    ],
+    "next_pr": "LB-008",
     "next_g2_review_generation": 24,
     "g3_unlocked": false,
     "g4_unlocked": false
