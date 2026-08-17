@@ -1,5 +1,5 @@
 {
-  "schema_version": 37,
+  "schema_version": 38,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -795,7 +795,23 @@
       "编辑模式",
       "完整模式",
       "管理员模式"
-    ]
+    ],
+    "task_control_cancel_detached_public_session_required": true,
+    "task_control_cancel_shared_public_session_terminator_required": true,
+    "git_file_metadata_machine_readable_nul_required": true,
+    "git_patch_body_and_file_metadata_independent_required": true,
+    "command_control_top_level_discoverable_schema_required": true,
+    "elevated_exec_top_level_discoverable_schema_required": true,
+    "client_hostile_top_level_input_combinator_for_command_and_elevated_forbidden": true,
+    "document_rebuild_schema_existing_path_and_content_discoverable_required": true,
+    "windows_timeout_term_ctrl_break_forbidden": true,
+    "windows_timeout_graceful_then_forced_tree_termination_required": true,
+    "windows_timeout_300ms_convergence_test_max_ms": 1800,
+    "cmd_rmdir_full_ordinary_cleanup_not_privileged_by_surface_syntax": true,
+    "schema38_contract_ratified": true,
+    "schema38_earliest_owner_pr": "LB-006",
+    "schema38_next_g2_review_generation": 26,
+    "schema38_next_g3_review_generation": 16
   },
   "prs": {
     "LB-000": {
@@ -1059,7 +1075,12 @@
         "stable shell/runtime discovery diagnostics and canonical typed-error normalization",
         "consistent command lifecycle and retained-output paging metadata",
         "read-only policy explanation/dry-run contract on existing public tools",
-        "single LocalBridge path-authority implementation shared across structured public tools"
+        "single LocalBridge path-authority implementation shared across structured public tools",
+        "unified public command cancellation bridge from task_control to the same public-session terminator and terminal task-state finalizer used by command_control",
+        "Git patch/text output separated from NUL-delimited machine-readable file status metadata for Unicode-safe path/status projection",
+        "client-discoverable top-level input schemas for command_control and elevated_exec with strict server-side action/operation validation",
+        "document_workflow rebuild discoverability contract for existing target path plus required replacement content",
+        "bounded Windows command termination ladder with TERM distinct from CTRL_BREAK and forced process-tree convergence"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -1127,7 +1148,13 @@
         "public command/session results expose consistent task/session/status/elapsed/exit/output metadata and retained output exposes total/offset/returned/truncated metadata",
         "document image Git workflow and workspace validation share the same LocalBridge path-authority/canonical-containment implementation",
         "exec_command and agent_workflow read-only explain/dry_run performs no execution and returns stable route classification plus safe rule category",
-        "agent_workflow diagnose or workspace_context supplies one-shot safe environment self-check without secrets"
+        "agent_workflow diagnose or workspace_context supplies one-shot safe environment self-check without secrets",
+        "after exec_command returns a running public session, task_control cancel finds that same session through current task ownership, invokes the same public-session terminator as command_control, returns cancelled_requests at least one, and later command_control poll plus task_control terminal history converge to stable ProcessCancelled without waiting for natural completion",
+        "git_workflow show and diff derive files metadata from machine-readable NUL-delimited Git status output rather than reverse-parsing human patch text; deleting 中文.txt while modifying B.txt reports 中文.txt deleted and B.txt modified with the patch body independently correct",
+        "command_control tools/list inputSchema is a directly projectable top-level object with action enum poll read write kill plus discoverable session_id output_ref chars signal wait_ms stream offset and limit properties; server-side action-specific validation still rejects invalid field combinations",
+        "elevated_exec tools/list inputSchema is a directly projectable top-level object exposing operation program args shell command workdir action path destination content_base64 recursive timeout_ms and max_output_bytes without a top-level oneOf; Broker and PEP still strictly validate process shell filesystem variants and call-time authority",
+        "document_workflow public schema explicitly discloses rebuild requires an existing path and content; missing target remains NotFound and missing content remains InvalidArgument without relying on trial-and-error discovery",
+        "on Windows a PowerShell command with timeout_ms=300 converges to ProcessTimedOut within 1800ms in the real bundled runtime test, TERM never maps to CTRL_BREAK or emits Entering debug mode, and graceful termination escalates to bounded forced process-tree kill when required"
       ],
       "non_goals": [
         "policy enforcement",
@@ -1185,7 +1212,8 @@
         "elevated_exec remains advertised in Edit Full and Elevated and across Broker Disabled Requested AwaitingUac Active or Faulted states; catalog visibility never grants authority, every tools/call is re-authorized against current PermissionMode and Broker state, Edit/Full return typed PrivilegedRouteUnavailable, Elevated without Active Broker returns typed ElevationRequired, and Full<->Elevated or Broker-state changes do not require reconnect solely for elevated_exec visibility",
         "semantic command classifier distinguishes executable/argument effects from inert diagnostic/data tokens",
         "canonical public policy errors use PolicyDenied WorkspaceDenied RuntimeUnavailable InvalidShellSyntax PrivilegedRouteUnavailable ProcessTimedOut as applicable and include only safe rule/remediation metadata",
-        "permission and Broker changes refresh capability snapshot while stale tools/list remains non-authoritative and tools/call always reauthorizes"
+        "permission and Broker changes refresh capability snapshot while stale tools/list remains non-authoritative and tools/call always reauthorizes",
+        "Full cmd rmdir /s /q of an ordinary active-workspace temporary directory is not classified privileged solely because rmdir is a PowerShell alias; the same token in windows_powershell remains review-required under provider-mutation rules"
       ],
       "non_goals": [
         "Tunnel",

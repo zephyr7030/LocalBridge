@@ -179,3 +179,10 @@ Schema36 correction：G3 generation13 因 Dashboard PermissionMode 回退纠正�
 - public privileged-route unavailable canonical error 统一为 `PrivilegedRouteUnavailable`；历史/内部 `PrivilegedRouteNotAvailable` 不得再作为 public required-test 期望；
 - UI skill 与 schema26/schema36 已冻结管理员流程对齐：管理员入口橙色 `#ff9500`，Broker 未 Active 时固定风险警告 → backend monotonic 9000ms not-before → enabled 用户确认 → 安全校验 → Windows UAC；frontend countdown 仅展示；
 - schema37 修订本身不修改 `PR_INDEX.json` / `PROJECT_STATE.json`，不自动推进、回退或重开任何 PR/Gate；G3 human review 仍为 REQUIRED，G4 仍须等待该 Gate 的真实结论。
+
+
+## Schema38 — Public control/runtime audit repair（current）
+
+2026-08-17 使用端反馈仅作为复现线索重新核对磁盘后，确认六类现行合同缺陷：detached public session 不能被高层 task cancel 接管、Git human diff 反解析导致 Unicode quoted path metadata 错位、command_control/elevated_exec 顶层组合 schema 的客户端可发现性退化、document rebuild 的 existing-path+content 约束未公开、Windows timeout/TERM 收敛过慢且 CTRL_BREAK 可触发 PowerShell debug mode，以及 cmd rmdir 被 PowerShell alias 关键词误伤。schema38 将这些归入 LB-006/LB-007，并要求真实 bundled-runtime/Unicode repo 回归。
+
+本次不扩展 system-management target 集：pnputil/wevtutil/powercfg 的 query/mutation operation-level 分类是后续产品策略，而非 schema37 当前违规。schema38 修复完成后必须重新消费 G2 generation26 与 G3 generation16；G3 PASS 仍只能进入独立 human review REQUIRED，不能由 AI 解锁 G4。

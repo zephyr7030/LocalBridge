@@ -239,3 +239,14 @@
 - [ ] main window default/minimum/maximum inner size are all exactly 780×620; resizable/maximizable/decorations/custom-chrome semantics remain frozen
 - [x] title+description permission buttons render at least 2× the actual height of a single-line control at 780×620 with both line boxes complete; user scoped visual review PASS 2026-08-14 (reopen if Screen3 layout changes)
 - [ ] a scrollable rounded sheet/dialog/card preserves all four outer corners, clips/insets the scrollbar inside the rounded shell, shows no top/bottom arrow or triangle buttons, and retains wheel/track/thumb scrolling
+
+
+## Schema38 Public Control / Runtime
+
+- [ ] detached running public session can be cancelled by task_control and converges through the same terminator/finalizer as command_control kill
+- [ ] git show/diff file metadata uses NUL-delimited machine Git output and Unicode deleted paths retain correct status independently from patch text
+- [ ] command_control and elevated_exec expose directly projectable top-level properties without client-hostile top-level oneOf; strict server call validation remains
+- [ ] document_workflow rebuild schema discloses existing target path + content requirements
+- [ ] Windows 300ms timeout converges within 1800ms, TERM does not map to CTRL_BREAK/debug mode, and forced tree kill is bounded
+- [ ] Full cmd rmdir /s /q ordinary workspace cleanup is not privilege-classified solely by alias token; PowerShell rmdir stays review-required
+- [ ] schema38 does not silently expand system-management executables beyond the current ratified set

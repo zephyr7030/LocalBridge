@@ -1783,6 +1783,83 @@ export function normalizeStablePrivilegedToolCatalogAmendment20260816(contractsD
   return normalized;
 }
 
+const SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17 = Object.freeze({
+  schemaVersion: 38,
+  baselineSchemaVersion: 37,
+  addedRules: {
+    task_control_cancel_detached_public_session_required: true,
+    task_control_cancel_shared_public_session_terminator_required: true,
+    git_file_metadata_machine_readable_nul_required: true,
+    git_patch_body_and_file_metadata_independent_required: true,
+    command_control_top_level_discoverable_schema_required: true,
+    elevated_exec_top_level_discoverable_schema_required: true,
+    client_hostile_top_level_input_combinator_for_command_and_elevated_forbidden: true,
+    document_rebuild_schema_existing_path_and_content_discoverable_required: true,
+    windows_timeout_term_ctrl_break_forbidden: true,
+    windows_timeout_graceful_then_forced_tree_termination_required: true,
+    windows_timeout_300ms_convergence_test_max_ms: 1800,
+    cmd_rmdir_full_ordinary_cleanup_not_privileged_by_surface_syntax: true,
+    schema38_contract_ratified: true,
+    schema38_earliest_owner_pr: "LB-006",
+    schema38_next_g2_review_generation: 26,
+    schema38_next_g3_review_generation: 16,
+  },
+  prs: {
+    "LB-006": {
+      addedArtifacts: [
+        "unified public command cancellation bridge from task_control to the same public-session terminator and terminal task-state finalizer used by command_control",
+        "Git patch/text output separated from NUL-delimited machine-readable file status metadata for Unicode-safe path/status projection",
+        "client-discoverable top-level input schemas for command_control and elevated_exec with strict server-side action/operation validation",
+        "document_workflow rebuild discoverability contract for existing target path plus required replacement content",
+        "bounded Windows command termination ladder with TERM distinct from CTRL_BREAK and forced process-tree convergence",
+      ],
+      addedTests: [
+        "after exec_command returns a running public session, task_control cancel finds that same session through current task ownership, invokes the same public-session terminator as command_control, returns cancelled_requests at least one, and later command_control poll plus task_control terminal history converge to stable ProcessCancelled without waiting for natural completion",
+        "git_workflow show and diff derive files metadata from machine-readable NUL-delimited Git status output rather than reverse-parsing human patch text; deleting 中文.txt while modifying B.txt reports 中文.txt deleted and B.txt modified with the patch body independently correct",
+        "command_control tools/list inputSchema is a directly projectable top-level object with action enum poll read write kill plus discoverable session_id output_ref chars signal wait_ms stream offset and limit properties; server-side action-specific validation still rejects invalid field combinations",
+        "elevated_exec tools/list inputSchema is a directly projectable top-level object exposing operation program args shell command workdir action path destination content_base64 recursive timeout_ms and max_output_bytes without a top-level oneOf; Broker and PEP still strictly validate process shell filesystem variants and call-time authority",
+        "document_workflow public schema explicitly discloses rebuild requires an existing path and content; missing target remains NotFound and missing content remains InvalidArgument without relying on trial-and-error discovery",
+        "on Windows a PowerShell command with timeout_ms=300 converges to ProcessTimedOut within 1800ms in the real bundled runtime test, TERM never maps to CTRL_BREAK or emits Entering debug mode, and graceful termination escalates to bounded forced process-tree kill when required",
+      ],
+    },
+    "LB-007": {
+      addedTests: [
+        "Full cmd rmdir /s /q of an ordinary active-workspace temporary directory is not classified privileged solely because rmdir is a PowerShell alias; the same token in windows_powershell remains review-required under provider-mutation rules",
+      ],
+    },
+  },
+});
+
+export function hasExactSchema38PublicControlRepair20260817(contractsDoc) {
+  if (contractsDoc?.schema_version !== SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const [id, delta] of Object.entries(SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.prs)) {
+    const pr = contractsDoc?.prs?.[id];
+    if (!pr) return false;
+    for (const artifact of delta.addedArtifacts ?? []) if (!pr.required_artifacts?.includes(artifact)) return false;
+    for (const test of delta.addedTests ?? []) if (!pr.required_tests?.includes(test)) return false;
+  }
+  return true;
+}
+
+export function normalizeSchema38PublicControlRepair20260817(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.baselineSchemaVersion;
+  for (const key of Object.keys(SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.addedRules)) delete normalized.rules[key];
+  for (const [id, delta] of Object.entries(SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.prs)) {
+    const pr = normalized.prs?.[id];
+    if (!pr) continue;
+    const artifacts = new Set(delta.addedArtifacts ?? []);
+    const tests = new Set(delta.addedTests ?? []);
+    pr.required_artifacts = (pr.required_artifacts ?? []).filter((item) => !artifacts.has(item));
+    pr.required_tests = (pr.required_tests ?? []).filter((item) => !tests.has(item));
+  }
+  return normalized;
+}
+
 const SCHEMA37_CONTRACT_CLEANUP_2026_08_17 = Object.freeze({
   schemaVersion: 37,
   baselineSchemaVersion: 36,
@@ -2525,6 +2602,12 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.schemaVersion) {
+    if (!hasExactSchema38PublicControlRepair20260817(authorizationContracts)) {
+      findings.push(`${expected.id}:schema38-public-control-repair-20260817-drift`);
+    }
+    authorizationContracts = normalizeSchema38PublicControlRepair20260817(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA37_CONTRACT_CLEANUP_2026_08_17.schemaVersion) {
     if (!hasExactSchema37ContractCleanup20260817(authorizationContracts)) {
       findings.push(`${expected.id}:schema37-contract-cleanup-20260817-drift`);

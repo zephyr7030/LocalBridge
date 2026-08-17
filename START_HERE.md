@@ -206,6 +206,18 @@ Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订�
 - 管理员模式入口固定橙色 `#ff9500`；Broker 未 Active 时必须先走固定风险警告 + backend monotonic 9000ms not-before + 用户 enabled `确认`，之后才可请求 UAC；frontend 倒计时不具授权权威。
 - 本次 schema37 只清理当前合同矛盾，不自动推进、回退或重开 `PR_INDEX.json` / `PROJECT_STATE.json` 中的 PR/Gate 状态；现有 G3 human review 要求保持不变。
 
+
+## Schema38 — Public control/runtime audit repair（current）
+
+- `task_control cancel` 必须在请求已异步化为 public command session 后仍可通过 current task owner 找到同一 session，并调用与 `command_control kill` 相同的 public-session terminator；terminal truth/finalizer 继续唯一归属 task-state。
+- `git_workflow show/diff` 的正文 patch 与 `files[]` metadata 分离生成；metadata 必须来自 Git NUL-delimited machine output（`--name-status -z`/`--numstat -z`），不得反向解析 human patch，Unicode/quoted path 必须保持精确状态。
+- `command_control` 与 `elevated_exec` 的 public inputSchema 必须是客户端可直接展开的顶层 `type: object + properties`；不得用顶层 `oneOf` 作为可发现性前提。action/operation-specific 合法组合仍由服务端/PEP/Broker 严格校验。
+- `document_workflow rebuild` 对外明确要求“目标 path 已存在 + content 必填”；不存在目标仍为 NotFound，缺 content 仍为 InvalidArgument。
+- Windows command timeout 的 TERM 不得映射为 CTRL_BREAK；300ms timeout 的真实 bundled-runtime 回归必须在 1800ms 内收敛为 ProcessTimedOut，必要时由短 graceful window 升级为 forced process-tree kill，且不得出现 PowerShell `Entering debug mode`。
+- Full/cmd 下普通 workspace 临时目录 `rmdir /s /q` 不得仅因 `rmdir` 同时是 PowerShell alias 被判 privileged；PowerShell selector 下该 alias 仍按 provider/dynamic surface 保持 review-required。
+- schema38 不扩展 system-management executable 集；schema37 当前六个静态目标继续生效。`pnputil/wevtutil/powercfg` 的 query/mutation operation-level 分类留作后续独立合同，不作为本轮违规修复。
+- 本轮最早责任 PR 为 LB-006，policy classifier 补充归 LB-007；修复后必须重验 LB-006→LB-012、fresh G2 generation26，再重验 LB-013→LB-017、fresh G3 generation16。G3 结束仍停在 human review REQUIRED，G4 BLOCKED。
+
 ```text
 品牌图标       = assets/icons/localbridge.ico
 品牌 PNG       = assets/icons/localbridge.png

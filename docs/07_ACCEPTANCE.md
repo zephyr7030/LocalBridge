@@ -338,3 +338,11 @@
 | A333 | schema36 green-storage conservation | immutable runtime=安装根，mutable state=`%LOCALAPPDATA%\LocalBridge`，secret=Credential Manager；普通启动/后台/自启动 Medium 且无 UAC |
 | A334 | schema37 safe absolute path equivalence | 对所有 active-workspace-bound public path/workdir 输入，安全 workspace-relative 与普通 Win32 absolute 在 canonical/identity validation 后若指向同一 active workspace 对象必须等价允许；workspace 外 absolute、UNC、verbatim public input、POSIX absolute、ADS-like、越界 parent traversal 与 reparse escape 必须 fail-closed |
 | A335 | schema37 canonical privileged-route error | public privileged-route unavailable 错误统一为 `PrivilegedRouteUnavailable`；`PrivilegedRouteNotAvailable` 仅可作为历史/内部实现名存在，不得成为 public canonical code、required-test 期望或用户可见错误 |
+
+| A336 | schema38 detached task cancellation | `exec_command` 已返回 running public session 后，`task_control cancel` 仍通过 current owner 找到同一 session 并使用 public-session terminator；返回 `cancelled_requests>=1`，后续 poll/task terminal 稳定为 `ProcessCancelled`/cancelled，不等待自然完成 |
+| A337 | schema38 Git Unicode metadata | `git_workflow show/diff` 的 `files[]` 来自 NUL-delimited machine-readable Git metadata，正文 diff 独立生成；修改 `B.txt` 同时删除 `中文.txt` 必须分别报告 modified/deleted，不得 quoted-path 错位 |
+| A338 | schema38 command_control discoverability | `tools/list` 中 command_control inputSchema 为顶层 object/properties，直接公开 action=poll/read/write/kill 与 session_id/output_ref/chars/signal/wait_ms/stream/offset/limit；顶层 oneOf 禁止作为客户端发现前提，服务端仍严格 action 校验 |
+| A339 | schema38 elevated_exec discoverability | `elevated_exec` 顶层 schema 直接公开 operation/program/args/shell/command/workdir/action/path/destination/content_base64/recursive/timeout_ms/max_output_bytes，且无顶层 oneOf；PEP/Broker 的 process/shell/filesystem call-time validation/authority 不放宽 |
+| A340 | schema38 document rebuild discoverability | public schema 明确 rebuild 需要已存在 path + content；缺目标为 NotFound，缺 content 为 InvalidArgument |
+| A341 | schema38 Windows timeout convergence | Windows PowerShell `timeout_ms=300` 的 bundled-runtime 回归在 1800ms 内收敛 `ProcessTimedOut`；TERM 不映射 CTRL_BREAK、不出现 `Entering debug mode`；graceful 失败后 bounded forced tree kill |
+| A342 | schema38 cmd rmdir classification | Full/cmd `rmdir /s /q` 普通 active-workspace 临时目录不因表面 token 升级 privileged；Windows PowerShell 的 `rmdir` alias 仍保持 review-required |
