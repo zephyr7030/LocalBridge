@@ -1315,57 +1315,44 @@ fn append_elevated_exec_tool(result: &mut Value) {
         "name": "elevated_exec",
         "description": "Run a reviewed administrator operation through the active LocalBridge privileged broker.",
         "inputSchema": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["process", "shell", "filesystem"],
+                    "description": "Privileged operation family. Omit only for the legacy direct-process form."
+                },
+                "program": {"type": "string", "description": "Absolute executable path for process operations."},
+                "args": {"type": "array", "items": {"type": "string"}, "description": "Process arguments."},
+                "shell": {"type": "string", "enum": ["auto", "powershell", "pwsh", "windows_powershell", "cmd"], "description": "Logical shell selector for shell operations."},
+                "command": {"type": "string", "description": "Reviewed shell command text."},
+                "workdir": {"type": ["string", "null"], "description": "Administrator-route working directory when applicable."},
+                "action": {"type": "string", "enum": ["read_file", "write_file", "create_directory", "rename", "delete"], "description": "Filesystem action."},
+                "path": {"type": "string", "description": "Filesystem source/target path."},
+                "destination": {"type": ["string", "null"], "description": "Rename destination when applicable."},
+                "content_base64": {"type": ["string", "null"], "description": "Base64 file content for write_file."},
+                "recursive": {"type": "boolean", "description": "Recursive delete flag."},
+                "timeout_ms": {"type": "integer", "minimum": 1, "description": "Execution timeout in milliseconds."},
+                "max_output_bytes": {"type": "integer", "minimum": 1, "description": "Maximum captured process/shell output bytes."}
+            },
+            "additionalProperties": false,
             "oneOf": [
                 {
-                    "type": "object",
-                    "properties": {
-                        "program": {"type": "string"},
-                        "args": {"type": "array", "items": {"type": "string"}},
-                        "workdir": {"type": ["string", "null"]},
-                        "timeout_ms": {"type": "integer", "minimum": 1},
-                        "max_output_bytes": {"type": "integer", "minimum": 1}
-                    },
+                    "not": {"required": ["operation"]},
                     "required": ["program", "args", "timeout_ms", "max_output_bytes"],
-                    "additionalProperties": false
+                    "description": "Legacy direct process form."
                 },
                 {
-                    "type": "object",
-                    "properties": {
-                        "operation": {"const": "process"},
-                        "program": {"type": "string"},
-                        "args": {"type": "array", "items": {"type": "string"}},
-                        "workdir": {"type": ["string", "null"]},
-                        "timeout_ms": {"type": "integer", "minimum": 1},
-                        "max_output_bytes": {"type": "integer", "minimum": 1}
-                    },
-                    "required": ["operation", "program", "args", "timeout_ms", "max_output_bytes"],
-                    "additionalProperties": false
+                    "properties": {"operation": {"const": "process"}},
+                    "required": ["operation", "program", "args", "timeout_ms", "max_output_bytes"]
                 },
                 {
-                    "type": "object",
-                    "properties": {
-                        "operation": {"const": "shell"},
-                        "shell": {"enum": ["auto", "powershell", "pwsh", "windows_powershell", "cmd"]},
-                        "command": {"type": "string"},
-                        "workdir": {"type": "string"},
-                        "timeout_ms": {"type": "integer", "minimum": 1},
-                        "max_output_bytes": {"type": "integer", "minimum": 1}
-                    },
-                    "required": ["operation", "shell", "command", "workdir", "timeout_ms", "max_output_bytes"],
-                    "additionalProperties": false
+                    "properties": {"operation": {"const": "shell"}},
+                    "required": ["operation", "shell", "command", "workdir", "timeout_ms", "max_output_bytes"]
                 },
                 {
-                    "type": "object",
-                    "properties": {
-                        "operation": {"const": "filesystem"},
-                        "action": {"enum": ["read_file", "write_file", "create_directory", "rename", "delete"]},
-                        "path": {"type": "string"},
-                        "destination": {"type": ["string", "null"]},
-                        "content_base64": {"type": ["string", "null"]},
-                        "recursive": {"type": "boolean"}
-                    },
-                    "required": ["operation", "action", "path", "destination", "content_base64", "recursive"],
-                    "additionalProperties": false
+                    "properties": {"operation": {"const": "filesystem"}},
+                    "required": ["operation", "action", "path", "destination", "content_base64", "recursive"]
                 }
             ]
         },
@@ -2382,10 +2369,10 @@ mod tests {
             json!({"action":"inspect","path":workspace.join("probe.txt").to_string_lossy()}),
         );
         assert_eq!(
-            absolute.body["result"]["structuredContent"]["error"]["code"],
-            "WorkspaceDenied"
+            absolute.body["result"]["isError"], false,
+            "absolute in-workspace document input must match its relative form: {:#?}",
+            absolute.body
         );
-        assert_eq!(absolute.body["result"]["isError"], true);
 
         let nonzero = public_tool_call(
             pep.port(),
@@ -2705,8 +2692,8 @@ mod tests {
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 33,
-            "fresh serving instance did not identify the revision33 facade: {:#?}",
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 34,
+            "fresh serving instance did not identify the revision34 facade: {:#?}",
             provenance.body
         );
         let served_tools = post(
@@ -3431,6 +3418,111 @@ mod tests {
     }
 
     #[test]
+    fn absolute_and_relative_active_workspace_paths_are_equivalent() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let outside = workspace.with_extension("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(workspace.join("absolute.txt"), b"ABSOLUTE_PATH_OK\n").unwrap();
+        fs::write(outside.join("outside.txt"), b"OUTSIDE\n").unwrap();
+        fs::copy(
+            root.join("assets/icons/localbridge.png"),
+            workspace.join("absolute.png"),
+        )
+        .unwrap();
+
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP listener ready");
+        let session = initialize(pep.port(), 810)
+            .session
+            .expect("absolute path test session");
+
+        for (id, path) in [
+            (811, "absolute.txt".to_string()),
+            (812, workspace.join("absolute.txt").to_string_lossy().into_owned()),
+        ] {
+            let response = public_tool_call(
+                pep.port(),
+                &session,
+                id,
+                "document_workflow",
+                json!({"action":"inspect","path":path}),
+            );
+            assert_eq!(response.status, 200);
+            assert_eq!(
+                response.body["result"]["isError"], false,
+                "in-workspace document path failed: {}",
+                response.body
+            );
+        }
+
+        let workdir = public_tool_call(
+            pep.port(),
+            &session,
+            813,
+            "exec_command",
+            json!({
+                "command":"cd",
+                "shell":"cmd",
+                "workdir":workspace.to_string_lossy(),
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(workdir.status, 200);
+        assert_eq!(
+            workdir.body["result"]["isError"], false,
+            "absolute in-workspace workdir failed: {}",
+            workdir.body
+        );
+
+        let image = public_tool_call(
+            pep.port(),
+            &session,
+            814,
+            "view_image",
+            json!({
+                "path":workspace.join("absolute.png").to_string_lossy(),
+                "max_width":64,
+                "max_height":64
+            }),
+        );
+        assert_eq!(image.status, 200);
+        assert_eq!(
+            image.body["result"]["isError"], false,
+            "absolute in-workspace image path failed: {}",
+            image.body
+        );
+
+        let outside_denied = public_tool_call(
+            pep.port(),
+            &session,
+            815,
+            "document_workflow",
+            json!({
+                "action":"inspect",
+                "path":outside.join("outside.txt").to_string_lossy()
+            }),
+        );
+        assert_tool_error(&outside_denied, "WorkspaceDenied");
+
+        let mut coding = pep.stop().expect("absolute path PEP stops");
+        coding.stop().expect("absolute path MCP stops");
+        cleanup_test_directory(&workspace);
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
     fn actual_bundled_mcp_is_reached_only_through_loopback_policy_server() {
         let root = repo_root();
         let workspace = temp_workspace();
@@ -3483,6 +3575,32 @@ mod tests {
                 .iter()
                 .any(|tool| tool["name"] == "elevated_exec")
         );
+        let elevated_schema = full_catalog
+            .iter()
+            .find(|tool| tool["name"] == "elevated_exec")
+            .expect("stable elevated_exec definition");
+        assert_eq!(elevated_schema["inputSchema"]["type"], "object");
+        for property in [
+            "operation",
+            "program",
+            "args",
+            "shell",
+            "command",
+            "workdir",
+            "action",
+            "path",
+            "destination",
+            "content_base64",
+            "recursive",
+            "timeout_ms",
+            "max_output_bytes",
+        ] {
+            assert!(
+                elevated_schema["inputSchema"]["properties"][property].is_object(),
+                "elevated_exec top-level property missing: {property}"
+            );
+        }
+
         for private in [
             "read_file",
             "apply_patch",
@@ -4097,6 +4215,11 @@ mod tests {
             .as_array()
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "elevated_exec"))
             .expect("elevated_exec tool definition");
+        assert_eq!(elevated_tool["inputSchema"]["type"], "object");
+        assert!(elevated_tool["inputSchema"]["properties"]["operation"].is_object());
+        assert!(elevated_tool["inputSchema"]["properties"]["shell"].is_object());
+        assert!(elevated_tool["inputSchema"]["properties"]["action"].is_object());
+        assert!(elevated_tool["inputSchema"]["properties"]["program"].is_object());
         assert!(elevated_tool["outputSchema"]["oneOf"].is_array());
 
         fake.set_state(PrivilegeState::AwaitingUac);

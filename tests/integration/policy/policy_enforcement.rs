@@ -227,6 +227,48 @@ fn public_shell_diagnostics_allow_only_narrow_static_console_and_command_discove
 }
 
 #[test]
+fn full_ordinary_workflow_scripts_and_file_cleanup_do_not_require_privileged_route() {
+    let policy = policy();
+    for arguments in [
+        json!({"command":"call test\\lb_broad_tmp.cmd","shell":"cmd"}),
+        json!({"command":"del /q test\\lb_broad_tmp.cmd","shell":"cmd"}),
+        json!({"command":"python -c \"import os; os.remove(r'test\\lb_broad_tmp.cmd')\"","shell":"cmd"}),
+    ] {
+        let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
+        assert!(decision.allowed, "ordinary Full operation was over-classified: {arguments}");
+    }
+
+    let ordinary_workflow = json!({
+        "action":"custom",
+        "commands":[{"command":"echo WORKFLOW_CMD_OK","shell":"cmd","workdir":"."}]
+    });
+    assert!(
+        policy
+            .decide_public(PermissionMode::Full, "agent_workflow", &ordinary_workflow)
+            .allowed,
+        "ordinary custom workflow was over-classified"
+    );
+    assert!(
+        !policy
+            .decide_public(PermissionMode::Edit, "agent_workflow", &ordinary_workflow)
+            .allowed,
+        "Edit workflow process execution escaped the process boundary"
+    );
+
+    for arguments in [
+        json!({"command":"call %SCRIPT%","shell":"cmd"}),
+        json!({"command":"Remove-Item HKLM:\\SOFTWARE\\probe","shell":"windows_powershell"}),
+    ] {
+        assert!(
+            !policy
+                .decide_public(PermissionMode::Full, "exec_command", &arguments)
+                .allowed,
+            "dynamic/provider mutation unexpectedly escaped review: {arguments}"
+        );
+    }
+}
+
+#[test]
 fn ordinary_system_management_targets_require_the_privileged_route_in_full_and_elevated() {
     let policy = policy();
     for mode in [PermissionMode::Full, PermissionMode::Elevated] {

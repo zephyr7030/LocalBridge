@@ -765,66 +765,64 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
         "agent_workflow" => {
             let shell_review_required = workflow_commands_require_review(arguments);
             let workflow_action = action?;
-            let commands_present = match arguments.get("commands") {
+            let object = arguments.as_object()?;
+            let commands_present = match object.get("commands") {
                 None => false,
                 Some(commands) => !commands.as_array()?.is_empty(),
             };
-            let directory_changes_only = workflow_directory_changes_only(arguments)?
-                && !matches!(workflow_action, "build_release" | "custom");
-            let (name, declaration) = match workflow_action {
-                "diagnose" => (
-                    "diagnose",
-                    PublicCapabilityDeclaration::workflow(
-                        false,
-                        commands_present,
-                        true,
-                        false,
-                        false,
-                    ),
-                ),
-                "document" => (
-                    "document",
-                    PublicCapabilityDeclaration::workflow(true, false, false, false, false),
-                ),
-                "bugfix" => (
-                    "bugfix",
-                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
-                ),
-                "feature" => (
-                    "feature",
-                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
-                ),
-                "refactor" => (
-                    "refactor",
-                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
-                ),
-                "test_failure" => (
-                    "test_failure",
-                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
-                ),
-                "build_release" => (
-                    "build_release",
-                    PublicCapabilityDeclaration::workflow(true, true, true, true, false),
-                ),
-                "resume" => (
-                    "resume",
-                    PublicCapabilityDeclaration::workflow(true, true, true, false, false),
-                ),
-                "custom" => (
-                    "custom",
-                    PublicCapabilityDeclaration::workflow(true, true, true, true, true),
-                ),
+            let patch_present = match object.get("patch") {
+                None => false,
+                Some(value) => {
+                    value.as_str()?;
+                    true
+                }
+            };
+            let directory_changes_present = match object.get("directory_changes") {
+                None => false,
+                Some(value) => {
+                    let changes = value.as_array()?;
+                    if changes.is_empty() || changes.len() > 32 {
+                        return None;
+                    }
+                    for change in changes {
+                        let change = change.as_object()?;
+                        if change.len() != 2
+                            || !change.contains_key("action")
+                            || !change.contains_key("path")
+                            || !matches!(
+                                change.get("action").and_then(Value::as_str),
+                                Some("create_directory" | "remove_empty_directory")
+                            )
+                            || change
+                                .get("path")
+                                .and_then(Value::as_str)
+                                .is_none_or(str::is_empty)
+                        {
+                            return None;
+                        }
+                    }
+                    !changes.is_empty()
+                }
+            };
+            let name = match workflow_action {
+                "diagnose" => "diagnose",
+                "document" => "document",
+                "bugfix" => "bugfix",
+                "feature" => "feature",
+                "refactor" => "refactor",
+                "test_failure" => "test_failure",
+                "build_release" => "build_release",
+                "resume" => "resume",
+                "custom" => "custom",
                 _ => return None,
             };
-            let declaration = if directory_changes_only {
-                PublicCapabilityDeclaration::workflow(true, false, true, false, false)
-            } else {
-                declaration
-            };
-            let declaration = PublicCapabilityDeclaration {
-                privilege: declaration.privilege || shell_review_required,
-                ..declaration
-            };
+            let declaration = PublicCapabilityDeclaration::workflow(
+                patch_present || directory_changes_present,
+                commands_present,
+                true,
+                false,
+                shell_review_required,
+            );
             Some(public_descriptor(
                 "agent_workflow",
                 name,
@@ -835,41 +833,6 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
         }
         _ => None,
     }
-}
-
-fn workflow_directory_changes_only(arguments: &Value) -> Option<bool> {
-    let object = arguments.as_object()?;
-    let Some(changes) = object.get("directory_changes") else {
-        return Some(false);
-    };
-    let changes = changes.as_array()?;
-    if changes.is_empty() || changes.len() > 32 {
-        return None;
-    }
-    for change in changes {
-        let change = change.as_object()?;
-        if change.len() != 2 || !change.contains_key("action") || !change.contains_key("path") {
-            return None;
-        }
-        if !matches!(
-            change.get("action").and_then(Value::as_str),
-            Some("create_directory" | "remove_empty_directory")
-        ) || change
-            .get("path")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        {
-            return None;
-        }
-    }
-    let patch_present = object.get("patch").is_some();
-    let commands_present = object
-        .get("commands")
-        .is_some_and(|value| value.as_array().is_none_or(|commands| !commands.is_empty()));
-    if patch_present || commands_present {
-        return None;
-    }
-    Some(true)
 }
 
 fn workflow_commands_require_review(arguments: &Value) -> bool {
@@ -1007,6 +970,21 @@ fn static_workspace_script_invocation(shell: &str, command: &str) -> Option<(Str
             cmd_input = rest;
             prefix += 1;
         }
+        if cmd_input
+            .get(..4)
+            .is_some_and(|value| value.eq_ignore_ascii_case("call"))
+            && cmd_input[4..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
+        {
+            let after_call = &cmd_input[4..];
+            let (target, consumed) = parse_token(after_call, false)?;
+            if literal_script_target(&target) {
+                return Some((target, prefix + 4 + consumed));
+            }
+            return None;
+        }
         if let Some((target, consumed)) = parse_token(cmd_input, false) {
             if literal_script_target(&target) {
                 return Some((target, prefix + consumed));
@@ -1071,8 +1049,6 @@ fn review_word(word: &str) -> bool {
             | "new-item"
             | "ni"
             | "remove-item"
-            | "del"
-            | "erase"
             | "rd"
             | "ri"
             | "rm"
@@ -1131,9 +1107,6 @@ fn review_word(word: &str) -> bool {
             | "workflow"
             | "configuration"
             | "call"
-    ) || matches!(
-        lower.rsplit('.').next(),
-        Some("ps1" | "psm1" | "psd1" | "bat" | "cmd" | "vbs" | "wsf")
     )
 }
 
@@ -1801,8 +1774,47 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
     flush_review_word(&mut word)
 }
 
+fn cmd_chained_literal_script_requires_review(command: &str) -> bool {
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, ch) in command.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '^' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if quoted || !matches!(ch, '&' | '|') {
+            continue;
+        }
+        let mut start = index + ch.len_utf8();
+        while command[start..]
+            .chars()
+            .next()
+            .is_some_and(|next| next.is_whitespace() || matches!(next, '&' | '|'))
+        {
+            start += command[start..].chars().next().unwrap().len_utf8();
+        }
+        if start < command.len()
+            && static_workspace_script_invocation("cmd", &command[start..]).is_some()
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn cmd_invocation_requires_review(command: &str) -> bool {
     if cmd_static_system_management_target(command) || cmd_if_system_management_target(command) {
+        return true;
+    }
+    if cmd_chained_literal_script_requires_review(command) {
         return true;
     }
     let mut chars = command.chars().peekable();

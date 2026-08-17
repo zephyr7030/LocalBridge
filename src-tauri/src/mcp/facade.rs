@@ -12,7 +12,9 @@ use crate::state::{
 };
 
 use super::http::McpCancellationClient;
-use super::path_authority::{PathAuthority, PathAuthorityError, workspace_relative_path_valid};
+use super::path_authority::{
+    PathAuthority, PathAuthorityError, workspace_input_path_valid, workspace_relative_path_valid,
+};
 use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision, static_workspace_script_target};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use super::shell::{ShellExecutionSpec, ShellExecutor, ShellResolveError, ShellSelector};
@@ -22,7 +24,7 @@ use super::task_state::{
 };
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 33;
+pub const AGENT_API_REVISION: u32 = 34;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",
@@ -974,6 +976,11 @@ pub struct ShellCommandRequest {
 pub trait WorkspaceRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError>;
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError>;
+    fn normalize_workspace_path(
+        &self,
+        path: &str,
+        allow_missing_leaf: bool,
+    ) -> Result<String, FacadeError>;
     fn project_context(&self, path: &str) -> Result<Value, FacadeError>;
     fn apply_directory_change(&mut self, action: &str, path: &str) -> Result<Value, FacadeError>;
     fn execute_shell(
@@ -1351,6 +1358,59 @@ impl CodingToolsRuntimeAdapter {
             .map_err(normalize_path_authority_error)
     }
 
+    fn normalized_workspace_path(
+        &self,
+        raw: &str,
+        allow_missing_leaf: bool,
+    ) -> Result<String, FacadeError> {
+        let authority = PathAuthority::active_workspace(&self.workspace)
+            .map_err(normalize_path_authority_error)?;
+        match authority.resolve_existing(raw) {
+            Ok(resolved) => authority
+                .display_path(&resolved)
+                .map_err(normalize_path_authority_error),
+            Err(PathAuthorityError::NotFound) if allow_missing_leaf => {
+                let candidate = authority
+                    .input_path(raw)
+                    .map_err(normalize_path_authority_error)?;
+                let parent = candidate.parent().ok_or_else(invalid_argument)?;
+                let canonical_parent = std::fs::canonicalize(parent).map_err(|_| {
+                    FacadeError::new(FacadeErrorCode::NotFound, "父目录不存在", false)
+                })?;
+                if !authority.allows_canonical(&canonical_parent) || !canonical_parent.is_dir() {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::WorkspaceDenied,
+                        "路径越出当前工作区",
+                        false,
+                    ));
+                }
+                let name = candidate
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(invalid_argument)?;
+                let parent = authority
+                    .display_path(&canonical_parent)
+                    .map_err(normalize_path_authority_error)?;
+                let relative = if parent == "." {
+                    name.to_string()
+                } else {
+                    format!("{parent}/{name}")
+                };
+                workspace_relative_path_valid(&relative)
+                    .then_some(relative)
+                    .ok_or_else(|| {
+                        FacadeError::new(
+                            FacadeErrorCode::WorkspaceDenied,
+                            "路径越出当前工作区",
+                            false,
+                        )
+                    })
+            }
+            Err(error) => Err(normalize_path_authority_error(error)),
+        }
+    }
+
     fn validate_static_workspace_script(
         &self,
         execution: &ShellExecutionSpec,
@@ -1366,21 +1426,14 @@ impl CodingToolsRuntimeAdapter {
             return Ok(());
         };
 
-        let cwd = execution.cwd.to_string_lossy().replace('\\', "/");
         let target = target.replace('\\', "/");
-        if !workspace_relative_path_valid(&cwd) || !workspace_relative_path_valid(&target) {
-            return Err(FacadeError::new(
-                FacadeErrorCode::WorkspaceDenied,
-                "脚本目标必须位于当前工作区内",
-                false,
-            ));
-        }
-        let relative = if cwd == "." {
+        let cwd = execution.cwd.to_string_lossy().replace('\\', "/");
+        let input = if Path::new(&target).is_absolute() || cwd == "." {
             target
         } else {
             format!("{}/{}", cwd.trim_end_matches('/'), target)
         };
-        if !workspace_relative_path_valid(&relative) {
+        if !workspace_input_path_valid(&input) {
             return Err(FacadeError::new(
                 FacadeErrorCode::WorkspaceDenied,
                 "脚本目标必须位于当前工作区内",
@@ -1389,7 +1442,7 @@ impl CodingToolsRuntimeAdapter {
         }
         let resolved = PathAuthority::active_workspace(&self.workspace)
             .map_err(normalize_path_authority_error)?
-            .resolve_existing(&relative)
+            .resolve_existing(&input)
             .map_err(normalize_path_authority_error)?;
         if !resolved.is_file() {
             return Err(FacadeError::new(
@@ -1500,6 +1553,14 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             "runtime": "ready"
         });
         Ok(stable_success(data, "LocalBridge workspace context ready"))
+    }
+
+    fn normalize_workspace_path(
+        &self,
+        path: &str,
+        allow_missing_leaf: bool,
+    ) -> Result<String, FacadeError> {
+        self.normalized_workspace_path(path, allow_missing_leaf)
     }
 
     fn project_context(&self, path: &str) -> Result<Value, FacadeError> {
@@ -1615,9 +1676,22 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
 
     fn execute_shell(
         &mut self,
-        request: ShellCommandRequest,
+        mut request: ShellCommandRequest,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
+        let normalized_cwd = self.normalized_workspace_path(
+            request.execution.cwd.to_string_lossy().as_ref(),
+            false,
+        )?;
+        let resolved_cwd = self.resolve_existing_workspace_path(&normalized_cwd)?;
+        if !resolved_cwd.is_dir() {
+            return Err(FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "工作目录必须是目录",
+                false,
+            ));
+        }
+        request.execution.cwd = PathBuf::from(normalized_cwd);
         self.validate_static_workspace_script(&request.execution)?;
         let public_session_id = self.public_commands.start_session(&self.task_state)?;
         let outcome = (|| {
@@ -1807,9 +1881,13 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     fn git_workflow(
         &mut self,
         action: GitWorkflowAction,
-        arguments: Value,
+        mut arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
+        if let Some(path) = arguments.get("path").and_then(Value::as_str) {
+            let normalized = self.normalized_workspace_path(path, false)?;
+            arguments["path"] = Value::String(normalized);
+        }
         let private_name = match action {
             GitWorkflowAction::Status => "git_status",
             GitWorkflowAction::Diff => "git_diff",
@@ -2742,7 +2820,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 .get("workdir")
                 .and_then(Value::as_str)
                 .unwrap_or(".");
-            if !workspace_relative_path_valid(workdir) {
+            if !workspace_input_path_valid(workdir) {
                 return Err(FacadeError::new(
                     FacadeErrorCode::WorkspaceDenied,
                     "工作区路径参数无效",
@@ -2950,12 +3028,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 self.adapter.inspect_document(private, request_id)
             }
             "create" => {
-                let path = required_string(object, "path")?;
+                let path = self
+                    .adapter
+                    .normalize_workspace_path(required_string(object, "path")?, true)?;
                 let content = object
                     .get("content")
                     .and_then(Value::as_str)
                     .ok_or_else(invalid_argument)?;
-                let patch = document_add_patch(path, content);
+                let patch = document_add_patch(&path, content);
                 self.adapter
                     .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
                 Ok(stable_success(
@@ -2965,13 +3045,15 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             }
             "convert" => {
                 let source = required_string(object, "source")?;
-                let path = required_string(object, "path")?;
+                let path = self
+                    .adapter
+                    .normalize_workspace_path(required_string(object, "path")?, true)?;
                 let inspected = self.adapter.inspect_document(
                     json!({"path":source,"start_line":1,"max_lines":100000,"max_bytes":1048576}),
                     request_id,
                 )?;
                 let content = stable_document_text(&inspected)?;
-                let patch = document_add_patch(path, content);
+                let patch = document_add_patch(&path, content);
                 self.adapter
                     .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
                 Ok(stable_success(
@@ -2980,7 +3062,9 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ))
             }
             "rebuild" => {
-                let path = required_string(object, "path")?;
+                let path = self
+                    .adapter
+                    .normalize_workspace_path(required_string(object, "path")?, false)?;
                 let content = object
                     .get("content")
                     .and_then(Value::as_str)
@@ -2990,7 +3074,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     request_id,
                 )?;
                 let existing = stable_document_text(&inspected)?;
-                let patch = document_rebuild_patch(path, existing, content);
+                let patch = document_rebuild_patch(&path, existing, content);
                 self.adapter
                     .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
                 Ok(stable_success(
@@ -3113,7 +3197,7 @@ fn public_workspace_paths_valid(name: &str, arguments: &Value) -> bool {
         object
             .get(*key)
             .and_then(Value::as_str)
-            .is_some_and(|value| !workspace_relative_path_valid(value))
+            .is_some_and(|value| !workspace_input_path_valid(value))
     }) {
         return false;
     }
@@ -3185,12 +3269,15 @@ fn parse_directory_changes(
 }
 
 fn join_project_workdir(project: &str, workdir: &str) -> Result<PathBuf, FacadeError> {
-    if !workspace_relative_path_valid(project) || !workspace_relative_path_valid(workdir) {
+    if !workspace_relative_path_valid(project) || !workspace_input_path_valid(workdir) {
         return Err(FacadeError::new(
             FacadeErrorCode::WorkspaceDenied,
             "工作区路径参数无效",
             false,
         ));
+    }
+    if Path::new(workdir).is_absolute() {
+        return Ok(PathBuf::from(workdir));
     }
     let combined = match (project, workdir) {
         (".", ".") => PathBuf::from("."),
@@ -3925,6 +4012,14 @@ mod tests {
 
         fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {
             Ok(stable_success(json!({}), "ok"))
+        }
+
+        fn normalize_workspace_path(
+            &self,
+            path: &str,
+            _allow_missing_leaf: bool,
+        ) -> Result<String, FacadeError> {
+            Ok(path.replace('\\', "/"))
         }
 
         fn project_context(&self, path: &str) -> Result<Value, FacadeError> {

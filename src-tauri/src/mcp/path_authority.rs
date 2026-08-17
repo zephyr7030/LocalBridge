@@ -49,14 +49,19 @@ impl PathAuthority {
     pub fn input_path(&self, raw: &str) -> Result<PathBuf, PathAuthorityError> {
         match self.scope {
             PathAuthorityScope::ActiveWorkspace => {
-                if !workspace_relative_path_valid(raw) {
+                if !workspace_input_path_valid(raw) {
                     return Err(PathAuthorityError::InvalidPath);
                 }
-                Ok(self
-                    .execution_root
-                    .as_ref()
-                    .expect("active workspace authority has execution root")
-                    .join(raw))
+                let path = Path::new(raw);
+                if path.is_absolute() {
+                    Ok(path.to_path_buf())
+                } else {
+                    Ok(self
+                        .execution_root
+                        .as_ref()
+                        .expect("active workspace authority has execution root")
+                        .join(path))
+                }
             }
             PathAuthorityScope::BrokerAdministrator => {
                 if !administrator_absolute_path_valid(raw) {
@@ -151,6 +156,45 @@ pub fn workspace_relative_path_valid(value: &str) -> bool {
         .any(|component| component == "..")
 }
 
+pub fn workspace_input_path_valid(value: &str) -> bool {
+    workspace_relative_path_valid(value) || workspace_absolute_path_valid(value)
+}
+
+fn workspace_absolute_path_valid(value: &str) -> bool {
+    if value.is_empty()
+        || value.contains(['\0', '\n', '\r'])
+        || value.starts_with('\\')
+        || value.starts_with('/')
+        || value.starts_with("//")
+        || value.starts_with(r"\\?\")
+        || value.starts_with("//?/")
+    {
+        return false;
+    }
+    let path = Path::new(value);
+    if !path.is_absolute()
+        || is_verbatim_path(path)
+        || path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+    {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        let bytes = value.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || !matches!(bytes[2], b'\\' | b'/')
+            || value[2..].contains(':')
+        {
+            return false;
+        }
+    }
+    true
+}
+
 fn administrator_absolute_path_valid(value: &str) -> bool {
     if value.is_empty()
         || value.contains(['\0', '\n', '\r'])
@@ -231,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn active_workspace_is_relative_only_and_canonical_root_bound() {
+    fn active_workspace_accepts_relative_or_absolute_inside_and_is_canonical_root_bound() {
         let root = temp_root();
         let workspace = root.join("workspace");
         let outside = root.join("outside");
@@ -244,18 +288,30 @@ mod tests {
         let inside = authority.resolve_existing("inside.txt").unwrap();
         assert!(inside.starts_with(std::fs::canonicalize(&workspace).unwrap()));
         assert_eq!(authority.display_path(&inside).unwrap(), "inside.txt");
+        let absolute_inside = authority
+            .resolve_existing(workspace.join("inside.txt").to_string_lossy().as_ref())
+            .unwrap();
+        assert_eq!(absolute_inside, inside);
         assert_eq!(
-            authority.input_path(workspace.to_string_lossy().as_ref()),
-            Err(PathAuthorityError::InvalidPath)
+            authority.display_path(
+                &authority
+                    .resolve_existing(workspace.to_string_lossy().as_ref())
+                    .unwrap()
+            )
+            .unwrap(),
+            "."
         );
         assert_eq!(
-            authority.input_path(outside.join("outside.txt").to_string_lossy().as_ref()),
-            Err(PathAuthorityError::InvalidPath)
+            authority.resolve_existing(outside.join("outside.txt").to_string_lossy().as_ref()),
+            Err(PathAuthorityError::OutsideAuthority)
         );
         assert_eq!(
             authority.input_path("../outside/outside.txt"),
             Err(PathAuthorityError::InvalidPath)
         );
+        assert!(!workspace_input_path_valid(r"\\server\share\file.txt"));
+        assert!(!workspace_input_path_valid(r"\\?\C:\project\file.txt"));
+        assert!(!workspace_input_path_valid(r"C:\project\file.txt:ads"));
 
         std::fs::remove_dir_all(root).unwrap();
     }

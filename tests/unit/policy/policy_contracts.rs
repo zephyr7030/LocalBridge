@@ -233,18 +233,18 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         );
     }
 
-    for protected_action in ["build_release", "custom"] {
+    for structured_only_action in ["build_release", "custom"] {
         let decision = policy.decide_public(
             PermissionMode::Full,
             "agent_workflow",
             &json!({
-                "action":protected_action,
+                "action":structured_only_action,
                 "directory_changes":[{"action":"create_directory","path":"test"}]
             }),
         );
         assert!(
-            !decision.allowed,
-            "directory_changes removed protected capability for {protected_action}"
+            decision.allowed,
+            "action label incorrectly added privilege/network capability for {structured_only_action}"
         );
     }
 
@@ -259,8 +259,8 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
     assert_eq!(workflow.descriptor.name, "agent_workflow");
     assert_eq!(workflow.descriptor.capability, Capability::Workflow);
     assert!(workflow.transitive.read);
-    assert!(workflow.transitive.write);
-    assert!(workflow.transitive.process_exec);
+    assert!(!workflow.transitive.write);
+    assert!(!workflow.transitive.process_exec);
     assert!(workflow.transitive.git);
     assert!(!workflow.transitive.network);
     assert!(!workflow.transitive.privilege);
@@ -270,33 +270,21 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         "agent_workflow",
         &json!({"action":"bugfix","objective":"repair local tests"}),
     );
-    assert!(!edit.allowed);
-    assert_eq!(
-        edit.deny_reason,
-        Some(DenyReason::IndirectProcessExecInEdit)
-    );
+    assert!(edit.allowed, "objective-only bugfix has no process/write capability");
 
-    let network = policy.decide_public(
+    let build_release_without_network = policy.decide_public(
         PermissionMode::Full,
         "agent_workflow",
         &json!({"action":"build_release","objective":"release"}),
     );
-    assert!(!network.allowed);
-    assert_eq!(
-        network.deny_reason,
-        Some(DenyReason::NetworkRouteNotAvailable)
-    );
+    assert!(build_release_without_network.allowed);
 
-    let privilege = policy.decide_public(
+    let custom_without_privilege = policy.decide_public(
         PermissionMode::Full,
         "agent_workflow",
         &json!({"action":"custom","objective":"unspecified"}),
     );
-    assert!(!privilege.allowed);
-    assert_eq!(
-        privilege.deny_reason,
-        Some(DenyReason::PrivilegedRouteNotAvailable)
-    );
+    assert!(custom_without_privilege.allowed);
 
     let external = policy.decide_public(
         PermissionMode::Full,
@@ -477,7 +465,6 @@ fn schema34_static_workspace_scripts_are_ordinary_but_dynamic_resolution_stays_r
         json!({"command":r"$p='.\scripts\probe.ps1'; & $p","shell":"windows_powershell"}),
         json!({"command":r". .\scripts\probe.ps1","shell":"windows_powershell"}),
         json!({"command":r"& (Join-Path . scripts\probe.ps1)","shell":"windows_powershell"}),
-        json!({"command":r"call scripts\probe.cmd","shell":"cmd"}),
         json!({"command":r"%SCRIPT%.cmd","shell":"cmd"}),
         json!({"command":r"echo ok & scripts\probe.cmd","shell":"cmd"}),
     ] {
@@ -491,6 +478,16 @@ fn schema34_static_workspace_scripts_are_ordinary_but_dynamic_resolution_stays_r
             Some(DenyReason::PrivilegedRouteNotAvailable)
         );
     }
+    assert!(
+        policy
+            .decide_public(
+                PermissionMode::Full,
+                "exec_command",
+                &json!({"command":r"call scripts\probe.cmd","shell":"cmd"}),
+            )
+            .allowed,
+        "literal workspace cmd call must remain an ordinary Full development operation"
+    );
 }
 
 #[test]

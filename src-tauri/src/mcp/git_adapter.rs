@@ -1084,7 +1084,7 @@ mod tests {
         let workspace_resolver = GitRepositoryResolver::new(&workspace).unwrap();
         assert!(matches!(
             workspace_resolver.resolve_existing(outside_repo.to_string_lossy().as_ref()),
-            Err(ResolveError::InvalidPath)
+            Err(ResolveError::OutsideWorkspace)
         ));
 
         let broker_resolver =
