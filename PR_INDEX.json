@@ -135,7 +135,7 @@
         "LB-006"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-008",
@@ -147,7 +147,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-009",
@@ -159,7 +159,7 @@
         "LB-008"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-010",
@@ -169,7 +169,7 @@
         "LB-009"
       ],
       "gate": "G2",
-      "status": "READY"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-011",
@@ -362,7 +362,7 @@
           }
         ]
       },
-      "reopen_from_pr": "LB-006"
+      "reopen_from_pr": "LB-007"
     },
     {
       "id": "G3",
@@ -435,5 +435,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-010"
+  "current_pr": "LB-007",
+  "current_group": "G2"
 }
