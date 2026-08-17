@@ -620,6 +620,10 @@ fn public_descriptor(
 
 fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicActionDescriptor> {
     let action = arguments.get("action").and_then(Value::as_str);
+    let dry_run = arguments
+        .get("dry_run")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     match tool_name {
         "workspace_context" if action.is_none() => Some(public_descriptor(
             "workspace_context",
@@ -630,12 +634,16 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
         )),
         "exec_command" if action.is_none() => Some(public_descriptor(
             "exec_command",
-            "execute",
+            if dry_run { "explain" } else { "execute" },
             Capability::ProcessExec,
-            TaskKind::ExecuteCommand,
-            PublicCapabilityDeclaration {
-                privilege: shell_request_requires_review(arguments),
-                ..PublicCapabilityDeclaration::PROCESS
+            if dry_run { TaskKind::Other } else { TaskKind::ExecuteCommand },
+            if dry_run {
+                PublicCapabilityDeclaration::READ
+            } else {
+                PublicCapabilityDeclaration {
+                    privilege: shell_request_requires_review(arguments),
+                    ..PublicCapabilityDeclaration::PROCESS
+                }
             },
         )),
         "command_control" => match action? {
@@ -816,13 +824,17 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                 "custom" => "custom",
                 _ => return None,
             };
-            let declaration = PublicCapabilityDeclaration::workflow(
-                patch_present || directory_changes_present,
-                commands_present,
-                true,
-                false,
-                shell_review_required,
-            );
+            let declaration = if dry_run {
+                PublicCapabilityDeclaration::workflow(false, false, false, false, false)
+            } else {
+                PublicCapabilityDeclaration::workflow(
+                    patch_present || directory_changes_present,
+                    commands_present,
+                    true,
+                    false,
+                    shell_review_required,
+                )
+            };
             Some(public_descriptor(
                 "agent_workflow",
                 name,
@@ -1672,6 +1684,42 @@ fn powershell_simple_get_command_diagnostic(command: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
 }
 
+fn powershell_readonly_command_discovery(command: &str) -> bool {
+    let mut segments = command.split('|').map(str::trim);
+    let Some(discovery) = segments.next() else {
+        return false;
+    };
+    let Some(projection) = segments.next() else {
+        return false;
+    };
+    if segments.next().is_some() || !powershell_simple_get_command_diagnostic(discovery) {
+        return false;
+    }
+    let mut words = projection.split_ascii_whitespace();
+    let Some(select) = words.next() else {
+        return false;
+    };
+    if !select.eq_ignore_ascii_case("select-object") && !select.eq_ignore_ascii_case("select") {
+        return false;
+    }
+    let Some(expand) = words.next() else {
+        return false;
+    };
+    if !expand.eq_ignore_ascii_case("-expandproperty") {
+        return false;
+    }
+    let Some(property) = words.next() else {
+        return false;
+    };
+    if words.next().is_some() {
+        return false;
+    }
+    matches!(
+        property.to_ascii_lowercase().as_str(),
+        "source" | "path" | "name" | "commandtype"
+    )
+}
+
 fn powershell_invocation_requires_review(command: &str) -> bool {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Quote {
@@ -1680,11 +1728,12 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
         Double,
     }
 
-    // A standalone command-discovery query does not execute the discovered target. Keep this
-    // exception deliberately narrower than the general Get-Command surface so pipelines,
-    // ScriptBlock extraction, dynamic names, assignments, and follow-on invocation continue to
-    // flow through the fail-closed grammar below.
-    if powershell_simple_get_command_diagnostic(command) {
+    // Static command discovery is data inspection, not execution of the discovered target.
+    // Keep the exception deliberately narrow: only one literal target and an optional
+    // Select-Object projection of non-executable metadata are accepted.
+    if powershell_simple_get_command_diagnostic(command)
+        || powershell_readonly_command_discovery(command)
+    {
         return false;
     }
 
@@ -1699,6 +1748,7 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
     let mut chars = command.chars().peekable();
     let mut word = String::new();
     let mut command_boundary = true;
+    let mut word_is_command = false;
     while let Some(ch) = chars.next() {
         match quote {
             Quote::Single => {
@@ -1723,55 +1773,60 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
         }
 
         if ch == '\'' {
-            if flush_review_word(&mut word) {
+            if word_is_command && flush_review_word(&mut word) {
                 return true;
             }
+            word.clear();
+            word_is_command = false;
             quote = Quote::Single;
             continue;
         }
         if ch == '"' {
-            if flush_review_word(&mut word) {
+            if word_is_command && flush_review_word(&mut word) {
                 return true;
             }
+            word.clear();
+            word_is_command = false;
             quote = Quote::Double;
             continue;
         }
         if ch == '`' {
-            // Outside quotes, backtick escaping can reconstruct command/cmdlet names at
-            // parse time (including Unicode escape forms in newer PowerShell). Treat the
-            // invocation grammar as unreviewable instead of approximating the final token.
             return true;
         }
         if ch == '&' {
-            if flush_review_word(&mut word) {
+            if word_is_command && flush_review_word(&mut word) {
                 return true;
             }
+            word.clear();
+            word_is_command = false;
             if chars.peek() == Some(&'&') {
                 chars.next();
                 command_boundary = true;
                 continue;
             }
-            // A single PowerShell call operator can execute a target assembled at runtime.
             return true;
         }
         if ch == '.' && command_boundary {
-            // Dot-sourcing/script-path invocation is an execution indirection surface and is
-            // intentionally review-required rather than guessed from the eventual target.
             return true;
         }
         if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            if word.is_empty() {
+                word_is_command = command_boundary;
+            }
             word.push(ch);
             command_boundary = false;
             continue;
         }
-        if flush_review_word(&mut word) {
+        if word_is_command && flush_review_word(&mut word) {
             return true;
         }
+        word.clear();
+        word_is_command = false;
         if matches!(ch, ';' | '|' | '\n' | '\r' | '{' | '}') {
             command_boundary = true;
         }
     }
-    flush_review_word(&mut word)
+    word_is_command && flush_review_word(&mut word)
 }
 
 fn cmd_chained_literal_script_requires_review(command: &str) -> bool {
@@ -1819,28 +1874,69 @@ fn cmd_invocation_requires_review(command: &str) -> bool {
     }
     let mut chars = command.chars().peekable();
     let mut word = String::new();
+    let mut command_boundary = true;
+    let mut word_is_command = false;
+    let mut control_flow_command = false;
+    let mut quoted = false;
     while let Some(ch) = chars.next() {
         if matches!(ch, '%' | '!') {
-            // cmd variable/argument/delayed expansion can assemble a command name at runtime.
-            return true;
+            // Expansion is authority-sensitive when it can construct the command target.
+            // Ordinary data arguments such as `echo %PATH%` remain Full-mode diagnostics.
+            if command_boundary || control_flow_command {
+                return true;
+            }
+            continue;
         }
         if ch == '^' {
             if let Some(escaped) = chars.next() {
                 if escaped.is_ascii_alphanumeric() || matches!(escaped, '_' | '-' | '.') {
+                    if word.is_empty() {
+                        word_is_command = command_boundary;
+                    }
                     word.push(escaped);
-                } else if flush_review_word(&mut word) {
+                    command_boundary = false;
+                } else if word_is_command && flush_review_word(&mut word) {
                     return true;
                 }
             }
             continue;
         }
+        if ch == '"' {
+            quoted = !quoted;
+            if word_is_command && flush_review_word(&mut word) {
+                return true;
+            }
+            word.clear();
+            word_is_command = false;
+            continue;
+        }
+        if quoted {
+            continue;
+        }
         if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            if word.is_empty() {
+                word_is_command = command_boundary;
+            }
             word.push(ch);
-        } else if flush_review_word(&mut word) {
-            return true;
+            command_boundary = false;
+        } else {
+            if !word.is_empty() && word_is_command {
+                let lower = word.to_ascii_lowercase();
+                control_flow_command = matches!(lower.as_str(), "if" | "for");
+                if flush_review_word(&mut word) {
+                    return true;
+                }
+            } else {
+                word.clear();
+            }
+            word_is_command = false;
+            if matches!(ch, '&' | '|' | '\n' | '\r' | '(') {
+                command_boundary = true;
+                control_flow_command = false;
+            }
         }
     }
-    flush_review_word(&mut word)
+    word_is_command && flush_review_word(&mut word)
 }
 
 fn is_control_plane_name(name: &str) -> bool {
@@ -2285,5 +2381,51 @@ mod administrator_gateway_tests {
             "args":["query","HKLM\\Software\\Microsoft"],"workdir":null,
             "timeout_ms":1000,"max_output_bytes":4096
         })));
+    }
+}
+
+
+#[cfg(test)]
+mod schema36_shell_classifier_tests {
+    use super::*;
+
+    #[test]
+    fn full_style_diagnostics_are_not_privileged_by_argument_tokens() {
+        for command in ["where cmd", "where pwsh", "echo %PATH%", "echo %TEMP%"] {
+            assert!(!shell_invocation_requires_review("cmd", command), "{command}");
+        }
+    }
+
+    #[test]
+    fn command_position_and_dynamic_control_flow_remain_fail_closed() {
+        for command in [
+            "cmd /c echo nested",
+            "pwsh -NoProfile -Command whoami",
+            "%COMSPEC% /c whoami",
+            "echo ok && cmd /c whoami",
+            "if 1==1 %COMSPEC% /c whoami",
+        ] {
+            assert!(shell_invocation_requires_review("cmd", command), "{command}");
+        }
+    }
+
+    #[test]
+    fn powershell_literal_command_discovery_allows_safe_projection_only() {
+        assert!(!shell_invocation_requires_review(
+            "windows_powershell",
+            "Get-Command cmd | Select-Object -ExpandProperty Source"
+        ));
+        assert!(!shell_invocation_requires_review(
+            "windows_powershell",
+            "gcm git | select -ExpandProperty Path"
+        ));
+        assert!(shell_invocation_requires_review(
+            "windows_powershell",
+            "Get-Command cmd | ForEach-Object { & $_.Source }"
+        ));
+        assert!(shell_invocation_requires_review(
+            "windows_powershell",
+            "Get-Command cmd | Select-Object -ExpandProperty ScriptBlock"
+        ));
     }
 }

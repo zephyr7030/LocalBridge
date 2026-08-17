@@ -3,6 +3,7 @@ use std::fmt;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use base64::Engine as _;
 use serde_json::{Map, Value, json};
@@ -17,14 +18,16 @@ use super::path_authority::{
 };
 use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision, static_workspace_script_target};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
-use super::shell::{ShellExecutionSpec, ShellExecutor, ShellResolveError, ShellSelector};
+use super::shell::{
+    ResolvedShellKind, ShellExecutionSpec, ShellExecutor, ShellResolveError, ShellSelector,
+};
 use super::task_state::{
     CommandOwner, CommandTaskStateError, CommandTaskStateStore, CommandTerminalStatus,
     TerminalCommandSnapshot,
 };
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 34;
+pub const AGENT_API_REVISION: u32 = 36;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",
@@ -43,6 +46,7 @@ pub enum FacadeErrorCode {
     WorkspaceDenied,
     CapabilityDenied,
     PolicyDenied,
+    InvalidShellSyntax,
     PrivilegedRouteNotAvailable,
     ElevationRequired,
     ProcessFailed,
@@ -64,7 +68,8 @@ impl FacadeErrorCode {
             Self::WorkspaceDenied => "WorkspaceDenied",
             Self::CapabilityDenied => "CapabilityDenied",
             Self::PolicyDenied => "PolicyDenied",
-            Self::PrivilegedRouteNotAvailable => "PrivilegedRouteNotAvailable",
+            Self::InvalidShellSyntax => "InvalidShellSyntax",
+            Self::PrivilegedRouteNotAvailable => "PrivilegedRouteUnavailable",
             Self::ElevationRequired => "ElevationRequired",
             Self::ProcessFailed => "ProcessFailed",
             Self::ProcessTimedOut => "ProcessTimedOut",
@@ -75,6 +80,36 @@ impl FacadeErrorCode {
             Self::RuntimeProtocolMismatch => "RuntimeProtocolMismatch",
             Self::RuntimeCapabilityMismatch => "RuntimeCapabilityMismatch",
             Self::Internal => "Internal",
+        }
+    }
+}
+
+impl FacadeErrorCode {
+    const fn safe_rule_category(self) -> &'static str {
+        match self {
+            Self::WorkspaceDenied => "workspace_boundary",
+            Self::PolicyDenied | Self::CapabilityDenied => "policy",
+            Self::InvalidShellSyntax => "shell_syntax",
+            Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => "privileged_route",
+            Self::RuntimeUnavailable | Self::RuntimeProtocolMismatch | Self::RuntimeCapabilityMismatch => "runtime",
+            Self::ProcessTimedOut => "process_timeout",
+            Self::ProcessFailed | Self::ProcessCancelled | Self::SessionUnavailable | Self::OutputTruncated => "command_runtime",
+            Self::InvalidArgument | Self::NotFound | Self::Internal => "request",
+        }
+    }
+
+    const fn safe_remediation(self) -> &'static str {
+        match self {
+            Self::WorkspaceDenied => "使用当前 active workspace 内的相对路径",
+            Self::PolicyDenied | Self::CapabilityDenied => "查看 workspace_context.capabilities 或使用 dry_run 获取允许路线",
+            Self::InvalidShellSyntax => "按所选 Windows Shell 的原生语法修正命令",
+            Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => "检查 workspace_context 中的权限模式与管理员路由状态",
+            Self::RuntimeUnavailable | Self::RuntimeProtocolMismatch | Self::RuntimeCapabilityMismatch => "查看 workspace_context.shell_discovery 与运行时诊断",
+            Self::ProcessTimedOut => "提高 timeout_ms 或缩小单次任务",
+            Self::ProcessCancelled => "重新发起命令",
+            Self::SessionUnavailable => "重新执行命令以创建新会话",
+            Self::OutputTruncated => "使用 output_ref 分页读取",
+            Self::ProcessFailed | Self::InvalidArgument | Self::NotFound | Self::Internal => "检查参数与返回的稳定错误信息",
         }
     }
 }
@@ -103,7 +138,9 @@ impl FacadeError {
                 "error": {
                     "code": self.code.as_str(),
                     "message": self.message,
-                    "retryable": self.retryable
+                    "retryable": self.retryable,
+                    "rule_category": self.code.safe_rule_category(),
+                    "remediation": self.code.safe_remediation()
                 }
             },
             "isError": true
@@ -386,9 +423,20 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "facade_revision":{"type":"integer"},
                 "workspace":{"type":"string"},
                 "default_cwd":{"type":"string"},
-                "runtime":{"type":"string","enum":["ready"]}
+                "runtime":{"type":"string","enum":["ready"]},
+                "permission_mode":{"type":"string","enum":["edit","full","elevated"]},
+                "workspace_scope":{"type":"string","enum":["active_workspace"]},
+                "ordinary_route_token":{"type":"string","enum":["current_windows_user"]},
+                "elevated_route_available":{"type":"boolean"},
+                "privilege_state":{"type":"string"},
+                "broker_state":{"type":"string"},
+                "uac_state":{"type":"string"},
+                "administrator_token_available":{"type":"boolean"},
+                "selected_route":{"type":"string"},
+                "shell_discovery":{"type":"object","additionalProperties":true},
+                "capabilities":{"type":"object","additionalProperties":true}
             },
-            "required":["api_version","facade_revision","workspace","default_cwd","runtime"],
+            "required":["api_version","facade_revision","workspace","default_cwd","runtime","permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","privilege_state","shell_discovery","capabilities"],
             "additionalProperties":false
         }),
         "agent_workflow" => json!({
@@ -413,6 +461,8 @@ fn public_tool_output_schema(name: &str) -> Value {
             "type":"object",
             "properties":{
                 "status":{"type":"string","enum":["running","completed","failed","timed_out","cancelled","lost"]},
+                "task_id":{"type":"string"},
+                "elapsed_ms":{"type":"integer","minimum":0},
                 "exit_code":{"type":"integer"},
                 "signal":{"type":"string"},
                 "session_id":{"type":"string"},
@@ -425,6 +475,8 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "requested_offset":{"type":"integer"},
                 "limit":{"type":"integer"},
                 "next_offset":{"type":["integer","null"]},
+                "total_bytes":{"type":"integer","minimum":0},
+                "returned_bytes":{"type":"integer","minimum":0},
                 "content":{"type":"string"}
             },
             "additionalProperties":false
@@ -511,16 +563,23 @@ fn command_output_data_schema() -> Value {
     json!({
         "type":"object",
         "properties":{
-            "status":{"type":"string","enum":["running","completed","failed","timed_out","cancelled","lost"]},
+            "status":{"type":"string","enum":["running","completed","failed","timed_out","cancelled","lost","explained"]},
+            "task_id":{"type":"string"},
+            "elapsed_ms":{"type":"integer","minimum":0},
             "exit_code":{"type":"integer"},
             "signal":{"type":"string"},
             "session_id":{"type":"string"},
             "output":{"type":"string"},
             "output_ref":{"type":"string"},
             "output_refs":{"type":"object","additionalProperties":{"type":"string"}},
-            "truncated":{"type":"boolean"}
+            "truncated":{"type":"boolean"},
+            "allowed":{"type":"boolean"},
+            "route":{"type":"string","enum":["ordinary","workspace_restricted","elevated_required","permanently_denied"]},
+            "rule_category":{"type":"string"},
+            "remediation":{"type":"string"},
+            "would_execute":{"type":"boolean"}
         },
-        "required":["status","session_id","output"],
+        "required":["status"],
         "additionalProperties":false
     })
 }
@@ -531,12 +590,14 @@ fn public_error_output_schema() -> Value {
         "properties":{
             "code":{"type":"string","enum":[
                 "InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied",
-                "PrivilegedRouteNotAvailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
+                "InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
                 "ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable",
                 "RuntimeProtocolMismatch","RuntimeCapabilityMismatch","Internal"
             ]},
             "message":{"type":"string"},
-            "retryable":{"type":"boolean"}
+            "retryable":{"type":"boolean"},
+            "rule_category":{"type":"string"},
+            "remediation":{"type":"string"}
         },
         "required":["code","message","retryable"],
         "additionalProperties":false
@@ -976,6 +1037,19 @@ pub struct ShellCommandRequest {
 pub trait WorkspaceRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError>;
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError>;
+    fn runtime_discovery(&self) -> Value {
+        json!({
+            "shells": {
+                "cmd":{"available":false},
+                "powershell_core":{"available":false},
+                "windows_powershell":{"available":false},
+                "auto_resolved":null
+            },
+            "git":{"available":true},
+            "bundled_python":{"available":true},
+            "bundled_node":{"available":false,"reason":"not_bundled"}
+        })
+    }
     fn normalize_workspace_path(
         &self,
         path: &str,
@@ -1034,6 +1108,7 @@ fn next_public_handle(prefix: &str) -> String {
 #[derive(Debug, Clone)]
 struct PublicCommandSession {
     owner: CommandOwner,
+    started_at: Instant,
     private_session_id: Option<String>,
     terminal: Option<Value>,
     pending_output: String,
@@ -1064,6 +1139,7 @@ impl PublicCommandSessions {
             public.clone(),
             PublicCommandSession {
                 owner,
+                started_at: Instant::now(),
                 private_session_id: None,
                 terminal: None,
                 pending_output: String::new(),
@@ -1118,6 +1194,15 @@ impl PublicCommandSessions {
             },
         );
         public
+    }
+
+    fn stable_metadata(&self, public_session_id: &str) -> Option<(String, u64)> {
+        self.sessions.get(public_session_id).map(|session| {
+            (
+                session.owner.task_id.clone(),
+                session.started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+            )
+        })
     }
 
     fn terminal(&self, public_session_id: &str) -> Option<Value> {
@@ -1464,7 +1549,7 @@ impl CodingToolsRuntimeAdapter {
                 timeout_ms: 45_000,
                 max_output_bytes: 65_536,
             })
-            .map_err(normalize_shell_error)?;
+            .map_err(|error| normalize_shell_error(error, ShellSelector::Auto))?;
         let exec = self.private_call(
             "exec_command",
             json!({
@@ -1555,6 +1640,29 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         Ok(stable_success(data, "LocalBridge workspace context ready"))
     }
 
+    fn runtime_discovery(&self) -> Value {
+        let summary = self.shell_executor.discovery_summary();
+        let core_version = summary.powershell_core_version.map(|version| {
+            format!("{}.{}.{}.{}", version.major, version.minor, version.patch, version.revision)
+        });
+        let auto_resolved = summary.auto_resolved.map(|kind| match kind {
+            ResolvedShellKind::PowerShellCore => "pwsh",
+            ResolvedShellKind::WindowsPowerShell => "windows_powershell",
+            ResolvedShellKind::Cmd => "cmd",
+        });
+        json!({
+            "shells": {
+                "cmd":{"available":summary.cmd_available,"trusted":summary.cmd_available},
+                "powershell_core":{"available":summary.powershell_core_available,"trusted":summary.powershell_core_available,"version":core_version},
+                "windows_powershell":{"available":summary.windows_powershell_available,"trusted":summary.windows_powershell_available},
+                "auto_resolved":auto_resolved
+            },
+            "git":{"available":true},
+            "bundled_python":{"available":true},
+            "bundled_node":{"available":false,"reason":"not_bundled"}
+        })
+    }
+
     fn normalize_workspace_path(
         &self,
         path: &str,
@@ -1583,10 +1691,11 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 false,
             ));
         }
-        let root = std::fs::canonicalize(&self.workspace).map_err(|_| {
-            FacadeError::new(FacadeErrorCode::WorkspaceDenied, "工作区不可用", false)
-        })?;
-        let target = self.workspace.join(path);
+        let authority = PathAuthority::active_workspace(&self.workspace)
+            .map_err(normalize_path_authority_error)?;
+        let target = authority
+            .input_path(path)
+            .map_err(normalize_path_authority_error)?;
         let public_path = path.replace('\\', "/");
         match action {
             "create_directory" => {
@@ -1601,7 +1710,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 let canonical_parent = std::fs::canonicalize(parent).map_err(|_| {
                     FacadeError::new(FacadeErrorCode::NotFound, "父目录不存在", false)
                 })?;
-                if !canonical_parent.starts_with(&root) || !canonical_parent.is_dir() {
+                if !authority.allows_canonical(&canonical_parent) || !canonical_parent.is_dir() {
                     return Err(FacadeError::new(
                         FacadeErrorCode::WorkspaceDenied,
                         "目录路径越出当前工作区",
@@ -1612,7 +1721,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                     FacadeError::new(FacadeErrorCode::Internal, "创建目录失败", false)
                 })?;
                 let canonical_target = match std::fs::canonicalize(&target) {
-                    Ok(value) if value.starts_with(&root) && value != root => value,
+                    Ok(value)
+                        if authority.allows_canonical(&value)
+                            && authority.canonical_root() != Some(value.as_path()) => value,
                     _ => {
                         let _ = std::fs::remove_dir(&target);
                         return Err(FacadeError::new(
@@ -1639,13 +1750,13 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                         false,
                     ));
                 }
-                let canonical_target = std::fs::canonicalize(&target).map_err(|_| {
-                    FacadeError::new(FacadeErrorCode::NotFound, "目录不存在", false)
-                })?;
-                if !canonical_target.starts_with(&root) || canonical_target == root {
+                let canonical_target = authority
+                    .resolve_existing(path)
+                    .map_err(normalize_path_authority_error)?;
+                if authority.canonical_root() == Some(canonical_target.as_path()) {
                     return Err(FacadeError::new(
                         FacadeErrorCode::WorkspaceDenied,
-                        "目录路径越出当前工作区",
+                        "拒绝清理工作区根目录",
                         false,
                     ));
                 }
@@ -1694,11 +1805,12 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         request.execution.cwd = PathBuf::from(normalized_cwd);
         self.validate_static_workspace_script(&request.execution)?;
         let public_session_id = self.public_commands.start_session(&self.task_state)?;
+        let selector = request.execution.shell;
         let outcome = (|| {
             let invocation = self
                 .shell_executor
                 .runtime_invocation(&request.execution)
-                .map_err(normalize_shell_error)?;
+                .map_err(|error| normalize_shell_error(error, selector))?;
             let mut private = json!({
                 "cmd": invocation.command_line,
                 "workdir": request.execution.cwd,
@@ -2150,6 +2262,10 @@ impl CodingToolsRuntimeAdapter {
             "session_id".into(),
             Value::String(public_session_id.to_string()),
         );
+        if let Some((task_id, elapsed_ms)) = self.public_commands.stable_metadata(public_session_id) {
+            data.insert("task_id".into(), Value::String(task_id));
+            data.insert("elapsed_ms".into(), Value::from(elapsed_ms));
+        }
         if let Some(value) = structured.and_then(|object| object.get("truncated")) {
             if value.is_boolean() {
                 data.insert("truncated".into(), value.clone());
@@ -2243,7 +2359,23 @@ impl CodingToolsRuntimeAdapter {
             } else {
                 content.to_string()
             };
+            let returned_bytes = content.len() as u64;
+            data.insert("returned_bytes".into(), Value::from(returned_bytes));
             data.insert("content".into(), Value::String(content));
+            if let Some(total_bytes) = structured
+                .and_then(|object| object.get("total_stream_bytes").or_else(|| object.get("total_bytes")))
+                .and_then(Value::as_u64)
+            {
+                data.insert("total_bytes".into(), Value::from(total_bytes));
+            }
+        } else {
+            data.insert("returned_bytes".into(), Value::from(0u64));
+            if let Some(total_bytes) = structured
+                .and_then(|object| object.get("total_stream_bytes").or_else(|| object.get("total_bytes")))
+                .and_then(Value::as_u64)
+            {
+                data.insert("total_bytes".into(), Value::from(total_bytes));
+            }
         }
         stable_success(Value::Object(data), "Command output read")
     }
@@ -2656,7 +2788,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             CurrentTaskStatus::project(kind, summary, TaskExecutionState::Running)
                 .expect("Running is valid"),
         );
-        let result = self.dispatch(name, arguments, request_id);
+        let result = self.dispatch(mode, name, arguments, request_id);
         match &result {
             Ok(value) if value.get("isError").and_then(Value::as_bool) == Some(true) => project(
                 CurrentTaskStatus::project(
@@ -2686,14 +2818,15 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
 
     fn dispatch(
         &mut self,
+        mode: PermissionMode,
         name: &str,
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
         match name {
-            "workspace_context" => self.workspace_context(request_id),
-            "agent_workflow" => self.agent_workflow(arguments, request_id),
-            "exec_command" => self.exec_command(arguments, request_id),
+            "workspace_context" => self.workspace_context(mode, request_id),
+            "agent_workflow" => self.agent_workflow(mode, arguments, request_id),
+            "exec_command" => self.exec_command(mode, arguments, request_id),
             "command_control" => self.command_control(arguments, request_id),
             "git_workflow" => self.git_workflow(arguments, request_id),
             "document_workflow" => self.document_workflow(arguments, request_id),
@@ -2710,12 +2843,116 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         }
     }
 
-    fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError> {
-        self.adapter.workspace_context(request_id)
+    fn workspace_context(
+        &mut self,
+        mode: PermissionMode,
+        request_id: Option<&Value>,
+    ) -> Result<Value, FacadeError> {
+        let mut result = self.adapter.workspace_context(request_id)?;
+        let discovery = self.adapter.runtime_discovery();
+        let mut public_tools = V1_CORE_TOOL_NAMES
+            .iter()
+            .filter(|name| self.policy.public_tool_allowed_for_list(mode, name))
+            .map(|name| Value::String((*name).to_string()))
+            .collect::<Vec<_>>();
+        if self.policy.privileged_tool_visible(mode, "elevated_exec") {
+            public_tools.push(Value::String("elevated_exec".into()));
+        }
+        let permission_mode = match mode {
+            PermissionMode::Edit => "edit",
+            PermissionMode::Full => "full",
+            PermissionMode::Elevated => "elevated",
+        };
+        let data = result
+            .pointer_mut("/structuredContent/data")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| FacadeError::new(FacadeErrorCode::Internal, "工作区上下文投影无效", false))?;
+        data.insert("permission_mode".into(), Value::String(permission_mode.into()));
+        data.insert("workspace_scope".into(), Value::String("active_workspace".into()));
+        data.insert(
+            "ordinary_route_token".into(),
+            Value::String("current_windows_user".into()),
+        );
+        data.insert("elevated_route_available".into(), Value::Bool(false));
+        data.insert("privilege_state".into(), Value::String("unknown".into()));
+        data.insert("broker_state".into(), Value::String("unknown".into()));
+        data.insert("uac_state".into(), Value::String("unknown".into()));
+        data.insert("administrator_token_available".into(), Value::Bool(false));
+        data.insert("selected_route".into(), Value::String("ordinary".into()));
+        data.insert(
+            "shell_discovery".into(),
+            discovery.get("shells").cloned().unwrap_or_else(|| json!({})),
+        );
+        data.insert(
+            "capabilities".into(),
+            json!({
+                "public_tools":public_tools,
+                "actions":{
+                    "agent_workflow":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"],
+                    "command_control":["poll","read","write","kill"],
+                    "task_control":["get","cancel"],
+                    "document_workflow":["inspect","create","convert","rebuild"]
+                },
+                "shells":discovery.get("shells").cloned().unwrap_or_else(|| json!({})),
+                "git":discovery.get("git").cloned().unwrap_or_else(|| json!({"available":false})),
+                "bundled_python":discovery.get("bundled_python").cloned().unwrap_or_else(|| json!({"available":false})),
+                "bundled_node":discovery.get("bundled_node").cloned().unwrap_or_else(|| json!({"available":false})),
+                "elevated_route":{"available":false,"reason":"broker_state_required"}
+            }),
+        );
+        Ok(result)
+    }
+
+    fn policy_explanation(&self, mode: PermissionMode, tool_name: &str, arguments: &Value) -> Value {
+        let decision = self.policy.decide_public(mode, tool_name, arguments);
+        let (route, rule_category, remediation) = if decision.allowed {
+            ("ordinary", "ordinary_allowed", "当前 ordinary route 可执行")
+        } else {
+            match decision.deny_reason {
+                Some(DenyReason::PrivilegedRouteNotAvailable | DenyReason::ElevatedExecNotReviewed) => (
+                    "elevated_required",
+                    "privileged_route",
+                    "需要用户显式管理员授权与可用 Broker route",
+                ),
+                Some(DenyReason::ToolNotAllowedInMode | DenyReason::IndirectProcessExecInEdit) => (
+                    "workspace_restricted",
+                    "permission_mode",
+                    "切换到允许该 ordinary capability 的用户权限模式",
+                ),
+                Some(DenyReason::VerbatimExecutionPath) => (
+                    "workspace_restricted",
+                    "workspace_boundary",
+                    "使用普通 Win32 workspace 路径而不是 verbatim 路径",
+                ),
+                Some(DenyReason::ControlPlane | DenyReason::IndirectControlPlane) => (
+                    "permanently_denied",
+                    "control_plane",
+                    "LocalBridge control-plane 不允许由 MCP/AI 修改",
+                ),
+                Some(DenyReason::NetworkRouteNotAvailable) => (
+                    "permanently_denied",
+                    "network_policy",
+                    "该网络路线未获当前 public capability 授权",
+                ),
+                Some(DenyReason::UnknownTool | DenyReason::IndirectUnknownCapability) | None => (
+                    "permanently_denied",
+                    "unknown_capability",
+                    "使用当前 workspace_context.capabilities 中声明的稳定能力",
+                ),
+            }
+        };
+        json!({
+            "allowed":decision.allowed,
+            "route":route,
+            "rule_category":rule_category,
+            "remediation":remediation,
+            "would_execute":false
+        })
     }
 
     fn agent_workflow(
         &mut self,
+        mode: PermissionMode,
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
@@ -2746,6 +2983,48 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             .and_then(Value::as_str)
             .ok_or_else(|| FacadeError::new(FacadeErrorCode::Internal, "项目上下文无效", false))?
             .to_string();
+        let dry_run = object.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+        if dry_run {
+            let mut actual = arguments.clone();
+            if let Some(actual) = actual.as_object_mut() {
+                actual.remove("dry_run");
+            }
+            let explanation = self.policy_explanation(mode, "agent_workflow", &actual);
+            let command_explanations = object
+                .get("commands")
+                .and_then(Value::as_array)
+                .map(|commands| {
+                    commands
+                        .iter()
+                        .filter_map(|command| command.as_object())
+                        .map(|command| {
+                            let args = json!({
+                                "command":command.get("command").and_then(Value::as_str).unwrap_or_default(),
+                                "shell":command.get("shell").and_then(Value::as_str).unwrap_or("auto"),
+                                "workdir":command.get("workdir").and_then(Value::as_str).unwrap_or(".")
+                            });
+                            self.policy_explanation(mode, "exec_command", &args)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let workspace = self.workspace_context(mode, request_id)?;
+            return Ok(stable_success(
+                json!({
+                    "action":action,
+                    "objective":object.get("objective").and_then(Value::as_str),
+                    "state":"completed",
+                    "workspace":stable_data(&workspace),
+                    "project":project,
+                    "git_before":{},
+                    "patch_applied":false,
+                    "directory_changes":[],
+                    "commands":command_explanations,
+                    "explain":explanation
+                }),
+                "Agent workflow policy explained without execution",
+            ));
+        }
         let directory_changes = parse_directory_changes(object)?;
         let commands = object
             .get("commands")
@@ -2908,6 +3187,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
 
     fn exec_command(
         &mut self,
+        mode: PermissionMode,
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
@@ -2921,6 +3201,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         )
         .map_err(|_| invalid_argument())?;
         let workdir = object.get("workdir").and_then(Value::as_str).unwrap_or(".");
+        if object.get("dry_run").and_then(Value::as_bool).unwrap_or(false) {
+            let mut actual = arguments.clone();
+            if let Some(actual) = actual.as_object_mut() {
+                actual.remove("dry_run");
+            }
+            let mut explanation = self.policy_explanation(mode, "exec_command", &actual);
+            if let Some(data) = explanation.as_object_mut() {
+                data.insert("status".into(), Value::String("explained".into()));
+            }
+            return Ok(stable_success(explanation, "Command policy explained without execution"));
+        }
         let spec = ShellExecutionSpec {
             shell,
             command: command.to_string(),
@@ -3376,12 +3667,14 @@ fn invalid_argument() -> FacadeError {
     )
 }
 
-fn normalize_shell_error(_error: ShellResolveError) -> FacadeError {
-    FacadeError::new(
-        FacadeErrorCode::RuntimeUnavailable,
-        "没有可用的可信命令 Shell",
-        false,
-    )
+fn normalize_shell_error(_error: ShellResolveError, selector: ShellSelector) -> FacadeError {
+    let message = match selector {
+        ShellSelector::Pwsh => "未发现可信 PowerShell Core；可查看 workspace_context.shell_discovery 并使用 windows_powershell 或 auto",
+        ShellSelector::WindowsPowershell => "未发现可信 Windows PowerShell；请查看 workspace_context.shell_discovery",
+        ShellSelector::Cmd => "未发现可信 cmd.exe；请查看 workspace_context.shell_discovery",
+        ShellSelector::Powershell | ShellSelector::Auto => "没有可用的可信命令 Shell；请查看 workspace_context.shell_discovery",
+    };
+    FacadeError::new(FacadeErrorCode::RuntimeUnavailable, message, false)
 }
 
 fn normalize_runtime_error(error: CodingToolsRuntimeError) -> FacadeError {
@@ -3434,6 +3727,8 @@ fn normalize_private_error(raw: &Value) -> FacadeError {
         .unwrap_or_default();
     let public = if code.contains("SESSION_NOT_FOUND") || code.contains("SESSION_CLOSED") {
         FacadeErrorCode::SessionUnavailable
+    } else if code.contains("SHELL_SYNTAX") || code.contains("INVALID_SHELL") || code.contains("PARSE_ERROR") {
+        FacadeErrorCode::InvalidShellSyntax
     } else if code.contains("INVALID") {
         FacadeErrorCode::InvalidArgument
     } else if code.contains("NOT_FOUND") || code.contains("MISSING") {
@@ -3484,7 +3779,10 @@ fn stable_command_error(code: FacadeErrorCode, message: &str, data: Map<String, 
         "content":[{"type":"text","text":message}],
         "structuredContent":{
             "ok":false,
-            "error":{"code":code.as_str(),"message":message,"retryable":false},
+            "error":{
+                "code":code.as_str(),"message":message,"retryable":false,
+                "rule_category":code.safe_rule_category(),"remediation":code.safe_remediation()
+            },
             "data":Value::Object(data)
         },
         "isError":true
@@ -4616,6 +4914,31 @@ mod tests {
     }
 
     #[test]
+    fn schema36_retained_output_maps_total_stream_bytes_without_faking_page_end() {
+        let raw = json!({
+            "structuredContent":{
+                "stream":"stdout",
+                "offset":512,
+                "requested_offset":512,
+                "limit":512,
+                "content":"hello",
+                "next_offset":1024,
+                "total_stream_bytes":8192,
+                "truncated":true
+            }
+        });
+        let normalized = CodingToolsRuntimeAdapter::normalize_read_output(
+            &raw,
+            "lb-output-schema36",
+        );
+        let data = &normalized["structuredContent"]["data"];
+        assert_eq!(data["returned_bytes"], 5);
+        assert_eq!(data["total_bytes"], 8192);
+        assert_eq!(data["offset"], 512);
+        assert_eq!(data["next_offset"], 1024);
+    }
+
+    #[test]
     fn git_success_shape_is_rebuilt_from_typed_allowlists() {
         let cases = [
             (
@@ -4712,6 +5035,85 @@ mod tests {
     }
 
     #[test]
+    fn schema36_workspace_context_reports_mode_scope_and_capability_snapshot() {
+        let mut facade = AgentFacade::with_adapter(
+            FakeAdapter { catalog: compatible_catalog() },
+            policy(),
+        )
+        .unwrap();
+        let result = facade
+            .call_tool(
+                PermissionMode::Full,
+                "workspace_context",
+                json!({}),
+                None,
+                |_| {},
+            )
+            .unwrap();
+        let data = stable_data(&result);
+        assert_eq!(data["permission_mode"], "full");
+        assert_eq!(data["workspace_scope"], "active_workspace");
+        assert_eq!(data["ordinary_route_token"], "current_windows_user");
+        assert_eq!(data["elevated_route_available"], false);
+        assert!(data["capabilities"]["public_tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|name| name == "exec_command"));
+        assert!(data["shell_discovery"].is_object());
+    }
+
+    #[test]
+    fn schema36_exec_dry_run_explains_without_creating_public_session() {
+        let mut facade = AgentFacade::with_adapter(
+            FakeAdapter { catalog: compatible_catalog() },
+            policy(),
+        )
+        .unwrap();
+        let result = facade
+            .call_tool(
+                PermissionMode::Full,
+                "exec_command",
+                json!({"command":"where cmd","shell":"cmd","workdir":".","dry_run":true}),
+                None,
+                |_| {},
+            )
+            .unwrap();
+        let data = stable_data(&result);
+        assert_eq!(data["status"], "explained");
+        assert_eq!(data["would_execute"], false);
+        assert_eq!(data["route"], "ordinary");
+        assert!(data.get("session_id").is_none());
+    }
+
+    #[test]
+    fn schema36_agent_dry_run_can_explain_process_restriction_in_edit() {
+        let mut facade = AgentFacade::with_adapter(
+            FakeAdapter { catalog: compatible_catalog() },
+            policy(),
+        )
+        .unwrap();
+        let result = facade
+            .call_tool(
+                PermissionMode::Edit,
+                "agent_workflow",
+                json!({
+                    "action":"diagnose",
+                    "path":".",
+                    "commands":[{"command":"echo hello","shell":"cmd","workdir":"."}],
+                    "dry_run":true
+                }),
+                None,
+                |_| {},
+            )
+            .unwrap();
+        let data = stable_data(&result);
+        assert_eq!(data["state"], "completed");
+        assert_eq!(data["commands"][0]["would_execute"], false);
+        assert_eq!(data["commands"][0]["route"], "workspace_restricted");
+    }
+
+    #[test]
     fn raw_upstream_name_is_not_a_public_registry_entry() {
         let registry = ToolRegistry;
         assert!(registry.contains("exec_command"));
@@ -4740,7 +5142,7 @@ mod tests {
             "custom",
         ] {
             let result = facade
-                .dispatch("agent_workflow", json!({"action":action}), None)
+                .dispatch(PermissionMode::Full, "agent_workflow", json!({"action":action}), None)
                 .unwrap();
             assert_eq!(result["isError"], false, "action={action}: {result:#?}");
             assert_eq!(
@@ -4750,6 +5152,7 @@ mod tests {
         }
         let diagnose_command = facade
             .dispatch(
+                PermissionMode::Full,
                 "agent_workflow",
                 json!({
                     "action":"diagnose",
@@ -4779,7 +5182,7 @@ mod tests {
             ),
         ] {
             let result = facade
-                .dispatch("document_workflow", arguments, None)
+                .dispatch(PermissionMode::Full, "document_workflow", arguments, None)
                 .unwrap();
             assert_eq!(result["isError"], false, "action={action}: {result:#?}");
         }

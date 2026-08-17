@@ -1091,13 +1091,72 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             });
             remove_active_request(active_requests, &id);
             match result {
-                Ok(result) => write_rpc_result(&mut stream, id, result, Some(session)),
+                Ok(mut result) => {
+                    if name == "workspace_context" {
+                        enrich_workspace_context_privilege(&mut result, mode, privileged);
+                    }
+                    write_rpc_result(&mut stream, id, result, Some(session))
+                }
                 Err(FacadeCallError::Denied(denied)) => {
                     write_rpc_result(&mut stream, id, denied.to_mcp_result(), Some(session))
                 }
             }
         }
         _ => write_rpc_error(&mut stream, id, -32601, "Method not found", Some(session)),
+    }
+}
+
+fn enrich_workspace_context_privilege(
+    result: &mut Value,
+    mode: PermissionMode,
+    privileged: Option<&Arc<dyn PrivilegedExecution>>,
+) {
+    let state = privileged
+        .map(|gateway| gateway.state())
+        .unwrap_or(PrivilegeState::Disabled);
+    let (privilege_state, broker_state, uac_state) = match &state {
+        PrivilegeState::Disabled => ("disabled", "offline", "not_requested"),
+        PrivilegeState::Requested => ("requested", "offline", "not_requested"),
+        PrivilegeState::AwaitingUac => ("awaiting_uac", "starting", "awaiting_user"),
+        PrivilegeState::Active { .. } => ("active", "active", "authorized"),
+        PrivilegeState::Faulted(_) => ("faulted", "faulted", "faulted"),
+    };
+    let administrator_token_available =
+        mode == PermissionMode::Elevated && state.accepts_privileged_calls();
+    let elevated_route_available = administrator_token_available;
+    let Some(data) = result
+        .pointer_mut("/structuredContent/data")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    data.insert(
+        "elevated_route_available".into(),
+        Value::Bool(elevated_route_available),
+    );
+    data.insert("privilege_state".into(), Value::String(privilege_state.into()));
+    data.insert("broker_state".into(), Value::String(broker_state.into()));
+    data.insert("uac_state".into(), Value::String(uac_state.into()));
+    data.insert(
+        "administrator_token_available".into(),
+        Value::Bool(administrator_token_available),
+    );
+    data.insert("selected_route".into(), Value::String("ordinary".into()));
+    if let Some(capabilities) = data
+        .get_mut("capabilities")
+        .and_then(Value::as_object_mut)
+    {
+        let reason = if elevated_route_available {
+            Value::Null
+        } else if mode != PermissionMode::Elevated {
+            Value::String("permission_mode_not_elevated".into())
+        } else {
+            Value::String("broker_not_active".into())
+        };
+        capabilities.insert(
+            "elevated_route".into(),
+            json!({"available":elevated_route_available,"reason":reason}),
+        );
     }
 }
 
@@ -2692,7 +2751,7 @@ mod tests {
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 34,
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], 36,
             "fresh serving instance did not identify the revision34 facade: {:#?}",
             provenance.body
         );
@@ -4267,7 +4326,7 @@ mod tests {
                     "params":{"name":"elevated_exec","arguments":arguments}
                 }),
             );
-            assert_tool_error(&denied, "PrivilegedRouteNotAvailable");
+            assert_tool_error(&denied, "PrivilegedRouteUnavailable");
             assert!(!denied.body.to_string().contains(secret));
             assert_eq!(fake.start_count(), 0, "unreviewed elevated request reached Broker");
         }
@@ -4373,7 +4432,7 @@ mod tests {
                 }}
             }),
         );
-        assert_tool_error(&full_denied, "PrivilegedRouteNotAvailable");
+        assert_tool_error(&full_denied, "PrivilegedRouteUnavailable");
         assert_eq!(fake.start_count(), 1);
         assert!(matches!(
             pep.current_task_projection().snapshot(),
@@ -4408,7 +4467,7 @@ mod tests {
                 "program":reviewed_program.clone(),"args":["/user"],"workdir":null,"timeout_ms":1000,"max_output_bytes":1024
             }}}),
         );
-        assert_tool_error(&edit_denied, "PrivilegedRouteNotAvailable");
+        assert_tool_error(&edit_denied, "PrivilegedRouteUnavailable");
         assert!(matches!(
             pep.current_task_projection().snapshot(),
             CurrentTaskStatus::Active(CurrentTask {
@@ -4725,7 +4784,7 @@ mod tests {
                 }}
             }),
         );
-        assert_tool_error(&shell_path_denied, "PrivilegedRouteNotAvailable");
+        assert_tool_error(&shell_path_denied, "PrivilegedRouteUnavailable");
         assert_eq!(fake.start_count(), 2);
 
         let filesystem = post(
@@ -4764,7 +4823,7 @@ mod tests {
                 }}
             }),
         );
-        assert_tool_error(&control_plane_denied, "PrivilegedRouteNotAvailable");
+        assert_tool_error(&control_plane_denied, "PrivilegedRouteUnavailable");
         assert_eq!(fake.start_count(), 2);
 
         let mut coding = pep

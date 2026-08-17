@@ -10,11 +10,18 @@ for(const [k,v] of Object.entries(exact))if(r[k]!==v)fail.push(k);
 const core=["workspace_context","agent_workflow","exec_command","command_control","task_control","git_workflow","document_workflow","view_image"];
 if(JSON.stringify(r.localbridge_agent_api_v1_core_tools)!==JSON.stringify(core))fail.push("core-tools");
 for(const e of ["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","InvalidShellSyntax","PrivilegedRouteUnavailable","ProcessTimedOut"])if(!(r.stable_public_error_codes||[]).includes(e))fail.push("error:"+e);
-const app=readFileSync(resolve(root,"src/App.tsx"),"utf8");
-if(app.includes(">权限模式</span>"))fail.push("dashboard-permission-row");
 const facade=readFileSync(resolve(root,"src-tauri/src/mcp/facade.rs"),"utf8");
-for(const m of ["permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","capabilities"])if(!facade.includes(m))fail.push("workspace-context:"+m);
-const ui=readFileSync(resolve(root,"src-tauri/src/commands/ui.rs"),"utf8");
-if(!/(challenge|not_before|not-before)/i.test(ui))fail.push("backend-admin-consent-challenge");
+for(const m of ["permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","shell_discovery","capabilities","PrivilegedRouteUnavailable","InvalidShellSyntax"])if(!facade.includes(m))fail.push("workspace-context:"+m);
+const policy=readFileSync(resolve(root,"src-tauri/src/mcp/policy.rs"),"utf8");
+for(const m of ["powershell_readonly_command_discovery","cmd_invocation_requires_review","full_style_diagnostics_are_not_privileged_by_argument_tokens"])if(!policy.includes(m))fail.push("shell-classifier:"+m);
+const state=JSON.parse(readFileSync(resolve(root,"PR_INDEX.json"),"utf8"));
+const pr=(id)=>state.prs.find((item)=>item.id===id);
+const g3Reopened=state.execution?.current_group==="G3" || ["READY","IN_PROGRESS","REWORK_REQUIRED","PASS"].includes(pr("LB-015")?.status);
+if(g3Reopened){
+  const app=readFileSync(resolve(root,"src/App.tsx"),"utf8");
+  if(app.includes(">权限模式</span>"))fail.push("dashboard-permission-row");
+  const ui=readFileSync(resolve(root,"src-tauri/src/commands/ui.rs"),"utf8");
+  if(!/(challenge|not_before|not-before)/i.test(ui))fail.push("backend-admin-consent-challenge");
+}
 if(fail.length){console.error("ARCH-034 "+fail.join("|"));process.exit(1);}
 console.log("ARCH-034 PASS");

@@ -96,6 +96,15 @@ pub enum ShellResolveError {
     NoShellAvailable,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellDiscoverySummary {
+    pub cmd_available: bool,
+    pub powershell_core_available: bool,
+    pub powershell_core_version: Option<SemanticVersion>,
+    pub windows_powershell_available: bool,
+    pub auto_resolved: Option<ResolvedShellKind>,
+}
+
 pub trait ShellDiscovery {
     fn pwsh_candidates(&self) -> Vec<PathBuf>;
     fn windows_powershell_candidate(&self) -> Option<PathBuf>;
@@ -311,6 +320,24 @@ where
         }
     }
 
+    pub fn discovery_summary(&self) -> ShellDiscoverySummary {
+        let core = self.highest_core();
+        let windows = self.windows_powershell();
+        let cmd = self.cmd();
+        let auto_resolved = core
+            .as_ref()
+            .map(|shell| shell.kind)
+            .or_else(|| windows.as_ref().map(|shell| shell.kind))
+            .or_else(|| cmd.as_ref().map(|shell| shell.kind));
+        ShellDiscoverySummary {
+            cmd_available: cmd.is_some(),
+            powershell_core_available: core.is_some(),
+            powershell_core_version: core.as_ref().and_then(|shell| shell.version),
+            windows_powershell_available: windows.is_some(),
+            auto_resolved,
+        }
+    }
+
     /// Resolve a trusted shell for the privileged Broker without launching candidates under the
     /// ordinary LocalBridge token. PowerShell Core ordering comes from the protected install
     /// directory version rather than a process probe.
@@ -488,6 +515,10 @@ where
         }
     }
 
+    pub fn discovery_summary(&self) -> ShellDiscoverySummary {
+        self.resolver.discovery_summary()
+    }
+
     pub fn direct_spec(
         &self,
         spec: &ShellExecutionSpec,
@@ -545,7 +576,7 @@ where
         let shell = self.resolver.resolve(spec.shell)?;
         let trusted_cmd = self.resolver.resolve(ShellSelector::Cmd)?;
         let command_line = match shell.kind {
-            ResolvedShellKind::Cmd => spec.command.clone(),
+            ResolvedShellKind::Cmd => normalize_cmd_reserved_device_redirection(&spec.command),
             ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
                 let management_module = shell
                     .management_module
@@ -581,6 +612,64 @@ where
             .execute(&direct)
             .map_err(ShellExecutionError::Process)
     }
+}
+
+fn normalize_cmd_reserved_device_redirection(command: &str) -> String {
+    let chars = command.chars().collect::<Vec<_>>();
+    let mut output = String::with_capacity(command.len());
+    let mut index = 0usize;
+    let mut quoted = false;
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '^' {
+            output.push(ch);
+            index += 1;
+            if index < chars.len() {
+                output.push(chars[index]);
+                index += 1;
+            }
+            continue;
+        }
+        if ch == '"' {
+            quoted = !quoted;
+            output.push(ch);
+            index += 1;
+            continue;
+        }
+        if quoted || !matches!(ch, '<' | '>') {
+            output.push(ch);
+            index += 1;
+            continue;
+        }
+
+        output.push(ch);
+        index += 1;
+        if ch == '>' && index < chars.len() && chars[index] == '>' {
+            output.push(chars[index]);
+            index += 1;
+        }
+        while index < chars.len() && matches!(chars[index], ' ' | '\t') {
+            output.push(chars[index]);
+            index += 1;
+        }
+        let start = index;
+        while index < chars.len()
+            && !chars[index].is_whitespace()
+            && !matches!(chars[index], '&' | '|' | '<' | '>')
+        {
+            index += 1;
+        }
+        let target = chars[start..index].iter().collect::<String>();
+        if target.eq_ignore_ascii_case("nul") {
+            // Win32 treats NUL.<suffix> as the same reserved device. The private workspace
+            // runtime rejects the bare token as a path before cmd.exe sees it, so use an
+            // equivalent spelling without weakening workspace path validation generally.
+            output.push_str("nul.localbridge");
+        } else {
+            output.push_str(&target);
+        }
+    }
+    output
 }
 
 fn windows_shell_quote(value: &OsStr) -> String {
@@ -992,6 +1081,46 @@ mod tests {
         assert!(script.contains("Import-Module -Name '"));
         assert!(script.contains("OutputEncoding"));
         assert!(script.ends_with(user));
+    }
+
+    #[test]
+    fn cmd_runtime_invocation_normalizes_only_bare_nul_redirection() {
+        let cmd = PathBuf::from(r"C:\Windows\System32\cmd.exe");
+        let resolver = ShellResolver::new(
+            FakeDiscovery {
+                pwsh: vec![],
+                trusted: HashSet::new(),
+                windows: None,
+                cmd: Some(cmd.clone()),
+            },
+            FakeProbe {
+                versions: HashMap::new(),
+                probed: Arc::new(Mutex::new(Vec::new())),
+            },
+        );
+        let executor = ShellExecutor::new(resolver);
+        let invocation = executor
+            .runtime_invocation(&ShellExecutionSpec {
+                shell: ShellSelector::Cmd,
+                command: "echo ok>nul && echo done 2> NUL".into(),
+                cwd: PathBuf::from(r"C:\work"),
+                timeout_ms: 1000,
+                max_output_bytes: 4096,
+            })
+            .unwrap();
+        assert_eq!(invocation.comspec, cmd);
+        assert_eq!(
+            invocation.command_line,
+            "echo ok>nul.localbridge && echo done 2> nul.localbridge"
+        );
+        assert_eq!(
+            normalize_cmd_reserved_device_redirection("echo ok>nul.txt && echo nul"),
+            "echo ok>nul.txt && echo nul"
+        );
+        assert_eq!(
+            normalize_cmd_reserved_device_redirection("echo \"literal >nul\""),
+            "echo \"literal >nul\""
+        );
     }
 
     #[test]
