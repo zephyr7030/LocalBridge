@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": "LB-011",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3588,6 +3588,12 @@
     "status": "PASS",
     "evidence": [
       "Fresh runtime orchestrator Rust tests PASS after LB-007 classifier fix."
+    ]
+  },
+  "lb010_post_lb007_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "evidence": [
+      "Fresh recovery and workspace control Rust tests PASS after LB-007 classifier fix."
     ]
   }
 }
