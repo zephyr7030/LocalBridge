@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3601,5 +3601,12 @@
     "evidence": [
       "Fresh privilege Rust tests PASS after LB-007 classifier fix."
     ]
+  },
+  "lb012_post_lb007_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "evidence": [
+      "Fresh Broker IPC and ARCH-031 stable privileged catalog tests PASS after LB-007 classifier fix."
+    ],
+    "next_action": "Run fresh G2 adversarial review generation25."
   }
 }
