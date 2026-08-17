@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4469,6 +4469,17 @@
       "Clippy lib -D warnings, architecture and git diff --check PASS."
     ],
     "next_pr": "LB-011",
+    "g4_unlocked": false
+  },
+  "schema40_schema41_lb011_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-011",
+    "evidence": [
+      "LB011 security boundary PASS.",
+      "Fresh privilege 23/23 PASS; broker IPC 6 PASS with one explicit-UAC test ignored by design.",
+      "Architecture and diff check PASS."
+    ],
+    "next_pr": "LB-012",
     "g4_unlocked": false
   }
 }
