@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4568,6 +4568,16 @@
       "Architecture and G4 human-gate fail-closed PASS."
     ],
     "next_pr": "LB-017",
+    "g4_unlocked": false
+  },
+  "schema40_g3_lb017_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB017 diagnostics contract PASS.",
+      "Fresh diagnostics 4/4 PASS including typed bounded redacted events and exact recovery-attempt projection.",
+      "Architecture and diff check PASS."
+    ],
+    "next_action": "Run fresh schema40 G3 generation18 independent adversarial review.",
     "g4_unlocked": false
   }
 }
