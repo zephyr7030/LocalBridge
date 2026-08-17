@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4424,6 +4424,16 @@
     "next_pr": "LB-007",
     "schema40_g2_generation": 28,
     "schema41_g2_generation": 29,
+    "g4_unlocked": false
+  },
+  "schema40_schema41_lb007_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "evidence": [
+      "Fresh lb007_policy_contracts 9/9 PASS including schema41 planner-owned verify ProcessExec classification: Edit denied, Full allowed.",
+      "Fresh lb007_policy_enforcement 10/10 PASS; architecture PASS; no privilege/control-plane widening."
+    ],
+    "next_pr": "LB-008",
     "g4_unlocked": false
   }
 }
