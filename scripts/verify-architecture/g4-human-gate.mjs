@@ -1800,6 +1800,7 @@ const SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17 = Object.freeze({
     windows_timeout_300ms_convergence_test_max_ms: 1800,
     cmd_rmdir_full_ordinary_cleanup_not_privileged_by_surface_syntax: true,
     schema38_contract_ratified: true,
+    localbridge_agent_api_revision: 38,
     schema38_earliest_owner_pr: "LB-006",
     schema38_next_g2_review_generation: 26,
     schema38_next_g3_review_generation: 16,

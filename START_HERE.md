@@ -211,7 +211,7 @@ Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订�
 
 - `task_control cancel` 必须在请求已异步化为 public command session 后仍可通过 current task owner 找到同一 session，并调用与 `command_control kill` 相同的 public-session terminator；terminal truth/finalizer 继续唯一归属 task-state。
 - `git_workflow show/diff` 的正文 patch 与 `files[]` metadata 分离生成；metadata 必须来自 Git NUL-delimited machine output（`--name-status -z`/`--numstat -z`），不得反向解析 human patch，Unicode/quoted path 必须保持精确状态。
-- `command_control` 与 `elevated_exec` 的 public inputSchema 必须是客户端可直接展开的顶层 `type: object + properties`；不得用顶层 `oneOf` 作为可发现性前提。action/operation-specific 合法组合仍由服务端/PEP/Broker 严格校验。
+- public `facade_revision` 升为 38。`command_control` 与 `elevated_exec` 的 public inputSchema 必须是客户端可直接展开的顶层 `type: object + properties`；不得用顶层 `oneOf` 作为可发现性前提。action/operation-specific 合法组合仍由服务端/PEP/Broker 严格校验。
 - `document_workflow rebuild` 对外明确要求“目标 path 已存在 + content 必填”；不存在目标仍为 NotFound，缺 content 仍为 InvalidArgument。
 - Windows command timeout 的 TERM 不得映射为 CTRL_BREAK；300ms timeout 的真实 bundled-runtime 回归必须在 1800ms 内收敛为 ProcessTimedOut，必要时由短 graceful window 升级为 forced process-tree kill，且不得出现 PowerShell `Entering debug mode`。
 - Full/cmd 下普通 workspace 临时目录 `rmdir /s /q` 不得仅因 `rmdir` 同时是 PowerShell alias 被判 privileged；PowerShell selector 下该 alias 仍按 provider/dynamic surface 保持 review-required。

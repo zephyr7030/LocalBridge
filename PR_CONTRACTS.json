@@ -811,7 +811,8 @@
     "schema38_contract_ratified": true,
     "schema38_earliest_owner_pr": "LB-006",
     "schema38_next_g2_review_generation": 26,
-    "schema38_next_g3_review_generation": 16
+    "schema38_next_g3_review_generation": 16,
+    "localbridge_agent_api_revision": 38
   },
   "prs": {
     "LB-000": {
