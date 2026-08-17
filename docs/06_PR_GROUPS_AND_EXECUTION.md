@@ -349,3 +349,11 @@ G4/LB-018 在新的 G3 human Gate PASS 前继续 BLOCKED；智能体不能代替
 2026-08-17 用户明确纠正 schema36 引入的 Dashboard 回退：主页恢复一个只读 `权限模式` 行，值直接来自 backend PermissionMode（编辑模式/完整模式/管理员模式），无状态点、无编辑控件、无 UAC 入口。Settings 与显式重新打开的 onboarding Screen3 仍是可编辑入口；`workspace_context` 的 AI/client observability 与 backend nonce-bound administrator consent 均保持不变。
 
 该纠正只重开 G3/LB-015，不重开 G2。G3 generation13 保留历史 provenance 但失去解锁效力；严格顺序为 `LB-015 → LB-016 → LB-017 → fresh G3 adversarial generation14 → human_review_status=REQUIRED`。G4/LB-018 继续 BLOCKED。
+
+### Schema39 — Agent execution platform maturity reacceptance（current）
+
+schema39 不增加新的 public tool family，而是把现有 Agent API 的生命周期、schema 可消费性、error normalization、orchestration 与恢复能力提升为 G2/G3 的新验收基线。最早责任仍为 **LB-006**：Workflow 拥有 Task，process-backed Task 才拥有 optional Execution/public Session/process tree；`task_control` 继续只有 `get/cancel`；真实 downstream MCP client 最终投影必须能直接构造合法调用；现有 canonical typed errors 跨 direct tool/`agent_workflow` 归一；`agent_workflow` 只编排并复用共享 filesystem/Git/process/document/image/privilege、Session Manager、path authority、capability classifier 与 terminal truth；`workspace_context` 提供 compact cached first-turn discovery；workflow resume/retained output 提供 durable recovery；public surface 继续 8 core + `elevated_exec`，不新增 `file_workflow`、generic pause/history/snapshot/rollback。
+
+LB-007 只重新消费 policy/path/capability classifier 交叉项；其后 LB-008→LB-012 按严格编号 reaccept。schema38 的 G2 generation26 / G3 generation16 保留历史 provenance，但不能证明 schema39 新增合同。新顺序为 `LB-006 → LB-007 → ... → LB-012 → fresh G2 adversarial generation27 → LB-013 → ... → LB-017 → fresh G3 adversarial generation17 → G3 human_review_status=REQUIRED`。
+
+schema39 不创建平行的“成熟度 G1–G5”；仍只使用本文件既有 Group/Gate。合同修订本身不允许修改 `PR_INDEX.json` / `PROJECT_STATE.json` 假装消费上述 generation，也不能替代 G3→G4 human Gate。

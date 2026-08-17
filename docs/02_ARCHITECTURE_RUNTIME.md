@@ -407,3 +407,15 @@ canonical public errors 至少稳定区分 `PolicyDenied / WorkspaceDenied / Run
 `exec_command` 与 `agent_workflow` 可在既有 schema 上提供只读 `dry_run/explain`：只返回 `ordinary / workspace_restricted / elevated_required / permanently_denied` 与安全规则类别，不执行、不授权。统一环境自检由 enriched `workspace_context` 与/或 `agent_workflow(action=diagnose)` 承担。
 
 command/session 稳定结果在适用时统一 `task_id/session_id/status/elapsed_ms/exit_code/output_ref`；retained output 分页增加 `total_bytes/offset/returned_bytes/truncated`。public contract 不要求暴露 OS PID。所有 document/image/Git/workflow/workspace structured path authority 继续由单一 LocalBridge-owned canonical containment/path-authority 实现。
+
+### Schema39 — Workflow / Task / Execution maturity boundary
+
+LocalBridge 的 Agent 执行模型统一为 `Workflow → Task → optional Execution → public Session → process tree`。只有 process-backed Task 才分配 Execution/public Session/process tree；Git、document、image 与纯结构化 workspace Task 不得为了形式统一伪造 session handle。`task_control` 的 public action 继续严格只有 `get/cancel`；高层 cancel 通过当前 Task owner 自动解析其 Execution/Session 并调用共享 terminator/finalizer，模型不负责选择 session/process。
+
+Public schema 的 authority 是真实 downstream MCP client 最终可消费的投影，而不是 facade/server 内部 JSON Schema 单测。多 action/operation 工具必须保留直接可发现的顶层 properties/enum/bounds；合法调用不得要求模型先触发 `InvalidArgument` 猜字段。服务端继续做严格 action/operation-specific validation，不能为了客户端兼容而降低验证。
+
+typed error 继续沿用现有 LocalBridge canonical names，不创建同义错误体系。同一失败条件经 direct tool 或 `agent_workflow` 间接路径必须进入同一 normalization table。`agent_workflow` 只承担 orchestration，必须复用与 direct tools 相同的 filesystem/Git/process/document/image/privilege service、Session Manager、ShellResolver、terminal finalizer、path authority 与 capability classifier，不得维护第二套 Shell/File/Git 语义。
+
+`workspace_context` 是 compact first-turn discovery：在可确定时直接投影 project name/type/version、Git branch/dirty/changed count、package manager、build/test system、runtime availability、trusted shells、permission mode、current task。稳定 discovery 优先读取已有/缓存 snapshot，禁止为了同一稳定信息在每次调用时重复拉起探测进程；无法确定的字段必须显式 unknown/unavailable，不能猜测。
+
+public process/session 生命周期固定为 `running → completed | failed | cancelled | timed_out | lost`。所有非 `running` 状态都是 durable terminal truth，独立于客户端持续 poll。恢复边界限定为 durable workflow checkpoint/resume 与 retained output continuation；schema39 v0.1 不要求 generic process pause、用户可浏览 task history、自动 filesystem snapshot/rollback，也不新增 `file_workflow`。Public surface 继续严格 8 个非特权 core + `elevated_exec` privileged extension。

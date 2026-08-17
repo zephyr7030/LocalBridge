@@ -218,6 +218,17 @@ Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订�
 - schema38 不扩展 system-management executable 集；schema37 当前六个静态目标继续生效。`pnputil/wevtutil/powercfg` 的 query/mutation operation-level 分类留作后续独立合同，不作为本轮违规修复。
 - 本轮最早责任 PR 为 LB-006，policy classifier 补充归 LB-007；修复后必须重验 LB-006→LB-012、fresh G2 generation26，再重验 LB-013→LB-017、fresh G3 generation16。G3 结束仍停在 human review REQUIRED，G4 BLOCKED。
 
+## Schema39 — Agent execution platform maturity contract（current）
+
+- 生命周期统一为 `Workflow → Task → optional Execution`。只有进程型 Task 才拥有 `public Session → process tree`；Git/document/image/纯结构化文件等非进程 Task 不得为了形式统一伪造 Session。`task_control` 继续严格只有 `get/cancel`，AI 只取消 Task，不负责判断底层 session/process。
+- Public API 以“真实 MCP 客户端能直接消费”为验收标准，而不是只验证后端 JSON Schema 理论正确。顶层字段必须可发现，action/operation-specific 组合继续由服务端严格校验；不得要求模型先故意触发 `InvalidArgument` 才学习调用格式。
+- 保留并扩展现有 LocalBridge typed-error taxonomy，不重命名已冻结 canonical code；同一失败条件经过 `exec_command`、`agent_workflow` 或其他 facade 间接路径时必须归一到同一 public error code。
+- `agent_workflow` 是编排层，不是第二套 Shell/File/Git runtime：必须复用同一 filesystem/Git/process/document/image/privilege service、Session Manager、terminal finalizer、path authority 与 capability classifier。
+- `workspace_context` 成为 compact first-turn discovery：在可确定时一次返回 project name/type/version、Git branch/dirty/changed count、package manager、build/test system、runtime availability、trusted shells、permission mode、current task；使用缓存/已知 discovery snapshot，禁止每次调用都重复拉起探测进程。
+- public process/session 状态收敛为 `running/completed/failed/cancelled/timed_out/lost`；所有非 running 状态都是 durable terminal truth，且不依赖客户端持续 poll。恢复能力只要求 durable workflow resume + retained output continuation；v0.1 不要求 generic pause/history/snapshot/rollback。
+- public surface 继续严格 8 个非特权 core + `elevated_exec` 特权扩展；本轮明确**不新增 `file_workflow`**。若未来真实黑盒证明结构化文件能力不足，必须另立合同后再扩展。
+- schema39 不建立第二套 G1–G5 成熟度体系；所有成熟度验收映射回现有 LB/Group/Gate。最早责任 PR 仍为 LB-006，policy/path classifier 交叉项归 LB-007；schema38 generation26/16 只保留历史证据，新合同需要 fresh G2 generation27 / G3 generation17。合同修订本身不自动修改 `PR_INDEX.json` / `PROJECT_STATE.json` 或替人类通过 G3→G4 Gate。
+
 ```text
 品牌图标       = assets/icons/localbridge.ico
 品牌 PNG       = assets/icons/localbridge.png

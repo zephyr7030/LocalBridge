@@ -186,3 +186,15 @@ Schema36 correction：G3 generation13 因 Dashboard PermissionMode 回退纠正�
 2026-08-17 使用端反馈仅作为复现线索重新核对磁盘后，确认六类现行合同缺陷：detached public session 不能被高层 task cancel 接管、Git human diff 反解析导致 Unicode quoted path metadata 错位、command_control/elevated_exec 顶层组合 schema 的客户端可发现性退化、document rebuild 的 existing-path+content 约束未公开、Windows timeout/TERM 收敛过慢且 CTRL_BREAK 可触发 PowerShell debug mode，以及 cmd rmdir 被 PowerShell alias 关键词误伤。schema38 将这些归入 LB-006/LB-007，并要求真实 bundled-runtime/Unicode repo 回归。
 
 本次不扩展 system-management target 集：pnputil/wevtutil/powercfg 的 query/mutation operation-level 分类是后续产品策略，而非 schema37 当前违规。schema38 修复完成后必须重新消费 G2 generation26 与 G3 generation16；G3 PASS 仍只能进入独立 human review REQUIRED，不能由 AI 解锁 G4。
+
+## Schema39 — Agent execution platform maturity contract（current）
+
+schema39 不通过增加工具数量来定义成熟度，而是收敛现有八 core + `elevated_exec` 的 ownership、schema、error、orchestration 与 recovery 语义。统一模型为 Workflow 拥有 Task，只有 process-backed Task 才挂接 Execution/public Session/process tree；`task_control` 继续只有 `get/cancel`，高层取消不得把底层 session/process 选择责任转嫁给模型。
+
+所有 public schema 的验收必须落到真实 downstream MCP client 的最终投影；后端 schema/unit test 正确但客户端退化成 `{[key:string]:any}` 仍判 FAIL。现有 typed-error canonical names 保留，并建立跨 direct tool / agent_workflow 的单一 normalization table。
+
+`agent_workflow` 被冻结为编排层，必须复用同一 filesystem/Git/process/document/image/privilege service、Session Manager、terminal finalizer、path authority 与 capability classifier。`workspace_context` 则提供 compact cached first-turn project discovery，避免模型反复执行环境探测命令。
+
+public process/session 状态只保留 `running/completed/failed/cancelled/timed_out/lost`，terminal truth 必须 durable 且与 client polling 解耦。恢复范围限定为 durable workflow resume + retained output continuation；generic process pause、用户可浏览 task history、自动 filesystem snapshot/rollback 与 `file_workflow` 均不是 schema39 v0.1 要求。
+
+schema39 仍映射现有 LB/Group/Gate，不创建第二套成熟度 G1–G5。最早实现责任为 LB-006，policy/path classifier 交叉项为 LB-007；既有 schema38 G2 generation26 / G3 generation16 只作为历史 provenance，schema39 需要 fresh G2 generation27 / G3 generation17。合同修订自身不改 `PR_INDEX.json` / `PROJECT_STATE.json`，也不替代 G3→G4 human review。

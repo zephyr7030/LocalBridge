@@ -250,3 +250,15 @@
 - [ ] Windows 300ms timeout converges within 1800ms, TERM does not map to CTRL_BREAK/debug mode, and forced tree kill is bounded
 - [ ] Full cmd rmdir /s /q ordinary workspace cleanup is not privilege-classified solely by alias token; PowerShell rmdir stays review-required
 - [ ] schema38 does not silently expand system-management executables beyond the current ratified set
+
+## Schema39 Agent Execution Platform
+
+- [ ] Workflow owns Task lifecycle; only process-backed Tasks allocate Execution/public Session/process tree and non-process Tasks do not fabricate session handles
+- [ ] task_control remains exactly get/cancel and cancel resolves the owned execution without requiring AI to choose session/process handles
+- [ ] every public schema passes real downstream MCP-client projection; legal top-level fields/enum/bounds remain discoverable without trial-and-error
+- [ ] existing canonical typed errors are normalized consistently across direct tools and agent_workflow indirection
+- [ ] agent_workflow reuses shared filesystem/Git/process/document/image/privilege services, Session Manager, terminal finalizer, path authority and capability classifier
+- [ ] workspace_context returns compact cached project/Git/runtime/build-test/shell/permission/current-task discovery without redundant probe processes
+- [ ] public process states are running/completed/failed/cancelled/timed_out/lost and every non-running state is durable terminal truth independent of polling
+- [ ] workflow resume + retained-output continuation survive reconnect/interruption without adding generic pause/history/snapshot/rollback semantics
+- [ ] public surface remains exactly eight non-privileged core tools plus elevated_exec; no file_workflow or parallel maturity Gate taxonomy is introduced

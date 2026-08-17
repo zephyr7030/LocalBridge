@@ -346,3 +346,12 @@
 | A340 | schema38 document rebuild discoverability | public schema 明确 rebuild 需要已存在 path + content；缺目标为 NotFound，缺 content 为 InvalidArgument |
 | A341 | schema38 Windows timeout convergence | Windows PowerShell `timeout_ms=300` 的 bundled-runtime 回归在 1800ms 内收敛 `ProcessTimedOut`；TERM 不映射 CTRL_BREAK、不出现 `Entering debug mode`；graceful 失败后 bounded forced tree kill |
 | A342 | schema38 cmd rmdir classification | Full/cmd `rmdir /s /q` 普通 active-workspace 临时目录不因表面 token 升级 privileged；Windows PowerShell 的 `rmdir` alias 仍保持 review-required |
+| A343 | schema39 Workflow/Task/Execution ownership | Workflow 拥有 Task；只有 process-backed Task 才拥有 Execution/public Session/process tree，Git/document/image/纯结构化 Task 不得伪造 session_id；所有 Task 都有明确 terminal state |
+| A344 | schema39 high-level cancel boundary | `task_control` action 严格仍为 `get/cancel`；AI 调 cancel 不提供/选择 session/process，backend 通过当前 Task owner 找到关联 execution 并调用共享 terminator/finalizer |
+| A345 | schema39 real-client schema consumability | 每个 public inputSchema 必须通过真实 downstream MCP 客户端投影验收；合法字段/enum/bounds 在工具 schema 可直接发现，不能只因后端 oneOf/unit test 正确就 PASS，也不能要求先触发 InvalidArgument 学 API |
+| A346 | schema39 typed error normalization | 保留现有 canonical `PolicyDenied/WorkspaceDenied/RuntimeUnavailable/InvalidShellSyntax/PrivilegedRouteUnavailable/ProcessTimedOut` 及已实现 error family；同一失败条件经过 direct tool 或 agent_workflow 间接路径返回同一 public error code，不另造同义名字 |
+| A347 | schema39 agent_workflow orchestration | agent_workflow 不重新实现 Shell/File/Git/terminal semantics；process 复用 Session Manager/ShellResolver/finalizer，Git/document/image/file/privilege 复用各自共享 service、path authority 与 capability classifier |
+| A348 | schema39 compact workspace_context | 一次调用在可确定时返回 project name/type/version、Git branch/dirty/changed count、package manager、build/test system、runtime availability、trusted shells、permission mode、current task；重复调用优先缓存/已知 discovery，不为同一稳定信息反复启动探测进程 |
+| A349 | schema39 public process state set | public session 状态限定 `running/completed/failed/cancelled/timed_out/lost`；除 running 外均为 durable terminal truth，不依赖客户端 poll，private handle 丢失/runtime error 不得使 Task 消失或永久 running |
+| A350 | schema39 recovery without surface expansion | `agent_workflow resume` 可从 durable checkpoint 恢复缺失步骤，retained output 可按 output_ref/offset 延续读取；v0.1 不要求 generic pause/history/snapshot/rollback，也不新增 file_workflow |
+| A351 | schema39 public surface conservation | 非特权 core 仍严格 8 个，`elevated_exec` 仍为 privileged extension；任何第九 core、新成熟度 Gate 体系或新通用文件工具均需未来显式合同，不得由实现自行扩张 |
