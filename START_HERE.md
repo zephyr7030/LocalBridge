@@ -218,7 +218,7 @@ Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订�
 - schema38 不扩展 system-management executable 集；schema37 当前六个静态目标继续生效。`pnputil/wevtutil/powercfg` 的 query/mutation operation-level 分类留作后续独立合同，不作为本轮违规修复。
 - 本轮最早责任 PR 为 LB-006，policy classifier 补充归 LB-007；修复后必须重验 LB-006→LB-012、fresh G2 generation26，再重验 LB-013→LB-017、fresh G3 generation16。G3 结束仍停在 human review REQUIRED，G4 BLOCKED。
 
-## Schema39 — Agent execution platform maturity contract（current）
+## Schema39 — Agent execution platform maturity contract
 
 - 生命周期统一为 `Workflow → Task → optional Execution`。只有进程型 Task 才拥有 `public Session → process tree`；Git/document/image/纯结构化文件等非进程 Task 不得为了形式统一伪造 Session。`task_control` 继续严格只有 `get/cancel`，AI 只取消 Task，不负责判断底层 session/process。
 - Public API 以“真实 MCP 客户端能直接消费”为验收标准，而不是只验证后端 JSON Schema 理论正确。顶层字段必须可发现，action/operation-specific 组合继续由服务端严格校验；不得要求模型先故意触发 `InvalidArgument` 才学习调用格式。
@@ -228,6 +228,29 @@ Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订�
 - public process/session 状态收敛为 `running/completed/failed/cancelled/timed_out/lost`；所有非 running 状态都是 durable terminal truth，且不依赖客户端持续 poll。恢复能力只要求 durable workflow resume + retained output continuation；v0.1 不要求 generic pause/history/snapshot/rollback。
 - public surface 继续严格 8 个非特权 core + `elevated_exec` 特权扩展；本轮明确**不新增 `file_workflow`**。若未来真实黑盒证明结构化文件能力不足，必须另立合同后再扩展。
 - schema39 不建立第二套 G1–G5 成熟度体系；所有成熟度验收映射回现有 LB/Group/Gate。最早责任 PR 仍为 LB-006，policy/path classifier 交叉项归 LB-007；schema38 generation26/16 只保留历史证据，新合同需要 fresh G2 generation27 / G3 generation17。合同修订本身不自动修改 `PR_INDEX.json` / `PROJECT_STATE.json` 或替人类通过 G3→G4 Gate。
+
+## Schema40 — Live coding runtime health truth（current）
+
+- `workspace_context.runtime` 是 backend-owned live health truth，禁止 facade 初始化后永久 hard-code `ready`。项目/构建发现可以缓存，但 runtime health 不能随 project discovery snapshot 一起缓存为 Ready。
+- `shell_discovery` 只回答可信 shell 是否存在；`cmd.available=true` / `cmd.trusted=true` 不代表 private coding MCP 当前可调用。Shell trust、supervised root-process liveness、authenticated MCP transport/protocol health 是三个独立事实。
+- runtime 只有在 bounded authenticated MCP health 成功时才可投影 `ready`；root process alive 本身不够。若 root process 仍 alive 但 MCP HTTP/protocol 已不可用，必须立即离开 Ready，投影 `recovering` 或 `fault`。
+- recoverable private MCP transport-health failure（例如 connection unavailable / health timeout）不能只作为一次 `RuntimeUnavailable` 返回给调用者；必须反馈给 backend runtime/recovery owner，进入既有 typed fault + 五次 bounded minimal-layer recovery。协议/能力不兼容仍 fail-closed，不得伪装成健康。
+- recovery 验收必须真实覆盖“进程仍 alive、MCP 不响应”的故障：先证明 `workspace_context`/Dashboard 不再假 Ready，再证明自动恢复后 `exec_command(shell="cmd", command="echo TEST_PLUGIN_OK")` 无需人工重启即可成功。
+- Dashboard/onboarding 编码服务状态必须与同一 backend runtime truth 同源；MCP health 已 recovering/fault 时不得仅因进程仍存活继续显示绿色 Ready。
+- 本修订责任分层：LB-006 负责 live health truth / public projection / transport fault feedback，LB-010 负责 process-alive-but-unresponsive recovery，LB-015 负责 UI truthful projection。现有 G2 generation27 / G3 generation17 只保留 schema39 历史证据，不能验收 schema40；修复后需 fresh G2 generation28，再 fresh G3 generation18。合同修订本身不改 `PR_INDEX.json` / `PROJECT_STATE.json`，不自动推进或通过任何 Gate。
+
+## Schema41 — Coding Agent semantic compatibility（current）
+
+- LocalBridge 的目标是实现 `coding-agent-v1` **兼容语义**，不是复制 coding-tools public API。继续严格 8 个 non-privileged core tools + `elevated_exec`；不新增 `file_workflow`，不建立第二套 Gate，也不在 LocalBridge 内嵌 LLM。代码诊断/修改方案的推理由 ChatGPT/Codex/Claude 等 host model 负责，LocalBridge 负责确定性的发现、检索、执行、验证、持久化、恢复和权限边界。
+- `agent_workflow` 是 Coding Agent 主入口。`diagnose / bugfix / feature / refactor / test_failure / build_release / document` 必须支持 objective-driven non-mutating prepare：自动发现项目规则和相关上下文，不要求模型预先提供 patch/commands；同一 logical Workflow 可继续进入 model-directed edit → automatic verify → persist，并保持一个 durable Task identity。`resume` 继续只执行缺失且可安全判定的步骤。
+- durable Task checkpoint 版本化并至少保存 `objective/current_step/next_step/files_read/modified_files/commands/test_results/build_results/failure/output_refs/git_before/git_after`。`files_read` 只存 path/range/content identity 等 bounded metadata，不保存整份源码；checkpoint 必须跨 ChatGPT 重连、MCP 重启和 LocalBridge 重启恢复，且不得持久化 secret-bearing stdin/env/plaintext credential。
+- `workspace_context` 默认 `compact`，并支持 bounded `full`；在可确定时包含 project name/type/version、`git_root/branch/dirty/changed_count`、package/build/test system、`important_files`、适用 `instructions`、runtime/trusted shells/permission/current task。full 仍是结构化 metadata，不允许一次 bulk dump README/AGENTS/manifests/source bodies。
+- 内部共享 `ContextService` 至少提供 `discover_instructions / search_text / select_related_files / read_relevant_ranges`，由 `agent_workflow` 使用，减少模型反复调用 rg/findstr/type/Get-Content；v0.1 不强制完整 semantic symbol/reference engine，除非未来另行实现和验收。
+- 原子编辑服务至少具备 read range、exact replace、apply patch、create/delete/rename file、mkdir、search/replace，并使用 expected content hash/version 或等价 content identity 做乐观并发控制。独立变更返回 `FileChanged`，patch 上下文失配返回 `PatchConflict`，非唯一匹配返回 `AmbiguousMatch`，目标不存在继续使用 canonical `NotFound`；所有写入仍受现有 PathAuthority/policy 和原子写语义约束。
+- `VerificationPlanner` 必须 deterministic：项目 instructions/显式 Gate 最高优先，其次 changed-file targeted tests → lint/typecheck → broader project gate → git diff checks；只有发现真实 manifest/script/rule evidence 才能生成 npm/cargo/pytest/dotnet/go 等命令，禁止猜测，并继续遵守现有 `pr_fast / pr_runtime / group_release` 分层。
+- Coding result 统一公共 metadata envelope：`ok/state/summary/task_id/warnings/next_step/output_refs/data/error`；具体 command/Git/document/image/workflow 字段保留在 `data`，不得为了统一制造无意义空字段。默认响应保持 compact；大型 context/output/diff/verification log 通过 `output_refs` 或 bounded range continuation 获取。
+- `coding-agent-v1` 机器验收语义固定为 Workspace discovery、Project instructions、Context search、Command execution、Persistent task、Resume、Patch/edit、Test/build、Git status/diff、Cancellation、Output continuation、Typed errors。兼容判断以这些行为是否真实可用为准，不以工具名称或 schema 外观是否模仿 coding-tools 为准。
+- schema41 最早责任 PR 仍为 LB-006。schema40 的 generation28/18 目标保留历史含义，但不能验收新增 schema41；完成后需 fresh G2 generation29 / G3 generation19。合同修订本身不改 `PR_INDEX.json` / `PROJECT_STATE.json`，不自动推进任何 Gate。
 
 ```text
 品牌图标       = assets/icons/localbridge.ico

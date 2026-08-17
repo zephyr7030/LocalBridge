@@ -1,5 +1,5 @@
 {
-  "schema_version": 39,
+  "schema_version": 41,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -782,6 +782,9 @@
       "RuntimeUnavailable",
       "RuntimeProtocolMismatch",
       "RuntimeCapabilityMismatch",
+      "FileChanged",
+      "PatchConflict",
+      "AmbiguousMatch",
       "Internal"
     ],
     "public_typed_error_existing_canonical_names_preserved": true,
@@ -861,9 +864,12 @@
       "git_branch",
       "git_dirty",
       "git_changed_count",
+      "git_root",
       "package_manager",
       "build_system",
       "test_system",
+      "important_files",
+      "instructions",
       "runtime_availability",
       "trusted_shells",
       "permission_mode",
@@ -902,7 +908,156 @@
     "schema39_earliest_owner_pr": "LB-006",
     "schema39_next_g2_review_generation": 27,
     "schema39_next_g3_review_generation": 17,
-    "localbridge_agent_api_revision": 39
+    "runtime_health_truth_backend_owned_required": true,
+    "shell_discovery_runtime_health_independent_required": true,
+    "runtime_ready_process_liveness_alone_forbidden": true,
+    "runtime_ready_authenticated_mcp_health_required": true,
+    "runtime_health_probe_bounded_required": true,
+    "private_mcp_transport_faults_trigger_recovery_required": true,
+    "process_alive_mcp_unresponsive_recovery_required": true,
+    "workspace_context_runtime_hardcoded_ready_forbidden": true,
+    "workspace_context_cached_project_discovery_must_not_cache_runtime_health": true,
+    "runtime_ready_projection_during_private_mcp_outage_forbidden": true,
+    "workspace_context_runtime_states": [
+      "ready",
+      "recovering",
+      "fault"
+    ],
+    "schema40_contract_ratified": true,
+    "schema40_revision_scope": [
+      "live-runtime-health-truth",
+      "process-alive-mcp-unresponsive-recovery",
+      "runtime-transport-fault-feedback",
+      "no-stale-ready-projection"
+    ],
+    "schema40_owner_prs": [
+      "LB-006",
+      "LB-010",
+      "LB-015"
+    ],
+    "schema40_earliest_owner_pr": "LB-006",
+    "schema40_preexisting_g2_generation_27_insufficient": true,
+    "schema40_preexisting_g3_generation_17_insufficient": true,
+    "schema40_next_g2_review_generation": 28,
+    "schema40_next_g3_review_generation": 18,
+    "coding_agent_compatibility_profile": "coding-agent-v1",
+    "coding_agent_semantic_profile_required": true,
+    "coding_agent_public_api_clone_forbidden": true,
+    "coding_agent_embedded_llm_forbidden": true,
+    "coding_agent_profile_capabilities": [
+      "workspace_discovery",
+      "project_instructions",
+      "context_search",
+      "command_execution",
+      "persistent_task",
+      "resume",
+      "patch_edit",
+      "test_build",
+      "git_status_diff",
+      "cancellation",
+      "output_continuation",
+      "typed_errors"
+    ],
+    "agent_workflow_primary_coding_entry_required": true,
+    "agent_workflow_objective_prepare_without_precomputed_patch_required": true,
+    "agent_workflow_host_model_reasoning_boundary_required": true,
+    "agent_workflow_logical_phases": [
+      "prepare",
+      "edit",
+      "verify",
+      "persist",
+      "resume"
+    ],
+    "agent_workflow_cross_call_task_continuity_required": true,
+    "durable_coding_task_checkpoint_versioned_required": true,
+    "durable_coding_task_checkpoint_required_fields": [
+      "objective",
+      "current_step",
+      "next_step",
+      "files_read",
+      "modified_files",
+      "commands",
+      "test_results",
+      "build_results",
+      "failure",
+      "output_refs",
+      "git_before",
+      "git_after"
+    ],
+    "durable_coding_task_files_read_metadata_only_required": true,
+    "durable_coding_task_survives_chat_mcp_app_restart_required": true,
+    "workspace_context_detail_modes": [
+      "compact",
+      "full"
+    ],
+    "workspace_context_compact_default_required": true,
+    "workspace_context_full_bounded_structured_metadata_required": true,
+    "workspace_context_manifest_or_instruction_bulk_dump_forbidden": true,
+    "internal_context_service_required": true,
+    "internal_context_service_capabilities": [
+      "discover_instructions",
+      "search_text",
+      "select_related_files",
+      "read_relevant_ranges"
+    ],
+    "internal_context_service_public_tool_forbidden": true,
+    "context_service_semantic_symbol_reference_v0_1_required": false,
+    "coding_result_common_envelope_fields": [
+      "ok",
+      "state",
+      "summary",
+      "task_id",
+      "warnings",
+      "next_step",
+      "output_refs",
+      "data",
+      "error"
+    ],
+    "coding_result_domain_specific_data_preserved": true,
+    "coding_result_compact_default_required": true,
+    "coding_result_large_payload_uses_output_refs_required": true,
+    "coding_edit_internal_primitives": [
+      "read_range",
+      "replace_exact",
+      "apply_patch",
+      "create_file",
+      "delete_file",
+      "rename_file",
+      "mkdir",
+      "search_replace"
+    ],
+    "coding_edit_expected_content_identity_required": true,
+    "coding_edit_atomic_write_required": true,
+    "coding_edit_file_changed_fail_closed_required": true,
+    "coding_edit_missing_target_reuses_not_found_required": true,
+    "verification_planner_deterministic_required": true,
+    "verification_planner_precedence": [
+      "project_instructions",
+      "changed_file_targeted_tests",
+      "lint_typecheck",
+      "project_gate",
+      "git_diff_checks"
+    ],
+    "verification_planner_manifest_or_rule_evidence_required": true,
+    "verification_planner_command_guessing_forbidden": true,
+    "verification_planner_existing_test_tiers_preserved": true,
+    "schema41_contract_ratified": true,
+    "schema41_revision_scope": [
+      "coding-agent-semantic-profile",
+      "objective-driven-agent-workflow",
+      "durable-coding-task-checkpoint",
+      "bounded-context-service",
+      "atomic-conflict-aware-editing",
+      "deterministic-verification-planner",
+      "common-compact-result-envelope"
+    ],
+    "schema41_owner_prs": [
+      "LB-006"
+    ],
+    "schema41_earliest_owner_pr": "LB-006",
+    "schema41_next_g2_review_generation": 29,
+    "schema41_next_g3_review_generation": 19,
+    "localbridge_agent_api_revision": 41
   },
   "prs": {
     "LB-000": {
@@ -1176,7 +1331,15 @@
         "one LocalBridge public typed-error normalization table preserving existing canonical codes across facade entry points",
         "agent_workflow orchestration adapters that reuse the same filesystem Git process document image privilege path-authority capability and terminal-lifecycle services as direct public tools",
         "compact cached workspace_context project discovery projection sufficient for first-turn development without redundant shell probing",
-        "durable workflow resume checkpoint plus retained-output continuation using existing public tools without adding task history UI or a ninth core tool"
+        "durable workflow resume checkpoint plus retained-output continuation using existing public tools without adding task history UI or a ninth core tool",
+        "backend-owned live coding-runtime health projection separating trusted shell discovery, supervised root-process liveness, and bounded authenticated MCP transport/protocol health",
+        "machine-verifiable coding-agent-v1 semantic capability matrix mapped to existing LocalBridge public tools and shared internal services without cloning an upstream API or adding a ninth core tool",
+        "objective-driven agent_workflow orchestration spanning project and instruction discovery, bounded context selection, model-directed edit execution, deterministic verification, result persistence and durable resume without embedding an LLM",
+        "versioned durable coding Task checkpoint with step, file identity, modification, command, test, build, failure, output and Git metadata surviving ChatGPT reconnect, MCP restart and LocalBridge restart",
+        "bounded internal ContextService for instruction discovery, text search, related-file selection and relevant-range reads reused by agent_workflow without a public file_workflow",
+        "atomic coding edit service with content-identity preconditions, read-range exact-replace patch create delete rename mkdir and search-replace primitives plus fail-closed conflict detection",
+        "deterministic VerificationPlanner driven by project instructions and discovered manifests or declared scripts while preserving existing PR Fast PR Runtime and Group Release test tiers",
+        "shared compact coding result envelope metadata layered around domain-specific result data with retained output_ref continuation"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -1259,7 +1422,19 @@
         "one workspace_context call returns compact project name type version Git branch dirty state changed count package manager build and test system runtime availability trusted shells permission mode and current task when deterministically discoverable; cached discovery does not spawn redundant probe processes on every call and unavailable fields remain typed or explicitly unknown rather than guessed",
         "public command lifecycle states are restricted to running completed failed cancelled timed_out or lost at the session boundary and every non-running state is durable terminal truth independent of client polling; no runtime error or handle loss can erase the terminal owner",
         "agent_workflow resume can recover the last durable workflow checkpoint and continue only missing work after reconnect or interruption without adding a user-browsable task history surface; retained output can continue from output_ref offsets",
-        "schema39 preserves exactly eight non-privileged core tools plus elevated_exec privileged extension and does not add file_workflow generic process pause task history automatic filesystem snapshot or rollback requirements"
+        "schema39 preserves exactly eight non-privileged core tools plus elevated_exec privileged extension and does not add file_workflow generic process pause task history automatic filesystem snapshot or rollback requirements",
+        "workspace_context runtime truth is live and backend-owned rather than hard-coded ready: if the supervised coding-tools root process remains alive but authenticated MCP transport/protocol health is unavailable, runtime projects recovering or fault rather than ready even when cmd.available and cmd.trusted remain true because shell discovery is independent",
+        "a recoverable private MCP ConnectionUnavailable, health timeout, or equivalent transport-health failure is normalized into the existing typed runtime fault path and fed back to runtime recovery instead of being returned only to the individual tool caller; protocol/capability incompatibility remains fail-closed rather than being silently treated as healthy",
+        "agent_workflow accepts an objective for diagnose bugfix feature refactor test_failure build_release or document and can perform a non-mutating prepare stage that discovers applicable project instructions and bounded relevant context without requiring the model to precompute patch or shell commands; LocalBridge does not claim to replace the host model's code reasoning",
+        "one logical workflow keeps the same durable task identity across prepare then model-directed edit then automatic verify and persist calls, and resume after a fresh MCP or LocalBridge instance continues from the last verified checkpoint rather than replaying completed side effects",
+        "the durable coding Task checkpoint contains objective current_step next_step files_read modified_files commands test_results build_results failure output_refs git_before and git_after; files_read stores bounded path range and content-identity metadata rather than full source bodies or secrets",
+        "workspace_context defaults to compact and exposes project type version git root branch dirty state changed count package manager build and test system important files applicable instruction files runtime trusted shells permission mode and current task when deterministically available; full remains bounded structured metadata and does not bulk dump README AGENTS manifests or source files",
+        "agent_workflow obtains instruction discovery text search related-file selection and relevant-range reads from one internal ContextService without requiring repeated shell rg findstr type or Get-Content calls and without publishing a ninth core tool; full symbol/reference semantics are not required in v0.1 unless separately implemented and verified",
+        "coding edits use expected content identity or equivalent version preconditions and atomic replacement: an independently changed file fails closed as FileChanged, a patch whose expected context no longer applies is PatchConflict, a non-unique exact/search replacement is AmbiguousMatch, and a missing target reuses canonical NotFound rather than inventing TargetNotFound",
+        "VerificationPlanner gives project instructions and explicit project gates highest authority, then selects evidence-backed changed-file targeted tests, lint or typecheck, broader project gate and git diff checks as applicable; it never guesses an npm cargo pytest dotnet or go command without discovered manifest script or project-rule evidence and preserves existing pr_fast pr_runtime group_release orchestration",
+        "public coding operations share common ok state summary task_id warnings next_step output_refs data error envelope metadata while keeping command Git document image and workflow domain fields inside data rather than forcing meaningless empty cross-domain fields",
+        "coding-agent-v1 machine verification proves workspace discovery project instructions context search command execution persistent task resume patch edit test/build Git status/diff cancellation output continuation and typed errors are all reachable through the existing eight non-privileged core tools plus elevated_exec extension with no public API clone requirement",
+        "default Coding Agent responses remain compact; large context command output diffs or verification logs are retained behind output_refs or bounded range retrieval rather than returning coding-tools-style multi-tens-of-kilobyte prepare payloads"
       ],
       "non_goals": [
         "policy enforcement",
@@ -1403,7 +1578,8 @@
         "NoActiveWorkspace transition",
         "five-attempt automatic reconnect controller",
         "minimal-layer restart policy",
-        "single reconnect-exhaustion UserAttentionRequired event"
+        "single reconnect-exhaustion UserAttentionRequired event",
+        "bounded authenticated MCP health monitoring and recoverable fault feedback for a coding runtime whose supervised root process is alive but whose MCP transport is unresponsive"
       ],
       "required_tests": [
         "backoff",
@@ -1428,6 +1604,8 @@
         "tunnel fault restarts tunnel only when dependencies are healthy",
         "PEP fault restarts PEP then tunnel",
         "MCP fault restarts MCP then PEP then tunnel",
+        "while the supervised coding-tools root process remains alive, loss of bounded authenticated MCP transport/protocol responsiveness leaves Ready, enters the existing recovering/fault lifecycle and invokes the normal five-attempt minimal-layer MCP recovery path rather than waiting for process exit",
+        "after a process-alive but MCP-unresponsive fault is successfully recovered, workspace_context returns live ready health and exec_command with shell=cmd and command=echo TEST_PLUGIN_OK completes without a manual LocalBridge restart",
         "fifth reconnect failure stops automatic loop",
         "same outage generation emits final user-attention event once",
         "manual retry starts a fresh five-attempt generation",
@@ -1627,6 +1805,7 @@
         "administrator mode controls in onboarding and Settings use orange #ff9500 warning styling and are not overridden by ordinary blue selected styling",
         "Dashboard tunnel and coding service states render status dots using Ready green Starting amber Fault red Unknown gray semantics from the same typed status source used by onboarding",
         "Dashboard does not maintain an independent conflicting service-status color state",
+        "Dashboard and onboarding coding-service status never remain Ready/green solely because the supervised coding runtime process is alive when backend authenticated MCP health is recovering or faulted; both surfaces project the same backend runtime truth",
         "Settings has no separate 启用管理员权限 button; when Broker is not Active, visible 管理员模式 selection or reselection opens the safety warning gate and cannot request UAC before the enabled red 确认 action after the full 9000ms countdown",
         "leaving 管理员模式 closes the privileged call gate and disables the broker",
         "Dashboard 权限模式 display is sourced from backend PermissionMode while Settings and onboarding administrator activation still use PrivilegeState for runtime elevation state",

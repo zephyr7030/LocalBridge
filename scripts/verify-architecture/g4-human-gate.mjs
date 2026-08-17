@@ -1947,6 +1947,248 @@ export function normalizeSchema39ExecutionPlatform20260817(contractsDoc) {
   return normalized;
 }
 
+const SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17 = Object.freeze({
+  schemaVersion: 40,
+  baselineSchemaVersion: 39,
+  replacedRules: {
+    localbridge_agent_api_revision: { current: 40, baseline: 39 },
+  },
+  addedRules: {
+    runtime_health_truth_backend_owned_required: true,
+    shell_discovery_runtime_health_independent_required: true,
+    runtime_ready_process_liveness_alone_forbidden: true,
+    runtime_ready_authenticated_mcp_health_required: true,
+    runtime_health_probe_bounded_required: true,
+    private_mcp_transport_faults_trigger_recovery_required: true,
+    process_alive_mcp_unresponsive_recovery_required: true,
+    workspace_context_runtime_hardcoded_ready_forbidden: true,
+    workspace_context_cached_project_discovery_must_not_cache_runtime_health: true,
+    runtime_ready_projection_during_private_mcp_outage_forbidden: true,
+    workspace_context_runtime_states: ["ready", "recovering", "fault"],
+    schema40_contract_ratified: true,
+    schema40_revision_scope: [
+      "live-runtime-health-truth",
+      "process-alive-mcp-unresponsive-recovery",
+      "runtime-transport-fault-feedback",
+      "no-stale-ready-projection",
+    ],
+    schema40_owner_prs: ["LB-006", "LB-010", "LB-015"],
+    schema40_earliest_owner_pr: "LB-006",
+    schema40_preexisting_g2_generation_27_insufficient: true,
+    schema40_preexisting_g3_generation_17_insufficient: true,
+    schema40_next_g2_review_generation: 28,
+    schema40_next_g3_review_generation: 18,
+  },
+  prs: {
+    "LB-006": {
+      addedArtifacts: [
+        "backend-owned live coding-runtime health projection separating trusted shell discovery, supervised root-process liveness, and bounded authenticated MCP transport/protocol health",
+      ],
+      addedTests: [
+        "workspace_context runtime truth is live and backend-owned rather than hard-coded ready: if the supervised coding-tools root process remains alive but authenticated MCP transport/protocol health is unavailable, runtime projects recovering or fault rather than ready even when cmd.available and cmd.trusted remain true because shell discovery is independent",
+        "a recoverable private MCP ConnectionUnavailable, health timeout, or equivalent transport-health failure is normalized into the existing typed runtime fault path and fed back to runtime recovery instead of being returned only to the individual tool caller; protocol/capability incompatibility remains fail-closed rather than being silently treated as healthy",
+      ],
+    },
+    "LB-010": {
+      addedArtifacts: [
+        "bounded authenticated MCP health monitoring and recoverable fault feedback for a coding runtime whose supervised root process is alive but whose MCP transport is unresponsive",
+      ],
+      addedTests: [
+        "while the supervised coding-tools root process remains alive, loss of bounded authenticated MCP transport/protocol responsiveness leaves Ready, enters the existing recovering/fault lifecycle and invokes the normal five-attempt minimal-layer MCP recovery path rather than waiting for process exit",
+        "after a process-alive but MCP-unresponsive fault is successfully recovered, workspace_context returns live ready health and exec_command with shell=cmd and command=echo TEST_PLUGIN_OK completes without a manual LocalBridge restart",
+      ],
+    },
+    "LB-015": {
+      addedTests: [
+        "Dashboard and onboarding coding-service status never remain Ready/green solely because the supervised coding runtime process is alive when backend authenticated MCP health is recovering or faulted; both surfaces project the same backend runtime truth",
+      ],
+    },
+  },
+});
+
+export function hasExactSchema40LiveRuntimeHealth20260817(contractsDoc) {
+  if (contractsDoc?.schema_version !== SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const [key, replacement] of Object.entries(SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.replacedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(replacement.current)) return false;
+  }
+  for (const [id, delta] of Object.entries(SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.prs)) {
+    const pr = contractsDoc?.prs?.[id];
+    if (!pr) return false;
+    for (const artifact of delta.addedArtifacts ?? []) if (!pr.required_artifacts?.includes(artifact)) return false;
+    for (const test of delta.addedTests ?? []) if (!pr.required_tests?.includes(test)) return false;
+  }
+  return true;
+}
+
+export function normalizeSchema40LiveRuntimeHealth20260817(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.baselineSchemaVersion;
+  for (const key of Object.keys(SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.addedRules)) delete normalized.rules[key];
+  for (const [key, replacement] of Object.entries(SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.replacedRules)) normalized.rules[key] = replacement.baseline;
+  for (const [id, delta] of Object.entries(SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.prs)) {
+    const pr = normalized.prs?.[id];
+    if (!pr) continue;
+    const artifacts = new Set(delta.addedArtifacts ?? []);
+    const tests = new Set(delta.addedTests ?? []);
+    pr.required_artifacts = (pr.required_artifacts ?? []).filter((item) => !artifacts.has(item));
+    pr.required_tests = (pr.required_tests ?? []).filter((item) => !tests.has(item));
+  }
+  return normalized;
+}
+
+const SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17 = Object.freeze({
+  schemaVersion: 41,
+  baselineSchemaVersion: 40,
+  replacedRules: {
+    localbridge_agent_api_revision: { current: 41, baseline: 40 },
+    public_typed_error_taxonomy: {
+      current: [
+        "InvalidArgument", "NotFound", "WorkspaceDenied", "CapabilityDenied", "PolicyDenied",
+        "InvalidShellSyntax", "PrivilegedRouteUnavailable", "ElevationRequired", "ProcessFailed",
+        "ProcessTimedOut", "ProcessCancelled", "SessionUnavailable", "OutputTruncated",
+        "RuntimeUnavailable", "RuntimeProtocolMismatch", "RuntimeCapabilityMismatch",
+        "FileChanged", "PatchConflict", "AmbiguousMatch", "Internal",
+      ],
+      baseline: [
+        "InvalidArgument", "NotFound", "WorkspaceDenied", "CapabilityDenied", "PolicyDenied",
+        "InvalidShellSyntax", "PrivilegedRouteUnavailable", "ElevationRequired", "ProcessFailed",
+        "ProcessTimedOut", "ProcessCancelled", "SessionUnavailable", "OutputTruncated",
+        "RuntimeUnavailable", "RuntimeProtocolMismatch", "RuntimeCapabilityMismatch", "Internal",
+      ],
+    },
+    workspace_context_compact_project_discovery_fields: {
+      current: [
+        "project_name", "project_type", "project_version", "git_branch", "git_dirty", "git_changed_count",
+        "git_root", "package_manager", "build_system", "test_system", "important_files", "instructions",
+        "runtime_availability", "trusted_shells", "permission_mode", "current_task",
+      ],
+      baseline: [
+        "project_name", "project_type", "project_version", "git_branch", "git_dirty", "git_changed_count",
+        "package_manager", "build_system", "test_system", "runtime_availability", "trusted_shells",
+        "permission_mode", "current_task",
+      ],
+    },
+  },
+  addedRules: {
+    coding_agent_compatibility_profile: "coding-agent-v1",
+    coding_agent_semantic_profile_required: true,
+    coding_agent_public_api_clone_forbidden: true,
+    coding_agent_embedded_llm_forbidden: true,
+    coding_agent_profile_capabilities: [
+      "workspace_discovery", "project_instructions", "context_search", "command_execution",
+      "persistent_task", "resume", "patch_edit", "test_build", "git_status_diff", "cancellation",
+      "output_continuation", "typed_errors",
+    ],
+    agent_workflow_primary_coding_entry_required: true,
+    agent_workflow_objective_prepare_without_precomputed_patch_required: true,
+    agent_workflow_host_model_reasoning_boundary_required: true,
+    agent_workflow_logical_phases: ["prepare", "edit", "verify", "persist", "resume"],
+    agent_workflow_cross_call_task_continuity_required: true,
+    durable_coding_task_checkpoint_versioned_required: true,
+    durable_coding_task_checkpoint_required_fields: [
+      "objective", "current_step", "next_step", "files_read", "modified_files", "commands",
+      "test_results", "build_results", "failure", "output_refs", "git_before", "git_after",
+    ],
+    durable_coding_task_files_read_metadata_only_required: true,
+    durable_coding_task_survives_chat_mcp_app_restart_required: true,
+    workspace_context_detail_modes: ["compact", "full"],
+    workspace_context_compact_default_required: true,
+    workspace_context_full_bounded_structured_metadata_required: true,
+    workspace_context_manifest_or_instruction_bulk_dump_forbidden: true,
+    internal_context_service_required: true,
+    internal_context_service_capabilities: ["discover_instructions", "search_text", "select_related_files", "read_relevant_ranges"],
+    internal_context_service_public_tool_forbidden: true,
+    context_service_semantic_symbol_reference_v0_1_required: false,
+    coding_result_common_envelope_fields: ["ok", "state", "summary", "task_id", "warnings", "next_step", "output_refs", "data", "error"],
+    coding_result_domain_specific_data_preserved: true,
+    coding_result_compact_default_required: true,
+    coding_result_large_payload_uses_output_refs_required: true,
+    coding_edit_internal_primitives: ["read_range", "replace_exact", "apply_patch", "create_file", "delete_file", "rename_file", "mkdir", "search_replace"],
+    coding_edit_expected_content_identity_required: true,
+    coding_edit_atomic_write_required: true,
+    coding_edit_file_changed_fail_closed_required: true,
+    coding_edit_missing_target_reuses_not_found_required: true,
+    verification_planner_deterministic_required: true,
+    verification_planner_precedence: ["project_instructions", "changed_file_targeted_tests", "lint_typecheck", "project_gate", "git_diff_checks"],
+    verification_planner_manifest_or_rule_evidence_required: true,
+    verification_planner_command_guessing_forbidden: true,
+    verification_planner_existing_test_tiers_preserved: true,
+    schema41_contract_ratified: true,
+    schema41_revision_scope: [
+      "coding-agent-semantic-profile", "objective-driven-agent-workflow", "durable-coding-task-checkpoint",
+      "bounded-context-service", "atomic-conflict-aware-editing", "deterministic-verification-planner",
+      "common-compact-result-envelope",
+    ],
+    schema41_owner_prs: ["LB-006"],
+    schema41_earliest_owner_pr: "LB-006",
+    schema41_next_g2_review_generation: 29,
+    schema41_next_g3_review_generation: 19,
+  },
+  prs: {
+    "LB-006": {
+      addedArtifacts: [
+        "machine-verifiable coding-agent-v1 semantic capability matrix mapped to existing LocalBridge public tools and shared internal services without cloning an upstream API or adding a ninth core tool",
+        "objective-driven agent_workflow orchestration spanning project and instruction discovery, bounded context selection, model-directed edit execution, deterministic verification, result persistence and durable resume without embedding an LLM",
+        "versioned durable coding Task checkpoint with step, file identity, modification, command, test, build, failure, output and Git metadata surviving ChatGPT reconnect, MCP restart and LocalBridge restart",
+        "bounded internal ContextService for instruction discovery, text search, related-file selection and relevant-range reads reused by agent_workflow without a public file_workflow",
+        "atomic coding edit service with content-identity preconditions, read-range exact-replace patch create delete rename mkdir and search-replace primitives plus fail-closed conflict detection",
+        "deterministic VerificationPlanner driven by project instructions and discovered manifests or declared scripts while preserving existing PR Fast PR Runtime and Group Release test tiers",
+        "shared compact coding result envelope metadata layered around domain-specific result data with retained output_ref continuation",
+      ],
+      addedTests: [
+        "agent_workflow accepts an objective for diagnose bugfix feature refactor test_failure build_release or document and can perform a non-mutating prepare stage that discovers applicable project instructions and bounded relevant context without requiring the model to precompute patch or shell commands; LocalBridge does not claim to replace the host model's code reasoning",
+        "one logical workflow keeps the same durable task identity across prepare then model-directed edit then automatic verify and persist calls, and resume after a fresh MCP or LocalBridge instance continues from the last verified checkpoint rather than replaying completed side effects",
+        "the durable coding Task checkpoint contains objective current_step next_step files_read modified_files commands test_results build_results failure output_refs git_before and git_after; files_read stores bounded path range and content-identity metadata rather than full source bodies or secrets",
+        "workspace_context defaults to compact and exposes project type version git root branch dirty state changed count package manager build and test system important files applicable instruction files runtime trusted shells permission mode and current task when deterministically available; full remains bounded structured metadata and does not bulk dump README AGENTS manifests or source files",
+        "agent_workflow obtains instruction discovery text search related-file selection and relevant-range reads from one internal ContextService without requiring repeated shell rg findstr type or Get-Content calls and without publishing a ninth core tool; full symbol/reference semantics are not required in v0.1 unless separately implemented and verified",
+        "coding edits use expected content identity or equivalent version preconditions and atomic replacement: an independently changed file fails closed as FileChanged, a patch whose expected context no longer applies is PatchConflict, a non-unique exact/search replacement is AmbiguousMatch, and a missing target reuses canonical NotFound rather than inventing TargetNotFound",
+        "VerificationPlanner gives project instructions and explicit project gates highest authority, then selects evidence-backed changed-file targeted tests, lint or typecheck, broader project gate and git diff checks as applicable; it never guesses an npm cargo pytest dotnet or go command without discovered manifest script or project-rule evidence and preserves existing pr_fast pr_runtime group_release orchestration",
+        "public coding operations share common ok state summary task_id warnings next_step output_refs data error envelope metadata while keeping command Git document image and workflow domain fields inside data rather than forcing meaningless empty cross-domain fields",
+        "coding-agent-v1 machine verification proves workspace discovery project instructions context search command execution persistent task resume patch edit test/build Git status/diff cancellation output continuation and typed errors are all reachable through the existing eight non-privileged core tools plus elevated_exec extension with no public API clone requirement",
+        "default Coding Agent responses remain compact; large context command output diffs or verification logs are retained behind output_refs or bounded range retrieval rather than returning coding-tools-style multi-tens-of-kilobyte prepare payloads",
+      ],
+    },
+  },
+});
+
+export function hasExactSchema41CodingAgentCompatibility20260817(contractsDoc) {
+  if (contractsDoc?.schema_version !== SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.schemaVersion) return false;
+  for (const [key, expected] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.addedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  }
+  for (const [key, replacement] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.replacedRules)) {
+    if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(replacement.current)) return false;
+  }
+  for (const [id, delta] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.prs)) {
+    const pr = contractsDoc?.prs?.[id];
+    if (!pr) return false;
+    for (const artifact of delta.addedArtifacts ?? []) if (!pr.required_artifacts?.includes(artifact)) return false;
+    for (const test of delta.addedTests ?? []) if (!pr.required_tests?.includes(test)) return false;
+  }
+  return true;
+}
+
+export function normalizeSchema41CodingAgentCompatibility20260817(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  if (!normalized) return normalized;
+  normalized.schema_version = SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.baselineSchemaVersion;
+  for (const key of Object.keys(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.addedRules)) delete normalized.rules[key];
+  for (const [key, replacement] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.replacedRules)) normalized.rules[key] = structuredClone(replacement.baseline);
+  for (const [id, delta] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.prs)) {
+    const pr = normalized.prs?.[id];
+    if (!pr) continue;
+    const artifacts = new Set(delta.addedArtifacts ?? []);
+    const tests = new Set(delta.addedTests ?? []);
+    pr.required_artifacts = (pr.required_artifacts ?? []).filter((item) => !artifacts.has(item));
+    pr.required_tests = (pr.required_tests ?? []).filter((item) => !tests.has(item));
+  }
+  return normalized;
+}
+
 export function hasExactSchema38PublicControlRepair20260817(contractsDoc) {
   if (contractsDoc?.schema_version !== SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.schemaVersion) return false;
   for (const [key, expected] of Object.entries(SCHEMA38_PUBLIC_CONTROL_REPAIR_2026_08_17.addedRules)) {
@@ -2719,6 +2961,18 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.schemaVersion) {
+    if (!hasExactSchema41CodingAgentCompatibility20260817(authorizationContracts)) {
+      findings.push(`${expected.id}:schema41-coding-agent-compatibility-20260817-drift`);
+    }
+    authorizationContracts = normalizeSchema41CodingAgentCompatibility20260817(authorizationContracts);
+  }
+  if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA40_LIVE_RUNTIME_HEALTH_2026_08_17.schemaVersion) {
+    if (!hasExactSchema40LiveRuntimeHealth20260817(authorizationContracts)) {
+      findings.push(`${expected.id}:schema40-live-runtime-health-20260817-drift`);
+    }
+    authorizationContracts = normalizeSchema40LiveRuntimeHealth20260817(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA39_EXECUTION_PLATFORM_2026_08_17.schemaVersion) {
     if (!hasExactSchema39ExecutionPlatform20260817(authorizationContracts)) {
       findings.push(`${expected.id}:schema39-execution-platform-20260817-drift`);
