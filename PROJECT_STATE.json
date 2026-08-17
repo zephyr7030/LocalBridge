@@ -3988,7 +3988,7 @@
     "review_decision_commit": "4bd2db334f12325fe1d04e36cf0356002fbbc0cc"
   },
   "schema38_g3_revalidation_2026_08_17": {
-    "status": "PASS_PENDING_PROVENANCE",
+    "status": "PASS",
     "owner_prs": [
       "LB-013",
       "LB-014",
@@ -4007,7 +4007,8 @@
     ],
     "next_required_g3_adversarial_generation": 16,
     "human_review_generation": 3,
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "g3_review_decision_commit": "3e4b71cf56985a0c100a4959c783cc54169110c2"
   },
   "g3_adversarial_review_generation_16_2026_08_17": {
     "status": "PASS",
@@ -4038,7 +4039,9 @@
     "human_review_required": true,
     "human_review_generation": 3,
     "g4_unlocked": false,
-    "review_decision_commit": "PENDING",
-    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+    "review_decision_commit": "3e4b71cf56985a0c100a4959c783cc54169110c2",
+    "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS.",
+    "g3_generation_16_consumed": true,
+    "blackbox_connector_status": "NOT_CLAIMED_REAL_BUNDLED_MCP_E2E_USED"
   }
 }
