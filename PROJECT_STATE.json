@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3872,6 +3872,18 @@
       "LB-015 contract, frontend Vitest 4 files / 7 tests, production build, Clippy -D warnings, architecture 34/34, UI-language and native onboarding/dashboard WebView2 fixed-window E2E at 150% DPI PASS."
     ],
     "next_action": "Strictly revalidate LB-016 nonce-bound administrator consent on the corrected CurrentTask projection baseline, then LB-017 and fresh G3 adversarial generation15.",
+    "g4_unlocked": false
+  },
+  "lb016_post_task_projection_cursor_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "evidence": [
+      "LB-016 contract PASS on the corrected LB-015 task projection cursor baseline.",
+      "All four nonce-bound administrator consent state-machine tests PASS: early confirmation rejected, fresh begin resets full deadline, stale identity cannot confirm or cancel newer challenge, matching cancel invalidates challenge.",
+      "Native WebView2 onboarding/dashboard fixed-window E2E and architecture/UI-language gates remained PASS after the LB-015 fix."
+    ],
+    "next_pr": "LB-017",
+    "g3_review_generation": 15,
     "g4_unlocked": false
   }
 }
