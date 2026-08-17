@@ -31,9 +31,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "G3 generation13 was invalidated by the explicit Dashboard PermissionMode regression correction; LB-015 is reaccepted and strict revalidation continues from LB-016 before fresh G3 generation14."
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -3739,7 +3737,7 @@
     "next_action": "Perform separate G3-to-G4 human manual/detail review generation 3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   },
   "schema37_dashboard_permission_mode_correction_reopen_2026_08_17": {
-    "status": "REWORK_REQUIRED",
+    "status": "RESOLVED_G3_GENERATION14_PASS",
     "source": "explicit_user_instruction_2026_08_17",
     "owner_pr": "LB-015",
     "finding": "Schema36 incorrectly superseded the user-approved Dashboard read-only PermissionMode row and restored the older read-only administrator PrivilegeState row. The schema36 runtime observability and backend consent changes did not require that UI reversal.",
@@ -3753,10 +3751,17 @@
     "next_g3_review_generation": 14,
     "current_pointer": {
       "group": "G3",
-      "pr": "LB-015"
+      "pr": null
     },
     "g4": "BLOCKED",
-    "human_gate_policy": "blocked during rework; after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
+    "human_gate_policy": "G3 PASS returns human review generation3 to REQUIRED; AI cannot self-PASS; G4 remains BLOCKED",
+    "resolution": {
+      "contract_commit": "125f52dfdad00a9aee5d289e8cf2da18d6b38a3c",
+      "product_commit": "11c78745191a8c6dcc2d217c9c1646e6d3fe07e7",
+      "lb015_acceptance_commit": "a3685c7",
+      "lb016_acceptance_commit": "50d2ae3",
+      "lb017_acceptance_commit": "c402b7a"
+    }
   },
   "lb015_dashboard_permission_mode_correction_acceptance_2026_08_17": {
     "status": "PASS",
@@ -3798,5 +3803,42 @@
     ],
     "next_action": "Run independent G3 adversarial review generation14.",
     "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_14_2026_08_17": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 14,
+    "baseline_commit": "c402b7a02e0409e73d9486d1a5f158350a3fdf71",
+    "finding": "No blocking G3 defect remains after correcting the accidental Dashboard PermissionMode regression while preserving schema36 runtime observability, Windows shell fidelity and nonce-bound backend administrator consent.",
+    "evidence": [
+      "Fresh final-tree Rust Group Gate PASS: 199 library tests plus migration/integration/doc targets; Broker IPC 6/6 PASS with the explicit live-UAC case intentionally ignored by routine automation.",
+      "Fresh cargo clippy --locked --all-targets --all-features -- -D warnings PASS; frontend Vitest 4 files / 7 tests PASS; production build, runtime-manifest and UI-language verification PASS.",
+      "Fresh LB-013 through LB-017 contracts PASS; LB-015 explicitly reports dashboard_permission_readonly=true and Settings remains the editable PermissionMode surface alongside explicitly reopened onboarding Screen3.",
+      "Fresh native Tauri/WebView2 E2E PASS at 150% DPI: onboarding and Dashboard logical 780x620, physical 1170x930, single edge-to-edge custom chrome, fixed window constraints, settings alignment delta 0.00px and rounded scrolling intact.",
+      "Fresh architecture verifier PASS 34/34, G4 human-gate fail-closed regression PASS and git diff --check PASS.",
+      "Adversarial source attack confirms Dashboard renders one read-only 权限模式 row from accessText[projection.permission], has no Dashboard administrator PrivilegeState replacement row/status dot/mutation control, and admin project scope remains bound solely to PermissionMode.",
+      "Adversarial consent source/test attack confirms challenge_id plus monotonic not_before, exact challenge matching, stale confirm/cancel rejection and one-shot confirmed-ticket consumption; frontend uses a fresh crypto.randomUUID challenge while its timer remains presentation only.",
+      "Adversarial shell source/test attack confirms the read-only pwsh version diagnostic is an exact narrow seam while chained Start-Process/pipeline execution remains review-required.",
+      "@测试 connector discovery succeeded but direct tool routing twice returned Resource not found before reaching LocalBridge; this transport/plugin lifecycle failure was not counted as product PASS or FAIL and no black-box result was fabricated."
+    ],
+    "verified_passes": [
+      "cargo test --manifest-path src-tauri\\Cargo.toml --locked -- --test-threads=1",
+      "cargo clippy --manifest-path src-tauri\\Cargo.toml --locked --all-targets --all-features -- -D warnings",
+      "npm test -- --run / npm run build",
+      "runtime-manifest / UI-language",
+      "LB-013 -> LB-017 contracts",
+      "native fixed-window/WebView2 E2E at 150% DPI",
+      "architecture 34/34",
+      "G4 fail-closed regression",
+      "git diff --check"
+    ],
+    "blackbox_connector_status": "UNAVAILABLE_BEFORE_PRODUCT_ROUTE_RESOURCE_NOT_FOUND_NOT_COUNTED",
+    "g3_generation_14_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": null,
+    "next_action": "Perform the separate G3-to-G4 human manual/detail review generation3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
   }
 }
