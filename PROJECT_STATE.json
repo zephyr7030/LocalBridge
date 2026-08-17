@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3840,5 +3840,24 @@
     "g4_unlocked": false,
     "review_decision_commit": "555c1cd3aa31237a5d5d43a2c2d4cbc36260892e",
     "next_action": "Perform the separate G3-to-G4 human manual/detail review generation3. G4 and LB-018 remain blocked until that human review is explicitly accepted as PASS."
+  },
+  "g3_generation14_current_task_projection_race_reopen_2026_08_17": {
+    "status": "REWORK_REQUIRED",
+    "owner_pr": "LB-015",
+    "source": "explicit_user_runtime_report_2026_08_17",
+    "finding": "Dashboard can remain on 等待命令 because get_main_projection reads DesktopRuntimeSnapshot before projection_revision. A CurrentTask wake between those reads can return an old task snapshot paired with the new revision, after which the frontend waits from that new revision and misses the event.",
+    "evidence": [
+      "src-tauri/src/commands/ui.rs get_main_projection_blocking reads lifecycle.runtime_snapshot() at line 232 but lifecycle.projection_revision() only when constructing MainProjection at line 299.",
+      "src/App.tsx treats the returned projectionRevision as the cursor for wait_main_projection_change, so an old snapshot/new cursor pair is a lost-wakeup race.",
+      "Existing tests separately validate CurrentTask minimum visibility and WebView rendering but do not exercise atomic snapshot+revision delivery across the real Dashboard wake loop."
+    ],
+    "invalidated_g3_review_generation": 14,
+    "next_g3_review_generation": 15,
+    "current_pointer": {
+      "group": "G3",
+      "pr": "LB-015"
+    },
+    "g4": "BLOCKED",
+    "human_gate_policy": "blocked during rework; after fresh G3 PASS return to REQUIRED; AI cannot self-PASS"
   }
 }
