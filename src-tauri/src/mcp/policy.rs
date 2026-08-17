@@ -1720,6 +1720,12 @@ fn powershell_readonly_command_discovery(command: &str) -> bool {
     )
 }
 
+fn powershell_readonly_version_diagnostic(command: &str) -> bool {
+    let command = command.trim();
+    command.eq_ignore_ascii_case("$PSVersionTable.PSVersion")
+        || command.eq_ignore_ascii_case("$PSVersionTable.PSVersion.ToString()")
+}
+
 fn powershell_invocation_requires_review(command: &str) -> bool {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Quote {
@@ -1733,6 +1739,7 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
     // Select-Object projection of non-executable metadata are accepted.
     if powershell_simple_get_command_diagnostic(command)
         || powershell_readonly_command_discovery(command)
+        || powershell_readonly_version_diagnostic(command)
     {
         return false;
     }
@@ -2427,5 +2434,23 @@ mod schema36_shell_classifier_tests {
             "windows_powershell",
             "Get-Command cmd | Select-Object -ExpandProperty ScriptBlock"
         ));
+    }
+
+    #[test]
+    fn powershell_version_probe_is_read_only_but_suffixes_remain_reviewed() {
+        for command in [
+            "$PSVersionTable.PSVersion",
+            "$PSVersionTable.PSVersion.ToString()",
+            "  $psversiontable.psversion.tostring()  ",
+        ] {
+            assert!(!shell_invocation_requires_review("pwsh", command), "{command}");
+        }
+        for command in [
+            "$PSVersionTable.PSVersion.ToString(); Start-Process cmd",
+            "$PSVersionTable.PSVersion.ToString() | ForEach-Object { & cmd }",
+            "$env:COMSPEC.ToString()",
+        ] {
+            assert!(shell_invocation_requires_review("pwsh", command), "{command}");
+        }
     }
 }
