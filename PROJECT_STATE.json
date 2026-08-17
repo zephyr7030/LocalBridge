@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4527,6 +4527,16 @@
     "generation": 28,
     "decision_commit": "c710756c9b4938de6571c83475cf72c0509f852d",
     "next_pr": "LB-013",
+    "g4_unlocked": false
+  },
+  "schema40_g3_lb013_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB013 contract PASS.",
+      "Fresh app::background 14/14 PASS including CurrentTask cursor consistency, silent recovery until exhaustion and actual adapter shutdown.",
+      "Architecture PASS."
+    ],
+    "next_pr": "LB-014",
     "g4_unlocked": false
   }
 }
