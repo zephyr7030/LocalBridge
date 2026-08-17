@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": "LB-011",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3404,6 +3404,19 @@
       "Fresh cargo test --locked orchestrator filter: 8 passed, 0 failed."
     ],
     "next_pr": "LB-010",
+    "next_g2_review_generation": 24,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb010_schema36_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-010",
+    "evidence": [
+      "LB010_PRODUCTION_WATCHDOG PASS.",
+      "Fresh recovery filter: 15 passed, 0 failed.",
+      "Fresh workspace filter: 21 passed, 0 failed, with persistence and broker filesystem boundary checks also passing."
+    ],
+    "next_pr": "LB-011",
     "next_g2_review_generation": 24,
     "g3_unlocked": false,
     "g4_unlocked": false
