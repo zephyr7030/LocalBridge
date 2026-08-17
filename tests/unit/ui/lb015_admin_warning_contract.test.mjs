@@ -17,7 +17,7 @@ for (const text of [
   "系统被破坏，严重时可能需要重装 Windows",
   "仅在你明确理解操作后果时授权。",
 ]) if (!warning.includes(text)) throw new Error(`LB-015 administrator warning copy missing: ${text}`);
-for (const marker of ["ADMIN_WARNING_COUNTDOWN_MS = 9000", "performance.now()", "adminWarningCanConfirm", "adminWarningRemainingSeconds", 'event.key === "Escape"', "onMouseDown={onCancel}", "disabled={remainingSeconds > 0}", "`确认${remainingSeconds}`", ' : "确认"']) if (!warning.includes(marker)) throw new Error(`LB-015 administrator warning gate marker missing: ${marker}`);
+for (const marker of ["ADMIN_WARNING_COUNTDOWN_MS = 9000", "performance.now()", "adminWarningCanConfirm", "adminWarningRemainingSeconds", 'event.key === "Escape"', "admin-consent-begin", "admin-consent-cancel", "backendChallengeReady", "onMouseDown={() => void cancel()}", "disabled={!backendChallengeReady || remainingSeconds > 0}", "`确认${remainingSeconds}`", ' : "确认"']) if (!warning.includes(marker)) throw new Error(`LB-015 administrator warning gate marker missing: ${marker}`);
 if (!css.replace(/\s+/g, "").includes("--admin-accent:#ff9500") || !css.includes(".admin-warning-confirm{background:#d70015;border-color:#d70015;color:#fff}")) throw new Error("LB-015 administrator warning/accent colors drifted");
 for (const source of [app, onboarding]) {
   if (!source.includes('mode === "admin"') || !source.includes('privilege !== "active"') || !source.includes("setAdminWarningOpen(true)") || !source.includes("<AdminModeWarning")) throw new Error("LB-015 administrator mode surface bypasses the shared warning gate");
