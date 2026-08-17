@@ -19,6 +19,9 @@ const startupTests = readFileSync("tests/integration/autostart/startup.rs", "utf
 const backgroundTests = readFileSync("tests/integration/background/background.rs", "utf8");
 const policyTests = readFileSync("tests/integration/policy/policy_enforcement.rs", "utf8");
 const codingRuntimeTests = readFileSync("tests/integration/mcp/coding_runtime.rs", "utf8");
+const backendUi = readFileSync("src-tauri/src/commands/ui.rs", "utf8");
+const backendOnboarding = readFileSync("src-tauri/src/commands/onboarding.rs", "utf8");
+const onboardingUi = readFileSync("src/features/onboarding/Onboarding.tsx", "utf8");
 const auth = JSON.parse(readFileSync("scripts/authorization-records/LB-015.json", "utf8"));
 for (const text of ["当前项目","本地运行环境","OpenAI 安全隧道","编码服务","权限模式","等待命令"]) if (!`${app}\n${presentation}`.includes(text)) throw new Error(`LB-015 Dashboard wording missing: ${text}`);
 if (app.includes("pathEditor") || app.includes("newPath") || app.includes('id="project-path"')) throw new Error("LB-015 Dashboard still exposes raw project path input");
@@ -124,6 +127,9 @@ for (const required of ["WorkspaceValidator", "entry.validated_identity.as_str()
 if (!privilegeProtocol.includes("is_windows_verbatim_path") || !privilegeProtocol.includes('value.starts_with(r"\\\\?\\")') || !privilegeProtocol.includes("is_windows_verbatim_path(&self.program)") || !privilegeProtocol.includes("is_windows_verbatim_path(value)")) throw new Error("LB-015 Broker execution boundary does not fail closed on Win32 verbatim program/workdir paths");
 for (const required of ["DenyReason::VerbatimExecutionPath", "has_verbatim_execution_path", '"exec_command"', '"write_stdin"', '"cwd"', '"workdir"', '"paths"', "contains_verbatim_path_text"]) if (!`${mcpGuard}\n${mcpPolicy}`.includes(required)) throw new Error(`LB-015 normal MCP verbatim execution-path guard missing: ${required}`);
 for (const required of ["win32_verbatim_execution_paths_are_blocked_before_upstream_without_scanning_patch_content", "verbatim_execution_paths_are_denied_before_real_upstream_runtime"]) if (!`${policyTests}\n${codingRuntimeTests}`.includes(required)) throw new Error(`LB-015 verbatim-path regression missing: ${required}`);
+if (!app.includes('projection?.codingService') || !onboardingUi.includes('main?.codingService')) throw new Error("LB-015 Dashboard/onboarding no longer share backend codingService projection");
+for (const marker of ["RuntimeComponent::CodingRuntime", '("recovering", "recovering")']) if (!backendUi.includes(marker)) throw new Error(`LB-015 backend coding-service recovering projection missing: ${marker}`);
+for (const marker of ["fn readiness(lifecycle: &DesktopLifecycle)", "RuntimeState::StartingTunnel", "RuntimeState::WaitingTunnelReady", "RuntimeState::Ready"]) if (!backendOnboarding.includes(marker)) throw new Error(`LB-015 onboarding backend readiness source drift: ${marker}`);
 const manualStopStart = startup.indexOf("pub fn manual_stop_services");
 const manualStopEnd = startup.indexOf("fn build_background_resume_config", manualStopStart);
 const manualStopBody = startup.slice(manualStopStart, manualStopEnd);

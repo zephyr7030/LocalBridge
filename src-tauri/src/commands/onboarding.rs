@@ -358,6 +358,7 @@ fn wide(value: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{RuntimeComponent, RuntimeFault};
 
     #[test]
     fn browser_allowlist_is_fixed_to_the_four_setup_destinations() {
@@ -391,6 +392,14 @@ mod tests {
         };
         assert_eq!(ready(RuntimeState::WaitingTunnelReady), (true, false));
         assert_eq!(ready(RuntimeState::Ready), (true, true));
+        assert_eq!(
+            ready(RuntimeState::Recovering {
+                component: RuntimeComponent::CodingRuntime,
+                attempt: 0,
+            }),
+            (false, false)
+        );
+        assert_eq!(ready(RuntimeState::Faulted(RuntimeFault::McpHealthTimeout)), (false, false));
         assert_eq!(ready(RuntimeState::Stopped), (false, false));
     }
 }

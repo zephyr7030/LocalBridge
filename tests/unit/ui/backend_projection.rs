@@ -20,6 +20,8 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
         (RuntimeState::StartingTunnel, ("starting", "online")),
         (RuntimeState::Ready, ("online", "online")),
         (RuntimeState::Recovering { component: RuntimeComponent::Tunnel, attempt: 2 }, ("recovering", "online")),
+        (RuntimeState::Recovering { component: RuntimeComponent::PolicyEnforcement, attempt: 1 }, ("recovering", "recovering")),
+        (RuntimeState::Recovering { component: RuntimeComponent::CodingRuntime, attempt: 0 }, ("recovering", "recovering")),
         (RuntimeState::Faulted(RuntimeFault::Unknown), ("fault", "fault")),
     ] {
         assert_eq!(service_codes(&state), expected);
