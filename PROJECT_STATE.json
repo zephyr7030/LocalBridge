@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4142,6 +4142,16 @@
       "The actual schema39 downstream connector had already executed a public command successfully after refresh; a later focused @测试 call was disabled by the platform before reaching LocalBridge and was not counted as product evidence."
     ],
     "next_pr": "LB-008",
+    "g4_unlocked": false
+  },
+  "schema39_lb008_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-008",
+    "evidence": [
+      "LB008 tunnel contract PASS with pinned tunnel/cloudflared hashes and env-only Runtime API Key.",
+      "Fresh tunnel/recovery Rust set PASS 26/26 on schema39 baseline, including typed recoverable/non-recoverable faults, restart primitive and production tray-exit tunnel cleanup."
+    ],
+    "next_pr": "LB-009",
     "g4_unlocked": false
   }
 }
