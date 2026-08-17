@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-009",
+  "current_pr": "LB-010",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -3348,6 +3348,19 @@
       "Final-tree full cargo test and shared formal Gates remain PASS; no product tree changed during LB-008 reacceptance."
     ],
     "next_pr": "LB-009",
+    "next_g2_review_generation": 24,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "lb009_schema36_reacceptance_2026_08_17": {
+    "status": "PASS",
+    "owner_pr": "LB-009",
+    "baseline_product_commit": "f57efffecb889447c541663ae816afb6832c791f",
+    "evidence": [
+      "Fresh LB009 orchestrator contract PASS: staged MCP→PEP→Tunnel start, reverse stop, live-task-only projection and outage-generation semantics.",
+      "Fresh cargo orchestrator-filtered tests PASS on final tree; final-tree full cargo/shared formal Gates remain PASS and product tree is unchanged."
+    ],
+    "next_pr": "LB-010",
     "next_g2_review_generation": 24,
     "g3_unlocked": false,
     "g4_unlocked": false
