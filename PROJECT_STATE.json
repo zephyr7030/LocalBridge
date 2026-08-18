@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4805,6 +4805,17 @@
       "Architecture and git diff check PASS."
     ],
     "next_pr": "LB-015",
+    "g4_unlocked": false
+  },
+  "schema41_g3_lb015_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "evidence": [
+      "LB015 dashboard/UI contracts PASS.",
+      "Fresh CurrentTask wake/cursor and coding runtime health projection tests PASS.",
+      "Frontend 7/7, production build, architecture and git diff check PASS."
+    ],
+    "next_pr": "LB-016",
     "g4_unlocked": false
   }
 }
