@@ -119,7 +119,7 @@ impl FacadeErrorCode {
             Self::ProcessTimedOut => "提高 timeout_ms 或缩小单次任务",
             Self::ProcessCancelled => "重新发起命令",
             Self::SessionUnavailable => "重新执行命令以创建新会话",
-            Self::OutputTruncated => "使用 output_ref 分页读取",
+            Self::OutputTruncated => "若返回 output_ref 则分页读取；否则提高 max_bytes 或 resize 后重试",
             Self::FileChanged | Self::PatchConflict | Self::AmbiguousMatch
             | Self::ProcessFailed | Self::InvalidArgument | Self::NotFound | Self::Internal => "检查参数与返回的稳定错误信息",
         }
@@ -518,11 +518,21 @@ fn public_tool_output_schema(name: &str) -> Value {
         "task_control" => json!({
             "type":"object",
             "properties":{
-                "state":{"type":"string","enum":["idle","active","cancel_requested"]},
+                "state":{"type":"string","enum":["idle","active","waiting","cancel_requested"]},
                 "execution_state":{"type":"string"},
-                "kind":{"type":"string"},
+                "kind":{"type":["string","null"]},
                 "summary":{"type":["string","null"]},
+                "task_id":{"type":["string","null"]},
+                "session_id":{"type":["string","null"]},
+                "current_step":{"type":["string","null"]},
+                "next_step":{"type":["string","null"]},
+                "current_workflow":{"type":["object","null"],"additionalProperties":true},
+                "current_command":{"type":["object","null"],"additionalProperties":true},
+                "last_command":{"type":["object","null"],"additionalProperties":true},
+                "current_activity":{"type":["object","null"],"additionalProperties":true},
+                "last_activity":{"type":["object","null"],"additionalProperties":true},
                 "cancelled_requests":{"type":"integer","minimum":0},
+                "durable_task_cancelled":{"type":"boolean"},
                 "last_terminal_command":{"type":["object","null"]}
             },
             "required":["state"],
@@ -2117,7 +2127,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 "yield_time_ms": request.yield_time_ms,
                 "max_output_bytes": request.execution.max_output_bytes,
                 "verbosity":"full",
-                "env":{"COMSPEC":invocation.comspec.to_string_lossy()}
+                "env":{
+                    "COMSPEC":invocation.comspec.to_string_lossy(),
+                    "LOCALBRIDGE_OUTPUT_ENCODING":invocation.output_encoding
+                }
             });
             if let Some(stdin) = request.stdin {
                 private["stdin"] = Value::String(stdin);
@@ -2605,7 +2618,8 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
 
     fn current_command_snapshot(&self) -> Option<Value> {
         let owner=self.task_state.current_owner()?;
-        Some(json!({"state":"running","task_id":owner.task_id,"session_id":owner.session_id}))
+        let elapsed_ms=self.public_commands.stable_metadata(&owner.session_id).map(|(_,elapsed_ms)|elapsed_ms);
+        Some(json!({"state":"running","task_id":owner.task_id,"session_id":owner.session_id,"elapsed_ms":elapsed_ms}))
     }
 
     fn latest_terminal_command_snapshot(&self) -> Option<Value> {
@@ -3349,7 +3363,9 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let state = if checkpoint.current_session_id.is_some() || checkpoint.command_inflight || checkpoint.patch_inflight || checkpoint.directory_inflight { "running" } else { "waiting" };
         Some(json!({
             "state":state, "task_id":checkpoint.workflow_id, "kind":if checkpoint.is_coding_task(){"coding_workflow"}else{"workflow"},
-            "current_step":checkpoint.current_step, "next_step":checkpoint.next_step
+            "current_step":checkpoint.current_step, "next_step":checkpoint.next_step,
+            "progress_current":if checkpoint.current_step.as_deref()==Some("verify"){Some(checkpoint.command_index)}else{None},
+            "progress_total":if checkpoint.current_step.as_deref()==Some("verify"){Some(checkpoint.verification_plan.len())}else{None}
         }))
     }
 
@@ -3822,6 +3838,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             return Err(invalid_argument());
         }
         let has_work = !directory_changes.is_empty() || patch.is_some() || !commands.is_empty();
+        let directory_count = directory_changes.len();
+        let command_count = commands.len();
         if has_work { ensure_checkpoint_slot_available(&self.adapter)?; }
         let mut checkpoint = has_work.then(|| {
             WorkflowCheckpoint::new(next_public_handle("lb-workflow"), arguments.clone())
@@ -3856,6 +3874,16 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let mut directory_results = Vec::with_capacity(directory_changes.len());
         for (index, (directory_action, directory_path)) in directory_changes.iter().enumerate() {
             if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.current_step = Some(format!("directory {}/{}", index + 1, directory_count));
+                checkpoint.next_step = Some(if index + 1 < directory_count {
+                    "directory"
+                } else if patch.is_some() {
+                    "patch"
+                } else if command_count > 0 {
+                    "command"
+                } else {
+                    "complete"
+                }.into());
                 checkpoint.directory_inflight = true;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
@@ -3881,6 +3909,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ));
             }
             if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.current_step = Some("patch".into());
+                checkpoint.next_step = Some(if command_count > 0 { "command" } else { "complete" }.into());
                 checkpoint.patch_inflight = true;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
@@ -3918,6 +3948,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             }
             let effective_workdir = join_project_workdir(&selected_path, workdir)?;
             if let Some(checkpoint) = checkpoint.as_mut() {
+                checkpoint.current_step = Some(format!("command {}/{}", index + 1, command_count));
+                checkpoint.next_step = Some(if index + 1 < command_count { "command" } else { "complete" }.into());
                 checkpoint.command_inflight = true;
                 checkpoint.current_session_id = None;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
@@ -4004,12 +4036,19 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         if checkpoint.is_some() {
             self.adapter.clear_workflow_checkpoint()?;
         }
+        let summary = if state == "context_ready" {
+            "Agent workflow context ready"
+        } else {
+            "Agent workflow completed"
+        };
         Ok(stable_success(
             json!({
                 "action":action,
                 "workflow_id":checkpoint.as_ref().map(|checkpoint| checkpoint.workflow_id.as_str()),
+                "task_id":checkpoint.as_ref().map(|checkpoint| checkpoint.workflow_id.as_str()),
                 "objective":object.get("objective").and_then(Value::as_str),
                 "state":state,
+                "summary":summary,
                 "workspace":stable_data(&workspace),
                 "project":project,
                 "git_before":stable_data(&git_before),
@@ -4018,7 +4057,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 "directory_changes":directory_results,
                 "commands":command_results
             }),
-            "Agent workflow completed",
+            summary,
         ))
     }
 
@@ -4684,6 +4723,16 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             .enumerate()
             .skip(checkpoint.directory_index)
         {
+            checkpoint.current_step = Some(format!("directory {}/{}", index + 1, directory_changes.len()));
+            checkpoint.next_step = Some(if index + 1 < directory_changes.len() {
+                "directory"
+            } else if patch.is_some_and(|_| !checkpoint.patch_applied) {
+                "patch"
+            } else if checkpoint.command_index < commands.len() {
+                "command"
+            } else {
+                "complete"
+            }.into());
             checkpoint.directory_inflight = true;
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
             let result = self
@@ -4703,6 +4752,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     false,
                 ));
             }
+            checkpoint.current_step = Some("patch".into());
+            checkpoint.next_step = Some(if checkpoint.command_index < commands.len() { "command" } else { "complete" }.into());
             checkpoint.patch_inflight = true;
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
             self.adapter
@@ -4741,6 +4792,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ));
             }
             let effective_workdir = join_project_workdir(&selected_path, workdir)?;
+            checkpoint.current_step = Some(format!("command {}/{}", index + 1, commands.len()));
+            checkpoint.next_step = Some(if index + 1 < commands.len() { "command" } else { "complete" }.into());
             checkpoint.command_inflight = true;
             checkpoint.current_session_id = None;
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;

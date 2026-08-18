@@ -487,6 +487,7 @@ pub struct ShellExecutionSpec {
 pub struct ShellRuntimeInvocation {
     pub command_line: String,
     pub comspec: PathBuf,
+    pub output_encoding: &'static str,
 }
 
 pub struct ShellExecutor<D = SystemShellDiscovery, P = SystemShellVersionProbe> {
@@ -575,8 +576,12 @@ where
     ) -> Result<ShellRuntimeInvocation, ShellResolveError> {
         let shell = self.resolver.resolve(spec.shell)?;
         let trusted_cmd = self.resolver.resolve(ShellSelector::Cmd)?;
+        let output_encoding = match shell.kind {
+            ResolvedShellKind::Cmd => "windows_oem",
+            ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => "utf-8",
+        };
         let command_line = match shell.kind {
-            ResolvedShellKind::Cmd => normalize_cmd_reserved_device_redirection(&spec.command),
+            ResolvedShellKind::Cmd => spec.command.clone(),
             ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
                 let management_module = shell
                     .management_module
@@ -598,6 +603,7 @@ where
         Ok(ShellRuntimeInvocation {
             command_line,
             comspec: trusted_cmd.executable,
+            output_encoding,
         })
     }
 
@@ -612,64 +618,6 @@ where
             .execute(&direct)
             .map_err(ShellExecutionError::Process)
     }
-}
-
-fn normalize_cmd_reserved_device_redirection(command: &str) -> String {
-    let chars = command.chars().collect::<Vec<_>>();
-    let mut output = String::with_capacity(command.len());
-    let mut index = 0usize;
-    let mut quoted = false;
-    while index < chars.len() {
-        let ch = chars[index];
-        if ch == '^' {
-            output.push(ch);
-            index += 1;
-            if index < chars.len() {
-                output.push(chars[index]);
-                index += 1;
-            }
-            continue;
-        }
-        if ch == '"' {
-            quoted = !quoted;
-            output.push(ch);
-            index += 1;
-            continue;
-        }
-        if quoted || !matches!(ch, '<' | '>') {
-            output.push(ch);
-            index += 1;
-            continue;
-        }
-
-        output.push(ch);
-        index += 1;
-        if ch == '>' && index < chars.len() && chars[index] == '>' {
-            output.push(chars[index]);
-            index += 1;
-        }
-        while index < chars.len() && matches!(chars[index], ' ' | '\t') {
-            output.push(chars[index]);
-            index += 1;
-        }
-        let start = index;
-        while index < chars.len()
-            && !chars[index].is_whitespace()
-            && !matches!(chars[index], '&' | '|' | '<' | '>')
-        {
-            index += 1;
-        }
-        let target = chars[start..index].iter().collect::<String>();
-        if target.eq_ignore_ascii_case("nul") {
-            // Win32 treats NUL.<suffix> as the same reserved device. The private workspace
-            // runtime rejects the bare token as a path before cmd.exe sees it, so use an
-            // equivalent spelling without weakening workspace path validation generally.
-            output.push_str("nul.localbridge");
-        } else {
-            output.push_str(&target);
-        }
-    }
-    output
 }
 
 fn windows_shell_quote(value: &OsStr) -> String {
@@ -1084,7 +1032,7 @@ mod tests {
     }
 
     #[test]
-    fn cmd_runtime_invocation_normalizes_only_bare_nul_redirection() {
+    fn cmd_runtime_invocation_preserves_native_nul_device_redirection() {
         let cmd = PathBuf::from(r"C:\Windows\System32\cmd.exe");
         let resolver = ShellResolver::new(
             FakeDiscovery {
@@ -1109,18 +1057,9 @@ mod tests {
             })
             .unwrap();
         assert_eq!(invocation.comspec, cmd);
-        assert_eq!(
-            invocation.command_line,
-            "echo ok>nul.localbridge && echo done 2> nul.localbridge"
-        );
-        assert_eq!(
-            normalize_cmd_reserved_device_redirection("echo ok>nul.txt && echo nul"),
-            "echo ok>nul.txt && echo nul"
-        );
-        assert_eq!(
-            normalize_cmd_reserved_device_redirection("echo \"literal >nul\""),
-            "echo \"literal >nul\""
-        );
+        assert_eq!(invocation.command_line, "echo ok>nul && echo done 2> NUL");
+        assert_eq!(invocation.output_encoding, "windows_oem");
+        assert!(!invocation.command_line.contains("nul.localbridge"));
     }
 
     #[test]
@@ -1151,5 +1090,6 @@ mod tests {
             .unwrap();
         assert_eq!(invocation.comspec, cmd);
         assert_eq!(invocation.command_line, command);
+        assert_eq!(invocation.output_encoding, "windows_oem");
     }
 }

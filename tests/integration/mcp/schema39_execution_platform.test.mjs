@@ -7,9 +7,13 @@ const server = read("src-tauri/src/mcp/server.rs");
 const taskState = read("src-tauri/src/mcp/task_state.rs");
 const checkpoint = read("src-tauri/src/mcp/workflow_checkpoint.rs");
 
-const fail = (message) => { throw new Error(`SCHEMA39_EXECUTION_PLATFORM: ${message}`); };
-if (contracts.schema_version !== 39) fail("contract is not schema39");
-if (!facade.includes("pub const AGENT_API_REVISION: u32 = 39")) fail("public facade revision39 missing");
+const shell = read("src-tauri/src/mcp/shell.rs");
+const runtimeProcesses = read("runtime/coding-tools-mcp/coding_tools_mcp/processes.py");
+const runtimeServer = read("runtime/coding-tools-mcp/coding_tools_mcp/server.py");
+
+const fail = (message) => { throw new Error(`SCHEMA42_EXECUTION_PLATFORM: ${message}`); };
+if (contracts.schema_version !== 42) fail("contract is not schema42");
+if (!facade.includes("pub const AGENT_API_REVISION: u32 = 42")) fail("public facade revision42 missing");
 
 for (const marker of [
   '"workspace_context"', '"agent_workflow"', '"exec_command"', '"command_control"',
@@ -62,7 +66,7 @@ for (const field of [
   "project_name","project_type","project_version","git_branch","git_dirty","git_changed_count",
   "package_manager","build_system","test_system","runtime_availability","trusted_shells","current_task",
 ]) if (!facade.includes(`"${field}"`)) fail(`compact first-turn context field missing: ${field}`);
-if (!server.includes("task_control_snapshot(&current_task.actual_snapshot())")) fail("workspace_context current_task enrichment missing");
+if (!server.includes("merge_task_aggregate_activity(aggregate, current_task)")) fail("workspace_context TaskAggregate activity merge missing");
 
 for (const marker of [
   "WorkflowCheckpointStore", "resume_agent_workflow", "load_workflow_checkpoint",
@@ -89,6 +93,20 @@ for (const code of ["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","Inval
 for (const status of ["running","completed","failed","cancelled","timed_out","lost"]) {
   if (!facade.includes(`"${status}"`) && !taskState.includes(`"${status}"`)) fail(`public process lifecycle state missing: ${status}`);
 }
-if (facade.includes('"lost","explained"') || facade.includes('Value::String("explained".into())')) fail("schema39 public process lifecycle still exposes a seventh explained state");
+if (facade.includes('"lost","explained"') || facade.includes('Value::String("explained".into())')) fail("public process lifecycle still exposes a seventh explained state");
 
-console.log("SCHEMA39_EXECUTION_PLATFORM=PASS revision=39 cached_context=true durable_resume=true dual_cancel=true flat_client_schema=true core_tools=8");
+for (const marker of [
+  '"current_activity"', '"last_activity"', '"waiting"',
+  'merge_task_aggregate_activity', 'current_task_activity_value', 'workflow_activity_value', 'command_activity_value',
+]) if (!(facade + server).includes(marker)) fail(`schema42 TaskAggregate marker missing: ${marker}`);
+if (shell.includes("fn normalize_cmd_reserved_device_redirection") || shell.includes('output.push_str("nul.localbridge")')) fail("cmd NUL device is still rewritten to a workspace file");
+if (!shell.includes('ResolvedShellKind::Cmd => "windows_oem"')) fail("cmd output encoding is not bound to Windows OEM semantics");
+if (!runtimeProcesses.includes("GetOEMCP") || !runtimeProcesses.includes("decode_output_bytes")) fail("runtime OEM decoder missing");
+if (!runtimeServer.includes('env.pop("LOCALBRIDGE_OUTPUT_ENCODING", None)')) fail("internal output encoding marker leaks to child environment");
+if (!facade.includes("提高 max_bytes 或 resize 后重试")) fail("OutputTruncated remediation still assumes output_ref exists");
+for (const marker of ['format!("directory {}/{}"', 'Some("patch".into())', 'format!("command {}/{}"']) {
+  if (!facade.includes(marker)) fail(`generic durable workflow step marker missing: ${marker}`);
+}
+if (!facade.includes('"Agent workflow context ready"')) fail("context-only diagnose summary is not context-ready");
+
+console.log("SCHEMA42_EXECUTION_PLATFORM=PASS revision=42 task_aggregate=true nul_native=true native_codepage=true durable_steps=true context_ready=true core_tools=8");

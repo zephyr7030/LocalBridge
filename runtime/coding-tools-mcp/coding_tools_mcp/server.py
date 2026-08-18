@@ -61,6 +61,7 @@ from .processes import (
     HARD_KILL_SIGNAL,
     SESSION_BUFFER_BYTES,
     ExecSession,
+    decode_output_bytes,
     spawn_process,
     start_reader_threads,
     start_session_watchdog,
@@ -735,7 +736,7 @@ def is_loopback_bind_host(host: str) -> bool:
     return host in {"localhost", "127.0.0.1", "::1", ""}
 
 
-def truncate_bytes(data: bytes, limit: int) -> tuple[str, bool]:
+def truncate_bytes(data: bytes, limit: int, *, encoding: str = "utf-8") -> tuple[str, bool]:
     if limit <= 0:
         limit = 1
     truncated = len(data) > limit
@@ -748,7 +749,7 @@ def truncate_bytes(data: bytes, limit: int) -> tuple[str, bool]:
             data = data[:head] + marker + data[-tail:]
         else:
             data = data[:limit]
-    return data.decode("utf-8", errors="replace"), truncated
+    return decode_output_bytes(data, encoding), truncated
 
 
 def truncate_line_chars(line: str, max_chars: int = GREP_MAX_LINE_CHARS) -> tuple[str, bool]:
@@ -2239,7 +2240,14 @@ class Runtime:
         max_output_bytes = int(args.get("max_output_bytes", 65536))
         tty = bool(args.get("tty", False))
         stdin_text = str(args.get("stdin", ""))
-        env = self._command_env(args.get("env", {}))
+        requested_env = args.get("env", {})
+        output_encoding = "utf-8"
+        if isinstance(requested_env, dict):
+            candidate = str(requested_env.get("LOCALBRIDGE_OUTPUT_ENCODING", "utf-8"))
+            if candidate in {"utf-8", "windows_oem", "windows_acp"}:
+                output_encoding = candidate
+        env = self._command_env(requested_env)
+        env.pop("LOCALBRIDGE_OUTPUT_ENCODING", None)
         start = time.time()
         deadline = start + (timeout_ms / 1000.0)
         landlock_fd: int | None = None
@@ -2295,6 +2303,7 @@ class Runtime:
                 timeout_at=deadline,
                 warnings=[landlock_warning] if landlock_warning else None,
                 pty_master_fd=pty_master_fd,
+                output_encoding=output_encoding,
             )
             with self.sessions_lock:
                 self.starting_sessions -= 1
@@ -2612,6 +2621,7 @@ class Runtime:
         timeout_at: float | None = None,
         warnings: list[str] | None = None,
         pty_master_fd: int | None = None,
+        output_encoding: str = "utf-8",
     ) -> ExecSession:
         return ExecSession(
             session_id=secrets.token_urlsafe(18),
@@ -2619,6 +2629,7 @@ class Runtime:
             timeout_at=timeout_at,
             warnings=warnings or [],
             pty_master_fd=pty_master_fd,
+            output_encoding=output_encoding,
         )
 
     def _remember_output_session(self, session: ExecSession) -> None:
@@ -2761,7 +2772,9 @@ class Runtime:
         }
         if verbosity == "preview":
             preview_limit = int(args.get("preview_bytes", EXEC_PREVIEW_BYTES))
-            preview, preview_truncated = truncate_bytes(session.retained_output_bytes(), preview_limit)
+            preview, preview_truncated = truncate_bytes(
+                session.retained_output_bytes(), preview_limit, encoding=session.output_encoding
+            )
             compact["preview"] = preview
             compact["preview_truncated"] = preview_truncated
             compact["truncated"] = bool(compact.get("truncated") or preview_truncated)
@@ -2779,7 +2792,7 @@ class Runtime:
         return compact
 
     def _session_output_summary(self, session: ExecSession, payload: dict[str, Any]) -> str:
-        retained = session.retained_output_bytes().decode("utf-8", errors="replace")
+        retained = decode_output_bytes(session.retained_output_bytes(), session.output_encoding)
         lines = retained.splitlines()
         tail = next((line.strip() for line in reversed(lines) if line.strip()), "")
         if len(tail) > 120:
@@ -2832,7 +2845,7 @@ class Runtime:
             "offset": offset,
             "requested_offset": requested_offset,
             "limit": limit,
-            "content": chunk.decode("utf-8", errors="replace"),
+            "content": decode_output_bytes(chunk, session.output_encoding),
             "next_offset": next_offset,
             "total_retained_bytes": len(data),
             "retained_start_offset": retained_start_offset,
@@ -3537,7 +3550,7 @@ def explicit_command_path_candidates(tokens: list[str]) -> list[str]:
             index += 1
             continue
         if token in REDIRECTION_TOKENS:
-            if index + 1 < len(tokens):
+            if index + 1 < len(tokens) and not is_windows_null_redirection_target(tokens[index + 1]):
                 candidates.append(tokens[index + 1])
             index += 2
             continue
@@ -3552,6 +3565,10 @@ def explicit_command_path_candidates(tokens: list[str]) -> list[str]:
         index += 1
     candidates.extend(command_argument_path_candidates(current_command, current_args))
     return list(dict.fromkeys(candidates))
+
+
+def is_windows_null_redirection_target(token: str) -> bool:
+    return os.name == "nt" and token.strip().lower() == "nul"
 
 
 def command_argument_path_candidates(command: str | None, args: list[str]) -> list[str]:

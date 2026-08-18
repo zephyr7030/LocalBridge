@@ -192,6 +192,67 @@ impl CurrentTaskProjection {
             .clone()
     }
 
+    fn activity_observation(&self) -> (Option<Value>, Option<Value>) {
+        let now = Instant::now();
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        let state = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current = match &state.actual_status {
+            CurrentTaskStatus::Idle => None,
+            CurrentTaskStatus::Active(task) => {
+                let visible_since = state.active_sequence.and_then(|sequence| {
+                    state
+                        .current
+                        .as_ref()
+                        .filter(|item| item.sequence == sequence)
+                        .map(|item| item.visible_since)
+                });
+                let elapsed_ms = visible_since.map(|started| {
+                    now.saturating_duration_since(started)
+                        .as_millis()
+                        .min(u64::MAX as u128) as u64
+                });
+                Some(current_task_activity_value(task, elapsed_ms))
+            }
+        };
+        let mut latest = state
+            .last_tool
+            .as_ref()
+            .map(|item| (item.task.clone(), item.completed_at));
+        if let Some(item) = state.current.as_ref().filter(|item| item.completed_at.is_some()) {
+            let completed_at = item.completed_at.expect("filtered completed task");
+            if latest.as_ref().is_none_or(|(_, previous)| completed_at > *previous) {
+                latest = Some((item.task.clone(), completed_at));
+            }
+        }
+        for item in state.queued.iter().filter(|item| item.completed_at.is_some()) {
+            let completed_at = item.completed_at.expect("filtered completed task");
+            if latest.as_ref().is_none_or(|(_, previous)| completed_at > *previous) {
+                latest = Some((item.task.clone(), completed_at));
+            }
+        }
+        let last = latest.map(|(task, completed_at)| {
+            let age_ms = now
+                .saturating_duration_since(completed_at)
+                .as_millis()
+                .min(u64::MAX as u128) as u64;
+            json!({
+                "kind":activity_kind_name(task.kind),
+                "summary":task.summary.as_deref(),
+                "outcome":completed_task_outcome(task.state),
+                "completed_at_ms":now_ms.saturating_sub(age_ms)
+            })
+        });
+        (current, last)
+    }
+
     fn project(&self, status: CurrentTaskStatus) {
         let now = Instant::now();
         let mut schedule = None;
@@ -580,12 +641,15 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn task_aggregate_snapshot(&self) -> Value {
-        let Some(guard)=self.guard.as_ref() else { return task_control_snapshot_with_terminal(&self.current_task.actual_snapshot(),&self.task_state); };
-        match guard.try_lock() {
+        let aggregate = match self.guard.as_ref() {
+            None => task_control_snapshot_with_terminal(&self.current_task.actual_snapshot(),&self.task_state),
+            Some(guard) => match guard.try_lock() {
             Ok(guard)=>guard.task_aggregate_snapshot(),
             Err(TryLockError::WouldBlock)=>task_control_snapshot_with_terminal(&self.current_task.actual_snapshot(),&self.task_state),
             Err(TryLockError::Poisoned(error))=>error.into_inner().task_aggregate_snapshot(),
-        }
+            },
+        };
+        merge_task_aggregate_activity(aggregate, &self.current_task)
     }
 
     pub fn is_running(&self) -> bool {
@@ -1260,9 +1324,13 @@ fn enrich_workspace_context_privilege(
     data.insert("privilege_state".into(), Value::String(privilege_state.into()));
     data.insert("broker_state".into(), Value::String(broker_state.into()));
     data.insert("uac_state".into(), Value::String(uac_state.into()));
+    let aggregate = data
+        .get("current_task")
+        .cloned()
+        .unwrap_or_else(|| task_control_snapshot(&current_task.actual_snapshot()));
     data.insert(
         "current_task".into(),
-        task_control_snapshot(&current_task.actual_snapshot()),
+        merge_task_aggregate_activity(aggregate, current_task),
     );
     data.insert(
         "administrator_token_available".into(),
@@ -1399,6 +1467,7 @@ fn handle_task_control(
             );
         }
     };
+    let data = merge_task_aggregate_activity(data, current_task);
     write_rpc_result(
         stream,
         id,
@@ -1441,6 +1510,23 @@ fn task_control_snapshot_with_terminal(
     let mut data = task_control_snapshot(status);
     if let Some(object) = data.as_object_mut() {
         let terminal = task_state.latest_terminal().map(terminal_command_value);
+        let current_command = task_state.current_owner().map(|owner| {
+            json!({
+                "state":"running",
+                "task_id":owner.task_id,
+                "session_id":owner.session_id,
+                "elapsed_ms":Value::Null
+            })
+        });
+        object.insert("current_workflow".into(), Value::Null);
+        object.insert(
+            "current_command".into(),
+            current_command.unwrap_or(Value::Null),
+        );
+        object.insert(
+            "last_command".into(),
+            terminal.clone().unwrap_or(Value::Null),
+        );
         object.insert(
             "last_terminal_command".into(),
             terminal.unwrap_or(Value::Null),
@@ -1466,8 +1552,139 @@ fn terminal_command_value(terminal: TerminalCommandSnapshot) -> Value {
         "timed_out": terminal.timed_out,
         "cancelled": terminal.cancelled,
         "output_refs": terminal.output_refs,
-        "error_code": terminal.error_code
+        "error_code": terminal.error_code,
+        "completed_at_ms": terminal.completed_at_ms
     })
+}
+
+fn current_task_activity_value(task: &CurrentTask, elapsed_ms: Option<u64>) -> Value {
+    json!({
+        "kind":activity_kind_name(task.kind),
+        "state":task_execution_state_name(task.state),
+        "summary":task.summary.as_deref(),
+        "elapsed_ms":elapsed_ms,
+        "step":Value::Null,
+        "progress_current":Value::Null,
+        "progress_total":Value::Null
+    })
+}
+
+fn workflow_activity_value(workflow: &Value) -> Value {
+    json!({
+        "kind":"other",
+        "state":workflow.get("state").cloned().unwrap_or_else(|| Value::String("waiting".into())),
+        "summary":Value::Null,
+        "elapsed_ms":Value::Null,
+        "step":workflow.get("current_step").cloned().unwrap_or(Value::Null),
+        "progress_current":workflow.get("progress_current").cloned().unwrap_or(Value::Null),
+        "progress_total":workflow.get("progress_total").cloned().unwrap_or(Value::Null)
+    })
+}
+
+fn command_activity_value(command: &Value) -> Value {
+    json!({
+        "kind":"command",
+        "state":command.get("state").cloned().unwrap_or_else(|| Value::String("running".into())),
+        "summary":Value::Null,
+        "elapsed_ms":command.get("elapsed_ms").cloned().unwrap_or(Value::Null),
+        "step":Value::Null,
+        "progress_current":Value::Null,
+        "progress_total":Value::Null
+    })
+}
+
+fn command_last_activity_value(command: &Value) -> Option<Value> {
+    let completed_at_ms = command.get("completed_at_ms")?.as_u64()?;
+    Some(json!({
+        "kind":"command",
+        "summary":Value::Null,
+        "outcome":command.get("status").cloned().unwrap_or_else(|| Value::String("lost".into())),
+        "completed_at_ms":completed_at_ms
+    }))
+}
+
+fn merge_task_aggregate_activity(
+    mut aggregate: Value,
+    current_task: &CurrentTaskProjection,
+) -> Value {
+    let (tool_activity, tool_last_activity) = current_task.activity_observation();
+    let current_command = aggregate
+        .get("current_command")
+        .filter(|value| !value.is_null())
+        .cloned();
+    let current_workflow = aggregate
+        .get("current_workflow")
+        .filter(|value| !value.is_null())
+        .cloned();
+    let current_activity = current_command
+        .as_ref()
+        .map(command_activity_value)
+        .or(tool_activity)
+        .or_else(|| current_workflow.as_ref().map(workflow_activity_value));
+    let command_last_activity = aggregate
+        .get("last_command")
+        .and_then(command_last_activity_value);
+    let last_activity = match (command_last_activity, tool_last_activity) {
+        (Some(command), Some(tool)) => {
+            let command_at = command
+                .get("completed_at_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let tool_at = tool
+                .get("completed_at_ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            Some(if command_at >= tool_at { command } else { tool })
+        }
+        (Some(command), None) => Some(command),
+        (None, Some(tool)) => Some(tool),
+        (None, None) => None,
+    };
+    if let Some(object) = aggregate.as_object_mut() {
+        object.insert(
+            "current_activity".into(),
+            current_activity.clone().unwrap_or(Value::Null),
+        );
+        object.insert(
+            "last_activity".into(),
+            last_activity.unwrap_or(Value::Null),
+        );
+        let state = match current_activity
+            .as_ref()
+            .and_then(|value| value.get("state"))
+            .and_then(Value::as_str)
+        {
+            Some("waiting") => "waiting",
+            Some(_) => "active",
+            None => "idle",
+        };
+        object.insert("state".into(), Value::String(state.into()));
+    }
+    aggregate
+}
+
+const fn activity_kind_name(kind: TaskKind) -> &'static str {
+    match kind {
+        TaskKind::ReadFile => "read",
+        TaskKind::SearchCode => "search",
+        TaskKind::ModifyFile => "modify",
+        TaskKind::ExecuteCommand => "command",
+        TaskKind::GitOperation => "git",
+        TaskKind::Build => "build",
+        TaskKind::Test => "test",
+        TaskKind::ElevatedOperation => "admin",
+        TaskKind::Other => "other",
+    }
+}
+
+const fn completed_task_outcome(state: TaskExecutionState) -> &'static str {
+    match state {
+        TaskExecutionState::Cancelled => "cancelled",
+        TaskExecutionState::Blocked | TaskExecutionState::Failed => "failed",
+        TaskExecutionState::Idle
+        | TaskExecutionState::Running
+        | TaskExecutionState::AwaitingAuthorization => "completed",
+    }
 }
 
 fn task_control_snapshot(status: &CurrentTaskStatus) -> Value {
@@ -2285,6 +2502,41 @@ mod tests {
             finished.last_tool.as_ref().map(|tool| tool.kind),
             Some(TaskKind::ModifyFile)
         );
+    }
+
+    #[test]
+    fn schema42_task_aggregate_activity_precedence_is_command_then_tool_then_workflow() {
+        let idle = CurrentTaskProjection::default();
+        let workflow = json!({
+            "state":"waiting",
+            "current_workflow":{"state":"waiting","current_step":"edit","progress_current":null,"progress_total":null},
+            "current_command":null,
+            "last_command":null
+        });
+        let waiting = merge_task_aggregate_activity(workflow.clone(), &idle);
+        assert_eq!(waiting["state"], "waiting");
+        assert_eq!(waiting["current_activity"]["kind"], "other");
+        assert_eq!(waiting["current_activity"]["step"], "edit");
+
+        let tool = CurrentTaskProjection::default();
+        tool.project(CurrentTaskStatus::start(TaskKind::SearchCode, "search schema42"));
+        let tool_active = merge_task_aggregate_activity(workflow.clone(), &tool);
+        assert_eq!(tool_active["state"], "active");
+        assert_eq!(tool_active["current_activity"]["kind"], "search");
+        assert_eq!(tool_active["current_activity"]["summary"], "search schema42");
+
+        let command = merge_task_aggregate_activity(
+            json!({
+                "state":"active",
+                "current_workflow":{"state":"waiting","current_step":"verify"},
+                "current_command":{"state":"running","task_id":"t","session_id":"s","elapsed_ms":12},
+                "last_command":null
+            }),
+            &tool,
+        );
+        assert_eq!(command["current_activity"]["kind"], "command");
+        assert_eq!(command["current_activity"]["state"], "running");
+        assert_eq!(command["current_activity"]["elapsed_ms"], 12);
     }
 
     #[test]
@@ -4527,6 +4779,57 @@ mod tests {
                 response.body
             );
         }
+
+        let nul = public_tool_call(
+            pep.port(),
+            &session,
+            705,
+            "exec_command",
+            json!({
+                "command":"echo hidden>nul && echo hidden-error 1>nul 2>nul && echo LB_SCHEMA42_NUL_OK",
+                "shell":"cmd",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(nul.body["result"]["isError"], false, "{:#?}", nul.body);
+        assert!(
+            nul.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("LB_SCHEMA42_NUL_OK")
+        );
+        for entry in fs::read_dir(&workspace).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            assert_ne!(name, "nul");
+            assert_ne!(name, "nul.localbridge");
+        }
+
+        let oem = public_tool_call(
+            pep.port(),
+            &session,
+            706,
+            "exec_command",
+            json!({
+                "command":"echo LB_SCHEMA42_OEM_é中あ한Я",
+                "shell":"cmd",
+                "yield_time_ms":10000
+            }),
+        );
+        assert_eq!(oem.body["result"]["isError"], false, "{:#?}", oem.body);
+        let output = oem.body["result"]["structuredContent"]["data"]["output"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(output.contains("LB_SCHEMA42_OEM_"), "{output:?}");
+        assert!(
+            !output.contains('\u{fffd}'),
+            "OEM output was decoded as lossy UTF-8: {output:?}"
+        );
+        assert!(
+            ['é', '中', 'あ', '한', 'Я']
+                .iter()
+                .any(|candidate| output.contains(*candidate)),
+            "no representative non-ASCII OEM character survived decoding: {output:?}"
+        );
 
         let escaped = public_tool_call(
             pep.port(),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import signal
 import subprocess
@@ -178,6 +179,7 @@ class ExecSession:
     timed_out: bool = False
     terminating: bool = False
     pty_master_fd: int | None = None
+    output_encoding: str = "utf-8"
     _stdin_closed: bool = False
 
     @property
@@ -242,8 +244,12 @@ class ExecSession:
             stderr_bytes = bytes(self.stderr[stderr_start:])
             self.stdout_cursor = self.stdout_total_bytes
             self.stderr_cursor = self.stderr_total_bytes
-        stdout_truncation = truncate_output_bytes_tail(stdout_bytes, max_output_bytes)
-        stderr_truncation = truncate_output_bytes_tail(stderr_bytes, max_output_bytes)
+        stdout_truncation = truncate_output_bytes_tail(
+            stdout_bytes, max_output_bytes, encoding=self.output_encoding
+        )
+        stderr_truncation = truncate_output_bytes_tail(
+            stderr_bytes, max_output_bytes, encoding=self.output_encoding
+        )
         if self.timed_out:
             status = "timeout"
         elif self.terminating and self.process.poll() is None:
@@ -430,9 +436,35 @@ def _trim_buffer(
     return overflow
 
 
-def truncate_output_bytes_tail(data: bytes, max_bytes: int, max_lines: int = DEFAULT_MAX_LINES) -> TextTruncation:
+def decode_output_bytes(data: bytes, encoding: str = "utf-8") -> str:
+    if encoding == "utf-8":
+        return data.decode("utf-8", errors="replace")
+    if os.name != "nt" or encoding not in {"windows_oem", "windows_acp"}:
+        return data.decode("utf-8", errors="replace")
+    try:
+        # Windows console/native programs can emit UTF-8 when the inherited host
+        # code page is UTF-8. Accept it only when the byte stream is strictly valid;
+        # otherwise use the explicitly declared OEM/ACP fallback below.
+        return data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        pass
+    code_page = (
+        ctypes.windll.kernel32.GetOEMCP()
+        if encoding == "windows_oem"
+        else ctypes.windll.kernel32.GetACP()
+    )
+    return data.decode(f"cp{code_page}", errors="replace")
+
+
+def truncate_output_bytes_tail(
+    data: bytes,
+    max_bytes: int,
+    max_lines: int = DEFAULT_MAX_LINES,
+    *,
+    encoding: str = "utf-8",
+) -> TextTruncation:
     return truncate_text_tail(
-        data.decode("utf-8", errors="replace"),
+        decode_output_bytes(data, encoding),
         max_lines=max_lines,
         max_bytes=max_bytes,
     )
