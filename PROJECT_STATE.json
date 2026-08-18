@@ -5627,5 +5627,17 @@
     "next_pr": "LB-008",
     "next_required_g2_generation": 35,
     "next_required_g3_generation": 22
+  },
+  "schema42_lb008_unified_transport_diagnostics_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-008",
+    "product_commit": "acc594776fd8b4324c28c4826fad5280fe9d8d2e",
+    "evidence": [
+      "HTTP 400 is retained as ControlPlaneFault::BadRequest with unchanged nonrecoverable/ConfigurationInvalid behavior and shared Unavailable transport http_400 status 400 diagnostics.",
+      "Tunnel fault/runtime and LB-008 contract tests plus all-targets Clippy PASS."
+    ],
+    "next_pr": "LB-009",
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22
   }
 }
