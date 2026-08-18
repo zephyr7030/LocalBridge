@@ -5112,9 +5112,9 @@
     "g4_unlocked": false
   },
   "schema41_g3_generation20_pending_2026_08_18": {
-    "status": "REVIEW_REQUIRED",
+    "status": "PASS",
     "generation": 20,
-    "generation_consumed": false,
+    "generation_consumed": true,
     "baseline_commit": "b47cabc48a76e1301e823966d6f555bdd439b127",
     "product_commit": "6bb363cb84e03cb201b7bb38dbcf975d39f2a12a",
     "focus": [
@@ -5123,7 +5123,42 @@
       "current-task projection and admin consent unchanged",
       "fixed-window native E2E"
     ],
-    "human_review_status": "BLOCKED",
-    "g4_unlocked": false
+    "human_review_status": "REQUIRED",
+    "g4_unlocked": false,
+    "local_engineering_gate": "PASS"
+  },
+  "g3_adversarial_review_generation_20_2026_08_18": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 20,
+    "kind": "independent_adversarial",
+    "baseline_commit": "d0686a974200c78633bb77ff8b20b3eae07ee7bf",
+    "finding": "No blocking schema40/schema41 G3 defect remains after fresh final-tree adversarial review; semantic repair, backend health truth, CurrentTask UI and administrator consent remain consistent through the desktop layer.",
+    "evidence": [
+      "Fresh full cargo test PASS: 229 library tests plus all integration/migration/doc targets; one explicit live-UAC test intentionally ignored.",
+      "Clippy all-targets/all-features -D warnings PASS; frontend Vitest 4 files/7 tests and production build PASS.",
+      "LB-013 through LB-017 fresh contracts PASS; runtime manifest, UI-language, schema41 semantic machine acceptance, architecture and G4 fail-closed PASS.",
+      "Real Tauri/WebView2 fixed-window E2E PASS for onboarding and dashboard at 780x620 logical / 1170x930 physical / DPR 1.5.",
+      "Fresh source audit confirmed planner ordering/changed-set, strict phase/persist guards, durable stdin scrubbing, exclusive edit/create semantics, canonical context boundary and independent authenticated MCP health session.",
+      "@测试 rediscovery exposed concrete tools, but the host disabled the first workspace_context call before it reached LocalBridge; no product PASS/FAIL is inferred from that routing failure."
+    ],
+    "verified_passes": [
+      "cargo test --locked",
+      "cargo clippy --locked --all-targets --all-features -- -D warnings",
+      "frontend Vitest 7 tests and production build",
+      "LB-013/LB-014/LB-015/LB-016/LB-017 fresh acceptance",
+      "runtime-manifest",
+      "UI-language",
+      "schema41 semantic machine acceptance",
+      "architecture 34/34",
+      "G4 fail-closed",
+      "real fixed-window WebView2 E2E",
+      "git diff --check"
+    ],
+    "g3_generation_20_consumed": true,
+    "human_review_required": true,
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "review_decision_commit": null
   }
 }
