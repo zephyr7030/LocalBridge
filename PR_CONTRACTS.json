@@ -1,5 +1,5 @@
 {
-  "schema_version": 41,
+  "schema_version": 42,
   "rules": {
     "paths_are_repo_relative": true,
     "unlisted_write_is_forbidden": true,
@@ -276,7 +276,7 @@
     "frontend_runtime_readiness_polling_state_machine_forbidden": true,
     "blocking_backend_work_on_ui_thread_forbidden": true,
     "ui_responsiveness_under_slow_backend_required": true,
-    "dashboard_idle_text": "等待命令",
+    "dashboard_idle_text": "空闲",
     "dashboard_idle_row_must_remain_visible": true,
     "dashboard_frontend_synthesized_task_state_forbidden": true,
     "settings_connection_field_labels": [
@@ -575,7 +575,10 @@
       "sc.exe",
       "netsh.exe",
       "bcdedit.exe",
-      "dism.exe"
+      "dism.exe",
+      "pnputil.exe",
+      "powercfg.exe",
+      "wevtutil.exe"
     ],
     "ordinary_system_management_requires_privileged_route": true,
     "elevated_ordinary_exec_never_inherits_broker_token": true,
@@ -1057,7 +1060,7 @@
     "schema41_earliest_owner_pr": "LB-006",
     "schema41_next_g2_review_generation": 29,
     "schema41_next_g3_review_generation": 19,
-    "localbridge_agent_api_revision": 41,
+    "localbridge_agent_api_revision": 42,
     "coding_task_waiting_derived_from_real_wait_required": true,
     "coding_task_waiting_requires_next_step_without_running_session": true,
     "durable_incomplete_workflow_checkpoint_overwrite_forbidden": true,
@@ -1070,7 +1073,59 @@
     "document_create_existing_target_error": "FileChanged",
     "command_control_wait_ms_end_to_end_budget_required": true,
     "command_control_wait_ms_transport_headroom_ms": 1000,
-    "agent_workflow_command_workdir_relative_to_selected_project_discoverable_required": true
+    "agent_workflow_command_workdir_relative_to_selected_project_discoverable_required": true,
+    "schema42_contract_ratified": true,
+    "schema42_revision_scope": [
+      "task-command-truth-convergence",
+      "system-management-operation-classification",
+      "ui-current-vs-history-separation",
+      "derived-command-summary",
+      "precise-document-truncation",
+      "cancel-convergence"
+    ],
+    "schema42_owner_prs": [
+      "LB-006",
+      "LB-007",
+      "LB-015"
+    ],
+    "schema42_earliest_owner_pr": "LB-006",
+    "schema42_next_g2_review_generation": 32,
+    "schema42_next_g3_review_generation": 22,
+    "task_aggregate_single_backend_truth_required": true,
+    "task_aggregate_sources": [
+      "workflow_checkpoint",
+      "command_task_state_store"
+    ],
+    "current_workflow_states": [
+      "running",
+      "waiting"
+    ],
+    "current_command_states": [
+      "running",
+      "waiting_input",
+      "cancelling"
+    ],
+    "command_terminal_states_history_only": [
+      "completed",
+      "failed",
+      "cancelled",
+      "timed_out",
+      "lost"
+    ],
+    "overall_idle_requires_no_current_workflow_and_no_current_command": true,
+    "incomplete_workflow_slot_must_never_project_idle": true,
+    "task_control_workspace_context_ui_admission_share_task_aggregate": true,
+    "command_terminal_immediately_clears_current_command": true,
+    "last_command_derived_from_durable_terminal_history": true,
+    "task_control_cancel_ends_whole_current_task_once": true,
+    "command_control_kill_only_command_workflow_becomes_waiting": true,
+    "command_summary_derived_from_structured_status": true,
+    "document_truncated_means_requested_range_limited_not_eof": true,
+    "dashboard_current_and_history_projection_separated": true,
+    "windows_system_management_operation_classification_required": true,
+    "windows_system_management_readonly_full_allowlist_required": true,
+    "windows_system_management_mutation_or_unknown_requires_privileged_route": true,
+    "schema42_mcp_transport_blip_out_of_scope": true
   },
   "prs": {
     "LB-000": {
@@ -1457,7 +1512,13 @@
         "legacy agent_workflow and document patch conflicts preserve canonical FileChanged PatchConflict or AmbiguousMatch instead of degrading to NotFound or ProcessFailed",
         "document_workflow create on an existing target returns canonical FileChanged without partial modification",
         "command_control poll write and kill return within wait_ms plus 1000ms LocalBridge transport headroom under a responsive local runtime; the same timeout budget is not reset independently for connect write and read",
-        "agent_workflow commands workdir is discoverably relative to the selected agent_workflow path; dot means the selected project and callers must not repeat the project path"
+        "agent_workflow commands workdir is discoverably relative to the selected agent_workflow path; dot means the selected project and callers must not repeat the project path",
+        "TaskAggregate projects current_workflow current_command and last_command from WorkflowCheckpoint plus CommandTaskStateStore without a third persisted task database; overall idle is legal only when both current_workflow and current_command are absent",
+        "an incomplete durable workflow that occupies the workflow slot is non-idle through task_control get workspace_context current_task and workflow admission even when no command session is active",
+        "current_command contains only running waiting_input or cancelling activity; completed failed cancelled timed_out and lost are terminal history and clear current_command immediately",
+        "command summary is derived from structured command status so running can never report Command completed",
+        "task_control cancel ends the entire current workflow and owned command in one operation; command_control kill ends only the command and leaves an incomplete owner workflow explicitly waiting and resumable",
+        "document inspect truncated is true only when LocalBridge max_lines or max_bytes prevents returning the full requested logical range; end_line beyond EOF with all actual content returned is not truncated"
       ],
       "non_goals": [
         "policy enforcement",
@@ -1516,7 +1577,9 @@
         "semantic command classifier distinguishes executable/argument effects from inert diagnostic/data tokens",
         "canonical public policy errors use PolicyDenied WorkspaceDenied RuntimeUnavailable InvalidShellSyntax PrivilegedRouteUnavailable ProcessTimedOut as applicable and include only safe rule/remediation metadata",
         "permission and Broker changes refresh capability snapshot while stale tools/list remains non-authoritative and tools/call always reauthorizes",
-        "Full cmd rmdir /s /q of an ordinary active-workspace temporary directory is not classified privileged solely because rmdir is a PowerShell alias; the same token in windows_powershell remains review-required under provider-mutation rules"
+        "Full cmd rmdir /s /q of an ordinary active-workspace temporary directory is not classified privileged solely because rmdir is a PowerShell alias; the same token in windows_powershell remains review-required under provider-mutation rules",
+        "Full ordinary system-management classification covers pnputil powercfg and wevtutil across direct exec cmd PowerShell and agent_workflow command indirection; frozen read-only operations may run in Full while mutation or unknown operations require the privileged route",
+        "pnputil add-driver powercfg setactive and wevtutil clear-log style mutations are PrivilegedRouteUnavailable in Full while explicitly frozen enumeration/query operations remain ordinary read-only"
       ],
       "non_goals": [
         "Tunnel",
@@ -1879,7 +1942,9 @@
         "product typography uses exactly three font-size tiers: title for page/major headings, body for ordinary body labels buttons and primary status, and auxiliary for helper metadata time and secondary status; each non-title tier is internally unified and no fourth font-size tier exists",
         "Dashboard current-project scope is bound only to backend PermissionMode rather than Broker/PrivilegeState: Edit and Full display the active-workspace path, while Admin displays yellow 全目录访问 for the entire time Admin is the selected mode; Admin project switching remains blocked and shows exactly 管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式",
         "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode",
-        "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent"
+        "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent",
+        "Dashboard current activity is derived from backend TaskAggregate and displays 空闲 only when no current workflow and no current command exist; a resumable workflow with no command displays 任务等待继续",
+        "Dashboard current activity and last command history are separate projections; terminal command results never remain in the current activity row and the retained history row does not influence current status"
       ],
       "non_goals": [
         "wizard",

@@ -2155,6 +2155,40 @@ const SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17 = Object.freeze({
   },
 });
 
+const SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18 = Object.freeze({
+  schemaVersion: 42, baselineSchemaVersion: 41,
+  addedRules: {
+    schema42_contract_ratified:true,
+    schema42_revision_scope:["task-command-truth-convergence","system-management-operation-classification","ui-current-vs-history-separation","derived-command-summary","precise-document-truncation","cancel-convergence"],
+    schema42_owner_prs:["LB-006","LB-007","LB-015"], schema42_earliest_owner_pr:"LB-006", schema42_next_g2_review_generation:32, schema42_next_g3_review_generation:22,
+    task_aggregate_single_backend_truth_required:true, task_aggregate_sources:["workflow_checkpoint","command_task_state_store"],
+    current_workflow_states:["running","waiting"], current_command_states:["running","waiting_input","cancelling"], command_terminal_states_history_only:["completed","failed","cancelled","timed_out","lost"],
+    overall_idle_requires_no_current_workflow_and_no_current_command:true, incomplete_workflow_slot_must_never_project_idle:true, task_control_workspace_context_ui_admission_share_task_aggregate:true,
+    command_terminal_immediately_clears_current_command:true, last_command_derived_from_durable_terminal_history:true, task_control_cancel_ends_whole_current_task_once:true, command_control_kill_only_command_workflow_becomes_waiting:true,
+    command_summary_derived_from_structured_status:true, document_truncated_means_requested_range_limited_not_eof:true, dashboard_current_and_history_projection_separated:true,
+    windows_system_management_operation_classification_required:true, windows_system_management_readonly_full_allowlist_required:true, windows_system_management_mutation_or_unknown_requires_privileged_route:true, schema42_mcp_transport_blip_out_of_scope:true,
+  },
+  replacedRules:{ localbridge_agent_api_revision:{current:42,baseline:41}, dashboard_idle_text:{current:"空闲",baseline:"等待命令"}, windows_system_management_programs:{current:["reg.exe","schtasks.exe","sc.exe","netsh.exe","bcdedit.exe","dism.exe","pnputil.exe","powercfg.exe","wevtutil.exe"],baseline:["reg.exe","schtasks.exe","sc.exe","netsh.exe","bcdedit.exe","dism.exe"]}},
+  tests:{
+    "LB-006":[
+      "TaskAggregate projects current_workflow current_command and last_command from WorkflowCheckpoint plus CommandTaskStateStore without a third persisted task database; overall idle is legal only when both current_workflow and current_command are absent",
+      "an incomplete durable workflow that occupies the workflow slot is non-idle through task_control get workspace_context current_task and workflow admission even when no command session is active",
+      "current_command contains only running waiting_input or cancelling activity; completed failed cancelled timed_out and lost are terminal history and clear current_command immediately",
+      "command summary is derived from structured command status so running can never report Command completed",
+      "task_control cancel ends the entire current workflow and owned command in one operation; command_control kill ends only the command and leaves an incomplete owner workflow explicitly waiting and resumable",
+      "document inspect truncated is true only when LocalBridge max_lines or max_bytes prevents returning the full requested logical range; end_line beyond EOF with all actual content returned is not truncated"],
+    "LB-007":[
+      "Full ordinary system-management classification covers pnputil powercfg and wevtutil across direct exec cmd PowerShell and agent_workflow command indirection; frozen read-only operations may run in Full while mutation or unknown operations require the privileged route",
+      "pnputil add-driver powercfg setactive and wevtutil clear-log style mutations are PrivilegedRouteUnavailable in Full while explicitly frozen enumeration/query operations remain ordinary read-only"],
+    "LB-015":[
+      "Dashboard current activity is derived from backend TaskAggregate and displays 空闲 only when no current workflow and no current command exist; a resumable workflow with no command displays 任务等待继续",
+      "Dashboard current activity and last command history are separate projections; terminal command results never remain in the current activity row and the retained history row does not influence current status"]
+  }
+});
+
+export function hasExactSchema42TaskCommandTruth20260818(doc){ if(doc?.schema_version!==42)return false; for(const [k,v] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.addedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v)) return false; for(const [k,v] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current)) return false; for(const [id,tests] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.tests)) for(const t of tests) if(!doc?.prs?.[id]?.required_tests?.includes(t)) return false; return true;}
+export function normalizeSchema42TaskCommandTruth20260818(doc){ const n=structuredClone(doc??null); if(!n)return n; n.schema_version=41; for(const k of Object.keys(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.addedRules)) delete n.rules[k]; for(const [k,v] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.replacedRules)) n.rules[k]=structuredClone(v.baseline); for(const [id,tests] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.tests)) if(n.prs?.[id]) n.prs[id].required_tests=(n.prs[id].required_tests??[]).filter(x=>!tests.includes(x)); return n;}
+
 const SCHEMA41_DERIVED_WAIT_TEST = "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed";
 const SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18 = Object.freeze({
   rules: {
@@ -2998,6 +3032,10 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = contractsDoc;
+  if ((authorizationContracts?.schema_version ?? 0) >= 42) {
+    if (!hasExactSchema42TaskCommandTruth20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-task-command-truth-20260818-drift`);
+    authorizationContracts = normalizeSchema42TaskCommandTruth20260818(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.schemaVersion) {
     if (!hasExactSchema41CodingAgentCompatibility20260817(authorizationContracts)) {
       findings.push(`${expected.id}:schema41-coding-agent-compatibility-20260817-drift`);

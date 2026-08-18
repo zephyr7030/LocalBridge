@@ -5210,5 +5210,39 @@
       "g2": 31,
       "g3": 21
     }
+  },
+  "schema42_task_command_truth_and_system_management_2026_08_18": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "owner_prs": [
+      "LB-006",
+      "LB-007",
+      "LB-015"
+    ],
+    "excluded_from_scope": [
+      "transient MCP network blip without attributed LocalBridge root cause"
+    ],
+    "rules": [
+      "TaskAggregate is the single backend projection from existing workflow and command stores",
+      "current workflow and current command are active-only; command terminal states are history-only",
+      "overall idle requires no current workflow and no current command",
+      "task_control cancel ends the whole task once; command_control kill leaves an owner workflow explicitly waiting",
+      "command summary is derived from status",
+      "document truncated reflects actual requested-range truncation",
+      "pnputil powercfg wevtutil join Windows system-management operation classification",
+      "Dashboard separates current status from retained last-command history"
+    ],
+    "invalidated": {
+      "g2": {
+        "generation": 31,
+        "reason": "schema42 supersedes pending schema41 reacceptance"
+      },
+      "g3": {
+        "generation": 21,
+        "reason": "schema42 supersedes pending schema41 reacceptance"
+      }
+    },
+    "next_required_g2_generation": 32,
+    "next_required_g3_generation": 22,
+    "g4_unlocked": false
   }
 }

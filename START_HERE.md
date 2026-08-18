@@ -257,3 +257,13 @@ Schema26 管理员模式安全确认是对未来 LB-015/LB-016 的合同修订�
 品牌 PNG       = assets/icons/localbridge.png
 替换/重绘      = 未经明确合同禁止
 ```
+
+## Schema42 — Task/Command truth convergence + system-management classification（current）
+- Backend derives one TaskAggregate projection from existing WorkflowCheckpoint + CommandTaskStateStore; no third persisted task database.
+- current_workflow is active-only (running/waiting); current_command is active-only (running/waiting_input/cancelling); completed/failed/cancelled/timed_out/lost are history-only last_command truth.
+- Overall idle is legal iff current_workflow and current_command are both absent; incomplete durable workflow must never project idle through task_control/workspace_context/UI/admission.
+- task_control cancel ends the whole task once; command_control kill ends only the command and leaves an incomplete owner workflow explicitly waiting/resumable.
+- Command summary is derived from structured status; document truncated reflects actual requested-range limiting, not EOF.
+- pnputil/powercfg/wevtutil join Windows system-management classification; frozen read-only operations may be Full, mutation/unknown requires Elevated fail-closed.
+- UI current status and last-command history are separate backend projections; idle text is 空闲. MCP/Tunnel transient network blips remain out of scope.
+- Earliest owner LB-006; policy owner LB-007; UI owner LB-015; fresh G2 generation32 / G3 generation22 required. G4 remains blocked by human review.
