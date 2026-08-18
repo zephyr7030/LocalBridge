@@ -5600,5 +5600,20 @@
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "schema42_lb006_unified_error_diagnostics_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commit": "db85861",
+    "evidence": [
+      "Shared diagnostics mapper preserves detailed canonical error.code and adds error_code phase cause plus optional http_status.",
+      "MCP runtime transport HTTP status connection loss and health timeout no longer project detailed RuntimeUnavailable unless the runtime itself is unavailable.",
+      "MCP HTTP parser distinguishes malformed_request socket_read_failure early_eof unsupported_transfer_encoding header_too_large and body_too_large and emits diagnostic JSON for HTTP failures.",
+      "Command terminal and elevated timed_out/cancelled public failures also carry stable diagnostic metadata.",
+      "Full serial Rust suite, all-targets Clippy, schema41/schema42, LB-012 compatibility, G4 fail-closed and diff checks PASS."
+    ],
+    "next_pr": "LB-007",
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22
   }
 }
