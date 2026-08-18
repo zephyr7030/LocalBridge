@@ -5188,5 +5188,27 @@
     "next_required_g2_generation": 31,
     "next_required_g3_generation": 21,
     "g4_unlocked": false
+  },
+  "schema41_durability_projection_and_control_semantics_amendment_2026_08_18": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "owner_pr": "LB-006",
+    "excluded_from_scope": [
+      "transient MCP network blip without attributed LocalBridge root cause"
+    ],
+    "rules": [
+      "protect incomplete durable checkpoint from unrelated workflows",
+      "reject stale Git baseline with FileChanged before resumed side effects",
+      "workspace_context and task_control share durable task truth",
+      "workflow terminal evidence is task-owned",
+      "stderr continuation coordinates use sanitized public bytes",
+      "cross-entry patch conflicts retain canonical typed errors",
+      "duplicate document create returns FileChanged",
+      "wait_ms has one end-to-end budget with 1000ms transport headroom",
+      "workflow command workdir is documented relative to selected project"
+    ],
+    "next_review": {
+      "g2": 31,
+      "g3": 21
+    }
   }
 }

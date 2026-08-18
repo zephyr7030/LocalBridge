@@ -2156,12 +2156,40 @@ const SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17 = Object.freeze({
 });
 
 const SCHEMA41_DERIVED_WAIT_TEST = "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed";
+const SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18 = Object.freeze({
+  rules: {
+    durable_incomplete_workflow_checkpoint_overwrite_forbidden: true,
+    coding_resume_git_baseline_match_required: true,
+    coding_resume_git_baseline_mismatch_error: "FileChanged",
+    workspace_context_task_control_single_task_truth_required: true,
+    durable_task_terminal_command_owner_match_required: true,
+    retained_stderr_paging_public_byte_coordinates_required: true,
+    public_patch_conflict_cross_entry_normalization_required: true,
+    document_create_existing_target_error: "FileChanged",
+    command_control_wait_ms_end_to_end_budget_required: true,
+    command_control_wait_ms_transport_headroom_ms: 1000,
+    agent_workflow_command_workdir_relative_to_selected_project_discoverable_required: true,
+  },
+  tests: [
+    "a new side-effecting workflow cannot replace or clear an unrelated incomplete durable workflow checkpoint; a context-only workflow may complete without touching that checkpoint",
+    "resume and phased continuation compare saved git_before repository_root and head with current Git status and return FileChanged before further side effects when the baseline is stale",
+    "workspace_context.current_task and task_control get project the same durable task truth when no live command projection overrides it",
+    "last_terminal_command included in a durable task snapshot belongs to that same task_id; unrelated exec_command terminals never overwrite workflow-owned terminal evidence",
+    "stderr output_ref paging uses offsets next_offset returned_bytes and total_bytes from the sanitized public UTF-8 stderr stream rather than private raw CLIXML capture coordinates",
+    "legacy agent_workflow and document patch conflicts preserve canonical FileChanged PatchConflict or AmbiguousMatch instead of degrading to NotFound or ProcessFailed",
+    "document_workflow create on an existing target returns canonical FileChanged without partial modification",
+    "command_control poll write and kill return within wait_ms plus 1000ms LocalBridge transport headroom under a responsive local runtime; the same timeout budget is not reset independently for connect write and read",
+    "agent_workflow commands workdir is discoverably relative to the selected agent_workflow path; dot means the selected project and callers must not repeat the project path",
+  ],
+});
 
 export function hasExactSchema41CodingAgentCompatibility20260817(contractsDoc) {
   if (contractsDoc?.schema_version !== SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.schemaVersion) return false;
   if (contractsDoc?.rules?.coding_task_waiting_derived_from_real_wait_required !== true) return false;
   if (contractsDoc?.rules?.coding_task_waiting_requires_next_step_without_running_session !== true) return false;
   if (!contractsDoc?.prs?.["LB-006"]?.required_tests?.includes(SCHEMA41_DERIVED_WAIT_TEST)) return false;
+  for (const [key, expected] of Object.entries(SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18.rules)) if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
+  for (const test of SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18.tests) if (!contractsDoc?.prs?.["LB-006"]?.required_tests?.includes(test)) return false;
   for (const [key, expected] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.addedRules)) {
     if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
   }
@@ -2183,7 +2211,8 @@ export function normalizeSchema41CodingAgentCompatibility20260817(contractsDoc) 
   normalized.schema_version = SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.baselineSchemaVersion;
   delete normalized.rules.coding_task_waiting_derived_from_real_wait_required;
   delete normalized.rules.coding_task_waiting_requires_next_step_without_running_session;
-  if (normalized.prs?.["LB-006"]) normalized.prs["LB-006"].required_tests = (normalized.prs["LB-006"].required_tests ?? []).filter((item) => item !== SCHEMA41_DERIVED_WAIT_TEST);
+  if (normalized.prs?.["LB-006"]) normalized.prs["LB-006"].required_tests = (normalized.prs["LB-006"].required_tests ?? []).filter((item) => item !== SCHEMA41_DERIVED_WAIT_TEST && !SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18.tests.includes(item));
+  for (const key of Object.keys(SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18.rules)) delete normalized.rules[key];
   for (const key of Object.keys(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.addedRules)) delete normalized.rules[key];
   for (const [key, replacement] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.replacedRules)) normalized.rules[key] = structuredClone(replacement.baseline);
   for (const [id, delta] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.prs)) {

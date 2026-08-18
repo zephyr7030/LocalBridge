@@ -1059,7 +1059,18 @@
     "schema41_next_g3_review_generation": 19,
     "localbridge_agent_api_revision": 41,
     "coding_task_waiting_derived_from_real_wait_required": true,
-    "coding_task_waiting_requires_next_step_without_running_session": true
+    "coding_task_waiting_requires_next_step_without_running_session": true,
+    "durable_incomplete_workflow_checkpoint_overwrite_forbidden": true,
+    "coding_resume_git_baseline_match_required": true,
+    "coding_resume_git_baseline_mismatch_error": "FileChanged",
+    "workspace_context_task_control_single_task_truth_required": true,
+    "durable_task_terminal_command_owner_match_required": true,
+    "retained_stderr_paging_public_byte_coordinates_required": true,
+    "public_patch_conflict_cross_entry_normalization_required": true,
+    "document_create_existing_target_error": "FileChanged",
+    "command_control_wait_ms_end_to_end_budget_required": true,
+    "command_control_wait_ms_transport_headroom_ms": 1000,
+    "agent_workflow_command_workdir_relative_to_selected_project_discoverable_required": true
   },
   "prs": {
     "LB-000": {
@@ -1437,7 +1448,16 @@
         "public coding operations share common ok state summary task_id warnings next_step output_refs data error envelope metadata while keeping command Git document image and workflow domain fields inside data rather than forcing meaningless empty cross-domain fields",
         "coding-agent-v1 machine verification proves workspace discovery project instructions context search command execution persistent task resume patch edit test/build Git status/diff cancellation output continuation and typed errors are all reachable through the existing eight non-privileged core tools plus elevated_exec extension with no public API clone requirement",
         "default Coding Agent responses remain compact; large context command output diffs or verification logs are retained behind output_refs or bounded range retrieval rather than returning coding-tools-style multi-tens-of-kilobyte prepare payloads",
-        "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed"
+        "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed",
+        "a new side-effecting workflow cannot replace or clear an unrelated incomplete durable workflow checkpoint; a context-only workflow may complete without touching that checkpoint",
+        "resume and phased continuation compare saved git_before repository_root and head with current Git status and return FileChanged before further side effects when the baseline is stale",
+        "workspace_context.current_task and task_control get project the same durable task truth when no live command projection overrides it",
+        "last_terminal_command included in a durable task snapshot belongs to that same task_id; unrelated exec_command terminals never overwrite workflow-owned terminal evidence",
+        "stderr output_ref paging uses offsets next_offset returned_bytes and total_bytes from the sanitized public UTF-8 stderr stream rather than private raw CLIXML capture coordinates",
+        "legacy agent_workflow and document patch conflicts preserve canonical FileChanged PatchConflict or AmbiguousMatch instead of degrading to NotFound or ProcessFailed",
+        "document_workflow create on an existing target returns canonical FileChanged without partial modification",
+        "command_control poll write and kill return within wait_ms plus 1000ms LocalBridge transport headroom under a responsive local runtime; the same timeout budget is not reset independently for connect write and read",
+        "agent_workflow commands workdir is discoverably relative to the selected agent_workflow path; dot means the selected project and callers must not repeat the project path"
       ],
       "non_goals": [
         "policy enforcement",
