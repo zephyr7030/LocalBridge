@@ -5639,5 +5639,17 @@
     "next_pr": "LB-009",
     "next_required_g2_generation": 35,
     "next_required_g3_generation": 22
+  },
+  "schema42_lb009_reacceptance_after_unified_diagnostics_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-009",
+    "product_commit": null,
+    "evidence": [
+      "runtime::orchestrator production/fake owner tests 8/8 PASS including real bundled MCP to loopback PEP composition, staged start, reverse stop, live CurrentTask and outage generation.",
+      "LB-009 static orchestrator contract and diff check PASS; no product change required."
+    ],
+    "next_pr": "LB-010",
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22
   }
 }
