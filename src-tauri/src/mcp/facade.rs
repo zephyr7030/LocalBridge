@@ -8,6 +8,10 @@ use std::time::Instant;
 use base64::Engine as _;
 use serde_json::{Map, Value, json};
 
+use crate::diagnostics::error::{
+    DiagnosticErrorCode, DiagnosticPhase, ErrorDiagnostic, from_canonical_code,
+    transport_unavailable,
+};
 use crate::state::{
     Capability, CurrentTaskStatus, PermissionMode, RuntimeFault, SafeTaskSummary,
     TaskExecutionState, TaskKind,
@@ -134,6 +138,7 @@ pub struct FacadeError {
     pub code: FacadeErrorCode,
     pub message: &'static str,
     pub retryable: bool,
+    diagnostic: Option<ErrorDiagnostic>,
 }
 
 impl FacadeError {
@@ -142,10 +147,20 @@ impl FacadeError {
             code,
             message,
             retryable,
+            diagnostic: None,
         }
     }
 
+    pub fn with_diagnostic(mut self, diagnostic: ErrorDiagnostic) -> Self {
+        self.diagnostic = Some(diagnostic);
+        self
+    }
+
     pub fn to_mcp_result(&self) -> Value {
+        let diagnostic = self
+            .diagnostic
+            .clone()
+            .unwrap_or_else(|| from_canonical_code(self.code.as_str()));
         json!({
             "content": [{"type":"text","text":self.message}],
             "structuredContent": {
@@ -159,6 +174,10 @@ impl FacadeError {
                 "data":Value::Null,
                 "error": {
                     "code": self.code.as_str(),
+                    "error_code": diagnostic.error_code.as_str(),
+                    "phase": diagnostic.phase.as_str(),
+                    "cause": diagnostic.cause,
+                    "http_status": diagnostic.http_status,
                     "message": self.message,
                     "retryable": self.retryable,
                     "rule_category": self.code.safe_rule_category(),
@@ -647,12 +666,16 @@ fn public_error_output_schema() -> Value {
                 "ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
                 "RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"
             ]},
+            "error_code":{"type":"string","enum":["InvalidRequest","Unavailable","Denied","Timeout","Cancelled","ExecutionFailed","Unknown"]},
+            "phase":{"type":"string","enum":["transport","mcp","runtime","policy","tool","process","unknown"]},
+            "cause":{"type":"string"},
+            "http_status":{"type":["integer","null"],"minimum":100,"maximum":599},
             "message":{"type":"string"},
             "retryable":{"type":"boolean"},
             "rule_category":{"type":"string"},
             "remediation":{"type":"string"}
         },
-        "required":["code","message","retryable"],
+        "required":["code","error_code","phase","cause","message","retryable"],
         "additionalProperties":false
     })
 }
@@ -5581,15 +5604,46 @@ fn normalize_runtime_error(error: CodingToolsRuntimeError) -> FacadeError {
             FacadeErrorCode::RuntimeProtocolMismatch,
             "编码运行时协议不兼容",
             false,
-        ),
+        )
+        .with_diagnostic(ErrorDiagnostic::new(
+            DiagnosticErrorCode::Unavailable,
+            DiagnosticPhase::Mcp,
+            "protocol_mismatch",
+        )),
+        CodingToolsRuntimeError::ConnectionUnavailable => FacadeError::new(
+            FacadeErrorCode::SessionUnavailable,
+            "编码运行时连接不可用",
+            true,
+        )
+        .with_diagnostic(transport_unavailable("connection_unavailable", None)),
+        CodingToolsRuntimeError::HttpStatus(status) => FacadeError::new(
+            FacadeErrorCode::SessionUnavailable,
+            "编码运行时传输返回异常 HTTP 状态",
+            true,
+        )
+        .with_diagnostic(transport_unavailable(
+            format!("http_{status}"),
+            Some(status),
+        )),
         CodingToolsRuntimeError::Cancelled => {
             FacadeError::new(FacadeErrorCode::ProcessCancelled, "命令已取消", false)
         }
         CodingToolsRuntimeError::HealthTimeout => FacadeError::new(
-            FacadeErrorCode::RuntimeUnavailable,
-            "编码运行时未就绪",
+            FacadeErrorCode::SessionUnavailable,
+            "编码运行时 MCP 健康检查超时",
             true,
-        ),
+        )
+        .with_diagnostic(transport_unavailable("health_timeout", None)),
+        CodingToolsRuntimeError::UpstreamRpcError => FacadeError::new(
+            FacadeErrorCode::Internal,
+            "编码运行时 MCP 调用失败",
+            false,
+        )
+        .with_diagnostic(ErrorDiagnostic::new(
+            DiagnosticErrorCode::ExecutionFailed,
+            DiagnosticPhase::Mcp,
+            "upstream_rpc_error",
+        )),
         _ => FacadeError::new(
             FacadeErrorCode::RuntimeUnavailable,
             "编码运行时不可用",
@@ -5811,6 +5865,7 @@ fn stable_data(value: &Value) -> Value {
 }
 
 fn stable_command_error(code: FacadeErrorCode, message: &str, data: Map<String, Value>) -> Value {
+    let diagnostic = from_canonical_code(code.as_str());
     json!({
         "content":[{"type":"text","text":message}],
         "structuredContent":{
@@ -5822,7 +5877,12 @@ fn stable_command_error(code: FacadeErrorCode, message: &str, data: Map<String, 
             "next_step":Value::Null,
             "output_refs":[],
             "error":{
-                "code":code.as_str(),"message":message,"retryable":false,
+                "code":code.as_str(),
+                "error_code":diagnostic.error_code.as_str(),
+                "phase":diagnostic.phase.as_str(),
+                "cause":diagnostic.cause,
+                "http_status":diagnostic.http_status,
+                "message":message,"retryable":false,
                 "rule_category":code.safe_rule_category(),"remediation":code.safe_remediation()
             },
             "data":Value::Object(data)
@@ -6318,6 +6378,28 @@ fn sanitize_object_array(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn schema42_unified_error_diagnostics_preserve_detail_and_map_transport() {
+        let denied = FacadeError::new(FacadeErrorCode::PolicyDenied, "denied", false).to_mcp_result();
+        let error = &denied["structuredContent"]["error"];
+        assert_eq!(error["code"], "PolicyDenied");
+        assert_eq!(error["error_code"], "Denied");
+        assert_eq!(error["phase"], "policy");
+        assert_eq!(error["cause"], "policy_denied");
+
+        let transport = normalize_runtime_error(CodingToolsRuntimeError::HttpStatus(400)).to_mcp_result();
+        let error = &transport["structuredContent"]["error"];
+        assert_eq!(error["code"], "SessionUnavailable");
+        assert_eq!(error["error_code"], "Unavailable");
+        assert_eq!(error["phase"], "transport");
+        assert_eq!(error["cause"], "http_400");
+        assert_eq!(error["http_status"], 400);
+
+        let unknown = FacadeError::new(FacadeErrorCode::Internal, "internal", false).to_mcp_result();
+        assert_eq!(unknown["structuredContent"]["error"]["error_code"], "Unknown");
+        assert_eq!(unknown["structuredContent"]["error"]["phase"], "unknown");
+    }
 
     #[cfg(windows)]
     #[test]

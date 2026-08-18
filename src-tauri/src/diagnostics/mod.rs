@@ -10,6 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::runtime::{RecoveryDisposition, RuntimeOutage};
 use crate::state::{PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState};
 
+pub mod error;
+
 pub const DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const RECENT_EVENT_LIMIT: usize = 8;

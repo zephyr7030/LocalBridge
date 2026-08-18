@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
+use crate::diagnostics::error::{mcp_invalid, mcp_unknown, transport_unavailable};
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
@@ -917,7 +918,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         .map_err(|_| ())?;
     let request = match read_request(&mut stream) {
         Ok(request) => request,
-        Err(status) => return write_empty(&mut stream, status, None),
+        Err(error) => return write_http_diagnostic_error(&mut stream, error),
     };
 
     if request.path != "/mcp" {
@@ -1812,6 +1813,10 @@ fn elevated_exec_output_schema() -> Value {
                 "properties":{
                     "outcome":{"type":"string","enum":["completed","timed_out","cancelled"]},
                     "exit_code":{"type":["integer","null"]},
+                    "error_code":{"type":["string","null"],"enum":["Timeout","Cancelled",null]},
+                    "phase":{"type":["string","null"],"enum":["process",null]},
+                    "cause":{"type":["string","null"]},
+                    "http_status":{"type":["integer","null"],"minimum":100,"maximum":599},
                     "stdout":{"type":"string"},
                     "stderr":{"type":"string"},
                     "stdout_truncated":{"type":"boolean"},
@@ -1819,7 +1824,7 @@ fn elevated_exec_output_schema() -> Value {
                     "truncated":{"type":"boolean"},
                     "output_refs":{"type":"object","additionalProperties":{"type":"string"}}
                 },
-                "required":["outcome","exit_code","stdout","stderr","stdout_truncated","stderr_truncated","truncated","output_refs"],
+                "required":["outcome","exit_code","error_code","phase","cause","http_status","stdout","stderr","stdout_truncated","stderr_truncated","truncated","output_refs"],
                 "additionalProperties":false
             },
             {
@@ -2136,6 +2141,11 @@ fn handle_elevated_exec(
         ElevatedExecOutcome::Cancelled => Some(TaskExecutionState::Cancelled),
     };
     let is_error = !matches!(execution.outcome, ElevatedExecOutcome::Completed);
+    let diagnostic = match execution.outcome {
+        ElevatedExecOutcome::Completed => None,
+        ElevatedExecOutcome::TimedOut => Some(crate::diagnostics::error::from_canonical_code("ProcessTimedOut")),
+        ElevatedExecOutcome::Cancelled => Some(crate::diagnostics::error::from_canonical_code("ProcessCancelled")),
+    };
     const INLINE_OUTPUT_BYTES: usize = 8 * 1024;
     let (stdout, stdout_inline_truncated) = inline_output(&execution.stdout, INLINE_OUTPUT_BYTES);
     let (stderr, stderr_inline_truncated) = inline_output(&execution.stderr, INLINE_OUTPUT_BYTES);
@@ -2162,6 +2172,10 @@ fn handle_elevated_exec(
         "structuredContent": {
             "outcome": outcome,
             "exit_code": execution.exit_code,
+            "error_code": diagnostic.as_ref().map(|value| value.error_code.as_str()),
+            "phase": diagnostic.as_ref().map(|value| value.phase.as_str()),
+            "cause": diagnostic.as_ref().map(|value| value.cause.as_str()),
+            "http_status": diagnostic.as_ref().and_then(|value| value.http_status),
             "stdout": stdout,
             "stderr": stderr,
             "stdout_truncated": execution.stdout_truncated || stdout_inline_truncated,
@@ -2214,6 +2228,7 @@ fn active_request_exists(active_requests: &Mutex<Vec<Value>>, request_id: &Value
         .any(|active| active == request_id)
 }
 
+#[derive(Debug)]
 struct HttpRequest {
     method: String,
     path: String,
@@ -2230,44 +2245,71 @@ impl HttpRequest {
     }
 }
 
-fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, u16> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HttpReadError {
+    status: u16,
+    cause: &'static str,
+}
+
+impl HttpReadError {
+    const fn new(status: u16, cause: &'static str) -> Self {
+        Self { status, cause }
+    }
+}
+
+fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, HttpReadError> {
     let mut bytes = Vec::new();
     let mut chunk = [0u8; 4096];
     let header_end = loop {
         if bytes.len() > MAX_HEADER_BYTES {
-            return Err(431);
+            return Err(HttpReadError::new(431, "header_too_large"));
         }
-        let count = stream.read(&mut chunk).map_err(|_| 400u16)?;
+        let count = stream
+            .read(&mut chunk)
+            .map_err(|_| HttpReadError::new(400, "socket_read_failure"))?;
         if count == 0 {
-            return Err(400);
+            return Err(HttpReadError::new(400, "early_eof"));
         }
         bytes.extend_from_slice(&chunk[..count]);
         if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
             break index + 4;
         }
     };
-    let header_text = std::str::from_utf8(&bytes[..header_end - 4]).map_err(|_| 400u16)?;
+    let header_text = std::str::from_utf8(&bytes[..header_end - 4])
+        .map_err(|_| HttpReadError::new(400, "malformed_request"))?;
     let mut lines = header_text.split("\r\n");
-    let request_line = lines.next().ok_or(400u16)?;
+    let request_line = lines
+        .next()
+        .ok_or(HttpReadError::new(400, "malformed_request"))?;
     let mut request_parts = request_line.split_whitespace();
-    let method = request_parts.next().ok_or(400u16)?.to_string();
-    let path = request_parts.next().ok_or(400u16)?.to_string();
+    let method = request_parts
+        .next()
+        .ok_or(HttpReadError::new(400, "malformed_request"))?
+        .to_string();
+    let path = request_parts
+        .next()
+        .ok_or(HttpReadError::new(400, "malformed_request"))?
+        .to_string();
     if request_parts.next() != Some("HTTP/1.1") || request_parts.next().is_some() {
-        return Err(400);
+        return Err(HttpReadError::new(400, "malformed_request"));
     }
     let mut headers = Vec::new();
     let mut content_length = 0usize;
     for line in lines {
-        let (name, value) = line.split_once(':').ok_or(400u16)?;
+        let (name, value) = line
+            .split_once(':')
+            .ok_or(HttpReadError::new(400, "malformed_request"))?;
         let name = name.trim().to_string();
         let value = value.trim().to_string();
         if name.eq_ignore_ascii_case("content-length") {
-            content_length = value.parse::<usize>().map_err(|_| 400u16)?;
+            content_length = value
+                .parse::<usize>()
+                .map_err(|_| HttpReadError::new(400, "malformed_request"))?;
             if content_length > MAX_BODY_BYTES {
-                return Err(413);
+                return Err(HttpReadError::new(413, "body_too_large"));
             }
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            return Err(400);
+            return Err(HttpReadError::new(400, "unsupported_transfer_encoding"));
         }
         headers.push((name, value));
     }
@@ -2278,9 +2320,11 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, u16> {
     while body.len() < content_length {
         let remaining = content_length - body.len();
         let read_limit = remaining.min(chunk.len());
-        let count = stream.read(&mut chunk[..read_limit]).map_err(|_| 400u16)?;
+        let count = stream
+            .read(&mut chunk[..read_limit])
+            .map_err(|_| HttpReadError::new(400, "socket_read_failure"))?;
         if count == 0 {
-            return Err(400);
+            return Err(HttpReadError::new(400, "early_eof"));
         }
         body.extend_from_slice(&chunk[..count]);
     }
@@ -2322,11 +2366,28 @@ fn write_rpc_error(
     message: &str,
     session: Option<&str>,
 ) -> Result<(), ()> {
+    let diagnostic = match code {
+        -32700 => mcp_invalid("parse_error"),
+        -32600 => mcp_invalid("invalid_request"),
+        -32601 => mcp_invalid("method_not_found"),
+        -32602 => mcp_invalid("invalid_params"),
+        _ => mcp_unknown("internal_error"),
+    };
     write_json(
         stream,
         200,
-        &json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}}),
+        &json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message,"data":diagnostic.to_value()}}),
         session,
+    )
+}
+
+fn write_http_diagnostic_error(stream: &mut TcpStream, error: HttpReadError) -> Result<(), ()> {
+    let diagnostic = transport_unavailable(error.cause, Some(error.status));
+    write_json(
+        stream,
+        error.status,
+        &json!({"error":diagnostic.to_value()}),
+        None,
     )
 }
 
@@ -2402,6 +2463,63 @@ fn write_response(
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    fn http_read_error(raw: &[u8]) -> HttpReadError {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        client.write_all(raw).unwrap();
+        client.shutdown(std::net::Shutdown::Write).unwrap();
+        read_request(&mut server).unwrap_err()
+    }
+
+    #[test]
+    fn schema42_mcp_http_failures_have_distinct_transport_causes() {
+        assert_eq!(http_read_error(b"BROKEN\r\n\r\n").cause, "malformed_request");
+        assert_eq!(
+            http_read_error(b"POST /mcp HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n").cause,
+            "unsupported_transfer_encoding"
+        );
+        assert_eq!(
+            http_read_error(b"POST /mcp HTTP/1.1\r\nContent-Length: 5\r\n\r\nab").cause,
+            "early_eof"
+        );
+        let oversized_body = format!("POST /mcp HTTP/1.1\r\nContent-Length: {}\r\n\r\n", MAX_BODY_BYTES + 1);
+        assert_eq!(http_read_error(oversized_body.as_bytes()).cause, "body_too_large");
+
+        let mut oversized_header = b"GET /mcp HTTP/1.1\r\nX-Test: ".to_vec();
+        oversized_header.extend(std::iter::repeat_n(b'a', MAX_HEADER_BYTES + 1));
+        assert_eq!(http_read_error(&oversized_header).cause, "header_too_large");
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let _client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        server.set_nonblocking(true).unwrap();
+        assert_eq!(read_request(&mut server).unwrap_err().cause, "socket_read_failure");
+    }
+
+    #[test]
+    fn schema42_http_400_response_is_unavailable_transport_not_runtime() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        write_http_diagnostic_error(
+            &mut server,
+            HttpReadError::new(400, "unsupported_transfer_encoding"),
+        )
+        .unwrap();
+        drop(server);
+        let response = parse_client_response(client.try_clone().unwrap());
+        assert_eq!(response.status, 400);
+        assert_eq!(response.body["error"]["error_code"], "Unavailable");
+        assert_eq!(response.body["error"]["phase"], "transport");
+        assert_eq!(response.body["error"]["cause"], "unsupported_transfer_encoding");
+        assert_eq!(response.body["error"]["http_status"], 400);
+        let _ = client.shutdown(std::net::Shutdown::Both);
+    }
 
     #[test]
     fn task_control_cancel_does_not_skip_owned_session_after_active_request_success() {
