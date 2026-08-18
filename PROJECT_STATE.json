@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4634,7 +4634,7 @@
     "g4_unlocked": false
   },
   "schema41_g2_generation29_pending_2026_08_18": {
-    "status": "REWORK_REQUIRED",
+    "status": "REVIEW_REQUIRED",
     "generation": 29,
     "generation_consumed": false,
     "baseline_commit": "09bf28f97471be1ad012ac3e6a0008c27f8707b3",
@@ -4648,13 +4648,13 @@
       "A direct @测试 call was disabled by the platform before reaching LocalBridge; no product result is inferred from that routing failure."
     ],
     "blocker": {
-      "code": "DOWNSTREAM_CLIENT_METADATA_STALE",
+      "code": "RESOLVED_BY_STALE_CLIENT_COMPATIBILITY",
       "contract": "A345 / public_schema_real_mcp_client_projection_acceptance_required",
-      "scope": "ChatGPT current connector projection still lacks schema41 workspace_context.detail and agent_workflow phase/task_id/expected_files although live LocalBridge serves them",
-      "product_fix_remaining": true,
-      "requires_fresh_downstream_projection": true
+      "scope": "Real stale @测试 client successfully executed schema41 objective-only prepare through schema39-visible fields; api41 returned durable task/context/verification plan and task_control cancel cleaned it.",
+      "product_fix_remaining": false,
+      "requires_fresh_downstream_projection": false
     },
-    "next_action": "Repair LB-006 stale-projection compatibility, reaccept LB-006..LB-012, then rerun fresh G2 generation29 and G3 generation19.",
+    "next_action": "Run fresh G2 generation29 independent adversarial review on final stale-client-compatible tree.",
     "g3_generation19_blocked": true,
     "g4_unlocked": false
   },
@@ -4735,6 +4735,17 @@
       "Fresh privilege module 23/23 PASS; Broker/UAC/IPC/token boundaries unchanged."
     ],
     "next_pr": "LB-012",
+    "g4_unlocked": false
+  },
+  "schema41_stale_projection_lb012_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "evidence": [
+      "LB012 contract PASS on final tree.",
+      "Fresh Broker IPC 6 PASS with explicit-UAC test ignored by design; stable elevated_exec remains Broker-only and call-time gated.",
+      "Fresh MCP module 86/86 PASS includes elevated_exec stable catalog and Broker-only path."
+    ],
+    "next_action": "Run fresh schema41 G2 generation29 independent adversarial review.",
     "g4_unlocked": false
   }
 }
