@@ -6401,6 +6401,24 @@ mod tests {
         assert_eq!(unknown["structuredContent"]["error"]["phase"], "unknown");
     }
 
+    #[test]
+    fn schema42_policy_diagnostics_preserve_canonical_codes() {
+        for code in [
+            FacadeErrorCode::PolicyDenied,
+            FacadeErrorCode::WorkspaceDenied,
+            FacadeErrorCode::CapabilityDenied,
+            FacadeErrorCode::PrivilegedRouteNotAvailable,
+            FacadeErrorCode::ElevationRequired,
+        ] {
+            let result = FacadeError::new(code, "denied", false).to_mcp_result();
+            let error = &result["structuredContent"]["error"];
+            assert_eq!(error["code"], code.as_str());
+            assert_eq!(error["error_code"], "Denied");
+            assert_eq!(error["phase"], "policy");
+            assert!(error["cause"].as_str().is_some_and(|cause| !cause.is_empty()));
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn schema42_toolbox_runs_pinned_tools_through_public_exec_without_ambient_shadowing() {
