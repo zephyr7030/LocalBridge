@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-014",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4794,6 +4794,17 @@
       "Architecture and git diff check PASS."
     ],
     "next_pr": "LB-014",
+    "g4_unlocked": false
+  },
+  "schema41_g3_lb014_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-014",
+    "evidence": [
+      "LB014 contract PASS.",
+      "Fresh startup/autostart/single-instance behavior PASS on final schema41 tree.",
+      "Architecture and git diff check PASS."
+    ],
+    "next_pr": "LB-015",
     "g4_unlocked": false
   }
 }
