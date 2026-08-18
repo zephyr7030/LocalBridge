@@ -5244,5 +5244,22 @@
     "next_required_g2_generation": 32,
     "next_required_g3_generation": 22,
     "g4_unlocked": false
+  },
+  "schema42_lb006_task_truth_acceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commit": "4608de7",
+    "evidence": [
+      "schema42 TaskAggregate behavior tests PASS 4/4",
+      "task_control cancellation convergence tests PASS 4/4",
+      "schema41 compatibility tests PASS 14/14",
+      "schema42 machine semantic acceptance PASS over MCP semantic suite",
+      "Clippy all-targets/all-features -D warnings PASS",
+      "runtime manifest architecture G4 fail-closed and diff check PASS"
+    ],
+    "next_pr": "LB-007",
+    "next_required_g2_generation": 32,
+    "next_required_g3_generation": 22,
+    "g4_unlocked": false
   }
 }
