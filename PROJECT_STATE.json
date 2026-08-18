@@ -4881,6 +4881,15 @@
     "human_review_required": true,
     "human_review_generation": 3,
     "g4_unlocked": false,
-    "review_decision_commit": null
+    "review_decision_commit": "ffd4bfdcf0089e85f85c29d4a0ac1c551c566faa"
+  },
+  "schema41_g3_generation_19_provenance_2026_08_18": {
+    "status": "PASS",
+    "generation": 19,
+    "decision_commit": "ffd4bfdcf0089e85f85c29d4a0ac1c551c566faa",
+    "human_review_status": "REQUIRED",
+    "human_review_generation": 3,
+    "g4_unlocked": false,
+    "next_action": "Human G3-to-G4 detailed review generation3 is required before G4."
   }
 }
