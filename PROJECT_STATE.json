@@ -5007,9 +5007,9 @@
     "g4_unlocked": false
   },
   "schema41_g2_generation30_pending_2026_08_18": {
-    "status": "REVIEW_REQUIRED",
+    "status": "PASS",
     "generation": 30,
-    "generation_consumed": false,
+    "generation_consumed": true,
     "baseline_commit": "6f2f88df5b22d8f42bba7b51fb0cde6e88bffbc2",
     "product_commit": "6bb363cb84e03cb201b7bb38dbcf975d39f2a12a",
     "focus": [
@@ -5018,6 +5018,38 @@
       "policy/tunnel/orchestrator/broker regression"
     ],
     "g3_generation20_blocked": true,
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "local_engineering_gate": "PASS",
+    "next_action": "Seal generation30 provenance, then reaccept LB-013..LB-017 and run fresh G3 generation20."
+  },
+  "g2_adversarial_review_generation_30_2026_08_18": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 30,
+    "kind": "independent_adversarial",
+    "baseline_commit": "97323f63196914da633fc948dda7045aeab49834",
+    "finding": "No blocking G2 defect remains after schema41 semantic repair and schema40 independent authenticated health repair.",
+    "evidence": [
+      "Fresh full cargo test PASS on final tree: 229 library tests plus all integration/migration/doc targets; one explicit live-UAC test remains intentionally ignored.",
+      "Clippy all-targets/all-features -D warnings PASS; frontend Vitest 4 files/7 tests and production build PASS.",
+      "Runtime manifest, UI-language, LB-008/LB-009/LB-010/LB-011/LB-012 owner contracts, schema41 semantic machine acceptance, architecture, G4 fail-closed and git diff --check PASS.",
+      "Fresh semantic proofs include real Git changed-set planning, mixed Node+Rust discovery, strict phase order/persist completion, durable stdin redaction, Windows edit races/junction boundary, facade-lock-independent health, and real root-alive/MCP-unresponsive injection."
+    ],
+    "verified_passes": [
+      "cargo test --locked",
+      "cargo clippy --all-targets --all-features -- -D warnings",
+      "frontend Vitest 7 tests and production build",
+      "runtime-manifest",
+      "UI-language",
+      "LB-008..LB-012 contracts",
+      "schema41 semantic machine acceptance",
+      "architecture",
+      "G4 fail-closed",
+      "git diff --check"
+    ],
+    "g2_generation_30_consumed": true,
+    "g3_unlocked_for_reacceptance": false,
+    "g4_unlocked": false,
+    "review_decision_commit": null
   }
 }
