@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5088,6 +5088,17 @@
       "Dashboard read-only PermissionMode and backend-owned CurrentTask/service health projections remain intact after schema40 health repair."
     ],
     "next_pr": "LB-016",
+    "g4_unlocked": false
+  },
+  "schema41_lb016_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB016 five-screen onboarding contract PASS.",
+      "Backend onboarding readiness 2/2 PASS.",
+      "Backend admin consent challenge 4/4 PASS.",
+      "G4 human-gate fail-closed and architecture PASS."
+    ],
+    "next_pr": "LB-017",
     "g4_unlocked": false
   }
 }
