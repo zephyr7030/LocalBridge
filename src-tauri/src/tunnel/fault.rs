@@ -1,6 +1,9 @@
 use std::fmt;
 
 use crate::credentials::CredentialStoreError;
+use crate::diagnostics::error::{
+    DiagnosticErrorCode, DiagnosticPhase, ErrorDiagnostic, transport_unavailable,
+};
 use crate::runtime::SupervisorError;
 use crate::state::RuntimeFault;
 
@@ -12,6 +15,7 @@ pub enum Retryability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlPlaneFault {
+    BadRequest,
     Authentication,
     Authorization,
     TunnelNotFound,
@@ -29,11 +33,50 @@ impl ControlPlaneFault {
             Self::RateLimited | Self::Server | Self::Timeout | Self::Network => {
                 Retryability::Recoverable
             }
-            Self::Authentication
+            Self::BadRequest
+            | Self::Authentication
             | Self::Authorization
             | Self::TunnelNotFound
             | Self::Tls
             | Self::Unknown => Retryability::NonRecoverable,
+        }
+    }
+
+    pub fn diagnostic(self) -> ErrorDiagnostic {
+        match self {
+            Self::BadRequest => transport_unavailable("http_400", Some(400)),
+            Self::Authentication => ErrorDiagnostic::new(
+                DiagnosticErrorCode::Denied,
+                DiagnosticPhase::Transport,
+                "http_401_authentication",
+            )
+            .with_http_status(401),
+            Self::Authorization => ErrorDiagnostic::new(
+                DiagnosticErrorCode::Denied,
+                DiagnosticPhase::Transport,
+                "http_403_authorization",
+            )
+            .with_http_status(403),
+            Self::TunnelNotFound => ErrorDiagnostic::new(
+                DiagnosticErrorCode::InvalidRequest,
+                DiagnosticPhase::Transport,
+                "http_404_tunnel_not_found",
+            )
+            .with_http_status(404),
+            Self::RateLimited => transport_unavailable("http_429_rate_limited", Some(429)),
+            Self::Server => transport_unavailable("control_plane_server", None),
+            Self::Timeout => ErrorDiagnostic::new(
+                DiagnosticErrorCode::Timeout,
+                DiagnosticPhase::Transport,
+                "control_plane_timeout",
+            ),
+            Self::Tls => transport_unavailable("tls_failure", None),
+            Self::Network => transport_unavailable("network_failure", None),
+            Self::Unknown => ErrorDiagnostic::new(
+                DiagnosticErrorCode::Unknown,
+                DiagnosticPhase::Transport,
+                "control_plane_unknown",
+            ),
         }
     }
 }
@@ -104,10 +147,33 @@ impl TunnelError {
             | Self::HealthProtocol
             | Self::RestartDenied
             | Self::ControlPlane(
-                ControlPlaneFault::TunnelNotFound
+                ControlPlaneFault::BadRequest
+                | ControlPlaneFault::TunnelNotFound
                 | ControlPlaneFault::Tls
                 | ControlPlaneFault::Unknown,
             ) => RuntimeFault::ConfigurationInvalid,
+        }
+    }
+
+    pub fn diagnostic(&self) -> ErrorDiagnostic {
+        match self {
+            Self::ControlPlane(fault) => fault.diagnostic(),
+            Self::HealthUnavailable => transport_unavailable("health_unavailable", None),
+            Self::HealthTimeout => ErrorDiagnostic::new(
+                DiagnosticErrorCode::Timeout,
+                DiagnosticPhase::Transport,
+                "health_timeout",
+            ),
+            Self::HealthProtocol => ErrorDiagnostic::new(
+                DiagnosticErrorCode::Unavailable,
+                DiagnosticPhase::Transport,
+                "health_protocol",
+            ),
+            _ => ErrorDiagnostic::new(
+                DiagnosticErrorCode::Unknown,
+                DiagnosticPhase::Runtime,
+                format!("tunnel_{:?}", self.runtime_fault()).to_ascii_lowercase(),
+            ),
         }
     }
 }
@@ -153,7 +219,9 @@ impl std::error::Error for TunnelError {}
 
 pub fn classify_control_plane_error(message: &str) -> ControlPlaneFault {
     let lower = message.to_ascii_lowercase();
-    if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid api key")
+    if lower.contains("400") || lower.contains("bad request") {
+        ControlPlaneFault::BadRequest
+    } else if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid api key")
     {
         ControlPlaneFault::Authentication
     } else if lower.contains("403")
@@ -201,6 +269,7 @@ mod tests {
     #[test]
     fn control_plane_faults_have_stable_typed_retryability() {
         for (message, expected, retryability) in [
+            ("400 bad request", ControlPlaneFault::BadRequest, Retryability::NonRecoverable),
             (
                 "401 unauthorized",
                 ControlPlaneFault::Authentication,
@@ -251,6 +320,19 @@ mod tests {
             assert_eq!(fault, expected);
             assert_eq!(fault.retryability(), retryability);
         }
+    }
+
+    #[test]
+    fn schema42_http_400_has_transport_diagnostic_without_retry_semantic_change() {
+        let fault = classify_control_plane_error("HTTP 400 Bad Request");
+        assert_eq!(fault, ControlPlaneFault::BadRequest);
+        assert_eq!(fault.retryability(), Retryability::NonRecoverable);
+        assert_eq!(TunnelError::ControlPlane(fault).runtime_fault(), RuntimeFault::ConfigurationInvalid);
+        let diagnostic = fault.diagnostic();
+        assert_eq!(diagnostic.error_code, DiagnosticErrorCode::Unavailable);
+        assert_eq!(diagnostic.phase, DiagnosticPhase::Transport);
+        assert_eq!(diagnostic.cause, "http_400");
+        assert_eq!(diagnostic.http_status, Some(400));
     }
 
     #[test]
