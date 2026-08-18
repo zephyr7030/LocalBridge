@@ -5308,5 +5308,13 @@
       "Broker IPC 6 PASS 1 explicit-UAC ignored"
     ],
     "next_pr": "LB-012"
+  },
+  "schema42_lb012_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB012 contract PASS",
+      "elevated_exec/Broker-only 3/3 PASS"
+    ],
+    "next": "G2 generation32 review"
   }
 }
