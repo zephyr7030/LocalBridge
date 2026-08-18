@@ -3235,7 +3235,9 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         if !checkpoint.is_coding_task() {
             return None;
         }
-        let state = if checkpoint.completed {
+        let settled = checkpoint.completed
+            || (checkpoint.current_session_id.is_none() && checkpoint.next_step.is_none());
+        let state = if settled {
             if checkpoint.current_step.as_deref() == Some("cancelled") {
                 "cancelled"
             } else {
@@ -3252,7 +3254,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "task_id":checkpoint.workflow_id,
             "current_step":checkpoint.current_step,
             "next_step":checkpoint.next_step,
-            "completed":checkpoint.completed,
+            "completed":settled,
             "output_refs":checkpoint.output_refs
         }))
     }
@@ -6462,6 +6464,30 @@ mod tests {
         assert_eq!(error.code, FacadeErrorCode::SessionUnavailable);
         assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    fn durable_task_snapshot(next_step: Option<&str>) -> Value {
+        let state = ResumeFixtureState::new();
+        let mut checkpoint = WorkflowCheckpoint::new_coding(
+            "lb-task-settlement".into(), json!({"action":"bugfix","path":"."}), "settlement invariant".into(),
+        );
+        checkpoint.next_step = next_step.map(str::to_string);
+        *state.checkpoint.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(serde_json::to_value(checkpoint).unwrap());
+        AgentFacade::with_adapter(
+            ResumeAdapter { catalog: compatible_catalog(), state, first_execution_runs: false }, policy(),
+        ).unwrap().durable_coding_task_snapshot().unwrap()
+    }
+
+    #[test]
+    fn schema41_durable_task_waiting_requires_next_step() {
+        let snapshot = durable_task_snapshot(Some("edit"));
+        assert_eq!((&snapshot["state"], &snapshot["completed"]), (&json!("waiting"), &json!(false)));
+    }
+
+    #[test]
+    fn schema41_durable_task_without_next_step_settles_completed() {
+        let snapshot = durable_task_snapshot(None);
+        assert_eq!((&snapshot["state"], &snapshot["completed"]), (&json!("completed"), &json!(true)));
     }
 
     #[test]
