@@ -5316,5 +5316,22 @@
       "elevated_exec/Broker-only 3/3 PASS"
     ],
     "next": "G2 generation32 review"
+  },
+  "schema42_g2_generation32_review_2026_08_18": {
+    "status": "PASS_DECISION_PENDING_PROVENANCE",
+    "generation": 32,
+    "kind": "independent_adversarial",
+    "evidence": [
+      "full Rust 243/243 plus all integration/doc targets PASS",
+      "Clippy all-targets/all-features PASS",
+      "frontend 7/7 and production build PASS",
+      "runtime manifest and UI-language PASS",
+      "schema42 semantic acceptance PASS",
+      "architecture PASS",
+      "G4 human-gate fail-closed PASS",
+      "git diff check PASS"
+    ],
+    "next": "G3 LB-013",
+    "g4_unlocked": false
   }
 }

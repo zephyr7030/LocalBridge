@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": null,
+    "current_pr": "LB-013",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -41,7 +41,7 @@
     ],
     "advance_only_after_acceptance": true,
     "governance_transition_updates_current_pr": true,
-    "current_group": "G2",
+    "current_group": "G3",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
     "pre_g4_human_review_gate_required": true,
@@ -202,7 +202,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "BLOCKED"
+      "status": "READY"
     },
     {
       "id": "LB-014",
@@ -327,8 +327,8 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
+      "status": "PASS",
+      "review_status": "PASS",
       "review_generation": 32,
       "review_provenance": {
         "generation": 30,
@@ -409,8 +409,8 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "BLOCKED",
-      "review_status": "BLOCKED",
+      "status": "IN_PROGRESS",
+      "review_status": "REQUIRED",
       "review_generation": 20,
       "human_review_status": "BLOCKED",
       "human_review_generation": 3,
