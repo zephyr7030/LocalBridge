@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, RwLock, TryLockError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
@@ -1812,9 +1812,14 @@ fn elevated_exec_output_schema() -> Value {
                 "properties":{
                     "outcome":{"type":"string","enum":["completed","timed_out","cancelled"]},
                     "exit_code":{"type":["integer","null"]},
-                    "truncated":{"type":"boolean"}
+                    "stdout":{"type":"string"},
+                    "stderr":{"type":"string"},
+                    "stdout_truncated":{"type":"boolean"},
+                    "stderr_truncated":{"type":"boolean"},
+                    "truncated":{"type":"boolean"},
+                    "output_refs":{"type":"object","additionalProperties":{"type":"string"}}
                 },
-                "required":["outcome","exit_code","truncated"],
+                "required":["outcome","exit_code","stdout","stderr","stdout_truncated","stderr_truncated","truncated","output_refs"],
                 "additionalProperties":false
             },
             {
@@ -1967,7 +1972,7 @@ fn handle_elevated_exec(
         privileged_requests,
         stopping,
     } = context;
-    let execution_guard = guard
+    let mut execution_guard = guard
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let reviewed_arguments = arguments.clone();
@@ -2131,12 +2136,38 @@ fn handle_elevated_exec(
         ElevatedExecOutcome::Cancelled => Some(TaskExecutionState::Cancelled),
     };
     let is_error = !matches!(execution.outcome, ElevatedExecOutcome::Completed);
+    const INLINE_OUTPUT_BYTES: usize = 8 * 1024;
+    let (stdout, stdout_inline_truncated) = inline_output(&execution.stdout, INLINE_OUTPUT_BYTES);
+    let (stderr, stderr_inline_truncated) = inline_output(&execution.stderr, INLINE_OUTPUT_BYTES);
+    let mut output_refs = Map::new();
+    if stdout_inline_truncated {
+        output_refs.insert(
+            "stdout".into(),
+            Value::String(execution_guard.retain_local_output("stdout", execution.stdout.clone())),
+        );
+    }
+    if stderr_inline_truncated {
+        output_refs.insert(
+            "stderr".into(),
+            Value::String(execution_guard.retain_local_output("stderr", execution.stderr.clone())),
+        );
+    }
+    let text = [stdout.as_str(), stderr.as_str()]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(if stdout.is_empty() || stderr.is_empty() { "" } else { "\n" });
     let response = json!({
-        "content": [{"type": "text", "text": execution.output}],
+        "content": [{"type": "text", "text": text}],
         "structuredContent": {
             "outcome": outcome,
             "exit_code": execution.exit_code,
-            "truncated": execution.truncated
+            "stdout": stdout,
+            "stderr": stderr,
+            "stdout_truncated": execution.stdout_truncated || stdout_inline_truncated,
+            "stderr_truncated": execution.stderr_truncated || stderr_inline_truncated,
+            "truncated": execution.truncated || stdout_inline_truncated || stderr_inline_truncated,
+            "output_refs": output_refs
         },
         "isError": is_error
     });
@@ -2144,6 +2175,17 @@ fn handle_elevated_exec(
     let result = write_rpc_result(stream, id, response, Some(session));
     drop(execution_guard);
     result
+}
+
+fn inline_output(value: &str, limit: usize) -> (String, bool) {
+    if value.len() <= limit {
+        return (value.to_string(), false);
+    }
+    let mut end = limit;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    (value[..end].to_string(), true)
 }
 
 fn request_id(object: &serde_json::Map<String, Value>) -> Value {
@@ -2653,15 +2695,35 @@ mod tests {
                 return Ok(Some(crate::privilege::ElevatedExecResult {
                     outcome: ElevatedExecOutcome::Cancelled,
                     exit_code: None,
-                    output: String::new(),
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    stdout_truncated: false,
+                    stderr_truncated: false,
                     truncated: false,
                 }));
             }
             if self.complete.load(Ordering::Acquire) {
+                let large = self
+                    .starts
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .last()
+                    .is_some_and(|spec| spec.max_output_bytes > 8 * 1024);
                 return Ok(Some(crate::privilege::ElevatedExecResult {
                     outcome: ElevatedExecOutcome::Completed,
                     exit_code: Some(0),
-                    output: "LB012_FAKE_PRIVILEGED_OK".to_string(),
+                    stdout: if large {
+                        "O".repeat(9_000)
+                    } else {
+                        "LB012_FAKE_PRIVILEGED_OK".to_string()
+                    },
+                    stderr: if large {
+                        "E".repeat(9_000)
+                    } else {
+                        "LB012_FAKE_PRIVILEGED_ERR".to_string()
+                    },
+                    stdout_truncated: false,
+                    stderr_truncated: false,
                     truncated: false,
                 }));
             }
@@ -5632,8 +5694,16 @@ mod tests {
             "completed"
         );
         assert_eq!(
-            completed.body["result"]["content"][0]["text"],
+            completed.body["result"]["structuredContent"]["stdout"],
             "LB012_FAKE_PRIVILEGED_OK"
+        );
+        assert_eq!(
+            completed.body["result"]["structuredContent"]["stderr"],
+            "LB012_FAKE_PRIVILEGED_ERR"
+        );
+        assert_eq!(
+            completed.body["result"]["content"][0]["text"],
+            "LB012_FAKE_PRIVILEGED_OK\nLB012_FAKE_PRIVILEGED_ERR"
         );
         assert_eq!(fake.start_count(), 2);
         assert!(
@@ -5804,6 +5874,16 @@ mod tests {
         for property in ["program", "shell", "action", "path", "timeout_ms", "max_output_bytes"] {
             assert!(schema["properties"][property].is_object(), "elevated_exec schema lost {property}");
         }
+        let output_schema = &tools.body["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "elevated_exec")
+            .unwrap()["outputSchema"];
+        let execution_schema = &output_schema["oneOf"][1]["properties"];
+        for property in ["stdout", "stderr", "stdout_truncated", "stderr_truncated", "output_refs"] {
+            assert!(execution_schema[property].is_object(), "elevated_exec output schema lost {property}");
+        }
 
         let reviewed_program = super::super::policy::reviewed_elevated_program()
             .expect("trusted System32 diagnostic exists")
@@ -5823,6 +5903,14 @@ mod tests {
         assert_eq!(
             process.body["result"]["structuredContent"]["outcome"],
             "completed"
+        );
+        assert_eq!(
+            process.body["result"]["structuredContent"]["stdout"],
+            "LB012_FAKE_PRIVILEGED_OK"
+        );
+        assert_eq!(
+            process.body["result"]["structuredContent"]["stderr"],
+            "LB012_FAKE_PRIVILEGED_ERR"
         );
         assert_eq!(fake.start_count(), 1);
 
@@ -5896,6 +5984,56 @@ mod tests {
         );
         assert_tool_error(&control_plane_denied, "PrivilegedRouteUnavailable");
         assert_eq!(fake.start_count(), 2);
+
+        let retained = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":507,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "operation":"process","program":reviewed_program,"args":["/user"],
+                    "workdir":null,"timeout_ms":1000,"max_output_bytes":20000
+                }}
+            }),
+        );
+        let retained_data = &retained.body["result"]["structuredContent"];
+        assert_eq!(retained_data["stdout"].as_str().unwrap().len(), 8 * 1024);
+        assert_eq!(retained_data["stderr"].as_str().unwrap().len(), 8 * 1024);
+        assert_eq!(retained_data["stdout_truncated"], true);
+        assert_eq!(retained_data["stderr_truncated"], true);
+        let stdout_ref = retained_data["output_refs"]["stdout"].as_str().unwrap();
+        let stderr_ref = retained_data["output_refs"]["stderr"].as_str().unwrap();
+        assert!(stdout_ref.starts_with("lb-output-"));
+        assert!(stderr_ref.starts_with("lb-output-"));
+        let stdout_page = public_tool_call(
+            pep.port(),
+            &session,
+            508,
+            "command_control",
+            json!({"action":"read","output_ref":stdout_ref,"stream":"stdout","offset":0,"limit":20000}),
+        );
+        assert_eq!(
+            stdout_page.body["result"]["structuredContent"]["data"]["content"]
+                .as_str()
+                .unwrap()
+                .len(),
+            9_000
+        );
+        let stderr_page = public_tool_call(
+            pep.port(),
+            &session,
+            509,
+            "command_control",
+            json!({"action":"read","output_ref":stderr_ref,"stream":"stderr","offset":0,"limit":20000}),
+        );
+        assert_eq!(
+            stderr_page.body["result"]["structuredContent"]["data"]["content"]
+                .as_str()
+                .unwrap()
+                .len(),
+            9_000
+        );
+        assert_eq!(fake.start_count(), 3);
 
         let mut coding = pep
             .stop()

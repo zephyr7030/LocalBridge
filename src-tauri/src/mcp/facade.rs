@@ -1243,7 +1243,9 @@ struct PublicCommandSession {
 
 #[derive(Debug, Clone)]
 struct PublicOutputHandle {
-    private_output_ref: String,
+    private_output_ref: Option<String>,
+    local_stream: Option<String>,
+    local_content: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -1316,7 +1318,22 @@ impl PublicCommandSessions {
         self.outputs.insert(
             public.clone(),
             PublicOutputHandle {
-                private_output_ref: private_output_ref.to_string(),
+                private_output_ref: Some(private_output_ref.to_string()),
+                local_stream: None,
+                local_content: None,
+            },
+        );
+        public
+    }
+
+    fn retain_local_output(&mut self, stream: &str, content: String) -> String {
+        let public = next_public_handle("lb-output");
+        self.outputs.insert(
+            public.clone(),
+            PublicOutputHandle {
+                private_output_ref: None,
+                local_stream: Some(stream.to_string()),
+                local_content: Some(content),
             },
         );
         public
@@ -1346,7 +1363,15 @@ impl PublicCommandSessions {
     fn private_output(&self, public_output_ref: &str) -> Option<String> {
         self.outputs
             .get(public_output_ref)
-            .map(|output| output.private_output_ref.clone())
+            .and_then(|output| output.private_output_ref.clone())
+    }
+
+    fn local_output(&self, public_output_ref: &str) -> Option<(String, String)> {
+        let output = self.outputs.get(public_output_ref)?;
+        Some((
+            output.local_stream.clone()?,
+            output.local_content.clone()?,
+        ))
     }
 
     fn mark_terminal(
@@ -2174,11 +2199,25 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         let object = arguments.as_object().ok_or_else(invalid_argument)?;
         if action == CommandControlAction::Read {
             let public_output_ref = required_string(object, "output_ref")?;
+            let stream = object.get("stream").and_then(Value::as_str).unwrap_or("stdout");
+            if let Some((retained_stream, content)) =
+                self.public_commands.local_output(public_output_ref)
+            {
+                if stream != retained_stream {
+                    return Err(invalid_argument());
+                }
+                return public_local_output_page(
+                    public_output_ref,
+                    stream,
+                    &content,
+                    object.get("offset").and_then(Value::as_u64).unwrap_or(0),
+                    object.get("limit").and_then(Value::as_u64).unwrap_or(65_536),
+                );
+            }
             let private_output_ref = self
                 .public_commands
                 .private_output(public_output_ref)
                 .ok_or_else(session_unavailable)?;
-            let stream = object.get("stream").and_then(Value::as_str).unwrap_or("stdout");
             if stream == "stderr" {
                 let raw = self.private_call(
                     "read_output",
@@ -2822,6 +2861,49 @@ impl CodingToolsRuntimeAdapter {
     }
 }
 
+fn public_local_output_page(
+    output_ref: &str,
+    stream: &str,
+    content: &str,
+    requested_offset: u64,
+    limit: u64,
+) -> Result<Value, FacadeError> {
+    let total = content.len() as u64;
+    let start = requested_offset.min(total) as usize;
+    if !content.is_char_boundary(start) {
+        return Err(invalid_argument());
+    }
+    let mut end = start
+        .saturating_add(limit.min(1_048_576) as usize)
+        .min(content.len());
+    while end > start && !content.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end == start && start < content.len() {
+        end = content[start..]
+            .char_indices()
+            .nth(1)
+            .map(|(index, _)| start + index)
+            .unwrap_or(content.len());
+    }
+    let next_offset = (end < content.len()).then_some(end as u64);
+    Ok(stable_success(
+        json!({
+            "output_ref":output_ref,
+            "stream":stream,
+            "offset":start as u64,
+            "requested_offset":requested_offset,
+            "limit":limit,
+            "next_offset":next_offset,
+            "returned_bytes":end - start,
+            "total_bytes":total,
+            "truncated":next_offset.is_some(),
+            "content":&content[start..end]
+        }),
+        "Command output read",
+    ))
+}
+
 fn public_stderr_page(raw: &Value, public_output_ref: &str, requested_offset: u64, limit: u64) -> Result<Value, FacadeError> {
     let raw_content = raw.pointer("/structuredContent/content").and_then(Value::as_str).unwrap_or_default();
     let public = public_command_stderr(raw_content);
@@ -3279,6 +3361,10 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
             json!({"session_id":session_id,"signal":"KILL","wait_ms":1000}),
             None,
         )
+    }
+
+    pub(crate) fn retain_local_output(&mut self, stream: &str, content: String) -> String {
+        self.adapter.public_commands.retain_local_output(stream, content)
     }
 
     pub fn into_runtime(self) -> CodingToolsRuntime {

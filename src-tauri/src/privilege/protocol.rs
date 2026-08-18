@@ -3,8 +3,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const BROKER_PROTOCOL_VERSION: u16 = 1;
-pub const MAX_BROKER_FRAME_BYTES: usize = 64 * 1024;
+pub const BROKER_PROTOCOL_VERSION: u16 = 2;
+pub const MAX_BROKER_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const SESSION_NONCE_BYTES: usize = 32;
 pub const MAX_ELEVATED_ARGS: usize = 128;
 pub const MAX_ELEVATED_STRING_BYTES: usize = 32 * 1024;
@@ -195,7 +195,10 @@ pub enum ElevatedExecOutcome {
 pub struct ElevatedExecResult {
     pub outcome: ElevatedExecOutcome,
     pub exit_code: Option<u32>,
-    pub output: String,
+    pub stdout: String,
+    pub stderr: String,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
     pub truncated: bool,
 }
 

@@ -87,7 +87,7 @@ const structuredParse = handler.indexOf("elevated_exec_spec(arguments)");
 if (!(reviewSnapshot >= 0 && realArgumentDecision > reviewSnapshot && structuredParse > realArgumentDecision) || handler.includes('ToolCallRequest::new("elevated_exec", json!({}))')) {
   throw new Error("LB-012 policy decision does not consume real elevated_exec arguments before structured dispatch");
 }
-if (!handler.includes("let execution_guard = guard") || !handler.includes("drop(execution_guard)")) throw new Error("LB-012 elevated execution is not serialized by the Guard execution mutex");
+if (!/let\s+(?:mut\s+)?execution_guard\s*=\s*guard/.test(handler) || !handler.includes("drop(execution_guard)")) throw new Error("LB-012 elevated execution is not serialized by the Guard execution mutex");
 for (const required of ['"enum": ["process", "shell", "filesystem"]', 'Some("process") =>', 'Some("shell") =>', 'Some("filesystem") =>']) {
   if (!server.includes(required)) throw new Error(`LB-012 typed elevated_exec schema missing: ${required}`);
 }
@@ -97,6 +97,15 @@ if (elevatedToolStart < 0 || elevatedToolEnd <= elevatedToolStart || server.slic
   throw new Error("LB-012 elevated_exec public input schema regressed to a client-hostile top-level combinator");
 }
 if (!handler.includes("privileged.filesystem(spec)")) throw new Error("LB-012 privileged filesystem does not dispatch directly to Broker gateway");
+for (const required of ["execution.stdout", "execution.stderr", "retain_local_output", '"output_refs": output_refs']) {
+  if (!handler.includes(required)) throw new Error(`LB-012 structured elevated output/continuation missing: ${required}`);
+}
+const elevatedOutputSchemaStart = server.indexOf("fn elevated_exec_output_schema");
+const elevatedOutputSchemaEnd = server.indexOf("fn privileged_request_id", elevatedOutputSchemaStart);
+const elevatedOutputSchema = server.slice(elevatedOutputSchemaStart, elevatedOutputSchemaEnd);
+for (const required of ['"stdout"', '"stderr"', '"stdout_truncated"', '"stderr_truncated"', '"output_refs"']) {
+  if (!elevatedOutputSchema.includes(required)) throw new Error(`LB-012 elevated output schema missing ${required}`);
+}
 if (!server.includes("broker_direct_spec(&shell_spec)")) throw new Error("LB-012 shell route does not use Broker-only trusted shell preparation");
 if (!shell.includes("resolve_for_broker") || !shell.includes("highest_core_for_broker")) throw new Error("LB-012 Broker shell resolver missing");
 const brokerResolverStart = shell.indexOf("pub fn resolve_for_broker");

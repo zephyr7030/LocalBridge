@@ -7,7 +7,7 @@ use std::os::windows::io::FromRawHandle;
 use std::path::Path;
 use std::ptr::{null, null_mut};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -101,7 +101,15 @@ pub(crate) fn run_elevated_exec(
         }
     }
 
-    let (read_handle, write_handle) = create_output_pipe()?;
+    let (stdout_read, stdout_write) = create_output_pipe()?;
+    let (stderr_read, stderr_write) = match create_output_pipe() {
+        Ok(pipe) => pipe,
+        Err(error) => {
+            close_handle(stdout_read);
+            close_handle(stdout_write);
+            return Err(error);
+        }
+    };
     let job = create_kill_on_close_job()?;
     let mut command_line = build_command_line(&spec.program, &spec.args);
     let application = wide_null(OsStr::new(&spec.program));
@@ -113,8 +121,8 @@ pub(crate) fn run_elevated_exec(
     let mut startup: STARTUPINFOW = unsafe { zeroed() };
     startup.cb = size_of::<STARTUPINFOW>() as u32;
     startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdOutput = write_handle;
-    startup.hStdError = write_handle;
+    startup.hStdOutput = stdout_write;
+    startup.hStdError = stderr_write;
     startup.hStdInput = null_mut();
     let mut process_info: PROCESS_INFORMATION = unsafe { zeroed() };
     let created = unsafe {
@@ -133,12 +141,15 @@ pub(crate) fn run_elevated_exec(
     };
     if created == 0 {
         let code = last_error();
-        close_handle(read_handle);
-        close_handle(write_handle);
+        close_handle(stdout_read);
+        close_handle(stdout_write);
+        close_handle(stderr_read);
+        close_handle(stderr_write);
         close_handle(job);
         return Err(ExecutionError::CreateProcess(code));
     }
-    close_handle(write_handle);
+    close_handle(stdout_write);
+    close_handle(stderr_write);
 
     if unsafe { AssignProcessToJobObject(job, process_info.hProcess) } == 0 {
         let code = last_error();
@@ -148,7 +159,8 @@ pub(crate) fn run_elevated_exec(
         close_handle(process_info.hThread);
         close_handle(process_info.hProcess);
         close_handle(job);
-        close_handle(read_handle);
+        close_handle(stdout_read);
+        close_handle(stderr_read);
         return Err(ExecutionError::AssignJob(code));
     }
     if unsafe { ResumeThread(process_info.hThread) } == u32::MAX {
@@ -158,14 +170,22 @@ pub(crate) fn run_elevated_exec(
         close_handle(process_info.hThread);
         close_handle(process_info.hProcess);
         close_handle(job);
-        close_handle(read_handle);
+        close_handle(stdout_read);
+        close_handle(stderr_read);
         return Err(ExecutionError::Resume);
     }
     close_handle(process_info.hThread);
 
     let output_limit = spec.max_output_bytes as usize;
-    let reader_handle = read_handle as usize;
-    let reader = thread::spawn(move || drain_output(reader_handle as HANDLE, output_limit));
+    let remaining = Arc::new(AtomicUsize::new(output_limit));
+    let stdout_handle = stdout_read as usize;
+    let stdout_budget = Arc::clone(&remaining);
+    let stdout_reader =
+        thread::spawn(move || drain_output(stdout_handle as HANDLE, stdout_budget));
+    let stderr_handle = stderr_read as usize;
+    let stderr_budget = Arc::clone(&remaining);
+    let stderr_reader =
+        thread::spawn(move || drain_output(stderr_handle as HANDLE, stderr_budget));
     let started = Instant::now();
     let timeout = Duration::from_millis(spec.timeout_ms as u64);
     let outcome = loop {
@@ -201,13 +221,22 @@ pub(crate) fn run_elevated_exec(
     close_handle(process_info.hProcess);
     close_handle(job);
 
-    let (bytes, truncated) = reader.join().unwrap_or_else(|_| (Vec::new(), true));
-    let output = redact_output(String::from_utf8_lossy(&bytes).into_owned(), &spec);
+    let (stdout_bytes, stdout_truncated) = stdout_reader
+        .join()
+        .unwrap_or_else(|_| (Vec::new(), true));
+    let (stderr_bytes, stderr_truncated) = stderr_reader
+        .join()
+        .unwrap_or_else(|_| (Vec::new(), true));
+    let stdout = redact_output(String::from_utf8_lossy(&stdout_bytes).into_owned(), &spec);
+    let stderr = redact_output(String::from_utf8_lossy(&stderr_bytes).into_owned(), &spec);
     Ok(ElevatedExecResult {
         outcome,
         exit_code,
-        output,
-        truncated,
+        stdout,
+        stderr,
+        stdout_truncated,
+        stderr_truncated,
+        truncated: stdout_truncated || stderr_truncated,
     })
 }
 
@@ -282,7 +311,7 @@ fn wait_for_job_empty(job: HANDLE, timeout: Duration) -> Result<(), ExecutionErr
     Ok(())
 }
 
-fn drain_output(handle: HANDLE, limit: usize) -> (Vec<u8>, bool) {
+fn drain_output(handle: HANDLE, remaining: Arc<AtomicUsize>) -> (Vec<u8>, bool) {
     let mut file = unsafe { std::fs::File::from_raw_handle(handle.cast()) };
     let mut retained = Vec::new();
     let mut chunk = [0u8; 4096];
@@ -291,8 +320,7 @@ fn drain_output(handle: HANDLE, limit: usize) -> (Vec<u8>, bool) {
         match file.read(&mut chunk) {
             Ok(0) | Err(_) => break,
             Ok(count) => {
-                let available = limit.saturating_sub(retained.len());
-                let keep = count.min(available);
+                let keep = claim_output_budget(&remaining, count);
                 retained.extend_from_slice(&chunk[..keep]);
                 if keep < count {
                     truncated = true;
@@ -303,7 +331,28 @@ fn drain_output(handle: HANDLE, limit: usize) -> (Vec<u8>, bool) {
     (retained, truncated)
 }
 
+fn claim_output_budget(remaining: &AtomicUsize, requested: usize) -> usize {
+    loop {
+        let available = remaining.load(Ordering::Acquire);
+        let keep = requested.min(available);
+        if remaining
+            .compare_exchange_weak(
+                available,
+                available - keep,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            return keep;
+        }
+    }
+}
+
 fn redact_output(output: String, spec: &ElevatedExecSpec) -> String {
+    if output.is_empty() {
+        return output;
+    }
     let markers = [
         "password",
         "passwd",
@@ -414,7 +463,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.outcome, ElevatedExecOutcome::Completed);
-        assert!(result.output.contains("LB012_STRUCTURED"));
+        assert!(result.stdout.contains("LB012_STRUCTURED"));
+        assert!(result.stderr.is_empty());
         assert!(!result.truncated);
     }
 
@@ -444,7 +494,7 @@ mod tests {
         let mut limited_spec = spec(&["/d", "/c", "for /L %i in (1,1,1000) do @echo 1234567890"]);
         limited_spec.max_output_bytes = 128;
         let limited = run_elevated_exec(limited_spec, ExecutionCancel::default()).unwrap();
-        assert!(limited.output.len() <= 128);
+        assert!(limited.stdout.len() + limited.stderr.len() <= 128);
         assert!(limited.truncated);
 
         let secret = "LB012_SYNTHETIC_SECRET_VALUE";
@@ -453,7 +503,8 @@ mod tests {
             ExecutionCancel::default(),
         )
         .unwrap();
-        assert!(!redacted.output.contains(secret));
-        assert!(redacted.output.contains("[REDACTED]"));
+        assert!(!redacted.stdout.contains(secret));
+        assert!(!redacted.stderr.contains(secret));
+        assert!(redacted.stdout.contains("[REDACTED]"));
     }
 }

@@ -235,7 +235,22 @@ fn actual_broker_structured_execution_supports_completion_timeout_cancel_limit_a
         .unwrap();
     let complete = poll_until_complete(&mut session, "complete", Duration::from_secs(5));
     assert_eq!(complete.outcome, ElevatedExecOutcome::Completed);
-    assert!(complete.output.contains("LB012_BROKER_EXEC"));
+    assert!(complete.stdout.contains("LB012_BROKER_EXEC"));
+    assert!(complete.stderr.is_empty());
+
+    session
+        .start_exec(
+            "split".to_string(),
+            exec_spec(
+                &["/d", "/c", "echo LB012_STDOUT & echo LB012_STDERR 1>&2"],
+                5_000,
+                4096,
+            ),
+        )
+        .unwrap();
+    let split = poll_until_complete(&mut session, "split", Duration::from_secs(5));
+    assert!(split.stdout.contains("LB012_STDOUT"));
+    assert!(split.stderr.contains("LB012_STDERR"));
 
     session
         .start_exec(
@@ -268,8 +283,22 @@ fn actual_broker_structured_execution_supports_completion_timeout_cancel_limit_a
         )
         .unwrap();
     let limited = poll_until_complete(&mut session, "limit", Duration::from_secs(5));
-    assert!(limited.output.len() <= 128);
+    assert!(limited.stdout.len() + limited.stderr.len() <= 128);
     assert!(limited.truncated);
+
+    session
+        .start_exec(
+            "large-frame".to_string(),
+            exec_spec(
+                &["/d", "/c", "for /L %i in (1,1,8000) do @echo 1234567890"],
+                5_000,
+                128 * 1024,
+            ),
+        )
+        .unwrap();
+    let large_frame = poll_until_complete(&mut session, "large-frame", Duration::from_secs(5));
+    assert!(large_frame.stdout.len() > 64 * 1024);
+    assert!(!large_frame.truncated);
 
     let secret = "LB012_SYNTHETIC_BROKER_SECRET";
     session
@@ -283,8 +312,9 @@ fn actual_broker_structured_execution_supports_completion_timeout_cancel_limit_a
         )
         .unwrap();
     let redacted = poll_until_complete(&mut session, "redact", Duration::from_secs(5));
-    assert_eq!(redacted.output, "[REDACTED]");
-    assert!(!redacted.output.contains(secret));
+    assert_eq!(redacted.stdout, "[REDACTED]");
+    assert!(!redacted.stdout.contains(secret));
+    assert!(!redacted.stderr.contains(secret));
 
     session.shutdown().unwrap();
     assert!(child.wait().unwrap().success());
