@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { APP_NAME } from "./appModel";
 import { bridge, type AccessCode, type MainProjection, type ProjectProjection } from "./bridge";
-import { accessText, formatLastToolAge, lastToolText, serviceText, taskText, uiText } from "./presentation";
+import { accessText, currentActivityText, formatLastToolAge, lastCommandText, lastToolText, serviceText, uiText } from "./presentation";
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { onboardingApi, type OnboardingState } from "./features/onboarding/api";
 import { Diagnostics } from "./features/diagnostics/Diagnostics";
@@ -99,8 +99,9 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   useEffect(() => {
     if (view !== "settings" || (projection && !projection.runtimeKeySaved)) setConfirmingKeyDelete(false);
   }, [view, projection?.runtimeKeySaved]);
-  const task = projection?.currentTask ?? null;
-  const taskState = task?.state ?? "idle";
+  const currentWorkflow = projection?.currentWorkflow ?? null;
+  const currentCommand = projection?.currentCommand ?? null;
+  const taskState = currentCommand ? (currentCommand.state === "waiting_input" ? "waiting" : "running") : currentWorkflow?.state ?? "idle";
   const activeProject = projection?.projects.find((item) => item.active) ?? null;
   const reconnectVisible = Boolean(projection?.reconnect && projection.reconnect.generation !== handledGeneration);
   const adminModeFullAccess = projection?.permission === "admin";
@@ -130,8 +131,8 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       <div className="row"><span className="label">权限模式</span><span className="value permission-mode-value">{projection ? accessText[projection.permission] : "正在读取"}</span></div>
     </section>
     <div className="service-actions" aria-label="服务控制"><button className="secondary service-restart" onClick={() => void run(() => bridge.restartServices())}>重启服务</button><button className="secondary service-stop" onClick={() => void run(() => bridge.stopServices())}>关闭服务</button></div>
-    <div className="task-row" aria-live="polite"><span className={`activity-dot task-${taskState}`} aria-hidden="true"/><span>{taskText(task)}</span></div>
-    {projection?.lastTool && <div className="last-tool-row"><span className="last-tool-label">{lastToolText(projection.lastTool)}</span><span className="last-tool-age">{formatLastToolAge(projection.lastTool.ageMs)}</span></div>}
+    <div className="task-row" aria-live="polite"><span className={`activity-dot task-${taskState}`} aria-hidden="true"/><span>{currentActivityText(currentWorkflow, currentCommand)}</span></div>
+    {projection?.lastCommand ? <div className="last-tool-row"><span className="last-tool-label">{lastCommandText(projection.lastCommand)}</span><span className="last-tool-age">{formatLastToolAge(projection.lastCommand.ageMs)}</span></div> : projection?.lastTool ? <div className="last-tool-row"><span className="last-tool-label">{lastToolText(projection.lastTool)}</span><span className="last-tool-age">{formatLastToolAge(projection.lastTool.ageMs)}</span></div> : null}
     {error && <div className="error" role="alert">{error}</div>}
     {view === "settings" && <div className="sheet-backdrop" onMouseDown={() => setView("main")}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>{uiText.settings}</h2>
       <section className="settings-section"><h3>常规</h3><div className="row"><span>开机启动</span><input type="checkbox" checked={projection?.autoStart ?? false} onChange={(event) => void run(() => bridge.setAutoStart(event.target.checked))}/></div><div className="row"><span>关闭窗口后继续运行</span><input type="checkbox" checked={projection?.closeWindowContinueRunning ?? true} onChange={(event) => void run(() => bridge.setCloseWindowContinueRunning(event.target.checked))}/></div></section>

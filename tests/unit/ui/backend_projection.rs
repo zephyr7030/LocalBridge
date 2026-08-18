@@ -53,13 +53,33 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     }
     let rendered = serde_json::to_string(&MainProjection {
         permission: "admin", privilege: "active", local_environment_service: "online", tunnel_service: "online", coding_service: "online",
-        current_project: None, projects: vec![], current_task: None, last_tool: None, projection_revision: 7, tunnel_id: Some("tunnel_01401401401401401401401401401401".to_owned()),
+        current_project: None, projects: vec![], current_task: None, current_workflow: None, current_command: None, last_command: None, last_tool: None, projection_revision: 7, tunnel_id: Some("tunnel_01401401401401401401401401401401".to_owned()),
         runtime_key_saved: true, auto_start: true, close_window_continue_running: true,
         reconnect: None,
     }).unwrap();
     for forbidden in ["Elevated", "AwaitingUac", "BrokerExited", "RuntimeState", "PrivilegeState", "broker_generation", "nonce", "pid"] {
         assert!(!rendered.contains(forbidden));
     }
+}
+
+#[test]
+fn schema42_task_aggregate_projection_separates_current_and_history() {
+    let waiting = serde_json::json!({
+        "state":"waiting",
+        "current_workflow":{"state":"waiting"},
+        "current_command":null,
+        "last_command":{"status":"cancelled","completed_at_ms":0}
+    });
+    assert_eq!(current_workflow_projection(&waiting).unwrap().state, "waiting");
+    assert!(current_command_projection(&waiting).is_none());
+    assert_eq!(last_command_projection(&waiting).unwrap().status, "cancelled");
+    let idle = serde_json::json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null});
+    assert!(current_workflow_projection(&idle).is_none());
+    assert!(current_command_projection(&idle).is_none());
+    assert!(last_command_projection(&idle).is_none());
+    let running = serde_json::json!({"state":"active","current_workflow":{"state":"running"},"current_command":{"state":"running"},"last_command":{"status":"completed","completed_at_ms":0}});
+    assert_eq!(current_command_projection(&running).unwrap().state, "running");
+    assert_eq!(legacy_task_projection_from_aggregate(&running, Some(10)).unwrap().kind, "command");
 }
 
 #[test]

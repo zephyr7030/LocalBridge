@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessText, formatLastToolAge, lastToolText, privilegeText, serviceVisualState, taskText } from "../presentation";
+import { accessText, currentActivityText, formatLastToolAge, lastCommandText, lastToolText, privilegeText, serviceVisualState, taskText } from "../presentation";
 
 describe("LB-015 presentation", () => {
   it("maps frozen Chinese wording", () => {
@@ -17,7 +17,7 @@ describe("LB-015 presentation", () => {
     expect(line).toContain("cargo test");
     expect(line).toContain("59S");
     expect(line).not.toContain("前");
-    expect(taskText(null)).toBe("等待命令");
+    expect(taskText(null)).toBe("空闲");
     expect(taskText({ kind: "admin", summary: "安装设备驱动", state: "waiting", elapsedMs: null })).toBe("管理员操作  安装设备驱动  等待授权");
     expect(taskText({ kind: "admin", summary: "安装设备驱动", state: "blocked", elapsedMs: null })).toBe("管理员操作  安装设备驱动  已阻止");
     expect(taskText({ kind: "test", summary: "cargo test", state: "failed", elapsedMs: null })).toBe("运行测试  cargo test  执行失败");
@@ -29,4 +29,16 @@ describe("LB-015 presentation", () => {
     expect(formatLastToolAge(60 * 60_000)).toBe("大于1小时");
     expect(formatLastToolAge(3 * 24 * 60 * 60_000)).toBe("大于3天");
   });
+  it("keeps schema42 current state separate from command history", () => {
+    expect(currentActivityText(null, null)).toBe("空闲");
+    expect(currentActivityText({ state: "waiting" }, null)).toBe("任务等待继续");
+    expect(currentActivityText({ state: "running" }, null)).toBe("任务执行中…");
+    expect(currentActivityText(null, { state: "running" })).toBe("运行命令…");
+    expect(currentActivityText({ state: "waiting" }, { state: "waiting_input" })).toBe("等待输入…");
+    expect(currentActivityText({ state: "waiting" }, { state: "cancelling" })).toBe("正在取消…");
+    expect(lastCommandText({ status: "completed", ageMs: 1 })).toContain("结果：成功");
+    expect(lastCommandText({ status: "cancelled", ageMs: 1 })).toContain("结果：已取消");
+    expect(currentActivityText(null, null)).toBe("空闲");
+  });
+
 });

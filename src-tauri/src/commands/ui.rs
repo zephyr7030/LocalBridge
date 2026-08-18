@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 use crate::app::{
@@ -13,9 +14,10 @@ use crate::diagnostics::record_runtime_user_events;
 use crate::runtime::ProductionRuntimeConfig;
 use crate::settings::{AppData, SettingsStore, StoredPermissionMode};
 use crate::state::{
-    CurrentTaskStatus, LastToolTiming, PermissionMode, PrivilegeState, RuntimeComponent,
-    RuntimeFault, RuntimeState, TaskExecutionState, TaskKind,
+    LastToolTiming, PermissionMode, PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState, TaskKind,
 };
+#[cfg(test)]
+use crate::state::{CurrentTaskStatus, TaskExecutionState};
 use crate::tunnel::TunnelId;
 use crate::workspace::{WorkspaceId, WorkspaceValidator};
 
@@ -30,6 +32,9 @@ pub struct MainProjection {
     current_project: Option<String>,
     projects: Vec<ProjectProjection>,
     current_task: Option<TaskProjection>,
+    current_workflow: Option<CurrentWorkflowProjection>,
+    current_command: Option<CurrentCommandProjection>,
+    last_command: Option<LastCommandProjection>,
     last_tool: Option<LastToolProjection>,
     projection_revision: u64,
     tunnel_id: Option<String>,
@@ -55,6 +60,16 @@ struct TaskProjection {
     state: &'static str,
     elapsed_ms: Option<u64>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct CurrentWorkflowProjection { state: &'static str }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct CurrentCommandProjection { state: &'static str }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LastCommandProjection { status: &'static str, age_ms: u64 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -230,6 +245,7 @@ fn get_main_projection_blocking(
 ) -> Result<MainProjection, String> {
     let (_, data) = load_app_data(&app)?;
     let (snapshot, projection_revision) = lifecycle.runtime_snapshot_with_revision();
+    let task_aggregate = lifecycle.task_aggregate_snapshot();
     let privilege = lifecycle.privilege().refresh_broker_state();
     record_runtime_user_events(
         &snapshot.state,
@@ -294,7 +310,10 @@ fn get_main_projection_blocking(
         coding_service,
         current_project,
         projects,
-        current_task: task_projection(&snapshot.current_task, snapshot.current_task_elapsed_ms),
+        current_task: legacy_task_projection_from_aggregate(&task_aggregate, snapshot.current_task_elapsed_ms),
+        current_workflow: current_workflow_projection(&task_aggregate),
+        current_command: current_command_projection(&task_aggregate),
+        last_command: last_command_projection(&task_aggregate),
         last_tool: snapshot.last_tool.as_ref().map(last_tool_projection),
         projection_revision,
         tunnel_id,
@@ -965,6 +984,27 @@ fn last_tool_projection(last: &LastToolTiming) -> LastToolProjection {
         age_ms: last.age_ms,
     }
 }
+fn current_workflow_projection(aggregate: &Value) -> Option<CurrentWorkflowProjection> {
+    let state=aggregate.get("current_workflow")?.get("state")?.as_str()?;
+    Some(CurrentWorkflowProjection{state:match state {"running"=>"running","waiting"=>"waiting",_=>return None}})
+}
+fn current_command_projection(aggregate: &Value) -> Option<CurrentCommandProjection> {
+    let state=aggregate.get("current_command")?.get("state")?.as_str()?;
+    Some(CurrentCommandProjection{state:match state {"running"=>"running","waiting_input"=>"waiting_input","cancelling"=>"cancelling",_=>return None}})
+}
+fn last_command_projection(aggregate: &Value) -> Option<LastCommandProjection> {
+    let terminal=aggregate.get("last_command")?; let status=terminal.get("status")?.as_str()?;
+    let status=match status {"completed"=>"completed","failed"=>"failed","cancelled"=>"cancelled","timed_out"=>"timed_out","lost"=>"lost",_=>return None};
+    let completed=terminal.get("completed_at_ms").and_then(Value::as_u64).unwrap_or(0);
+    let now=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64;
+    Some(LastCommandProjection{status,age_ms:now.saturating_sub(completed)})
+}
+fn legacy_task_projection_from_aggregate(aggregate:&Value, elapsed_ms:Option<u64>)->Option<TaskProjection>{
+    if let Some(command)=current_command_projection(aggregate){ return Some(TaskProjection{kind:"command",summary:None,state:match command.state{"running"=>"running","waiting_input"=>"waiting","cancelling"=>"running",_=>"running"},elapsed_ms}); }
+    current_workflow_projection(aggregate).map(|workflow|TaskProjection{kind:"other",summary:None,state:if workflow.state=="waiting"{"waiting"}else{"running"},elapsed_ms})
+}
+
+#[cfg(test)]
 fn task_projection(status: &CurrentTaskStatus, elapsed_ms: Option<u64>) -> Option<TaskProjection> {
     let CurrentTaskStatus::Active(task) = status else {
         return None;
@@ -989,6 +1029,7 @@ fn task_kind_code(kind: TaskKind) -> &'static str {
         TaskKind::Other => "other",
     }
 }
+#[cfg(test)]
 fn task_state_code(state: TaskExecutionState) -> &'static str {
     match state {
         TaskExecutionState::Idle => "idle",

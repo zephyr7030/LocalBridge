@@ -1,3 +1,4 @@
+use serde_json::{Value, json};
 use std::fmt;
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
@@ -100,6 +101,13 @@ pub trait RuntimeDriver {
     fn stop_mcp(&mut self, mcp: &mut Self::Mcp) -> Result<(), RuntimeFault>;
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus;
+
+    fn task_aggregate(&self, pep: &Self::Pep) -> Value {
+        match self.current_task(pep) {
+            CurrentTaskStatus::Idle => json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null}),
+            CurrentTaskStatus::Active(_) => json!({"state":"active","current_workflow":null,"current_command":{"state":"running"},"last_command":null}),
+        }
+    }
 
     fn current_task_timing(&self, pep: &Self::Pep) -> CurrentTaskTiming {
         CurrentTaskTiming {
@@ -245,6 +253,14 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
 
     pub fn current_task(&self) -> CurrentTaskStatus {
         self.current_task_timing().status
+    }
+
+    pub fn task_aggregate(&self) -> Value {
+        self.ready
+            .as_ref()
+            .map(|ready| self.driver.task_aggregate(&ready.pep))
+            .or_else(|| self.recovering_pep.as_ref().map(|pep| self.driver.task_aggregate(pep)))
+            .unwrap_or_else(|| json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null}))
     }
 
     pub fn current_task_timing(&self) -> CurrentTaskTiming {
@@ -1472,6 +1488,10 @@ where
 
     fn current_task_timing(&self, pep: &Self::Pep) -> CurrentTaskTiming {
         pep.current_task_projection().timing_snapshot()
+    }
+
+    fn task_aggregate(&self, pep: &Self::Pep) -> Value {
+        pep.task_aggregate_snapshot()
     }
 
     fn connector_endpoint(&self, tunnel: &Self::Tunnel) -> Option<ConnectorEndpoint> {

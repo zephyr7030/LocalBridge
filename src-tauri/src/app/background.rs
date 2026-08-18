@@ -1,3 +1,4 @@
+use serde_json::{Value, json};
 use std::ffi::OsStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock, TryLockError, mpsc};
@@ -110,6 +111,10 @@ pub trait ExitRuntime {
         DesktopRuntimeSnapshot::inactive()
     }
 
+    fn task_aggregate_snapshot(&self) -> Value {
+        json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null})
+    }
+
     fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
         None
     }
@@ -210,6 +215,13 @@ impl ProductionRuntimeOwner {
             .map(ExitRuntime::runtime_snapshot)
             .unwrap_or_else(DesktopRuntimeSnapshot::inactive)
     }
+
+    fn task_aggregate_snapshot(&self) -> Value {
+        self.active
+            .as_deref()
+            .map(ExitRuntime::task_aggregate_snapshot)
+            .unwrap_or_else(|| json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null}))
+    }
 }
 
 impl ExitRuntime for ProductionRuntimeOwner {
@@ -264,6 +276,8 @@ where
             }),
         }
     }
+
+    fn task_aggregate_snapshot(&self) -> Value { self.task_aggregate() }
 
     fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
         RuntimeOrchestrator::connector_endpoint(self)
@@ -335,6 +349,8 @@ where
             }),
         }
     }
+
+    fn task_aggregate_snapshot(&self) -> Value { self.runtime().task_aggregate() }
 
     fn connector_endpoint(&self) -> Option<ConnectorEndpoint> {
         self.runtime().connector_endpoint()
@@ -718,6 +734,14 @@ impl DesktopLifecycle {
             return Err(DesktopRuntimeControlError::Runtime(RuntimeFault::Unknown));
         }
         Ok(())
+    }
+
+    pub fn task_aggregate_snapshot(&self) -> Value {
+        match self.runtime.try_lock() {
+            Ok(owner) => owner.task_aggregate_snapshot(),
+            Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
+            Err(TryLockError::WouldBlock) => json!({"state":"active","current_workflow":{"state":"running"},"current_command":null,"last_command":null}),
+        }
     }
 
     pub fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {

@@ -23,7 +23,7 @@ const backendUi = readFileSync("src-tauri/src/commands/ui.rs", "utf8");
 const backendOnboarding = readFileSync("src-tauri/src/commands/onboarding.rs", "utf8");
 const onboardingUi = readFileSync("src/features/onboarding/Onboarding.tsx", "utf8");
 const auth = JSON.parse(readFileSync("scripts/authorization-records/LB-015.json", "utf8"));
-for (const text of ["当前项目","本地运行环境","OpenAI 安全隧道","编码服务","权限模式","等待命令"]) if (!`${app}\n${presentation}`.includes(text)) throw new Error(`LB-015 Dashboard wording missing: ${text}`);
+for (const text of ["当前项目","本地运行环境","OpenAI 安全隧道","编码服务","权限模式","空闲","任务等待继续"]) if (!`${app}\n${presentation}`.includes(text)) throw new Error(`LB-015 Dashboard wording missing: ${text}`);
 if (app.includes("pathEditor") || app.includes("newPath") || app.includes('id="project-path"')) throw new Error("LB-015 Dashboard still exposes raw project path input");
 if (!bridge.includes('chooseProjectFolder: () => invoke<string | null>("choose_onboarding_workspace_folder")') || !app.includes("bridge.chooseProjectFolder()")) throw new Error("LB-015 Dashboard does not use native Windows folder picker");
 const dashboardBeforeSettings = app.slice(app.indexOf("return <main"), app.indexOf('{view === "settings"'));
@@ -38,9 +38,10 @@ for (const required of [">常规<",">连接<",">权限<","开机启动","关闭�
 if (app.includes("测试连接") || app.includes("运行密钥")) throw new Error("LB-015 Settings exposes forbidden connection wording/action");
 if (!app.includes('type="password"') || !app.includes('projection?.runtimeKeySaved ? "已保存" : "未保存"')) throw new Error("LB-015 Runtime API Key summary/edit security contract missing");
 if (!css.includes("#0071e3") || !css.includes("--admin-accent:#ff9500") || !css.includes("admin-choice")) throw new Error("LB-015 blue/orange selection styling missing");
-if (!presentation.includes('"等待命令"') || presentation.includes('"空闲"')) throw new Error("LB-015 no-task wording drifted");
-if (!backend.includes("current_task: task_projection(&snapshot.current_task, snapshot.current_task_elapsed_ms)")) throw new Error("LB-015 Dashboard task does not originate in backend typed projection with backend elapsed timing");
-for (const required of ["CurrentTaskStatus::Active", "CurrentTaskStatus::Idle", "current_task.project(status)"]) if (!mcp.includes(required)) throw new Error(`LB-015 production MCP CurrentTask plumbing missing: ${required}`);
+if (!presentation.includes('"空闲"') || presentation.includes('"等待命令"')) throw new Error("LB-015 schema42 idle wording drifted");
+for (const required of ["lifecycle.task_aggregate_snapshot()", "current_workflow_projection(&task_aggregate)", "current_command_projection(&task_aggregate)", "last_command_projection(&task_aggregate)"]) if (!backend.includes(required)) throw new Error(`LB-015 schema42 backend TaskAggregate projection missing: ${required}`);
+if (!mcp.includes("task_aggregate_snapshot")) throw new Error("LB-015 schema42 PEP TaskAggregate source missing");
+for (const required of ["current_workflow_projection","current_command_projection","last_command_projection"]) if (!backend.includes(required)) throw new Error(`LB-015 schema42 typed TaskAggregate projection missing: ${required}`);
 if (!bridge.includes('waitForProjectionChange: (sinceRevision: number) => invoke<number>("wait_main_projection_change"') || !app.includes("await bridge.waitForProjectionChange(revision)")) throw new Error("LB-015 frontend is not driven by backend projection wake");
 if (!background.includes('pub fn runtime_snapshot_with_revision(&self) -> (DesktopRuntimeSnapshot, u64)') || !backend.includes('let (snapshot, projection_revision) = lifecycle.runtime_snapshot_with_revision();') || backend.includes('projection_revision: lifecycle.projection_revision()')) throw new Error("LB-015 Dashboard projection snapshot and wake cursor are not captured atomically");
 if (/setInterval\s*\(/.test(app)) throw new Error("LB-015 Dashboard still relies on periodic frontend polling");
@@ -48,9 +49,9 @@ for (const required of ["pub async fn wait_main_projection_change", "wait_projec
 for (const required of ["Condvar", "struct ProjectionWake", "fn wait_after", "projection_wake.notify()", "CurrentTaskWake", ".with_task_projection_wake(wake)"]) if (!background.includes(required)) throw new Error(`LB-015 wake-driven runtime projection missing: ${required}`);
 for (const required of ["const MIN_TASK_PRESENTATION: Duration = Duration::from_millis(500)", "VecDeque<QueuedTask>", "current_task_projection_serializes_burst_fast_calls_for_full_visibility", "UI presentation retention must not delay real MCP response"]) if (!mcp.includes(required)) throw new Error(`LB-015 short real MCP >=500ms presentation contract missing: ${required}`);
 if (!mcp.includes("UI retention must not delay Broker response") || !mcp.includes("first_serialized_retired")) throw new Error("LB-015 Broker >=500ms/non-delaying burst regression missing");
-if (!backend.includes("last_tool: snapshot.last_tool.as_ref().map(last_tool_projection)") || !bridge.includes("lastTool: LastToolProjection | null")) throw new Error("LB-015 exactly-one last-tool typed projection missing");
-if (!app.includes("taskText(task)") || !app.includes('className="last-tool-row"') || !app.includes("lastToolText(projection.lastTool)") || !app.includes("formatLastToolAge(projection.lastTool.ageMs)")) throw new Error("LB-015 two-row current/last-tool presentation missing");
-if (!app.includes('const taskState = task?.state ?? "idle"') || !app.includes('className={`activity-dot task-${taskState}`}') || app.includes("taskActive")) throw new Error("LB-015 Dashboard CurrentTask visual state is not derived directly from typed backend task.state");
+if (!backend.includes("last_command: last_command_projection(&task_aggregate)") || !bridge.includes("lastCommand: LastCommandProjection | null") || !bridge.includes("lastTool: LastToolProjection | null")) throw new Error("LB-015 schema42 command history projection missing");
+if (!app.includes("currentActivityText(currentWorkflow, currentCommand)") || !app.includes('className="last-tool-row"') || !app.includes("lastCommandText(projection.lastCommand)") || !app.includes("formatLastToolAge(projection.lastCommand.ageMs)")) throw new Error("LB-015 schema42 current/history separation missing");
+if (!app.includes("const currentWorkflow = projection?.currentWorkflow ?? null") || !app.includes("const currentCommand = projection?.currentCommand ?? null") || !app.includes('className={`activity-dot task-${taskState}`}')) throw new Error("LB-015 schema42 current activity is not derived from TaskAggregate fields");
 const compactTaskCss = css.replace(/\s+/g, "");
 for (const marker of [
   ".activity-dot.task-idle,.activity-dot.task-cancelled{background:var(--status-unknown)}",
@@ -60,8 +61,8 @@ for (const marker of [
   ".activity-dot.task-running{animation:none;opacity:1;transform:none}",
 ]) if (!compactTaskCss.includes(marker.replace(/\s+/g, ""))) throw new Error(`LB-015 concrete CurrentTask visual semantic missing: ${marker}`);
 for (const wording of ['waiting: "等待授权"', 'blocked: "已阻止"', 'failed: "执行失败"', 'cancelled: "已取消"']) if (!presentation.includes(wording)) throw new Error(`LB-015 concrete CurrentTask wording missing: ${wording}`);
-if (!presentation.includes('return "等待命令"') || presentation.includes("lastCommandAge")) throw new Error("LB-015 first current-task row still carries last-tool age");
-if (!presentation.includes("上次执行工具：") || !css.includes(".last-tool-age{flex:0 0 auto;text-align:right")) throw new Error("LB-015 last-tool label/age alignment missing");
+for (const wording of ['return "空闲"', 'return "任务等待继续"', 'return "运行命令…"']) if (!presentation.includes(wording)) throw new Error(`LB-015 schema42 current activity wording missing: ${wording}`);
+if (!presentation.includes("上次执行：运行命令") || !css.includes(".last-tool-age{flex:0 0 auto;text-align:right")) throw new Error("LB-015 schema42 last-command history label/age alignment missing");
 if (bridge.includes("enable_admin") || bridge.includes("disable_admin") || lib.includes("commands::ui::enable_admin") || lib.includes("commands::ui::disable_admin")) throw new Error("LB-015 obsolete standalone administrator command remains registered");
 const permissionStart = backend.indexOf("pub async fn set_permission_mode");
 const permissionEnd = backend.indexOf("fn request_explicit_admin", permissionStart);
