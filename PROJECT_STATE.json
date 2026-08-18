@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-008",
+  "current_pr": "LB-009",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4695,6 +4695,16 @@
       "Fresh policy enforcement 10/10 PASS on final stale-projection-compatible product tree; fail-closed control-plane and mode boundaries preserved."
     ],
     "next_pr": "LB-008",
+    "g4_unlocked": false
+  },
+  "schema41_stale_projection_lb008_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-008",
+    "evidence": [
+      "LB008 tunnel contract PASS.",
+      "Fresh tunnel module 17/17 PASS on final stale-client-compatible tree; typed health/restart/secret boundaries preserved."
+    ],
+    "next_pr": "LB-009",
     "g4_unlocked": false
   }
 }
