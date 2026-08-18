@@ -5290,5 +5290,14 @@
       "8 orchestrator tests PASS"
     ],
     "next_pr": "LB-010"
+  },
+  "schema42_lb010_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "production watchdog contract PASS",
+      "recovery 17/17 PASS",
+      "workspace 23/23 PASS"
+    ],
+    "next_pr": "LB-011"
   }
 }
