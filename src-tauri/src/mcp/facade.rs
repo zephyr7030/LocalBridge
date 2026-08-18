@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -1221,6 +1221,7 @@ pub trait WorkspaceRuntimeAdapter {
 }
 
 static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
+const MAX_LOCAL_RETAINED_OUTPUT_HANDLES: usize = 8;
 
 fn next_public_handle(prefix: &str) -> String {
     let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
@@ -1254,6 +1255,7 @@ struct PublicCommandSessions {
     private_sessions: HashMap<String, String>,
     outputs: HashMap<String, PublicOutputHandle>,
     private_outputs: HashMap<String, String>,
+    local_outputs: VecDeque<String>,
 }
 
 impl PublicCommandSessions {
@@ -1327,6 +1329,11 @@ impl PublicCommandSessions {
     }
 
     fn retain_local_output(&mut self, stream: &str, content: String) -> String {
+        while self.local_outputs.len() >= MAX_LOCAL_RETAINED_OUTPUT_HANDLES {
+            if let Some(expired) = self.local_outputs.pop_front() {
+                self.outputs.remove(&expired);
+            }
+        }
         let public = next_public_handle("lb-output");
         self.outputs.insert(
             public.clone(),
@@ -1336,6 +1343,7 @@ impl PublicCommandSessions {
                 local_content: Some(content),
             },
         );
+        self.local_outputs.push_back(public.clone());
         public
     }
 
@@ -7525,6 +7533,25 @@ mod tests {
         assert!(public_output.starts_with("lb-output-"));
         assert_ne!(public_session, "PRIVATE_SESSION_SECRET");
         assert_ne!(public_output, "PRIVATE_OUTPUT_SECRET");
+    }
+
+    #[test]
+    fn local_retained_output_handles_are_fifo_bounded_without_evicting_private_handles() {
+        let mut sessions = PublicCommandSessions::default();
+        let private = sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET");
+        let first = sessions.retain_local_output("stdout", "first".into());
+        let mut latest = String::new();
+        for index in 1..=MAX_LOCAL_RETAINED_OUTPUT_HANDLES {
+            latest = sessions.retain_local_output("stderr", format!("retained-{index}"));
+        }
+
+        assert!(sessions.local_output(&first).is_none());
+        assert_eq!(sessions.local_outputs.len(), MAX_LOCAL_RETAINED_OUTPUT_HANDLES);
+        assert_eq!(sessions.private_output(&private).as_deref(), Some("PRIVATE_OUTPUT_SECRET"));
+        assert_eq!(
+            sessions.local_output(&latest),
+            Some(("stderr".into(), format!("retained-{MAX_LOCAL_RETAINED_OUTPUT_HANDLES}")))
+        );
     }
 
     #[test]
