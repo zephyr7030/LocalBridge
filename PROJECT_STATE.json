@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-014",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5067,6 +5067,16 @@
       "Architecture PASS."
     ],
     "next_pr": "LB-014",
+    "g4_unlocked": false
+  },
+  "schema41_lb014_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB014 startup/autostart contract PASS.",
+      "Single-instance 1/1, autostart 1/1, startup 6/6 PASS.",
+      "Architecture PASS."
+    ],
+    "next_pr": "LB-015",
     "g4_unlocked": false
   }
 }
