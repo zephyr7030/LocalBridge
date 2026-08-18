@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4816,6 +4816,17 @@
       "Frontend 7/7, production build, architecture and git diff check PASS."
     ],
     "next_pr": "LB-016",
+    "g4_unlocked": false
+  },
+  "schema41_g3_lb016_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "evidence": [
+      "LB016 five-screen onboarding contract PASS.",
+      "Fresh admin consent challenge timing/stale/cancel safety tests PASS.",
+      "Architecture, human-gate fail-closed and git diff check PASS."
+    ],
+    "next_pr": "LB-017",
     "g4_unlocked": false
   }
 }
