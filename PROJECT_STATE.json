@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4783,6 +4783,17 @@
     "generation": 29,
     "decision_commit": "2517f5d9ff435648f45fd52e13b7df7d8417262f",
     "next_pr": "LB-013",
+    "g4_unlocked": false
+  },
+  "schema41_g3_lb013_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-013",
+    "evidence": [
+      "LB013 contract PASS.",
+      "Fresh app::background Rust behavior PASS on final schema41 tree.",
+      "Architecture and git diff check PASS."
+    ],
+    "next_pr": "LB-014",
     "g4_unlocked": false
   }
 }
