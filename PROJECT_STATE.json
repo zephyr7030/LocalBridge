@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-009",
+  "current_pr": "LB-010",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4962,6 +4962,16 @@
       "Architecture PASS."
     ],
     "next_pr": "LB-009",
+    "g4_unlocked": false
+  },
+  "schema41_lb009_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB009 orchestrator contract PASS.",
+      "Orchestrator behavior 8/8 PASS.",
+      "Architecture PASS."
+    ],
+    "next_pr": "LB-010",
     "g4_unlocked": false
   }
 }
