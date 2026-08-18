@@ -5399,5 +5399,34 @@
       "MCP/Tunnel transient network blip attribution"
     ],
     "pending_g3_generation": 22
+  },
+  "schema42_windows_execution_policy_amendment_2026_08_18": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "owner_prs": [
+      "LB-006",
+      "LB-007",
+      "LB-012"
+    ],
+    "next_required_g2_generation": 33,
+    "next_required_g3_generation": 22,
+    "rules": [
+      "Full hard process authority is the current Windows ordinary-user token; command text classification is direct-invocation routing and accidental-system-maintenance protection, not a descendant-process sandbox",
+      "strict transitive denial of descendant system-maintenance activity requires a future OS-confinement execution contract rather than deeper textual scanning",
+      "system-management classification expands to net/net1 fsutil mountvol reagentc manage-bde fltmc auditpol vssadmin while retaining operation-level read-only versus mutation or unknown classification",
+      "CMD and PowerShell use shell-specific capability classification; ordinary CMD builtins nested shell usage ordinary PowerShell development operations and frozen read-only identity diagnostics are not privileged solely by surface token",
+      "CMD NUL device redirection preserves native Windows semantics and native command output uses codepage-aware Unicode decoding instead of blanket lossy UTF-8 conversion",
+      "Elevated process shell and filesystem share one Active-Broker authorization truth and require real-client parity; process and shell expose structured observable output with retained continuation when truncated",
+      "view_image truncation remediation is truthful; generic durable workflows expose meaningful active steps; context-only diagnose is a non-durable context_ready terminal result"
+    ],
+    "tunnel_mcp_transport": {
+      "status": "DEFERRED_TO_DIAGNOSTICS_LOGGING",
+      "current_repair_blocker": false,
+      "observed": "transient HTTP 400 / connection failed may recover on retry; root cause not established",
+      "future_requirement": "diagnostic logging work must distinguish malformed HTTP from socket read failure early EOF and other transport interruption instead of collapsing all causes into HTTP 400"
+    },
+    "excluded_current_defects": [
+      "Elevated filesystem route is not marked broken on current disk: Broker-backed process shell filesystem route tests passed; real-client parity remains required",
+      "historical permission_mode and Broker readiness mismatch is retained as evidence, while current contract keeps selected mode separate from administrator-token readiness"
+    ]
   }
 }

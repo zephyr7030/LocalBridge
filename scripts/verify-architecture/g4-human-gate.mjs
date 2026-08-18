@@ -2259,6 +2259,98 @@ export function normalizeSchema42DashboardObservabilityAmendment20260818(doc){
   return n;
 }
 
+const SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18 = Object.freeze({
+  addedRules:{
+    schema42_windows_execution_policy_amendment_ratified:true,
+    schema42_windows_execution_policy_owner_prs:["LB-006","LB-007","LB-012"],
+    schema42_windows_execution_policy_next_g2_review_generation:33,
+    schema42_windows_execution_policy_next_g3_review_generation:22,
+    full_hard_process_authority_boundary:"current_windows_user_token",
+    full_direct_command_classifier_scope:"direct_invocation_routing_and_accidental_system_maintenance_guard",
+    full_descendant_process_system_management_blocking_not_claimed_without_os_confinement:true,
+    strict_transitive_system_maintenance_denial_requires_separate_os_confinement_contract:true,
+    windows_system_management_shell_specific_classifier_required:true,
+    windows_system_management_nested_cmd_static_inner_classification_required:true,
+    cmd_ordinary_development_builtins_not_privileged_by_powershell_alias_collision:true,
+    powershell_ordinary_process_and_filesystem_development_operations_not_privileged_by_verb_alone:true,
+    powershell_narrow_readonly_identity_query_allowlist_required:true,
+    cmd_native_nul_device_semantics_required:true,
+    windows_native_output_codepage_aware_decoding_required:true,
+    windows_native_output_blanket_utf8_lossy_for_unknown_codepage_forbidden:true,
+    elevated_exec_process_shell_filesystem_share_one_authorization_truth:true,
+    elevated_exec_real_client_three_route_parity_required:true,
+    elevated_exec_process_shell_structured_stdout_stderr_required:true,
+    elevated_exec_truncated_output_requires_readable_output_ref:true,
+    view_image_truncation_must_not_advertise_missing_output_ref:true,
+    durable_workflow_active_step_required:true,
+    context_ready_non_durable_terminal_semantics_required:true,
+    permission_mode_elevated_selection_separate_from_administrator_route_readiness:true,
+    schema42_mcp_transport_diagnostics_deferred_to_diagnostics_logging:true,
+    schema42_mcp_transport_not_current_repair_blocker:true,
+    schema42_future_transport_diagnostics_must_distinguish_malformed_request_from_transport_interruption:true,
+  },
+  replacedRules:{
+    windows_system_management_programs:{
+      current:["reg.exe","schtasks.exe","sc.exe","netsh.exe","bcdedit.exe","dism.exe","pnputil.exe","powercfg.exe","wevtutil.exe","net.exe","net1.exe","fsutil.exe","mountvol.exe","reagentc.exe","manage-bde.exe","fltmc.exe","auditpol.exe","vssadmin.exe"],
+      baseline:["reg.exe","schtasks.exe","sc.exe","netsh.exe","bcdedit.exe","dism.exe","pnputil.exe","powercfg.exe","wevtutil.exe"]
+    }
+  },
+  addedArtifacts:{
+    "LB-006":[
+      "Windows native command-output decoding that preserves known UTF-8 OEM or ACP semantics without replacement decoding for unknown non-UTF8 bytes",
+      "workflow and image-result semantic convergence for generic durable steps context-ready terminal results and actionable truncation remediation"
+    ],
+    "LB-007":[
+      "shell-specific CMD and PowerShell capability classifiers with nested cmd inner-command classification instead of one shared review-word denylist",
+      "expanded Windows system-management operation classifier covering direct executable cmd PowerShell and agent_workflow entry points"
+    ],
+    "LB-012":[
+      "one Broker authorization truth shared by elevated process shell and filesystem routes with real-client route parity",
+      "structured elevated process and shell stdout stderr observation plus retained output continuation when inline output is truncated"
+    ]
+  },
+  addedTests:{
+    "LB-006":[
+      "Full process execution is explicitly bounded by the current Windows ordinary-user token; LocalBridge direct-command review is a routing and accidental-system-maintenance guard and does not claim transitive descendant enforcement for cmd bat ps1 Python npm or other child process trees without a separately contracted OS confinement mechanism",
+      "cmd bare NUL redirection preserves native Windows device semantics for >nul and 2>nul and creates neither nul.localbridge nor another workspace file",
+      "representative Windows native executable output emitted in a known non-UTF8 OEM or ACP code page is decoded to the correct public Unicode text without U+FFFD replacement corruption; blanket String::from_utf8_lossy is not accepted when the source bytes are not known UTF-8",
+      "view_image OutputTruncated either returns a real readable output_ref continuation or gives actionable resize or max_bytes remediation; it never tells the client to use output_ref while output_refs is empty",
+      "every active durable generic workflow has a meaningful current_step before directory patch or command side effects execute and supplies next_step whenever the next action is deterministically known; running durable workflow null current_step plus null next_step is forbidden",
+      "context-only diagnose is a non-durable terminal context result: state is context_ready, workflow_id and task_id are null, and summary describes context readiness rather than claiming that a durable Agent workflow completed"
+    ],
+    "LB-007":[
+      "Windows system-management family additionally covers net.exe net1.exe fsutil.exe mountvol.exe reagentc.exe manage-bde.exe fltmc.exe auditpol.exe and vssadmin.exe; explicitly frozen read-only queries may run in Full while mutation and unknown operations require the privileged route",
+      "CMD ordinary development builtins set, set /p, set X=value, copy, move and ren are not classified privileged solely because identical tokens are PowerShell aliases or review words; mkdir rmdir and del remain consistent ordinary Full behavior under the current-user token",
+      "cmd /c and cmd /k are not privileged merely for nesting a shell; a statically visible inner ordinary command such as echo remains Full while a statically visible inner system-management mutation is classified by the same direct-operation policy and requires Elevated",
+      "PowerShell Set-Variable Set-Content New-Item Copy-Item Move-Item and Remove-Item are not privilege-required solely by verb name for ordinary Full development use under the current-user token; dynamic provider control-plane reflection or independently privileged behavior remains fail-closed",
+      "[System.Security.Principal.WindowsIdentity]::GetCurrent() is a frozen read-only identity diagnostic in Full and is not privilege-required solely because it uses static .NET member dispatch",
+      "literal workspace cmd bat or ps1 scripts and language runtimes may create descendant processes under the ordinary user token without LocalBridge claiming transitive policy inspection of script bodies; no descendant receives Broker administrator authority unless it enters the explicit elevated_exec route"
+    ],
+    "LB-012":[
+      "one real connected MCP client with PermissionMode Elevated and Active Broker successfully exercises process shell and filesystem elevated_exec variants through the same administrator authorization truth; switching back to Full immediately closes all three privileged routes",
+      "elevated process and shell results expose structured stdout and stderr separately from outcome and exit_code; when either stream exceeds the inline limit the response supplies a real readable retained output_ref rather than only truncated=true",
+      "permission_mode=elevated alone does not claim an administrator token: administrator_token_available and elevated_route_available remain false until the Broker is Active and UAC authorization is valid, and all three elevated_exec operation families use that same readiness truth"
+    ]
+  }
+});
+
+export function hasExactSchema42WindowsExecutionPolicyAmendment20260818(doc){
+  if(doc?.schema_version!==42)return false;
+  for(const [k,v] of Object.entries(SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18.addedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v))return false;
+  for(const [k,v] of Object.entries(SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18.addedArtifacts)) for(const item of items) if(!doc?.prs?.[id]?.required_artifacts?.includes(item))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18.addedTests)) for(const item of items) if(!doc?.prs?.[id]?.required_tests?.includes(item))return false;
+  return true;
+}
+export function normalizeSchema42WindowsExecutionPolicyAmendment20260818(doc){
+  const n=structuredClone(doc??null); if(!n)return n;
+  for(const k of Object.keys(SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18.addedRules)) delete n.rules[k];
+  for(const [k,v] of Object.entries(SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18.replacedRules)) n.rules[k]=structuredClone(v.baseline);
+  for(const [id,items] of Object.entries(SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18.addedArtifacts)) if(n.prs?.[id]) n.prs[id].required_artifacts=(n.prs[id].required_artifacts??[]).filter(x=>!items.includes(x));
+  for(const [id,items] of Object.entries(SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18.addedTests)) if(n.prs?.[id]) n.prs[id].required_tests=(n.prs[id].required_tests??[]).filter(x=>!items.includes(x));
+  return n;
+}
+
 const SCHEMA41_DERIVED_WAIT_TEST = "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed";
 const SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18 = Object.freeze({
   rules: {
@@ -3103,6 +3195,8 @@ export function validatePreG4GateAuthorization(
   const findings = [];
   let authorizationContracts = contractsDoc;
   if ((authorizationContracts?.schema_version ?? 0) >= 42) {
+    if (!hasExactSchema42WindowsExecutionPolicyAmendment20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-windows-execution-policy-20260818-drift`);
+    authorizationContracts = normalizeSchema42WindowsExecutionPolicyAmendment20260818(authorizationContracts);
     if (!hasExactSchema42DashboardObservabilityAmendment20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-dashboard-observability-20260818-drift`);
     authorizationContracts = normalizeSchema42DashboardObservabilityAmendment20260818(authorizationContracts);
     if (!hasExactSchema42TaskCommandTruth20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-task-command-truth-20260818-drift`);
