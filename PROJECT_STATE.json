@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": "LB-011",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4972,6 +4972,17 @@
       "Architecture PASS."
     ],
     "next_pr": "LB-010",
+    "g4_unlocked": false
+  },
+  "schema40_lb010_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "Production watchdog semantic contract PASS; stale marker-only WouldBlock proof removed.",
+      "Recovery behavior 16/16 PASS including process-alive/authenticated-MCP-unresponsive existing recovery path.",
+      "Real schema40 tests PASS: health independent of facade lock; actual suspended MCP root stays alive while bounded authenticated probe becomes non-Ready and recovers after resume.",
+      "Architecture PASS."
+    ],
+    "next_pr": "LB-011",
     "g4_unlocked": false
   }
 }
