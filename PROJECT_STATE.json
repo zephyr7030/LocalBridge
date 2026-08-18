@@ -5299,5 +5299,14 @@
       "workspace 23/23 PASS"
     ],
     "next_pr": "LB-011"
+  },
+  "schema42_lb011_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB011 security boundary PASS",
+      "privilege 25/25 PASS",
+      "Broker IPC 6 PASS 1 explicit-UAC ignored"
+    ],
+    "next_pr": "LB-012"
   }
 }
