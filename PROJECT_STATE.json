@@ -4634,9 +4634,9 @@
     "g4_unlocked": false
   },
   "schema41_g2_generation29_pending_2026_08_18": {
-    "status": "REVIEW_REQUIRED",
+    "status": "PASS",
     "generation": 29,
-    "generation_consumed": false,
+    "generation_consumed": true,
     "baseline_commit": "09bf28f97471be1ad012ac3e6a0008c27f8707b3",
     "product_revision": 41,
     "local_engineering_gate": "PASS",
@@ -4654,7 +4654,7 @@
       "product_fix_remaining": false,
       "requires_fresh_downstream_projection": false
     },
-    "next_action": "Run fresh G2 generation29 independent adversarial review on final stale-client-compatible tree.",
+    "next_action": "Seal generation29 provenance, then reaccept LB-013..LB-017 and run fresh G3 generation19.",
     "g3_generation19_blocked": true,
     "g4_unlocked": false
   },
@@ -4747,5 +4747,35 @@
     ],
     "next_action": "Run fresh schema41 G2 generation29 independent adversarial review.",
     "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_29_2026_08_18": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 29,
+    "kind": "independent_adversarial",
+    "baseline_commit": "c956f90db0448213c7f21d9e27e9a05392d14c17",
+    "finding": "No blocking schema41 G2 defect found after stale downstream compatibility repair; old schema39-visible clients can drive the api41 durable coding task without weakening policy.",
+    "evidence": [
+      "Fresh full cargo test PASS on final tree: 220 library tests plus all integration/migration targets; explicit live-UAC test remains intentionally ignored.",
+      "Clippy all-targets/all-features -D warnings PASS; frontend Vitest 4 files/7 tests and production build PASS.",
+      "Runtime manifest, UI-language, schema41 coding-agent machine acceptance, architecture, G4 human-gate fail-closed and git diff --check PASS.",
+      "Real stale @测试 client used only schema39-visible action/objective/path and successfully received api41 prepared durable task/context/verification plan; task_control cancel then safely cancelled the durable task."
+    ],
+    "verified_passes": [
+      "cargo test --locked",
+      "cargo clippy --all-targets --all-features -- -D warnings",
+      "frontend Vitest 7 tests and production build",
+      "runtime-manifest",
+      "UI-language",
+      "schema41 coding-agent machine acceptance",
+      "real stale @测试 prepare/cancel",
+      "architecture",
+      "G4 fail-closed",
+      "git diff --check"
+    ],
+    "g2_generation_29_consumed": true,
+    "g3_unlocked_for_reacceptance": false,
+    "g4_unlocked": false,
+    "review_decision_commit": null
   }
 }
