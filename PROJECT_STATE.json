@@ -5508,5 +5508,24 @@
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "schema42_lb012_toolbox_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "product_commit": "e31bd032fb33124847652cbdf96bc086d367bd1f",
+    "governance_normalization_commit": "55c2340128510d455ce1e563176ba1bf59c4be4e",
+    "evidence": [
+      "generation33 retained local elevated output is now bounded by an eight-handle FIFO while private runtime output handles remain untouched; focused eviction/readability regression PASS",
+      "aria2c 1.37.0 7z 26.02 and jq 1.8.2 are prepared only by the build-time script from frozen sources with verified archive and executable SHA256; target artifacts are ignored and are not committed",
+      "ToolboxResolver hashes packaged binaries, probes exact Windows System32 curl capability, exposes readiness through workspace_context.runtime_availability.toolbox, and maps missing versus insufficient curl to RuntimeUnavailable versus CapabilityUnavailable",
+      "real bundled-runtime public exec_command E2E PASS for pinned aria2c 7z jq and cmd plus Windows PowerShell curl while workspace fake same-name commands cannot shadow trusted Toolbox executables and Full public tool count remains eight",
+      "full all-targets Clippy -D warnings PASS and complete serial Rust suite PASS with 249 library tests plus all integration migration policy and Broker targets; explicit live UAC test remains intentionally ignored",
+      "frontend tests/build schema41/schema42 execution contracts LB-012 runtime-manifest UI-language G4 fail-closed git diff check and Tauri debug no-bundle build PASS"
+    ],
+    "group_transition": "G2_REVIEW_REQUIRED",
+    "next_required_g2_generation": 34,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
