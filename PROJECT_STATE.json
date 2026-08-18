@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4634,7 +4634,7 @@
     "g4_unlocked": false
   },
   "schema41_g2_generation29_pending_2026_08_18": {
-    "status": "REVIEW_REQUIRED",
+    "status": "REWORK_REQUIRED",
     "generation": 29,
     "generation_consumed": false,
     "baseline_commit": "09bf28f97471be1ad012ac3e6a0008c27f8707b3",
@@ -4651,11 +4651,23 @@
       "code": "DOWNSTREAM_CLIENT_METADATA_STALE",
       "contract": "A345 / public_schema_real_mcp_client_projection_acceptance_required",
       "scope": "ChatGPT current connector projection still lacks schema41 workspace_context.detail and agent_workflow phase/task_id/expected_files although live LocalBridge serves them",
-      "product_fix_remaining": false,
+      "product_fix_remaining": true,
       "requires_fresh_downstream_projection": true
     },
-    "next_action": "Retry/refresh the real @测试 connector projection. If schema41 fields are visible and a legal call reaches LocalBridge, finish G2 generation29 decision/provenance, then run G3 generation19.",
+    "next_action": "Repair LB-006 stale-projection compatibility, reaccept LB-006..LB-012, then rerun fresh G2 generation29 and G3 generation19.",
     "g3_generation19_blocked": true,
+    "g4_unlocked": false
+  },
+  "schema41_downstream_compat_reopen_2026_08_18": {
+    "status": "REWORK_REQUIRED",
+    "owner_pr": "LB-006",
+    "reason": "Real @测试 executes api41 but its cached schema39 projection cannot express phase/task_id/expected_files. Schema41 semantics must remain reachable through schema39-visible action/objective/patch/resume fields instead of depending on client metadata refresh.",
+    "schema40_generations_preserved_as_history": {
+      "g2": 28,
+      "g3": 18
+    },
+    "next_required_g2_generation": 29,
+    "next_required_g3_generation": 19,
     "g4_unlocked": false
   }
 }
