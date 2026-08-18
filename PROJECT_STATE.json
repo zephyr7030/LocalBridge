@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4827,6 +4827,26 @@
       "Architecture, human-gate fail-closed and git diff check PASS."
     ],
     "next_pr": "LB-017",
+    "g4_unlocked": false
+  },
+  "schema41_g3_lb017_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-017",
+    "evidence": [
+      "LB017 diagnostics contract PASS.",
+      "Fresh diagnostics Rust tests PASS 4/4.",
+      "Architecture and git diff check PASS."
+    ],
+    "next_action": "Run schema41 G3 generation19 independent adversarial review.",
+    "g4_unlocked": false
+  },
+  "schema41_g3_generation19_pending_2026_08_18": {
+    "status": "REVIEW_REQUIRED",
+    "generation": 19,
+    "generation_consumed": false,
+    "baseline_commit": "7b84dcd9f8bc19097414e096984712459242edd3",
+    "product_revision": 41,
+    "next_action": "Run fresh G3 generation19 independent adversarial review.",
     "g4_unlocked": false
   }
 }
