@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -5168,6 +5168,25 @@
     "decision_commit": "0ff0e7ea3e38ea4369806d687f98e22ed18a2857",
     "human_review_status": "REQUIRED",
     "human_review_generation": 3,
+    "g4_unlocked": false
+  },
+  "schema41_waiting_derived_settlement_reopen_2026_08_18": {
+    "status": "REWORK_REQUIRED",
+    "owner_pr": "LB-006",
+    "contract": "waiting is derived, not freely persisted: with no running command session it is allowed only when next_step is present; no session plus no next_step settles completed",
+    "minimal_implementation": "derive durable task state from completed/current_session_id/next_step; add no wait field, watchdog, lease, heartbeat, or secondary state machine",
+    "invalidated": {
+      "g2": {
+        "generation": 30,
+        "commit": "1083059c890a157f19e3a71664997827344f557d"
+      },
+      "g3": {
+        "generation": 20,
+        "commit": "0ff0e7ea3e38ea4369806d687f98e22ed18a2857"
+      }
+    },
+    "next_required_g2_generation": 31,
+    "next_required_g3_generation": 21,
     "g4_unlocked": false
   }
 }

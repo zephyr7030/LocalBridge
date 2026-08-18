@@ -125,7 +125,7 @@
         "LB-004"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-007",
@@ -135,7 +135,7 @@
         "LB-006"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-008",
@@ -147,7 +147,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-009",
@@ -159,7 +159,7 @@
         "LB-008"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-010",
@@ -169,7 +169,7 @@
         "LB-009"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-011",
@@ -181,7 +181,7 @@
         "LB-007"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-012",
@@ -192,7 +192,7 @@
         "LB-011"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-013",
@@ -202,7 +202,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-014",
@@ -211,7 +211,7 @@
         "LB-013"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-015",
@@ -223,7 +223,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-016",
@@ -234,7 +234,7 @@
         "LB-015"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-017",
@@ -246,7 +246,7 @@
         "LB-015"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-018",
@@ -327,8 +327,8 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "REWORK_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 30,
       "review_provenance": {
         "generation": 30,
@@ -389,6 +389,11 @@
             "generation": 29,
             "commit": "2517f5d9ff435648f45fd52e13b7df7d8417262f",
             "cause": "schema41_adversarial_semantic_repair_2026_08_18"
+          },
+          {
+            "generation": 30,
+            "commit": "1083059c890a157f19e3a71664997827344f557d",
+            "cause": "schema41_waiting_derived_settlement_amendment_2026_08_18"
           }
         ]
       },
@@ -404,10 +409,10 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
+      "status": "BLOCKED",
+      "review_status": "BLOCKED",
       "review_generation": 20,
-      "human_review_status": "REQUIRED",
+      "human_review_status": "BLOCKED",
       "human_review_generation": 3,
       "review_provenance": {
         "generation": 20,
@@ -483,6 +488,11 @@
             "generation": 19,
             "commit": "ffd4bfdcf0089e85f85c29d4a0ac1c551c566faa",
             "cause": "upstream_schema41_adversarial_semantic_repair_2026_08_18"
+          },
+          {
+            "generation": 20,
+            "commit": "0ff0e7ea3e38ea4369806d687f98e22ed18a2857",
+            "cause": "schema41_waiting_derived_settlement_amendment_2026_08_18"
           }
         ]
       },
@@ -500,6 +510,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": null,
-  "current_group": "G3"
+  "current_pr": "LB-006",
+  "current_group": "G2"
 }

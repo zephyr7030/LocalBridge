@@ -1057,7 +1057,9 @@
     "schema41_earliest_owner_pr": "LB-006",
     "schema41_next_g2_review_generation": 29,
     "schema41_next_g3_review_generation": 19,
-    "localbridge_agent_api_revision": 41
+    "localbridge_agent_api_revision": 41,
+    "coding_task_waiting_derived_from_real_wait_required": true,
+    "coding_task_waiting_requires_next_step_without_running_session": true
   },
   "prs": {
     "LB-000": {
@@ -1434,7 +1436,8 @@
         "VerificationPlanner gives project instructions and explicit project gates highest authority, then selects evidence-backed changed-file targeted tests, lint or typecheck, broader project gate and git diff checks as applicable; it never guesses an npm cargo pytest dotnet or go command without discovered manifest script or project-rule evidence and preserves existing pr_fast pr_runtime group_release orchestration",
         "public coding operations share common ok state summary task_id warnings next_step output_refs data error envelope metadata while keeping command Git document image and workflow domain fields inside data rather than forcing meaningless empty cross-domain fields",
         "coding-agent-v1 machine verification proves workspace discovery project instructions context search command execution persistent task resume patch edit test/build Git status/diff cancellation output continuation and typed errors are all reachable through the existing eight non-privileged core tools plus elevated_exec extension with no public API clone requirement",
-        "default Coding Agent responses remain compact; large context command output diffs or verification logs are retained behind output_refs or bounded range retrieval rather than returning coding-tools-style multi-tens-of-kilobyte prepare payloads"
+        "default Coding Agent responses remain compact; large context command output diffs or verification logs are retained behind output_refs or bounded range retrieval rather than returning coding-tools-style multi-tens-of-kilobyte prepare payloads",
+        "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed"
       ],
       "non_goals": [
         "policy enforcement",

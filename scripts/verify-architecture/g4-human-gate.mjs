@@ -2155,8 +2155,13 @@ const SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17 = Object.freeze({
   },
 });
 
+const SCHEMA41_DERIVED_WAIT_TEST = "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed";
+
 export function hasExactSchema41CodingAgentCompatibility20260817(contractsDoc) {
   if (contractsDoc?.schema_version !== SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.schemaVersion) return false;
+  if (contractsDoc?.rules?.coding_task_waiting_derived_from_real_wait_required !== true) return false;
+  if (contractsDoc?.rules?.coding_task_waiting_requires_next_step_without_running_session !== true) return false;
+  if (!contractsDoc?.prs?.["LB-006"]?.required_tests?.includes(SCHEMA41_DERIVED_WAIT_TEST)) return false;
   for (const [key, expected] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.addedRules)) {
     if (canonicalJson(contractsDoc?.rules?.[key]) !== canonicalJson(expected)) return false;
   }
@@ -2176,6 +2181,9 @@ export function normalizeSchema41CodingAgentCompatibility20260817(contractsDoc) 
   const normalized = structuredClone(contractsDoc ?? null);
   if (!normalized) return normalized;
   normalized.schema_version = SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.baselineSchemaVersion;
+  delete normalized.rules.coding_task_waiting_derived_from_real_wait_required;
+  delete normalized.rules.coding_task_waiting_requires_next_step_without_running_session;
+  if (normalized.prs?.["LB-006"]) normalized.prs["LB-006"].required_tests = (normalized.prs["LB-006"].required_tests ?? []).filter((item) => item !== SCHEMA41_DERIVED_WAIT_TEST);
   for (const key of Object.keys(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.addedRules)) delete normalized.rules[key];
   for (const [key, replacement] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.replacedRules)) normalized.rules[key] = structuredClone(replacement.baseline);
   for (const [id, delta] of Object.entries(SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.prs)) {
