@@ -5318,7 +5318,7 @@
     "next": "G2 generation32 review"
   },
   "schema42_g2_generation32_review_2026_08_18": {
-    "status": "PASS_DECISION_PENDING_PROVENANCE",
+    "status": "PASS",
     "generation": 32,
     "kind": "independent_adversarial",
     "evidence": [
@@ -5332,6 +5332,7 @@
       "git diff check PASS"
     ],
     "next": "G3 LB-013",
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "decision_commit": "0c21acdeea09986d7a427a94a06b2c77144cecba"
   }
 }
