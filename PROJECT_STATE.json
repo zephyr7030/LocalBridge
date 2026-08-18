@@ -5125,7 +5125,8 @@
     ],
     "human_review_status": "REQUIRED",
     "g4_unlocked": false,
-    "local_engineering_gate": "PASS"
+    "local_engineering_gate": "PASS",
+    "review_decision_commit": "0ff0e7ea3e38ea4369806d687f98e22ed18a2857"
   },
   "g3_adversarial_review_generation_20_2026_08_18": {
     "status": "PASS",
@@ -5159,6 +5160,14 @@
     "human_review_required": true,
     "human_review_generation": 3,
     "g4_unlocked": false,
-    "review_decision_commit": null
+    "review_decision_commit": "0ff0e7ea3e38ea4369806d687f98e22ed18a2857"
+  },
+  "schema41_g3_generation_20_provenance_2026_08_18": {
+    "status": "PASS",
+    "generation": 20,
+    "decision_commit": "0ff0e7ea3e38ea4369806d687f98e22ed18a2857",
+    "human_review_status": "REQUIRED",
+    "human_review_generation": 3,
+    "g4_unlocked": false
   }
 }

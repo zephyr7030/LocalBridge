@@ -410,9 +410,9 @@
       "human_review_status": "REQUIRED",
       "human_review_generation": 3,
       "review_provenance": {
-        "generation": 19,
+        "generation": 20,
         "kind": "independent_adversarial",
-        "commit": "ffd4bfdcf0089e85f85c29d4a0ac1c551c566faa",
+        "commit": "0ff0e7ea3e38ea4369806d687f98e22ed18a2857",
         "invalidated_generations": [
           {
             "generation": 6,
