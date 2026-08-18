@@ -2259,6 +2259,82 @@ export function normalizeSchema42DashboardObservabilityAmendment20260818(doc){
   return n;
 }
 
+const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
+  addedRules:{
+    schema42_unified_error_diagnostics_amendment_ratified:true,
+    schema42_unified_error_diagnostics_owner_prs:["LB-006","LB-007","LB-008","LB-010","LB-017"],
+    schema42_unified_error_diagnostics_next_g2_review_generation:35,
+    schema42_unified_error_diagnostics_next_g3_review_generation:22,
+    public_diagnostic_error_codes:["InvalidRequest","Unavailable","Denied","Timeout","Cancelled","ExecutionFailed","Unknown"],
+    public_diagnostic_phases:["transport","mcp","runtime","policy","tool","process","unknown"],
+    public_failed_response_diagnostics_required:true,
+    public_detailed_canonical_error_code_preserved:true,
+    shared_error_mapper_required:true,
+    unknown_error_final_fallback_required:true,
+    diagnostic_cause_extensible_without_public_schema_change:true,
+    request_diagnostics_fields:["request_id","connection_id","attempt","error_code","phase","cause","http_status","duration_ms"],
+    request_retry_preserves_request_id_required:true,
+    request_retry_increments_attempt_required:true,
+    request_start_log_fields:["timestamp","request_id","connection_id","attempt","tool"],
+    request_end_log_fields:["request_id","connection_id","attempt","outcome","error_code","phase","cause","http_status","duration_ms"],
+    tunnel_mcp_transport_failure_phase_transport_required:true,
+    tunnel_http_400_diagnostic_error_code:"Unavailable",
+    tunnel_http_400_diagnostic_phase:"transport",
+    transport_failure_runtime_unavailable_misclassification_forbidden:true,
+    unified_request_diagnostics_reuse_existing_redacted_diagnostics_store_required:true,
+    unified_request_diagnostics_engineering_fields_ui_forbidden:true,
+    schema42_transport_diagnostics_current_required:true,
+  },
+  replacedRules:{
+    schema42_mcp_transport_diagnostics_deferred_to_diagnostics_logging:{current:false,baseline:true},
+    schema42_mcp_transport_not_current_repair_blocker:{current:false,baseline:true},
+  },
+  addedWritablePaths:{
+    "LB-006":["src-tauri/src/diagnostics/error.rs","src-tauri/src/diagnostics/mod.rs"]
+  },
+  addedArtifacts:{
+    "LB-006":["shared Unified Error Diagnostics mapper preserving detailed canonical error.code while adding stable error_code phase cause metadata"],
+    "LB-007":["policy failures projected through the shared Unified Error Diagnostics mapper without renaming existing detailed canonical policy codes"],
+    "LB-008":["Tunnel transport diagnostic mapping with stable cause and optional HTTP status without RuntimeUnavailable misclassification"],
+    "LB-010":["recovery request correlation retaining one request_id across retries while incrementing attempt"],
+    "LB-017":["bounded redacted request diagnostic start/end records reusing the existing diagnostics store"]
+  },
+  addedTests:{
+    "LB-006":[
+      "every failed public tool response contains detailed canonical code plus stable error_code phase and extensible cause; unrecognized internal failures map to Unknown instead of escaping unmapped",
+      "MCP transport connection HTTP framing and HTTP status failures map through the shared diagnostic mapper; HTTP 400 is Unavailable plus transport with cause http_400 and is not mislabeled RuntimeUnavailable unless the runtime itself is unavailable",
+      "MCP HTTP request parsing distinguishes malformed_request socket_read_failure early_eof unsupported_transfer_encoding header_too_large and body_too_large causes rather than collapsing all transport failures to HTTP 400"
+    ],
+    "LB-007":["PolicyDenied WorkspaceDenied CapabilityDenied PrivilegedRouteUnavailable and ElevationRequired retain their detailed code while projecting diagnostic error_code Denied and phase policy"],
+    "LB-008":["Tunnel-side HTTP 400 is recorded as diagnostic Unavailable plus transport plus cause http_400 and http_status 400 while preserving the existing Tunnel fault/retry contract"],
+    "LB-010":["automatic retries retain one request_id for the outage request and increment attempt monotonically; a successful retry remains correlated with the original failed request"],
+    "LB-017":[
+      "request start logging records timestamp request_id connection_id attempt and tool; request end records request_id connection_id attempt outcome error_code phase cause http_status and duration_ms",
+      "request diagnostic engineering fields remain out of the normal Diagnostics UI but are available in redacted diagnostic logs or export",
+      "successful retry records preserve the request_id used by preceding failed attempts and show incremented attempt values without leaking secrets"
+    ]
+  }
+});
+
+export function hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(doc){
+  if(doc?.schema_version!==42)return false;
+  for(const [k,v] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.addedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v))return false;
+  for(const [k,v] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.addedWritablePaths)) for(const item of items) if(!doc?.prs?.[id]?.writable_paths?.includes(item))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.addedArtifacts)) for(const item of items) if(!doc?.prs?.[id]?.required_artifacts?.includes(item))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.addedTests)) for(const item of items) if(!doc?.prs?.[id]?.required_tests?.includes(item))return false;
+  return true;
+}
+export function normalizeSchema42UnifiedErrorDiagnosticsAmendment20260819(doc){
+  const n=structuredClone(doc??null); if(!n)return n;
+  for(const k of Object.keys(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.addedRules)) delete n.rules[k];
+  for(const [k,v] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.replacedRules)) n.rules[k]=structuredClone(v.baseline);
+  for(const [id,items] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.addedWritablePaths)) if(n.prs?.[id]) n.prs[id].writable_paths=(n.prs[id].writable_paths??[]).filter(x=>!items.includes(x));
+  for(const [id,items] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.addedArtifacts)) if(n.prs?.[id]) n.prs[id].required_artifacts=(n.prs[id].required_artifacts??[]).filter(x=>!items.includes(x));
+  for(const [id,items] of Object.entries(SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19.addedTests)) if(n.prs?.[id]) n.prs[id].required_tests=(n.prs[id].required_tests??[]).filter(x=>!items.includes(x));
+  return n;
+}
+
 const SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18 = Object.freeze({
   addedRules:{
     schema42_toolbox_amendment_ratified:true,
@@ -3274,6 +3350,8 @@ export function validatePreG4GateAuthorization(
   const findings = [];
   let authorizationContracts = contractsDoc;
   if ((authorizationContracts?.schema_version ?? 0) >= 42) {
+    if (!hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(authorizationContracts)) findings.push(`${expected.id}:schema42-unified-error-diagnostics-20260819-drift`);
+    authorizationContracts = normalizeSchema42UnifiedErrorDiagnosticsAmendment20260819(authorizationContracts);
     if (!hasExactSchema42ToolboxAmendment20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-toolbox-20260818-drift`);
     authorizationContracts = normalizeSchema42ToolboxAmendment20260818(authorizationContracts);
     if (!hasExactSchema42WindowsExecutionPolicyAmendment20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-windows-execution-policy-20260818-drift`);

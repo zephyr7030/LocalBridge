@@ -5527,5 +5527,78 @@
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_34_2026_08_19": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "generation": 34,
+    "kind": "independent_adversarial",
+    "reviewed_baseline_commit": "7c4da73b027b609f879dbd16e0fe5049e8a3ec72",
+    "reopen_from_pr": "LB-012",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-012",
+        "title": "Toolbox command rewrite altered quoted inert shell literals",
+        "evidence": [
+          "ToolboxResolver treated separator characters inside quoted command arguments as new command boundaries.",
+          "Quoted strings such as PowerShell Write-Output 'prefix | jq suffix' could cause jq to be rewritten to a Toolbox executable path after policy review."
+        ],
+        "required_fix": "Preserve shell quote and escape boundaries while recognizing only actual command-position Toolbox targets."
+      }
+    ],
+    "fresh_group_release": [
+      "full serial Rust suite PASS",
+      "all-targets Clippy -D warnings PASS",
+      "frontend/runtime-manifest/schema/G4 checks PASS except expected review-transition architecture lock"
+    ],
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "schema42_lb012_toolbox_quote_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "product_commit": "7571748",
+    "evidence": [
+      "ToolboxResolver now respects CMD and PowerShell quote/escape boundaries when locating command separators.",
+      "Focused Toolbox and real bundled-runtime quoted-shell tests PASS.",
+      "Full serial cargo test, all-targets Clippy, LB-012 contract, schema42 execution-platform, runtime manifest, G4 regression and diff check PASS."
+    ],
+    "superseded_by": "schema42_unified_error_diagnostics_amendment_2026_08_19"
+  },
+  "schema42_unified_error_diagnostics_amendment_2026_08_19": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "owner_prs": [
+      "LB-006",
+      "LB-007",
+      "LB-008",
+      "LB-010",
+      "LB-017"
+    ],
+    "public_error_codes": [
+      "InvalidRequest",
+      "Unavailable",
+      "Denied",
+      "Timeout",
+      "Cancelled",
+      "ExecutionFailed",
+      "Unknown"
+    ],
+    "phases": [
+      "transport",
+      "mcp",
+      "runtime",
+      "policy",
+      "tool",
+      "process",
+      "unknown"
+    ],
+    "current_pr": "LB-006",
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }

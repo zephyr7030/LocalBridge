@@ -1295,7 +1295,32 @@
       "missing_error": "RuntimeUnavailable",
       "capability_missing_error": "CapabilityUnavailable",
       "fallback_download_forbidden": true
-    }
+    },
+    "schema42_unified_error_diagnostics_amendment_ratified": true,
+    "schema42_unified_error_diagnostics_owner_prs": ["LB-006", "LB-007", "LB-008", "LB-010", "LB-017"],
+    "schema42_unified_error_diagnostics_next_g2_review_generation": 35,
+    "schema42_unified_error_diagnostics_next_g3_review_generation": 22,
+    "public_diagnostic_error_codes": ["InvalidRequest", "Unavailable", "Denied", "Timeout", "Cancelled", "ExecutionFailed", "Unknown"],
+    "public_diagnostic_phases": ["transport", "mcp", "runtime", "policy", "tool", "process", "unknown"],
+    "public_failed_response_diagnostics_required": true,
+    "public_detailed_canonical_error_code_preserved": true,
+    "shared_error_mapper_required": true,
+    "unknown_error_final_fallback_required": true,
+    "diagnostic_cause_extensible_without_public_schema_change": true,
+    "request_diagnostics_fields": ["request_id", "connection_id", "attempt", "error_code", "phase", "cause", "http_status", "duration_ms"],
+    "request_retry_preserves_request_id_required": true,
+    "request_retry_increments_attempt_required": true,
+    "request_start_log_fields": ["timestamp", "request_id", "connection_id", "attempt", "tool"],
+    "request_end_log_fields": ["request_id", "connection_id", "attempt", "outcome", "error_code", "phase", "cause", "http_status", "duration_ms"],
+    "tunnel_mcp_transport_failure_phase_transport_required": true,
+    "tunnel_http_400_diagnostic_error_code": "Unavailable",
+    "tunnel_http_400_diagnostic_phase": "transport",
+    "transport_failure_runtime_unavailable_misclassification_forbidden": true,
+    "unified_request_diagnostics_reuse_existing_redacted_diagnostics_store_required": true,
+    "unified_request_diagnostics_engineering_fields_ui_forbidden": true,
+    "schema42_transport_diagnostics_current_required": true,
+    "schema42_mcp_transport_diagnostics_deferred_to_diagnostics_logging": false,
+    "schema42_mcp_transport_not_current_repair_blocker": false
   },
   "prs": {
     "LB-000": {
@@ -1517,6 +1542,8 @@
     "LB-006": {
       "writable_paths": [
         "src-tauri/src/mcp/**",
+        "src-tauri/src/diagnostics/error.rs",
+        "src-tauri/src/diagnostics/mod.rs",
         "runtime/python/**",
         "runtime/coding-tools-mcp/**",
         "runtime-manifest.toml",
@@ -1580,6 +1607,7 @@
         "shared compact coding result envelope metadata layered around domain-specific result data with retained output_ref continuation",
         "Windows native command-output decoding that preserves known UTF-8 OEM or ACP semantics without replacement decoding for unknown non-UTF8 bytes",
         "workflow and image-result semantic convergence for generic durable steps context-ready terminal results and actionable truncation remediation"
+        ,"shared Unified Error Diagnostics mapper preserving detailed canonical error.code while adding stable error_code phase cause metadata"
       ],
       "required_tests": [
         "embedded Python launch",
@@ -1700,6 +1728,9 @@
         "view_image OutputTruncated either returns a real readable output_ref continuation or gives actionable resize or max_bytes remediation; it never tells the client to use output_ref while output_refs is empty",
         "every active durable generic workflow has a meaningful current_step before directory patch or command side effects execute and supplies next_step whenever the next action is deterministically known; running durable workflow null current_step plus null next_step is forbidden",
         "context-only diagnose is a non-durable terminal context result: state is context_ready, workflow_id and task_id are null, and summary describes context readiness rather than claiming that a durable Agent workflow completed"
+        ,"every failed public tool response contains detailed canonical code plus stable error_code phase and extensible cause; unrecognized internal failures map to Unknown instead of escaping unmapped"
+        ,"MCP transport connection HTTP framing and HTTP status failures map through the shared diagnostic mapper; HTTP 400 is Unavailable plus transport with cause http_400 and is not mislabeled RuntimeUnavailable unless the runtime itself is unavailable"
+        ,"MCP HTTP request parsing distinguishes malformed_request socket_read_failure early_eof unsupported_transfer_encoding header_too_large and body_too_large causes rather than collapsing all transport failures to HTTP 400"
       ],
       "non_goals": [
         "policy enforcement",
@@ -1732,6 +1763,7 @@
         "stable privileged tool advertisement with call-time policy enforcement across permission and Broker transitions",
         "shell-specific CMD and PowerShell capability classifiers with nested cmd inner-command classification instead of one shared review-word denylist",
         "expanded Windows system-management operation classifier covering direct executable cmd PowerShell and agent_workflow entry points"
+        ,"policy failures projected through the shared Unified Error Diagnostics mapper without renaming existing detailed canonical policy codes"
       ],
       "required_tests": [
         "tools/call bypass",
@@ -1769,6 +1801,7 @@
         "PowerShell Set-Variable Set-Content New-Item Copy-Item Move-Item and Remove-Item are not privilege-required solely by verb name for ordinary Full development use under the current-user token; dynamic provider control-plane reflection or independently privileged behavior remains fail-closed",
         "[System.Security.Principal.WindowsIdentity]::GetCurrent() is a frozen read-only identity diagnostic in Full and is not privilege-required solely because it uses static .NET member dispatch",
         "literal workspace cmd bat or ps1 scripts and language runtimes may create descendant processes under the ordinary user token without LocalBridge claiming transitive policy inspection of script bodies; no descendant receives Broker administrator authority unless it enters the explicit elevated_exec route"
+        ,"PolicyDenied WorkspaceDenied CapabilityDenied PrivilegedRouteUnavailable and ElevationRequired retain their detailed code while projecting diagnostic error_code Denied and phase policy"
       ],
       "non_goals": [
         "Tunnel",
@@ -1787,7 +1820,8 @@
       ],
       "required_artifacts": [
         "pinned tunnel runtime",
-        "tunnel reconnect primitive with typed recoverable/non-recoverable faults"
+        "tunnel reconnect primitive with typed recoverable/non-recoverable faults",
+        "Tunnel transport diagnostic mapping with stable cause and optional HTTP status without RuntimeUnavailable misclassification"
       ],
       "required_tests": [
         "fake tunnel deterministic tests",
@@ -1800,6 +1834,7 @@
         "unsupported safe secret injection fails with typed SecretInjectionUnsupported",
         "recoverable tunnel disconnect can be restarted without exposing secret",
         "non-recoverable credential/config fault is classified without retry"
+        ,"Tunnel-side HTTP 400 is recorded as diagnostic Unavailable plus transport plus cause http_400 and http_status 400 while preserving the existing Tunnel fault/retry contract"
       ],
       "non_goals": [
         "orchestration",
@@ -1855,6 +1890,7 @@
         "minimal-layer restart policy",
         "single reconnect-exhaustion UserAttentionRequired event",
         "bounded authenticated MCP health monitoring and recoverable fault feedback for a coding runtime whose supervised root process is alive but whose MCP transport is unresponsive"
+        ,"recovery request correlation retaining one request_id across retries while incrementing attempt"
       ],
       "required_tests": [
         "backoff",
@@ -1885,6 +1921,7 @@
         "same outage generation emits final user-attention event once",
         "manual retry starts a fresh five-attempt generation",
         "non-retryable credential/config/integrity faults bypass reconnect loop"
+        ,"automatic retries retain one request_id for the outage request and increment attempt monotonically; a successful retry remains correlated with the original failed request"
       ],
       "non_goals": [
         "Tray",
@@ -2253,7 +2290,8 @@
       "required_artifacts": [
         "minimal diagnostics runtime status project and recent redacted log view",
         "redacted export",
-        "open-log action"
+        "open-log action",
+        "bounded redacted request diagnostic start/end records reusing the existing diagnostics store"
       ],
       "required_tests": [
         "diagnostics has exactly user-facing sections 运行状态 项目 日志",
@@ -2264,6 +2302,9 @@
         "normal diagnostics UI does not expose Broker generation reconnect generation attempt counters IPC nonce PID SID or other engineering internals",
         "diagnostic export remains redacted and may contain safe typed detail without changing the minimal on-screen view",
         "no refresh retry-connection or open-welcome action appears on the diagnostics page"
+        ,"request start logging records timestamp request_id connection_id attempt and tool; request end records request_id connection_id attempt outcome error_code phase cause http_status and duration_ms"
+        ,"request diagnostic engineering fields remain out of the normal Diagnostics UI but are available in redacted diagnostic logs or export"
+        ,"successful retry records preserve the request_id used by preceding failed attempts and show incremented attempt values without leaking secrets"
       ],
       "non_goals": [
         "credential reset automation",
