@@ -5443,5 +5443,21 @@
     "next_required_g2_generation": 33,
     "next_required_g3_generation": 22,
     "g4_unlocked": false
+  },
+  "schema42_lb012_windows_execution_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "product_commit": "9628d9c",
+    "evidence": [
+      "Elevated process and shell now expose separate structured stdout and stderr with per-stream truncation while preserving one bounded total capture budget.",
+      "Large elevated output receives real public lb-output-* continuation handles readable through the existing command_control read path; no new public tool or output database was added.",
+      "Actual Broker IPC separates stdout/stderr and carries output beyond the former 64 KiB frame limit while remaining hard-bounded; timeout cancellation output limits and secret redaction remain PASS.",
+      "Fresh full serial cargo test --locked PASS, Clippy --all-targets -D warnings PASS, LB-012/Broker tests PASS, frontend tests/build PASS, runtime-manifest architecture and git diff check PASS."
+    ],
+    "group_transition": "G2_REVIEW_REQUIRED",
+    "next_required_g2_generation": 33,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
