@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
 
 const read = (path) => readFileSync(path, "utf8");
 const background = read("src-tauri/src/app/background.rs");
@@ -94,7 +96,16 @@ for (const required of ["take_coding_runtime_fault()", "coding_runtime_health()"
 if (!orchestrator.includes("wait_ready_for_recovery(Duration::ZERO, Duration::from_millis(250), || false)")) throw new Error("LB-010 Tunnel watchdog probe is not transport-bounded");
 if (!guard.includes("runtime_root_is_running")) throw new Error("LB-010 McpGuard liveness seam missing");
 if (!server.includes("coding_runtime_health") || !server.includes("take_coding_runtime_fault")) throw new Error("LB-010 PEP authenticated MCP health/fault accessors missing");
-if (!server.includes("TryLockError::WouldBlock") || !server.includes("Ok(None)")) throw new Error("LB-010 busy MCP guard must defer health judgment instead of causing a false outage");
+const healthMethod = functionBody(server, "coding_runtime_health");
+for (const required of ["health_client.probe_default_cwd", "Duration::from_millis(750)", "authenticated_mcp: true", "authenticated_mcp: false"]) {
+  if (!healthMethod.includes(required)) throw new Error(`LB-010 independent authenticated MCP health method missing: ${required}`);
+}
+if (healthMethod.includes("try_lock()") || healthMethod.includes("TryLockError::WouldBlock") || healthMethod.includes("Ok(None)")) {
+  throw new Error("LB-010 coding_runtime_health regressed to facade-lock-dependent stale-ready behavior");
+}
+if (!mcpHttp.includes("struct McpHealthClient") || !mcpHttp.includes("health_session.initialize_with_timeout")) {
+  throw new Error("LB-010 dedicated authenticated MCP health session missing");
+}
 
 for (const required of ["start_for_recovery", "wait_ready_for_recovery", "initialize_with_timeout", "post_json_with_timeouts"]) {
   if (!mcpRuntime.includes(required) && !mcpHttp.includes(required)) throw new Error(`LB-010 bounded MCP recovery seam missing: ${required}`);
@@ -108,5 +119,20 @@ for (const endpoint of ['"/readyz"', '"/api/status"']) {
 }
 if (!mcpHttp.includes("Duration::from_millis(500)") || !mcpHttp.includes("Duration::from_secs(2)")) throw new Error("LB-010 ordinary MCP transport timeouts were not preserved");
 if (!tunnelHealth.includes("Duration::from_millis(500)") || !tunnelHealth.includes("Duration::from_secs(2)")) throw new Error("LB-010 ordinary Tunnel health timeouts were not preserved");
+
+const semanticTarget = process.env.CARGO_TARGET_DIR || path.resolve("src-tauri/target-lb010-contract");
+const semantic = spawnSync(
+  "cargo",
+  ["test", "--manifest-path", "src-tauri/Cargo.toml", "--locked", "--lib", "schema40_", "--", "--nocapture"],
+  { encoding: "utf8", env: { ...process.env, CARGO_TARGET_DIR: semanticTarget }, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
+);
+if (semantic.status !== 0) throw new Error("LB-010 schema40 semantic tests failed\n" + semantic.stdout + "\n" + semantic.stderr);
+const semanticLog = semantic.stdout + "\n" + semantic.stderr;
+for (const testName of [
+  "schema40_health_probe_remains_authenticated_while_facade_lock_is_held",
+  "schema40_real_root_process_alive_but_mcp_unresponsive_is_not_ready",
+]) {
+  if (!semanticLog.includes(testName + " ... ok")) throw new Error("LB-010 semantic proof missing: " + testName);
+}
 
 console.log("LB010_PRODUCTION_WATCHDOG=PASS cooperative_auto=true cancellable=true permission_interrupt_resume=true snapshot_cache=true mcp_probe=true pep_probe=true tunnel_probe=true stable_reset=true single_owner=true");
