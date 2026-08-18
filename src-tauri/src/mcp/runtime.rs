@@ -12,7 +12,7 @@ use crate::state::RuntimeFault;
 
 use super::bundle::verify_bundle;
 use super::git_adapter::handle_git_tool;
-use super::http::{McpCancellationClient, McpSession, unauthenticated_initialize_status};
+use super::http::{McpCancellationClient, McpHealthClient, McpSession, unauthenticated_initialize_status};
 
 const LOOPBACK_HOST: &str = "127.0.0.1";
 
@@ -366,6 +366,10 @@ impl CodingToolsRuntime {
         &self,
     ) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
         self.session.cancellation_client()
+    }
+
+    pub(crate) fn health_client(&self) -> Result<McpHealthClient, CodingToolsRuntimeError> {
+        self.session.health_client()
     }
 
     pub fn unauthenticated_initialize_is_rejected(&self) -> Result<bool, CodingToolsRuntimeError> {

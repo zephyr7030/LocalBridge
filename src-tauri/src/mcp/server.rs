@@ -24,10 +24,11 @@ use crate::state::{
 use super::facade::{
     AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter, FacadeCallError, FacadeDenied,
     FacadeError, FacadeErrorCode, AGENT_API_REVISION, public_tools_for_policy, stable_success,
+    validate_workspace_context_probe,
 };
-use super::http::McpCancellationClient;
+use super::http::{McpCancellationClient, McpHealthClient};
 use super::policy::CapabilityPolicy;
-use super::runtime::CodingToolsRuntime;
+use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use super::shell::{ShellExecutionSpec, ShellExecutor, ShellSelector};
 use super::task_state::CommandTaskStateStore;
 
@@ -400,6 +401,8 @@ pub struct PolicyEnforcementRuntime {
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
     sessions: Arc<Mutex<HashMap<String, McpSession>>>,
+    health_client: McpHealthClient,
+    health_workspace: PathBuf,
     shutdown: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<AgentFacade<CodingToolsRuntimeAdapter>>>,
 }
@@ -471,12 +474,16 @@ impl PolicyEnforcementRuntime {
         wake: Option<CurrentTaskWake>,
     ) -> Result<Self, PolicyEnforcementError> {
         let public_policy = Arc::new(RwLock::new(policy.clone()));
+        let health_workspace = coding_runtime.workspace().to_path_buf();
+        let cancellation = coding_runtime
+            .cancellation_client()
+            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
+        let health_client = coding_runtime
+            .health_client()
+            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
         let guard = AgentFacade::from_coding_runtime(coding_runtime, policy)
             .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
         let task_state = guard.command_task_state();
-        let cancellation = guard
-            .cancellation_client()
-            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| PolicyEnforcementError::BindFailed)?;
         listener
@@ -522,6 +529,8 @@ impl PolicyEnforcementRuntime {
             guard: Some(guard),
             public_policy,
             sessions,
+            health_client,
+            health_workspace,
             shutdown: Some(shutdown_tx),
             thread: Some(thread),
         })
@@ -587,13 +596,42 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn coding_runtime_health(&self) -> Result<Option<CodingRuntimeHealth>, FacadeError> {
-        let Some(guard) = self.guard.as_ref() else {
-            return Ok(None);
-        };
-        match guard.try_lock() {
-            Ok(mut guard) => guard.live_runtime_health().map(Some),
-            Err(TryLockError::WouldBlock) => Ok(None),
-            Err(TryLockError::Poisoned(error)) => error.into_inner().live_runtime_health().map(Some),
+        match self.health_client.probe_default_cwd(Duration::from_millis(750)) {
+            Ok(raw) if validate_workspace_context_probe(&raw, &self.health_workspace).is_ok() => {
+                Ok(Some(CodingRuntimeHealth {
+                    state: super::facade::CodingRuntimeHealthState::Ready,
+                    root_process_alive: true,
+                    authenticated_mcp: true,
+                    fault: None,
+                }))
+            }
+            Ok(_) => Ok(Some(CodingRuntimeHealth {
+                state: super::facade::CodingRuntimeHealthState::Fault,
+                root_process_alive: true,
+                authenticated_mcp: false,
+                fault: Some(crate::state::RuntimeFault::ConfigurationInvalid),
+            })),
+            Err(error) => {
+                let state = match error {
+                    CodingToolsRuntimeError::ConnectionUnavailable
+                    | CodingToolsRuntimeError::HttpStatus(_)
+                    | CodingToolsRuntimeError::HealthTimeout => {
+                        super::facade::CodingRuntimeHealthState::Recovering
+                    }
+                    _ => super::facade::CodingRuntimeHealthState::Fault,
+                };
+                let root_process_alive = self
+                    .upstream_root_is_running()
+                    .ok()
+                    .flatten()
+                    .unwrap_or(true);
+                Ok(Some(CodingRuntimeHealth {
+                    state,
+                    root_process_alive,
+                    authenticated_mcp: false,
+                    fault: Some(error.runtime_fault()),
+                }))
+            }
         }
     }
 
@@ -2124,6 +2162,10 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
+    #[cfg(windows)]
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    #[cfg(windows)]
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SUSPEND_RESUME};
 
     use super::super::runtime::{
         CodingToolsPermissionMode, CodingToolsRuntimeConfig, InternalBearer,
@@ -2131,6 +2173,39 @@ mod tests {
     use super::super::task_state::{CommandOwner, CommandTerminalStatus, TerminalCommandSnapshot};
 
     const SYNTHETIC_BEARER: &str = "LB009_PEP_INTERNAL_BEARER_SYNTHETIC_DO_NOT_LEAK";
+
+    #[cfg(windows)]
+    #[link(name = "ntdll")]
+    unsafe extern "system" {
+        fn NtSuspendProcess(process_handle: HANDLE) -> i32;
+        fn NtResumeProcess(process_handle: HANDLE) -> i32;
+    }
+
+    #[cfg(windows)]
+    struct SuspendedProcess {
+        handle: HANDLE,
+    }
+
+    #[cfg(windows)]
+    impl SuspendedProcess {
+        fn suspend(pid: u32) -> Self {
+            let handle = unsafe { OpenProcess(PROCESS_SUSPEND_RESUME, 0, pid) };
+            assert!(!handle.is_null(), "OpenProcess(PROCESS_SUSPEND_RESUME) failed for {pid}");
+            let status = unsafe { NtSuspendProcess(handle) };
+            assert_eq!(status, 0, "NtSuspendProcess failed with NTSTATUS {status:#x}");
+            Self { handle }
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for SuspendedProcess {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = NtResumeProcess(self.handle);
+                let _ = CloseHandle(self.handle);
+            }
+        }
+    }
 
     #[test]
     fn task_control_get_reads_durable_terminal_without_private_session() {
@@ -3951,6 +4026,83 @@ mod tests {
         coding.stop().expect("absolute path MCP stops");
         cleanup_test_directory(&workspace);
         fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn schema40_health_probe_remains_authenticated_while_facade_lock_is_held() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP ready");
+        let facade_guard = pep.guard.as_ref().unwrap().lock().unwrap();
+        let started = Instant::now();
+        let health = pep
+            .coding_runtime_health()
+            .expect("independent authenticated health probe")
+            .expect("health is available");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(health.state, super::super::facade::CodingRuntimeHealthState::Ready);
+        assert!(health.authenticated_mcp);
+        drop(facade_guard);
+        let mut coding = pep.stop().expect("PEP stop after independent health probe");
+        coding.stop().expect("MCP stop after independent health probe");
+        cleanup_test_directory(&workspace);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn schema40_real_root_process_alive_but_mcp_unresponsive_is_not_ready() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let coding_pid = coding.process_snapshot().pid;
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP ready");
+        let suspended = SuspendedProcess::suspend(coding_pid);
+        assert_eq!(pep.upstream_root_is_running().unwrap(), Some(true));
+        let started = Instant::now();
+        let health = pep
+            .coding_runtime_health()
+            .expect("bounded health probe")
+            .expect("health state");
+        assert!(started.elapsed() < Duration::from_secs(2), "health probe exceeded bound: {:?}", started.elapsed());
+        assert_ne!(health.state, super::super::facade::CodingRuntimeHealthState::Ready);
+        assert!(!health.authenticated_mcp);
+        assert!(health.root_process_alive, "suspended MCP root must still be alive");
+        drop(suspended);
+        let ready_deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let health = pep.coding_runtime_health().unwrap().unwrap();
+            if health.state == super::super::facade::CodingRuntimeHealthState::Ready && health.authenticated_mcp {
+                break;
+            }
+            assert!(Instant::now() < ready_deadline, "MCP did not recover after resume: {health:?}");
+            thread::sleep(Duration::from_millis(50));
+        }
+        let mut coding = pep.stop().expect("PEP stop after suspended MCP test");
+        coding.stop().expect("MCP stop after suspended MCP test");
+        cleanup_test_directory(&workspace);
     }
 
     #[test]

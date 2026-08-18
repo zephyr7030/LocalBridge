@@ -1,6 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -10,6 +11,7 @@ use super::runtime::{CodingToolsRuntimeError, InternalBearer};
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
 const MAX_HTTP_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+static HEALTH_REQUEST_ID: AtomicU64 = AtomicU64::new(1_000_000);
 
 pub(crate) struct McpSession {
     port: u16,
@@ -24,6 +26,36 @@ pub(crate) struct McpCancellationClient {
     bearer: Arc<InternalBearer>,
     session_id: Arc<str>,
 }
+
+#[derive(Clone)]
+pub(crate) struct McpHealthClient {
+    port: u16,
+    bearer: Arc<InternalBearer>,
+    session_id: Arc<str>,
+}
+
+impl std::fmt::Debug for McpHealthClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpHealthClient")
+            .field("endpoint", &format_args!("127.0.0.1:{}/mcp", self.port))
+            .field("authenticated", &true)
+            .finish()
+    }
+}
+
+impl McpHealthClient {
+    pub(crate) fn probe_default_cwd(&self, timeout: Duration) -> Result<Value, CodingToolsRuntimeError> {
+        let request_id = HEALTH_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        let mut session = McpSession {
+            port: self.port,
+            bearer: Arc::clone(&self.bearer),
+            session_id: Some(Arc::clone(&self.session_id)),
+            next_id: request_id,
+        };
+        session.call_tool_with_timeout("get_default_cwd", json!({}), timeout)
+    }
+}
+
 
 impl std::fmt::Debug for McpCancellationClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -206,6 +238,24 @@ impl McpSession {
             .cloned()
             .ok_or(CodingToolsRuntimeError::ProtocolMismatch)?;
         Ok(McpCancellationClient {
+            port: self.port,
+            bearer: Arc::clone(&self.bearer),
+            session_id,
+        })
+    }
+
+    pub(crate) fn health_client(&self) -> Result<McpHealthClient, CodingToolsRuntimeError> {
+        let mut health_session = McpSession {
+            port: self.port,
+            bearer: Arc::clone(&self.bearer),
+            session_id: None,
+            next_id: HEALTH_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
+        };
+        health_session.initialize_with_timeout(Duration::from_millis(750))?;
+        let session_id = health_session
+            .session_id
+            .ok_or(CodingToolsRuntimeError::ProtocolMismatch)?;
+        Ok(McpHealthClient {
             port: self.port,
             bearer: Arc::clone(&self.bearer),
             session_id,

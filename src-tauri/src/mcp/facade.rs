@@ -15,7 +15,6 @@ use crate::state::{
 
 use super::context_service::ContextService;
 use super::edit_service::{CodingEditError, CodingEditService};
-use super::http::McpCancellationClient;
 use super::path_authority::{
     PathAuthority, PathAuthorityError, workspace_input_path_valid, workspace_relative_path_valid,
 };
@@ -1494,11 +1493,6 @@ impl CodingToolsRuntimeAdapter {
         })
     }
 
-    pub(crate) fn cancellation_client(
-        &self,
-    ) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
-        self.runtime.cancellation_client()
-    }
 
     pub(crate) fn command_task_state(&self) -> CommandTaskStateStore {
         self.task_state.clone()
@@ -2982,7 +2976,7 @@ fn validate_private_read_output_semantics(raw: &Value) -> Result<(), FacadeError
     Ok(())
 }
 
-fn validate_workspace_context_probe(
+pub(crate) fn validate_workspace_context_probe(
     raw: &Value,
     expected_workspace: &Path,
 ) -> Result<(), FacadeError> {
@@ -3175,11 +3169,6 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
         Self::with_adapter(adapter, policy)
     }
 
-    pub(crate) fn cancellation_client(
-        &self,
-    ) -> Result<McpCancellationClient, CodingToolsRuntimeError> {
-        self.adapter.cancellation_client()
-    }
 
     pub(crate) fn command_task_state(&self) -> CommandTaskStateStore {
         self.adapter.command_task_state()
@@ -4005,10 +3994,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     .and_then(Value::as_object)
                     .unwrap_or(&empty_expected);
                 let mut checkpoint = self.load_coding_checkpoint(task_id, action)?;
-                if checkpoint.completed {
+                if checkpoint.completed
+                    || checkpoint.current_step.as_deref() != Some("prepare")
+                    || checkpoint.next_step.as_deref() != Some("edit")
+                    || checkpoint.patch_applied
+                    || checkpoint.command_index != 0
+                    || checkpoint.command_inflight
+                    || checkpoint.current_session_id.is_some()
+                {
                     return Err(FacadeError::new(
                         FacadeErrorCode::SessionUnavailable,
-                        "该 coding task 已结束，不能重新执行编辑步骤",
+                        "coding task phase order requires prepare -> edit",
                         false,
                     ));
                 }
@@ -4065,6 +4061,22 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         "Verification session is already running; use resume",
                     ));
                 }
+                let entering_verify = checkpoint.current_step.as_deref() == Some("edit")
+                    && checkpoint.next_step.as_deref() == Some("verify")
+                    && checkpoint.patch_applied
+                    && checkpoint.command_index == 0
+                    && checkpoint.command_results.is_empty()
+                    && checkpoint.failure.is_none();
+                let retrying_verify = checkpoint.current_step.as_deref() == Some("verify")
+                    && checkpoint.next_step.as_deref() == Some("verify")
+                    && checkpoint.command_index <= checkpoint.verification_plan.len();
+                if !entering_verify && !retrying_verify {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::SessionUnavailable,
+                        "coding task phase order requires a completed edit before verify",
+                        false,
+                    ));
+                }
                 let original = object_args(&checkpoint.arguments)?;
                 let project_path = original.get("path").and_then(Value::as_str).unwrap_or(".");
                 let project = self.adapter.project_context(project_path)?;
@@ -4073,10 +4085,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     .and_then(Value::as_str)
                     .ok_or_else(command_state_internal_error)?
                     .to_string();
+                if entering_verify {
+                    checkpoint.verification_plan = self.adapter.coding_verification_plan(&selected_path)?;
+                    checkpoint.commands = checkpoint.verification_plan.clone();
+                }
                 checkpoint.current_step = Some("verify".into());
                 checkpoint.next_step = Some("persist".into());
                 checkpoint.failure = None;
-                checkpoint.commands = checkpoint.verification_plan.clone();
                 persist_agent_checkpoint(&self.adapter, &checkpoint)?;
 
                 for index in checkpoint.command_index..checkpoint.verification_plan.len() {
@@ -4184,10 +4199,20 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ensure_only_keys(object, &["action", "phase", "task_id"])?;
                 let task_id = required_string(object, "task_id")?;
                 let mut checkpoint = self.load_coding_checkpoint(task_id, action)?;
-                if checkpoint.current_session_id.is_some() || checkpoint.command_inflight {
+                if checkpoint.current_session_id.is_some()
+                    || checkpoint.command_inflight
+                    || checkpoint.current_step.as_deref() != Some("verify")
+                    || checkpoint.next_step.as_deref() != Some("persist")
+                    || checkpoint.failure.is_some()
+                    || checkpoint.command_index != checkpoint.verification_plan.len()
+                    || checkpoint.command_results.len() != checkpoint.verification_plan.len()
+                    || checkpoint.command_results.iter().any(|result| {
+                        result.get("status").and_then(Value::as_str) != Some("completed")
+                    })
+                {
                     return Err(FacadeError::new(
                         FacadeErrorCode::SessionUnavailable,
-                        "验证命令仍在运行，不能持久化完成状态",
+                        "coding task cannot persist until the full verification plan completes successfully",
                         true,
                     ));
                 }
@@ -4570,6 +4595,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         }
 
         for (index, command) in commands.iter().enumerate().skip(checkpoint.command_index) {
+            if checkpoint.redacted_stdin_command_indices.contains(&index) {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::SessionUnavailable,
+                    "durable workflow omitted sensitive stdin; start a new workflow to execute this pending command",
+                    false,
+                ));
+            }
             let command = command.as_object().ok_or_else(invalid_argument)?;
             let text = required_string(command, "command")?;
             let shell: ShellSelector = serde_json::from_value(
@@ -6095,6 +6127,7 @@ mod tests {
         directory_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         patch_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         execute_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        last_stdin: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     }
 
     impl ResumeFixtureState {
@@ -6104,6 +6137,7 @@ mod tests {
                 directory_calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 patch_calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 execute_calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                last_stdin: std::sync::Arc::new(std::sync::Mutex::new(None)),
             }
         }
     }
@@ -6151,6 +6185,7 @@ mod tests {
             request: ShellCommandRequest,
             _request_id: Option<&Value>,
         ) -> Result<Value, FacadeError> {
+            *self.state.last_stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = request.stdin.clone();
             let call = self
                 .state
                 .execute_calls
@@ -6359,6 +6394,41 @@ mod tests {
     }
 
     #[test]
+    fn durable_checkpoint_omits_stdin_while_initial_execution_still_receives_it() {
+        let state = ResumeFixtureState::new();
+        let adapter = ResumeAdapter {
+            catalog: compatible_catalog(),
+            state: state.clone(),
+            first_execution_runs: true,
+        };
+        let mut facade = AgentFacade::with_adapter(adapter, policy()).unwrap();
+        let result = facade.dispatch(
+            PermissionMode::Full,
+            "agent_workflow",
+            json!({
+                "action":"bugfix",
+                "path":".",
+                "commands":[{
+                    "command":"echo stdin-probe",
+                    "shell":"cmd",
+                    "stdin":"SECRET_STDIN_SENTINEL",
+                    "yield_time_ms":0
+                }]
+            }),
+            None,
+        ).unwrap();
+        assert_eq!(stable_data(&result)["state"], "running");
+        assert_eq!(
+            state.last_stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_deref(),
+            Some("SECRET_STDIN_SENTINEL")
+        );
+        let stored = state.checkpoint.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().unwrap();
+        assert!(stored.pointer("/arguments/commands/0/stdin").is_none(), "{stored:#?}");
+        assert_eq!(stored["redacted_stdin_command_indices"], json!([0]));
+        assert!(!serde_json::to_string(&stored).unwrap().contains("SECRET_STDIN_SENTINEL"));
+    }
+
+    #[test]
     fn agent_workflow_resume_fails_closed_for_uncertain_inflight_file_step() {
         let state = ResumeFixtureState::new();
         let mut checkpoint = WorkflowCheckpoint::new(
@@ -6497,6 +6567,50 @@ mod tests {
             .expect("terminal coding checkpoint remains durable");
         assert_eq!(checkpoint["completed"], true);
         assert_eq!(checkpoint["workflow_id"], task_id);
+    }
+
+    #[test]
+    fn schema41_phased_coding_task_rejects_skipped_verify_or_persist() {
+        let state = ResumeFixtureState::new();
+        let adapter = ResumeAdapter {
+            catalog: compatible_catalog(),
+            state,
+            first_execution_runs: false,
+        };
+        let mut facade = AgentFacade::with_adapter(adapter, policy()).unwrap();
+        let prepared = facade.dispatch(
+            PermissionMode::Full,
+            "agent_workflow",
+            json!({"action":"bugfix","phase":"prepare","objective":"strict phase order","path":"."}),
+            None,
+        ).unwrap();
+        let task_id = stable_data(&prepared)["task_id"].as_str().unwrap().to_string();
+        for phase in ["verify", "persist"] {
+            let error = facade.dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"bugfix","phase":phase,"task_id":task_id}),
+                None,
+            ).unwrap_err();
+            assert_eq!(error.code, FacadeErrorCode::SessionUnavailable);
+        }
+        facade.dispatch(
+            PermissionMode::Full,
+            "agent_workflow",
+            json!({
+                "action":"bugfix","phase":"edit","task_id":task_id,
+                "expected_files":{"safe/doc.txt":"a".repeat(64)},
+                "patch":"*** Begin Patch\n*** Update File: safe/doc.txt\n@@\n-old\n+new\n*** End Patch"
+            }),
+            None,
+        ).unwrap();
+        let error = facade.dispatch(
+            PermissionMode::Full,
+            "agent_workflow",
+            json!({"action":"bugfix","phase":"persist","task_id":task_id}),
+            None,
+        ).unwrap_err();
+        assert_eq!(error.code, FacadeErrorCode::SessionUnavailable);
     }
 
     #[test]

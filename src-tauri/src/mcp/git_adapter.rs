@@ -40,6 +40,29 @@ pub(crate) fn handle_git_tool(workspace: &Path, name: &str, arguments: &Value) -
     }
 }
 
+pub(crate) fn changed_paths(workspace: &Path, path: &str) -> Result<Vec<String>, String> {
+    let result = handle_git_tool(
+        workspace,
+        "git_status",
+        &json!({"path":path,"include_untracked":true,"max_entries":10_000}),
+    )
+    .ok_or_else(|| "git status unavailable".to_string())?;
+    if result.get("isError").and_then(Value::as_bool) == Some(true) {
+        return Err("git status failed".into());
+    }
+    let mut paths = result
+        .pointer("/structuredContent/entries")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("path").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ResolveError {
     InvalidPath,

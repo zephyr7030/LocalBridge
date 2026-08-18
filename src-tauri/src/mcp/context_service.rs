@@ -8,6 +8,8 @@ use sha2::{Digest, Sha256};
 use super::path_authority::{PathAuthority, PathAuthorityError};
 
 const MAX_CANDIDATE_FILES: usize = 96;
+const MAX_DISCOVERY_FILES: usize = 512;
+const MAX_DISCOVERY_DEPTH: usize = 6;
 const MAX_FILE_BYTES: u64 = 128 * 1024;
 const MAX_RELEVANT_RANGES: usize = 12;
 const MAX_RANGE_LINES: usize = 9;
@@ -118,16 +120,35 @@ impl ContextService {
             let Ok(bytes) = fs::read(&path) else { continue };
             let Ok(text) = std::str::from_utf8(&bytes) else { continue };
             let lower = text.to_lowercase();
-            let mut score = tokens.iter().filter(|token| lower.contains(token.as_str())).count();
+            let relative = path
+                .strip_prefix(&self.project_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_lowercase();
+            let mut score = tokens
+                .iter()
+                .map(|token| lower.matches(token.as_str()).count().min(4))
+                .sum::<usize>();
+            score += tokens
+                .iter()
+                .filter(|token| relative.contains(token.as_str()))
+                .count()
+                * 5;
             if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
                 let lower_name = name.to_lowercase();
-                score += tokens.iter().filter(|token| lower_name.contains(token.as_str())).count() * 3;
+                score += tokens
+                    .iter()
+                    .filter(|token| lower_name.contains(token.as_str()))
+                    .count()
+                    * 5;
             }
             if score == 0 && !tokens.is_empty() { continue; }
             if let Ok(display) = self.authority.display_path(&path) {
                 scored.push((score, display));
             }
         }
+        scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
         scored.truncate(MAX_CANDIDATE_FILES);
         scored
     }
@@ -187,26 +208,49 @@ impl ContextService {
 
     fn candidate_files(&self) -> Vec<PathBuf> {
         let mut result = Vec::new();
+        let mut seen_directories = BTreeSet::<PathBuf>::new();
         let mut stack = vec![(self.project_root.clone(), 0usize)];
         while let Some((directory, depth)) = stack.pop() {
-            if result.len() >= MAX_CANDIDATE_FILES { break; }
-            let Ok(entries) = fs::read_dir(directory) else { continue };
-            for entry in entries.flatten() {
-                if result.len() >= MAX_CANDIDATE_FILES { break; }
+            if result.len() >= MAX_DISCOVERY_FILES { break; }
+            let Ok(canonical_directory) = fs::canonicalize(&directory) else { continue; };
+            if !self.authority.allows_canonical(&canonical_directory)
+                || !seen_directories.insert(canonical_directory)
+            {
+                continue;
+            }
+            let Ok(entries) = fs::read_dir(&directory) else { continue; };
+            let mut entries = entries.flatten().collect::<Vec<_>>();
+            entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase());
+            let mut children = Vec::new();
+            for entry in entries {
+                if result.len() >= MAX_DISCOVERY_FILES { break; }
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
-                if entry.file_type().ok().is_some_and(|kind| kind.is_symlink()) { continue; }
-                if path.is_dir() {
-                    if depth < 3 && !matches!(name.as_str(), ".git" | "node_modules" | "target" | "dist" | "build" | "runtime") {
-                        stack.push((path, depth + 1));
+                let Ok(kind) = entry.file_type() else { continue; };
+                if kind.is_symlink() { continue; }
+                let Ok(canonical) = fs::canonicalize(&path) else { continue; };
+                if !self.authority.allows_canonical(&canonical) { continue; }
+                if canonical.is_dir() {
+                    if depth < MAX_DISCOVERY_DEPTH && !excluded_directory(&name, depth) {
+                        children.push(path);
                     }
                     continue;
                 }
-                if source_like(&path) { result.push(path); }
+                if source_like(&canonical) { result.push(path); }
+            }
+            children.sort();
+            for child in children.into_iter().rev() {
+                stack.push((child, depth + 1));
             }
         }
         result
     }
+}
+
+fn excluded_directory(name: &str, depth: usize) -> bool {
+    matches!(name, ".git" | "node_modules" | "target" | "dist" | "build")
+        || name.starts_with("target-")
+        || (depth == 0 && name == "runtime")
 }
 
 fn objective_tokens(objective: &str) -> Vec<String> {
@@ -239,6 +283,53 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relevance_scoring_finds_deep_runtime_recovery_after_many_noise_files() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("localbridge-context-relevance-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(root.join("src/runtime")).unwrap();
+        for index in 0..140 {
+            fs::write(root.join(format!("noise-{index:03}.rs")), "fn unrelated_noise() {}
+").unwrap();
+        }
+        fs::write(
+            root.join("src/runtime/recovery.rs"),
+            "fn authenticated_mcp_recovery_runtime() { /* authenticated MCP recovery */ }
+",
+        ).unwrap();
+        let service = ContextService::new(&root, ".").unwrap();
+        let related = service.select_related_files("authenticated MCP runtime recovery");
+        assert!(related.iter().any(|path| path.replace('\\', "/").ends_with("src/runtime/recovery.rs")), "{related:#?}");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn junction_escape_is_excluded_from_context_discovery() {
+        use std::process::Command;
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("localbridge-context-root-{}-{nonce}", std::process::id()));
+        let outside = std::env::temp_dir().join(format!("localbridge-context-outside-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret_recovery.rs"), "UNIQUE_OUTSIDE_RECOVERY_SENTINEL
+").unwrap();
+        let junction = root.join("linked-outside");
+        let status = Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&outside)
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to create junction attack fixture");
+        let service = ContextService::new(&root, ".").unwrap();
+        let related = service.select_related_files("UNIQUE_OUTSIDE_RECOVERY_SENTINEL");
+        assert!(related.is_empty(), "junction escaped context authority: {related:#?}");
+        let _ = fs::remove_dir_all(&junction);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
 
     #[test]
     fn objective_tokens_are_bounded_and_deterministic() {

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 const read = (path) => readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 const facade = read("src-tauri/src/mcp/facade.rs");
@@ -53,4 +56,40 @@ const matrix = {
   typed_errors: "canonical FacadeErrorCode including edit conflicts"
 };
 assert.equal(Object.keys(matrix).length, 12);
-console.log(JSON.stringify({ profile: "coding-agent-v1", core_tools: 8, capabilities: matrix }, null, 2));
+
+const root = fileURLToPath(new URL("../../../", import.meta.url));
+const semanticTarget = process.env.CARGO_TARGET_DIR || path.join(root, "src-tauri", "target-schema41-contract");
+const semantic = spawnSync(
+  "cargo",
+  ["test", "--manifest-path", "src-tauri/Cargo.toml", "--locked", "--lib", "mcp::", "--", "--nocapture"],
+  {
+    cwd: root,
+    env: { ...process.env, CARGO_TARGET_DIR: semanticTarget },
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    windowsHide: true,
+  },
+);
+assert.equal(
+  semantic.status,
+  0,
+  "schema41 semantic acceptance failed\nSTDOUT:\n" + semantic.stdout + "\nSTDERR:\n" + semantic.stderr,
+);
+const semanticLog = semantic.stdout + "\n" + semantic.stderr;
+for (const testName of [
+  "changed_targeted_scripts_require_a_real_git_changed_set",
+  "planner_uses_required_precedence_and_mixed_node_rust_manifests",
+  "negative_instruction_code_spans_are_not_execution_requirements",
+  "relevance_scoring_finds_deep_runtime_recovery_after_many_noise_files",
+  "junction_escape_is_excluded_from_context_discovery",
+  "concurrent_existing_writer_handle_fails_closed_before_any_overwrite",
+  "concurrent_create_new_has_exactly_one_winner_and_never_overwrites",
+  "schema41_phased_coding_task_rejects_skipped_verify_or_persist",
+  "durable_checkpoint_omits_stdin_while_initial_execution_still_receives_it",
+  "schema40_health_probe_remains_authenticated_while_facade_lock_is_held",
+  "schema40_real_root_process_alive_but_mcp_unresponsive_is_not_ready",
+]) {
+  assert.ok(semanticLog.includes(testName + " ... ok"), "semantic proof did not execute " + testName);
+}
+
+console.log(JSON.stringify({ profile: "coding-agent-v1", core_tools: 8, capabilities: matrix, semantic_acceptance: "PASS" }, null, 2));

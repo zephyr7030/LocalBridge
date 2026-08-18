@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
@@ -46,27 +47,18 @@ impl CodingEditService {
         Ok(())
     }
 
-    #[allow(dead_code)] // schema41 internal semantic surface; retained for bounded range reads.
-    pub(crate) fn read_range(&self, path: &str, start_line: usize, end_line: usize) -> Result<String, CodingEditError> {
-        if start_line == 0 || end_line < start_line { return Err(CodingEditError::InvalidPath); }
-        let (_, bytes) = self.read_file(path)?;
-        let text = std::str::from_utf8(&bytes).map_err(|_| CodingEditError::PatchConflict)?;
-        let lines = text.lines().collect::<Vec<_>>();
-        if start_line > lines.len() { return Err(CodingEditError::NotFound); }
-        Ok(lines[start_line - 1..end_line.min(lines.len())].join("\n"))
-    }
-
     #[allow(dead_code)] // schema41 internal semantic surface; retained for exact replacement callers.
     pub(crate) fn replace_exact(&self, path: &str, expected_sha256: &str, old: &str, new: &str) -> Result<String, CodingEditError> {
-        let (target, bytes) = self.read_file(path)?;
-        self.require_identity(&bytes, expected_sha256)?;
-        let text = std::str::from_utf8(&bytes).map_err(|_| CodingEditError::PatchConflict)?;
-        let count = text.match_indices(old).count();
-        if count == 0 { return Err(CodingEditError::PatchConflict); }
-        if count > 1 { return Err(CodingEditError::AmbiguousMatch); }
-        let updated = text.replacen(old, new, 1);
-        atomic_write(&target, updated.as_bytes())?;
-        Ok(sha256_hex(updated.as_bytes()))
+        let target = self.authority.resolve_existing(path).map_err(map_path_error)?;
+        if !target.is_file() { return Err(CodingEditError::NotFound); }
+        let updated = conditional_transform_existing(&target, expected_sha256, |bytes| {
+            let text = std::str::from_utf8(bytes).map_err(|_| CodingEditError::PatchConflict)?;
+            let count = text.match_indices(old).count();
+            if count == 0 { return Err(CodingEditError::PatchConflict); }
+            if count > 1 { return Err(CodingEditError::AmbiguousMatch); }
+            Ok(text.replacen(old, new, 1).into_bytes())
+        })?;
+        Ok(sha256_hex(&updated))
     }
 
     #[allow(dead_code)] // schema41 internal semantic surface; retained for search/replace callers.
@@ -77,8 +69,7 @@ impl CodingEditService {
     #[allow(dead_code)] // schema41 internal semantic surface; retained for structured file creation.
     pub(crate) fn create_file(&self, path: &str, content: &[u8]) -> Result<String, CodingEditError> {
         let target = self.resolve_missing_leaf(path)?;
-        if target.exists() { return Err(CodingEditError::FileChanged); }
-        atomic_write(&target, content)?;
+        create_new_file(&target, content)?;
         Ok(sha256_hex(content))
     }
 
@@ -123,7 +114,7 @@ impl CodingEditService {
         let operations = parse_patch(patch)?;
         if operations.is_empty() { return Err(CodingEditError::PatchConflict); }
 
-        let mut updates = Vec::<(PathBuf, Option<PathBuf>, Vec<u8>)>::new();
+        let mut updates = Vec::<(PathBuf, Option<PathBuf>, Vec<(String, String)>, String)>::new();
         let mut adds = Vec::<(PathBuf, Vec<u8>)>::new();
         let mut deletes = Vec::<PathBuf>::new();
         let mut modified = Vec::<String>::new();
@@ -140,11 +131,11 @@ impl CodingEditService {
                     let mut text = std::str::from_utf8(&bytes)
                         .map_err(|_| CodingEditError::PatchConflict)?
                         .to_string();
-                    for (old, new) in hunks {
-                        let count = text.match_indices(&old).count();
+                    for (old, new) in &hunks {
+                        let count = text.match_indices(old.as_str()).count();
                         if count == 0 { return Err(CodingEditError::PatchConflict); }
                         if count > 1 { return Err(CodingEditError::AmbiguousMatch); }
-                        text = text.replacen(&old, &new, 1);
+                        text = text.replacen(old.as_str(), new.as_str(), 1);
                     }
                     let target = match destination.as_deref() {
                         Some(destination) => {
@@ -155,7 +146,7 @@ impl CodingEditService {
                         None => None,
                     };
                     modified.push(destination.unwrap_or_else(|| path.clone()));
-                    updates.push((source, target, text.into_bytes()));
+                    updates.push((source, target, hunks, identity.to_string()));
                 }
                 PatchOperation::Add { path, content } => {
                     let target = self.resolve_missing_leaf(&path)?;
@@ -176,13 +167,27 @@ impl CodingEditService {
             }
         }
 
-        for (source, destination, bytes) in updates {
-            atomic_write(&source, &bytes)?;
+        for (source, destination, hunks, identity) in updates {
+            conditional_transform_existing(&source, &identity, |bytes| {
+                let mut text = std::str::from_utf8(bytes)
+                    .map_err(|_| CodingEditError::PatchConflict)?
+                    .to_string();
+                for (old, new) in &hunks {
+                    let count = text.match_indices(old.as_str()).count();
+                    if count == 0 { return Err(CodingEditError::PatchConflict); }
+                    if count > 1 { return Err(CodingEditError::AmbiguousMatch); }
+                    text = text.replacen(old.as_str(), new.as_str(), 1);
+                }
+                Ok(text.into_bytes())
+            })?;
             if let Some(destination) = destination {
-                fs::rename(source, destination).map_err(|_| CodingEditError::Io)?;
+                if destination.exists() { return Err(CodingEditError::FileChanged); }
+                fs::rename(source, destination).map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::AlreadyExists { CodingEditError::FileChanged } else { CodingEditError::Io }
+                })?;
             }
         }
-        for (target, content) in adds { atomic_write(&target, &content)?; }
+        for (target, content) in adds { create_new_file(&target, &content)?; }
         for target in deletes { fs::remove_file(target).map_err(|_| CodingEditError::Io)?; }
         modified.sort();
         modified.dedup();
@@ -308,25 +313,72 @@ fn parse_patch(patch: &str) -> Result<Vec<PatchOperation>, CodingEditError> {
     Ok(operations)
 }
 
-fn atomic_write(target: &Path, content: &[u8]) -> Result<(), CodingEditError> {
-    let parent = target.parent().ok_or(CodingEditError::InvalidPath)?;
-    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-    let tmp = parent.join(format!(".localbridge-edit-{}-{nonce}.tmp", std::process::id()));
-    fs::write(&tmp, content).map_err(|_| CodingEditError::Io)?;
+fn map_existing_open_error(error: std::io::Error) -> CodingEditError {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return CodingEditError::NotFound;
+    }
+    #[cfg(windows)]
+    if matches!(error.raw_os_error(), Some(32 | 33)) {
+        return CodingEditError::FileChanged;
+    }
+    CodingEditError::Io
+}
+
+fn create_new_file(target: &Path, content: &[u8]) -> Result<(), CodingEditError> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
-        let source = tmp.as_os_str().encode_wide().chain(std::iter::once(0)).collect::<Vec<_>>();
-        let destination = target.as_os_str().encode_wide().chain(std::iter::once(0)).collect::<Vec<_>>();
-        let ok = unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
-        if ok == 0 { let _ = fs::remove_file(&tmp); return Err(CodingEditError::Io); }
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0);
     }
-    #[cfg(not(windows))]
-    {
-        fs::rename(&tmp, target).map_err(|_| CodingEditError::Io)?;
+    let mut file = options.open(target).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists { CodingEditError::FileChanged } else { CodingEditError::Io }
+    })?;
+    if file.write_all(content).and_then(|_| file.sync_all()).is_err() {
+        drop(file);
+        let _ = fs::remove_file(target);
+        return Err(CodingEditError::Io);
     }
     Ok(())
+}
+
+fn conditional_transform_existing<F>(
+    target: &Path,
+    expected_sha256: &str,
+    transform: F,
+) -> Result<Vec<u8>, CodingEditError>
+where
+    F: FnOnce(&[u8]) -> Result<Vec<u8>, CodingEditError>,
+{
+    if expected_sha256.len() != 64 { return Err(CodingEditError::InvalidPath); }
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0);
+    }
+    let mut file = options.open(target).map_err(map_existing_open_error)?;
+    let mut original = Vec::new();
+    file.read_to_end(&mut original).map_err(|_| CodingEditError::Io)?;
+    if sha256_hex(&original) != expected_sha256 { return Err(CodingEditError::FileChanged); }
+    let updated = transform(&original)?;
+    let write_result = (|| -> std::io::Result<()> {
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&updated)?;
+        file.set_len(updated.len() as u64)?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = file.seek(SeekFrom::Start(0));
+        let _ = file.write_all(&original);
+        let _ = file.set_len(original.len() as u64);
+        let _ = file.sync_all();
+        return Err(CodingEditError::Io);
+    }
+    Ok(updated)
 }
 
 #[cfg(all(test, windows))]
@@ -395,6 +447,55 @@ mod tests {
             ),
             Err(CodingEditError::FileChanged)
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_existing_writer_handle_fails_closed_before_any_overwrite() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
+        let root = workspace("writer-race");
+        let path = root.join("a.txt");
+        fs::write(&path, b"before\n").unwrap();
+        let expected = sha256_hex(b"before\n");
+        let _writer = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(&path)
+            .unwrap();
+        let service = CodingEditService::new(&root).unwrap();
+        assert_eq!(
+            service.replace_exact("a.txt", &expected, "before", "after"),
+            Err(CodingEditError::FileChanged)
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), "before\n");
+        drop(_writer);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_create_new_has_exactly_one_winner_and_never_overwrites() {
+        use std::sync::{Arc, Barrier};
+        let root = workspace("create-race");
+        let service = CodingEditService::new(&root).unwrap();
+        let barrier = Arc::new(Barrier::new(3));
+        let mut threads = Vec::new();
+        for content in [b"first".as_slice(), b"second".as_slice()] {
+            let service = service.clone();
+            let barrier = barrier.clone();
+            let bytes = content.to_vec();
+            threads.push(std::thread::spawn(move || {
+                barrier.wait();
+                service.create_file("new.txt", &bytes)
+            }));
+        }
+        barrier.wait();
+        let results = threads.into_iter().map(|thread| thread.join().unwrap()).collect::<Vec<_>>();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1, "{results:?}");
+        assert_eq!(results.iter().filter(|result| **result == Err(CodingEditError::FileChanged)).count(), 1, "{results:?}");
+        let final_bytes = fs::read(root.join("new.txt")).unwrap();
+        assert!(final_bytes == b"first" || final_bytes == b"second");
         let _ = fs::remove_dir_all(root);
     }
 }

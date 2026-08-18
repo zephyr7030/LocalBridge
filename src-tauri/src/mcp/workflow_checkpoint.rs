@@ -18,6 +18,8 @@ pub(crate) struct WorkflowCheckpoint {
     pub workflow_id: String,
     pub arguments: Value,
     #[serde(default)]
+    pub redacted_stdin_command_indices: Vec<usize>,
+    #[serde(default)]
     pub coding_profile: Option<String>,
     #[serde(default)]
     pub objective: Option<String>,
@@ -60,10 +62,12 @@ pub(crate) struct WorkflowCheckpoint {
 
 impl WorkflowCheckpoint {
     pub(crate) fn new(workflow_id: String, arguments: Value) -> Self {
+        let (arguments, redacted_stdin_command_indices) = sanitize_checkpoint_arguments(arguments);
         Self {
             version: CHECKPOINT_VERSION,
             workflow_id,
             arguments,
+            redacted_stdin_command_indices,
             coding_profile: None,
             objective: None,
             current_step: None,
@@ -107,6 +111,18 @@ impl WorkflowCheckpoint {
     pub(crate) fn is_coding_task(&self) -> bool {
         self.coding_profile.as_deref() == Some("coding-agent-v1")
     }
+}
+
+fn sanitize_checkpoint_arguments(mut arguments: Value) -> (Value, Vec<usize>) {
+    let mut redacted = Vec::new();
+    if let Some(commands) = arguments.get_mut("commands").and_then(Value::as_array_mut) {
+        for (index, command) in commands.iter_mut().enumerate() {
+            if let Some(object) = command.as_object_mut() {
+                if object.remove("stdin").is_some() { redacted.push(index); }
+            }
+        }
+    }
+    (arguments, redacted)
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +190,14 @@ impl WorkflowCheckpointStore {
                 .get("objective")
                 .and_then(Value::as_str)
                 .map(str::to_string);
+        }
+        let (arguments, newly_redacted) = sanitize_checkpoint_arguments(checkpoint.arguments);
+        checkpoint.arguments = arguments;
+        if !newly_redacted.is_empty() {
+            checkpoint.redacted_stdin_command_indices.extend(newly_redacted);
+            checkpoint.redacted_stdin_command_indices.sort_unstable();
+            checkpoint.redacted_stdin_command_indices.dedup();
+            self.save(&checkpoint)?;
         }
         Ok(Some(checkpoint))
     }
@@ -345,12 +369,15 @@ mod tests {
             json!({
                 "action":"bugfix",
                 "patch":"SECRET_PATCH_SENTINEL",
-                "commands":[{"command":"echo SECRET_COMMAND_SENTINEL","shell":"cmd"}]
+                "commands":[{"command":"echo SECRET_COMMAND_SENTINEL","shell":"cmd","stdin":"SECRET_STDIN_SENTINEL"}]
             }),
         );
         checkpoint.directory_index = 1;
         checkpoint.patch_applied = true;
         checkpoint.command_index = 1;
+        assert_eq!(checkpoint.redacted_stdin_command_indices, vec![0]);
+        assert!(checkpoint.arguments.pointer("/commands/0/stdin").is_none());
+        assert!(!serde_json::to_string(&checkpoint).unwrap().contains("SECRET_STDIN_SENTINEL"));
         store.save(&checkpoint).unwrap();
 
         let raw = fs::read(store.path_for_test()).unwrap();
