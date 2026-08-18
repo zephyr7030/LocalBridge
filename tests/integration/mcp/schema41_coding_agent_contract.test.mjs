@@ -36,7 +36,7 @@ requireAll(edit, ["struct CodingEditService", "apply_patch", "FileChanged", "Pat
 requireAll(planner, ["struct VerificationPlanner", "priority", "source", "plan"], "VerificationPlanner");
 requireAll(server, ["durable_coding_task_snapshot", "cancel_durable_coding_task", "stable_success(data, \"Task control completed\")"], "task_control durable Task integration");
 requireAll(policy, ['phase == Some("verify")', "process_exec"], "phase=verify capability policy");
-requireAll(facade, ["output_ref", "command_control", "resume_coding_task", "coding_verification_plan", "apply_coding_patch"], "coding capability reachability");
+requireAll(facade, ["output_ref", "command_control", "resume_coding_task", "coding_verification_plan", "apply_coding_patch", "schema41 stale-projection compatibility", "expected_files_from_checkpoint", "schema41_stale_schema39_client_can_complete_durable_coding_task", "schema41_stale_schema39_resume_rechecks_verify_policy_in_edit_mode"], "coding capability reachability");
 
 const matrix = {
   workspace_discovery: "workspace_context + ContextService",

@@ -3579,7 +3579,82 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         if let Some(phase) = object.get("phase").and_then(Value::as_str) {
             return self.coding_agent_workflow_phase(mode, action, phase, object, request_id);
         }
+
+        let dry_run_requested = object.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+        let has_directory_changes = object
+            .get("directory_changes")
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.is_empty());
+        let has_commands = object
+            .get("commands")
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.is_empty());
         let patch = object.get("patch").and_then(Value::as_str);
+
+        // schema41 stale-projection compatibility: an older downstream client that only knows
+        // action/objective/path/patch/resume can still drive the same durable coding task.
+        if !dry_run_requested
+            && patch.is_none()
+            && !has_directory_changes
+            && !has_commands
+            && object
+                .get("objective")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        {
+            let mut prepared = object.clone();
+            prepared.insert("phase".into(), Value::String("prepare".into()));
+            return self.coding_agent_workflow_phase(
+                mode,
+                action,
+                "prepare",
+                &prepared,
+                request_id,
+            );
+        }
+
+        if !dry_run_requested && !has_directory_changes && !has_commands {
+            if let Some(patch) = patch {
+                if let Some(stored) = self.adapter.load_workflow_checkpoint()? {
+                let checkpoint: WorkflowCheckpoint =
+                    serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
+                if checkpoint.is_coding_task() && !checkpoint.completed && checkpoint.next_step.as_deref() == Some("edit") {
+                    let original = object_args(&checkpoint.arguments)?;
+                    let original_action = required_string(original, "action")?;
+                    let same_objective = object
+                        .get("objective")
+                        .and_then(Value::as_str)
+                        .map(|value| checkpoint.objective.as_deref() == Some(value))
+                        .unwrap_or(true);
+                    let requested_path = object.get("path").and_then(Value::as_str).unwrap_or(".");
+                    let original_path = original.get("path").and_then(Value::as_str).unwrap_or(".");
+                    if original_action != action || !same_objective || requested_path != original_path {
+                        return Err(FacadeError::new(
+                            FacadeErrorCode::SessionUnavailable,
+                            "存在未完成的 coding task；旧客户端请求与该 task 不匹配",
+                            false,
+                        ));
+                    }
+                    let mut edited = Map::new();
+                    edited.insert("action".into(), Value::String(action.to_string()));
+                    edited.insert("phase".into(), Value::String("edit".into()));
+                    edited.insert("task_id".into(), Value::String(checkpoint.workflow_id.clone()));
+                    edited.insert("patch".into(), Value::String(patch.to_string()));
+                    edited.insert(
+                        "expected_files".into(),
+                        Value::Object(expected_files_from_checkpoint(&checkpoint)),
+                    );
+                    return self.coding_agent_workflow_phase(
+                        mode,
+                        action,
+                        "edit",
+                        &edited,
+                        request_id,
+                    );
+                }
+            }
+            }
+        }
         let project_path = match object.get("path") {
             Some(value) => value.as_str().ok_or_else(invalid_argument)?,
             None => ".",
@@ -4311,6 +4386,40 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             ));
         }
         if checkpoint.is_coding_task() {
+            if checkpoint.current_session_id.is_none()
+                && !checkpoint.command_inflight
+                && !checkpoint.patch_inflight
+                && !checkpoint.completed
+            {
+                if let Some(next_phase @ ("verify" | "persist")) = checkpoint.next_step.as_deref() {
+                    let mut synthesized = Map::new();
+                    synthesized.insert("action".into(), Value::String(action.to_string()));
+                    synthesized.insert("phase".into(), Value::String(next_phase.to_string()));
+                    synthesized.insert(
+                        "task_id".into(),
+                        Value::String(checkpoint.workflow_id.clone()),
+                    );
+                    let synthesized_value = Value::Object(synthesized.clone());
+                    if !self
+                        .policy
+                        .decide_public(mode, "agent_workflow", &synthesized_value)
+                        .allowed
+                    {
+                        return Err(FacadeError::new(
+                            FacadeErrorCode::CapabilityDenied,
+                            "当前权限模式不能继续 coding task 的下一阶段",
+                            false,
+                        ));
+                    }
+                    return self.coding_agent_workflow_phase(
+                        mode,
+                        action,
+                        next_phase,
+                        &synthesized,
+                        request_id,
+                    );
+                }
+            }
             return self.resume_coding_task(checkpoint, request_id);
         }
         if checkpoint.directory_inflight || checkpoint.patch_inflight {
@@ -5068,6 +5177,23 @@ fn persist_agent_checkpoint<A: WorkspaceRuntimeAdapter>(
 ) -> Result<(), FacadeError> {
     let value = serde_json::to_value(checkpoint).map_err(workflow_checkpoint_error)?;
     adapter.save_workflow_checkpoint(&value)
+}
+
+fn expected_files_from_checkpoint(checkpoint: &WorkflowCheckpoint) -> Map<String, Value> {
+    let mut expected = Map::new();
+    for entry in &checkpoint.files_read {
+        let Some(object) = entry.as_object() else { continue };
+        let Some(path) = object.get("path").and_then(Value::as_str).filter(|value| !value.is_empty()) else { continue };
+        let Some(identity) = object
+            .get("content_sha256")
+            .and_then(Value::as_str)
+            .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        else {
+            continue;
+        };
+        expected.insert(path.to_string(), Value::String(identity.to_string()));
+    }
+    expected
 }
 
 fn ensure_only_keys(object: &Map<String, Value>, allowed: &[&str]) -> Result<(), FacadeError> {
@@ -5876,6 +6002,21 @@ mod tests {
             Ok(json!({"selected_path":path}))
         }
 
+        fn coding_context(&self, _project_path: &str, _objective: &str) -> Result<Value, FacadeError> {
+            Ok(json!({
+                "instructions":[],
+                "important_files":["safe/doc.txt"],
+                "related_files":["safe/doc.txt"],
+                "relevant_ranges":[],
+                "files_read":[{
+                    "path":"safe/doc.txt",
+                    "start_line":1,
+                    "end_line":1,
+                    "content_sha256":"a".repeat(64)
+                }]
+            }))
+        }
+
         fn apply_directory_change(
             &mut self,
             action: &str,
@@ -6355,6 +6496,112 @@ mod tests {
             .expect("terminal coding checkpoint remains durable");
         assert_eq!(checkpoint["completed"], true);
         assert_eq!(checkpoint["workflow_id"], task_id);
+    }
+
+    #[test]
+    fn schema41_stale_schema39_client_can_complete_durable_coding_task() {
+        let state = ResumeFixtureState::new();
+        let adapter = ResumeAdapter {
+            catalog: compatible_catalog(),
+            state: state.clone(),
+            first_execution_runs: false,
+        };
+        let mut facade = AgentFacade::with_adapter(adapter, policy()).unwrap();
+
+        let prepared = facade
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"bugfix","objective":"stale projection compatibility","path":"."}),
+                None,
+            )
+            .unwrap();
+        let task_id = stable_data(&prepared)["task_id"]
+            .as_str()
+            .expect("compat prepare task id")
+            .to_string();
+        assert_eq!(stable_data(&prepared)["state"], "prepared");
+
+        let edited = facade
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({
+                    "action":"bugfix",
+                    "patch":"*** Begin Patch\n*** Update File: safe/doc.txt\n@@\n-old\n+new\n*** End Patch"
+                }),
+                None,
+            )
+            .unwrap();
+        assert_eq!(stable_data(&edited)["task_id"], task_id);
+        assert_eq!(stable_data(&edited)["next_step"], "verify");
+        assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "coding edit uses internal adapter path rather than legacy patch counter");
+
+        let verified = facade
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"resume"}),
+                None,
+            )
+            .unwrap();
+        assert_eq!(stable_data(&verified)["task_id"], task_id);
+        assert_eq!(stable_data(&verified)["next_step"], "persist");
+
+        let persisted = facade
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"resume"}),
+                None,
+            )
+            .unwrap();
+        assert_eq!(stable_data(&persisted)["task_id"], task_id);
+        assert_eq!(stable_data(&persisted)["state"], "persisted");
+        assert_eq!(stable_data(&persisted)["completed"], true);
+        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn schema41_stale_schema39_resume_rechecks_verify_policy_in_edit_mode() {
+        let state = ResumeFixtureState::new();
+        let adapter = ResumeAdapter {
+            catalog: compatible_catalog(),
+            state: state.clone(),
+            first_execution_runs: false,
+        };
+        let mut facade = AgentFacade::with_adapter(adapter, policy()).unwrap();
+        let prepared = facade
+            .dispatch(
+                PermissionMode::Edit,
+                "agent_workflow",
+                json!({"action":"bugfix","objective":"edit mode stale projection","path":"."}),
+                None,
+            )
+            .unwrap();
+        let task_id = stable_data(&prepared)["task_id"].as_str().unwrap().to_string();
+        let edited = facade
+            .dispatch(
+                PermissionMode::Edit,
+                "agent_workflow",
+                json!({
+                    "action":"bugfix",
+                    "patch":"*** Begin Patch\n*** Update File: safe/doc.txt\n@@\n-old\n+new\n*** End Patch"
+                }),
+                None,
+            )
+            .unwrap();
+        assert_eq!(stable_data(&edited)["task_id"], task_id);
+        let error = facade
+            .dispatch(
+                PermissionMode::Edit,
+                "agent_workflow",
+                json!({"action":"resume"}),
+                None,
+            )
+            .expect_err("resume must not bypass verify ProcessExec policy in Edit mode");
+        assert_eq!(error.code, FacadeErrorCode::CapabilityDenied);
+        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[test]
