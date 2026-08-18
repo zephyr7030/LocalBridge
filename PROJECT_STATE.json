@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4666,6 +4666,23 @@
       "g2": 28,
       "g3": 18
     },
+    "next_required_g2_generation": 29,
+    "next_required_g3_generation": 19,
+    "g4_unlocked": false
+  },
+  "schema41_stale_projection_lb006_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commits": [
+      "cc7d740",
+      "d16d5cd"
+    ],
+    "evidence": [
+      "Real @测试 using stale schema39-visible action/objective/path successfully reached api41 and returned prepared durable task_id, ContextService context, VerificationPlanner plan and nine-field envelope without file writes or process execution.",
+      "Real @测试 task_control cancel then returned durable_task_cancelled=true and cleaned the black-box task.",
+      "Fresh MCP module 86/86 PASS; schema41 stale-projection regressions PASS; legacy schema27 diagnose semantics PASS; policy 9/9+10/10 PASS; Clippy -D warnings PASS; architecture and human-gate fail-closed PASS."
+    ],
+    "next_pr": "LB-007",
     "next_required_g2_generation": 29,
     "next_required_g3_generation": 19,
     "g4_unlocked": false
