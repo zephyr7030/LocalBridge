@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5057,6 +5057,16 @@
     "generation": 30,
     "decision_commit": "1083059c890a157f19e3a71664997827344f557d",
     "next_pr": "LB-013",
+    "g4_unlocked": false
+  },
+  "schema41_lb013_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB013 background contract PASS.",
+      "Background lifecycle/current-task behavior 14/14 PASS.",
+      "Architecture PASS."
+    ],
+    "next_pr": "LB-014",
     "g4_unlocked": false
   }
 }
