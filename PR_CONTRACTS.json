@@ -89,7 +89,7 @@
       ],
       "condition": "only minimal dependencies required by the current PR; lockfiles must stay synchronized"
     },
-    "dashboard_current_task_status": "current_status_plus_single_last_tool_row",
+    "dashboard_current_task_status": "backend_current_activity_plus_single_last_activity_peer_row",
     "activity_feed_forbidden": true,
     "task_history_ui_forbidden": true,
     "task_last_metadata_only_allowed": true,
@@ -109,7 +109,7 @@
     "task_minimum_visible_duration_ms": 500,
     "task_minimum_visibility_must_not_delay_tool_response": true,
     "task_last_tool_row_required": true,
-    "task_last_tool_row_label": "上次执行工具：",
+    "task_last_tool_row_label": "上次执行：",
     "task_last_tool_age_right_aligned": true,
     "task_idle_age_moved_to_last_tool_row": true,
     "task_last_tool_label_secret_redacted": true,
@@ -1093,6 +1093,7 @@
     "schema42_next_g3_review_generation": 22,
     "task_aggregate_single_backend_truth_required": true,
     "task_aggregate_sources": [
+      "current_task_projection",
       "workflow_checkpoint",
       "command_task_state_store"
     ],
@@ -1125,7 +1126,83 @@
     "windows_system_management_operation_classification_required": true,
     "windows_system_management_readonly_full_allowlist_required": true,
     "windows_system_management_mutation_or_unknown_requires_privileged_route": true,
-    "schema42_mcp_transport_blip_out_of_scope": true
+    "schema42_mcp_transport_blip_out_of_scope": true,
+    "schema42_dashboard_observability_amendment_ratified": true,
+    "schema42_dashboard_observability_owner_prs": [
+      "LB-006",
+      "LB-015"
+    ],
+    "schema42_dashboard_observability_next_g2_review_generation": 33,
+    "schema42_dashboard_observability_next_g3_review_generation": 22,
+    "task_aggregate_all_observable_public_actions_required": true,
+    "task_aggregate_observable_public_actions": [
+      "workspace_context",
+      "agent_workflow",
+      "exec_command",
+      "command_control",
+      "task_control",
+      "git_workflow",
+      "document_workflow",
+      "view_image",
+      "elevated_exec"
+    ],
+    "dashboard_current_activity_backend_owned_projection_required": true,
+    "dashboard_last_activity_backend_owned_projection_required": true,
+    "dashboard_current_activity_fields": [
+      "kind",
+      "state",
+      "summary",
+      "elapsed_ms",
+      "step",
+      "progress_current",
+      "progress_total"
+    ],
+    "dashboard_last_activity_fields": [
+      "kind",
+      "summary",
+      "outcome",
+      "completed_at_ms"
+    ],
+    "dashboard_current_activity_precedence": [
+      "current_command",
+      "current_task_activity",
+      "current_workflow",
+      "idle"
+    ],
+    "dashboard_backend_current_command_waiting_input_and_cancelling_must_be_real": true,
+    "dashboard_workflow_step_projection_required": true,
+    "dashboard_verification_progress_from_checkpoint_when_available": true,
+    "dashboard_activity_kind_labels": {
+      "read": "读取文件…",
+      "search": "搜索代码…",
+      "modify": "修改文件…",
+      "command": "运行命令…",
+      "git": "Git 操作…",
+      "build": "构建项目…",
+      "test": "运行测试…",
+      "admin": "管理员操作…",
+      "other": "任务执行中…"
+    },
+    "dashboard_rows_visual_peer_required": true,
+    "dashboard_rows_body_typography_peer_required": true,
+    "dashboard_rows_shared_left_baseline_required": true,
+    "dashboard_rows_shared_right_age_column_required": true,
+    "dashboard_last_activity_prefix": "上次执行：",
+    "dashboard_last_activity_result_label_forbidden": true,
+    "dashboard_last_activity_left_sentence_outcome_colored": true,
+    "dashboard_last_activity_outcome_colors": {
+      "completed": "green",
+      "failed": "red",
+      "cancelled": "neutral_gray",
+      "timed_out": "amber",
+      "lost": "red"
+    },
+    "dashboard_last_activity_latest_completion_across_command_and_tool_required": true,
+    "dashboard_last_activity_safe_summary_required": true,
+    "dashboard_activity_summary_fixed_max_width_token_required": true,
+    "dashboard_activity_summary_only_segment_ellipsis": true,
+    "dashboard_activity_outcome_suffix_never_ellipsized": true,
+    "dashboard_last_activity_age_never_ellipsized": true
   },
   "prs": {
     "LB-000": {
@@ -1518,7 +1595,10 @@
         "current_command contains only running waiting_input or cancelling activity; completed failed cancelled timed_out and lost are terminal history and clear current_command immediately",
         "command summary is derived from structured command status so running can never report Command completed",
         "task_control cancel ends the entire current workflow and owned command in one operation; command_control kill ends only the command and leaves an incomplete owner workflow explicitly waiting and resumable",
-        "document inspect truncated is true only when LocalBridge max_lines or max_bytes prevents returning the full requested logical range; end_line beyond EOF with all actual content returned is not truncated"
+        "document inspect truncated is true only when LocalBridge max_lines or max_bytes prevents returning the full requested logical range; end_line beyond EOF with all actual content returned is not truncated",
+        "TaskAggregate merges CurrentTaskProjection plus WorkflowCheckpoint plus CommandTaskStateStore into one backend observation truth; workspace_context agent_workflow exec_command command_control task_control git_workflow document_workflow view_image and elevated_exec cannot be actively executing while Dashboard aggregate projects overall idle",
+        "when the AgentFacade execution guard is busy, the desktop fallback still returns the schema42 current_activity compatible aggregate shape rather than a legacy CurrentTask-only object that the Dashboard would parse as idle",
+        "backend production paths, not frontend-only enum placeholders, can project current command running waiting_input and cancelling when those states are actually observable; terminal states remain history-only"
       ],
       "non_goals": [
         "policy enforcement",
@@ -1837,7 +1917,9 @@
         "projection-only responsive frontend boundary",
         "content-derived text-button geometry system whose width follows maximum visible characters per line and height follows rendered line count",
         "three-tier typography system with exactly title, body and auxiliary font sizes and no fourth tier",
-        "Dashboard Elevated project-scope projection showing yellow 全目录访问 and blocking project switching with the fixed explanatory dialog"
+        "Dashboard Elevated project-scope projection showing yellow 全目录访问 and blocking project switching with the fixed explanatory dialog",
+        "backend-owned Dashboard currentActivity and lastActivity projections derived from TaskAggregate without a new persisted activity database",
+        "peer two-row Dashboard observation layout with current activity and one latest terminal activity result"
       ],
       "required_tests": [
         "minimal-ui assertions",
@@ -1944,7 +2026,17 @@
         "Dashboard 权限模式 row has no service/status indicator dot and its visible value comes directly from backend PermissionMode",
         "Dashboard main data surface is intentionally flat: card/base color contrast border and drop-shadow are not required and near-invisible fake elevation styling is absent",
         "Dashboard current activity is derived from backend TaskAggregate and displays 空闲 only when no current workflow and no current command exist; a resumable workflow with no command displays 任务等待继续",
-        "Dashboard current activity and last command history are separate projections; terminal command results never remain in the current activity row and the retained history row does not influence current status"
+        "Dashboard current activity and last command history are separate projections; terminal command results never remain in the current activity row and the retained history row does not influence current status",
+        "Dashboard first row consumes backend currentActivity rather than independently prioritizing currentWorkflow currentCommand or legacy CurrentTask; Git document image workspace context short command workflow and elevated execution activity use the same observable action projection and cannot appear idle while active",
+        "Dashboard backend lastActivity selects the newest completed observable activity by backend completion time across command terminal history and non-command tool completion instead of always preferring any historical command",
+        "Dashboard workflow activity may expose existing prepare edit verify persist step and verification command_index/verification_plan progress as concise presentation metadata without creating a new progress state machine",
+        "Dashboard current activity row and last activity row are visual peers: both use the body typography tier, share the same left baseline and row geometry, and the right-side age column remains aligned without making the history row a subordinate section",
+        "Dashboard last activity prefix is exactly 上次执行： and no 结果： field label is rendered; the left result sentence is natural text such as 上次执行：运行命令成功 or 上次执行：运行命令 cargo test成功",
+        "Dashboard last activity left sentence, including 上次执行： action label optional safe command summary and outcome suffix, uses one outcome semantic color: completed green, failed/lost red, cancelled neutral gray and timed_out amber; the far-right relative age is not part of that outcome coloring requirement",
+        "Dashboard command/activity summary uses one fixed maximum-width presentation token; when text exceeds it only the summary segment is ellipsized, while the action label outcome suffix such as 成功/失败/已取消/已超时 and far-right relative age remain fully visible at 780x620",
+        "Dashboard activity summary is sourced only from the existing secret-redacted safe summary path; unsafe or unavailable command text is omitted and the row falls back to a result sentence such as 上次执行：运行命令成功 without exposing raw arguments",
+        "frontend current activity wording is backend-projection driven and supports 读取文件… 搜索代码… 修改文件… Git 操作… 构建项目… 运行测试… 管理员操作… 运行命令… 任务执行中… 任务等待继续 and 空闲 without inventing a second lifecycle truth",
+        "waiting_input and cancelling are displayed only when backend currentActivity/currentCommand actually projects those states; TypeScript-only placeholder states do not count as lifecycle implementation"
       ],
       "non_goals": [
         "wizard",

@@ -2189,6 +2189,76 @@ const SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18 = Object.freeze({
 export function hasExactSchema42TaskCommandTruth20260818(doc){ if(doc?.schema_version!==42)return false; for(const [k,v] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.addedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v)) return false; for(const [k,v] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current)) return false; for(const [id,tests] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.tests)) for(const t of tests) if(!doc?.prs?.[id]?.required_tests?.includes(t)) return false; return true;}
 export function normalizeSchema42TaskCommandTruth20260818(doc){ const n=structuredClone(doc??null); if(!n)return n; n.schema_version=41; for(const k of Object.keys(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.addedRules)) delete n.rules[k]; for(const [k,v] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.replacedRules)) n.rules[k]=structuredClone(v.baseline); for(const [id,tests] of Object.entries(SCHEMA42_TASK_COMMAND_TRUTH_2026_08_18.tests)) if(n.prs?.[id]) n.prs[id].required_tests=(n.prs[id].required_tests??[]).filter(x=>!tests.includes(x)); return n;}
 
+const SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18 = Object.freeze({
+  addedRules:{
+    schema42_dashboard_observability_amendment_ratified:true,
+    schema42_dashboard_observability_owner_prs:["LB-006","LB-015"],
+    schema42_dashboard_observability_next_g2_review_generation:33,
+    schema42_dashboard_observability_next_g3_review_generation:22,
+    task_aggregate_all_observable_public_actions_required:true,
+    task_aggregate_observable_public_actions:["workspace_context","agent_workflow","exec_command","command_control","task_control","git_workflow","document_workflow","view_image","elevated_exec"],
+    dashboard_current_activity_backend_owned_projection_required:true,
+    dashboard_last_activity_backend_owned_projection_required:true,
+    dashboard_current_activity_fields:["kind","state","summary","elapsed_ms","step","progress_current","progress_total"],
+    dashboard_last_activity_fields:["kind","summary","outcome","completed_at_ms"],
+    dashboard_current_activity_precedence:["current_command","current_task_activity","current_workflow","idle"],
+    dashboard_backend_current_command_waiting_input_and_cancelling_must_be_real:true,
+    dashboard_workflow_step_projection_required:true,
+    dashboard_verification_progress_from_checkpoint_when_available:true,
+    dashboard_activity_kind_labels:{read:"读取文件…",search:"搜索代码…",modify:"修改文件…",command:"运行命令…",git:"Git 操作…",build:"构建项目…",test:"运行测试…",admin:"管理员操作…",other:"任务执行中…"},
+    dashboard_rows_visual_peer_required:true, dashboard_rows_body_typography_peer_required:true, dashboard_rows_shared_left_baseline_required:true, dashboard_rows_shared_right_age_column_required:true,
+    dashboard_last_activity_prefix:"上次执行：", dashboard_last_activity_result_label_forbidden:true, dashboard_last_activity_left_sentence_outcome_colored:true,
+    dashboard_last_activity_outcome_colors:{completed:"green",failed:"red",cancelled:"neutral_gray",timed_out:"amber",lost:"red"},
+    dashboard_last_activity_latest_completion_across_command_and_tool_required:true, dashboard_last_activity_safe_summary_required:true,
+    dashboard_activity_summary_fixed_max_width_token_required:true, dashboard_activity_summary_only_segment_ellipsis:true, dashboard_activity_outcome_suffix_never_ellipsized:true, dashboard_last_activity_age_never_ellipsized:true,
+  },
+  replacedRules:{
+    task_aggregate_sources:{current:["current_task_projection","workflow_checkpoint","command_task_state_store"],baseline:["workflow_checkpoint","command_task_state_store"]},
+    dashboard_current_task_status:{current:"backend_current_activity_plus_single_last_activity_peer_row",baseline:"current_status_plus_single_last_tool_row"},
+    task_last_tool_row_label:{current:"上次执行：",baseline:"上次执行工具："},
+  },
+  addedArtifacts:{"LB-015":[
+    "backend-owned Dashboard currentActivity and lastActivity projections derived from TaskAggregate without a new persisted activity database",
+    "peer two-row Dashboard observation layout with current activity and one latest terminal activity result"
+  ]},
+  addedTests:{
+    "LB-006":[
+      "TaskAggregate merges CurrentTaskProjection plus WorkflowCheckpoint plus CommandTaskStateStore into one backend observation truth; workspace_context agent_workflow exec_command command_control task_control git_workflow document_workflow view_image and elevated_exec cannot be actively executing while Dashboard aggregate projects overall idle",
+      "when the AgentFacade execution guard is busy, the desktop fallback still returns the schema42 current_activity compatible aggregate shape rather than a legacy CurrentTask-only object that the Dashboard would parse as idle",
+      "backend production paths, not frontend-only enum placeholders, can project current command running waiting_input and cancelling when those states are actually observable; terminal states remain history-only"
+    ],
+    "LB-015":[
+      "Dashboard first row consumes backend currentActivity rather than independently prioritizing currentWorkflow currentCommand or legacy CurrentTask; Git document image workspace context short command workflow and elevated execution activity use the same observable action projection and cannot appear idle while active",
+      "Dashboard backend lastActivity selects the newest completed observable activity by backend completion time across command terminal history and non-command tool completion instead of always preferring any historical command",
+      "Dashboard workflow activity may expose existing prepare edit verify persist step and verification command_index/verification_plan progress as concise presentation metadata without creating a new progress state machine",
+      "Dashboard current activity row and last activity row are visual peers: both use the body typography tier, share the same left baseline and row geometry, and the right-side age column remains aligned without making the history row a subordinate section",
+      "Dashboard last activity prefix is exactly 上次执行： and no 结果： field label is rendered; the left result sentence is natural text such as 上次执行：运行命令成功 or 上次执行：运行命令 cargo test成功",
+      "Dashboard last activity left sentence, including 上次执行： action label optional safe command summary and outcome suffix, uses one outcome semantic color: completed green, failed/lost red, cancelled neutral gray and timed_out amber; the far-right relative age is not part of that outcome coloring requirement",
+      "Dashboard command/activity summary uses one fixed maximum-width presentation token; when text exceeds it only the summary segment is ellipsized, while the action label outcome suffix such as 成功/失败/已取消/已超时 and far-right relative age remain fully visible at 780x620",
+      "Dashboard activity summary is sourced only from the existing secret-redacted safe summary path; unsafe or unavailable command text is omitted and the row falls back to a result sentence such as 上次执行：运行命令成功 without exposing raw arguments",
+      "frontend current activity wording is backend-projection driven and supports 读取文件… 搜索代码… 修改文件… Git 操作… 构建项目… 运行测试… 管理员操作… 运行命令… 任务执行中… 任务等待继续 and 空闲 without inventing a second lifecycle truth",
+      "waiting_input and cancelling are displayed only when backend currentActivity/currentCommand actually projects those states; TypeScript-only placeholder states do not count as lifecycle implementation"
+    ]
+  }
+});
+
+export function hasExactSchema42DashboardObservabilityAmendment20260818(doc){
+  if(doc?.schema_version!==42)return false;
+  for(const [k,v] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v))return false;
+  for(const [k,v] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedArtifacts)) for(const item of items) if(!doc?.prs?.[id]?.required_artifacts?.includes(item))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedTests)) for(const item of items) if(!doc?.prs?.[id]?.required_tests?.includes(item))return false;
+  return true;
+}
+export function normalizeSchema42DashboardObservabilityAmendment20260818(doc){
+  const n=structuredClone(doc??null); if(!n)return n;
+  for(const k of Object.keys(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedRules)) delete n.rules[k];
+  for(const [k,v] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.replacedRules)) n.rules[k]=structuredClone(v.baseline);
+  for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedArtifacts)) if(n.prs?.[id]) n.prs[id].required_artifacts=(n.prs[id].required_artifacts??[]).filter(x=>!items.includes(x));
+  for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedTests)) if(n.prs?.[id]) n.prs[id].required_tests=(n.prs[id].required_tests??[]).filter(x=>!items.includes(x));
+  return n;
+}
+
 const SCHEMA41_DERIVED_WAIT_TEST = "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed";
 const SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18 = Object.freeze({
   rules: {
@@ -3033,6 +3103,8 @@ export function validatePreG4GateAuthorization(
   const findings = [];
   let authorizationContracts = contractsDoc;
   if ((authorizationContracts?.schema_version ?? 0) >= 42) {
+    if (!hasExactSchema42DashboardObservabilityAmendment20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-dashboard-observability-20260818-drift`);
+    authorizationContracts = normalizeSchema42DashboardObservabilityAmendment20260818(authorizationContracts);
     if (!hasExactSchema42TaskCommandTruth20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-task-command-truth-20260818-drift`);
     authorizationContracts = normalizeSchema42TaskCommandTruth20260818(authorizationContracts);
   }

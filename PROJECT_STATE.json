@@ -5229,19 +5229,19 @@
       "command summary is derived from status",
       "document truncated reflects actual requested-range truncation",
       "pnputil powercfg wevtutil join Windows system-management operation classification",
-      "Dashboard separates current status from retained last-command history"
+      "Dashboard separates current status from retained last-command history",
+      "TaskAggregate also incorporates CurrentTaskProjection so every observable public action reaches Dashboard truth",
+      "Dashboard consumes backend currentActivity and lastActivity rather than recomputing lifecycle priority or latest history",
+      "Dashboard current and last rows are visual peers; last result uses natural outcome-colored sentence with fixed-width safe summary ellipsis"
     ],
     "invalidated": {
       "g2": {
-        "generation": 31,
-        "reason": "schema42 supersedes pending schema41 reacceptance"
-      },
-      "g3": {
-        "generation": 21,
-        "reason": "schema42 supersedes pending schema41 reacceptance"
+        "generation": 32,
+        "commit": "0c21acdeea09986d7a427a94a06b2c77144cecba",
+        "reason": "schema42 Dashboard observability amendment postdates generation32 evidence"
       }
     },
-    "next_required_g2_generation": 32,
+    "next_required_g2_generation": 33,
     "next_required_g3_generation": 22,
     "g4_unlocked": false
   },
@@ -5371,5 +5371,33 @@
     ],
     "next_pr": "LB-016",
     "remaining_schema42_product_changes": false
+  },
+  "schema42_dashboard_observability_amendment_2026_08_18": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "owner_prs": [
+      "LB-006",
+      "LB-015"
+    ],
+    "supersedes_review_evidence": {
+      "g2_generation": 32,
+      "g2_commit": "0c21acdeea09986d7a427a94a06b2c77144cecba"
+    },
+    "next_required_g2_generation": 33,
+    "next_required_g3_generation": 22,
+    "rules": [
+      "TaskAggregate observation truth merges CurrentTaskProjection WorkflowCheckpoint and CommandTaskStateStore without a new persisted activity database",
+      "backend currentActivity covers every observable public tool action and backend lastActivity selects the newest terminal activity across command and non-command completions",
+      "Dashboard frontend does not recompute activity priority or latest-history selection",
+      "current and last rows are visual peers; last result is one natural outcome-colored sentence plus a far-right relative age",
+      "safe command/activity summary uses one fixed max-width token; only the summary may ellipsize and the outcome suffix plus age must remain visible",
+      "backend waiting_input and cancelling must be real observable states before the UI may display them"
+    ],
+    "non_goals": [
+      "new persisted activity database",
+      "history/feed/timeline UI",
+      "new lifecycle enum family",
+      "MCP/Tunnel transient network blip attribution"
+    ],
+    "pending_g3_generation": 22
   }
 }
