@@ -1266,7 +1266,7 @@
       "version": "1.37.0",
       "source": "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
       "archive_sha256": "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",
-      "executable": "runtime/toolbox/aria2c/aria2c.exe",
+      "executable": "runtime/toolbox/bin/aria2c.exe",
       "executable_sha256": "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"
     },
     "toolbox_7z": {
@@ -1275,7 +1275,7 @@
       "source": "https://www.7-zip.org/a/7z2602-extra.7z",
       "archive_sha256": "081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a",
       "source_member": "x64/7za.exe",
-      "executable": "runtime/toolbox/7z/7z.exe",
+      "executable": "runtime/toolbox/bin/7z.exe",
       "executable_sha256": "35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2"
     },
     "toolbox_jq": {
@@ -1283,7 +1283,7 @@
       "version": "1.8.2",
       "source": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe",
       "archive_sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
-      "executable": "runtime/toolbox/jq/jq.exe",
+      "executable": "runtime/toolbox/bin/jq.exe",
       "executable_sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
     },
     "toolbox_curl": {
