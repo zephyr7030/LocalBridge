@@ -5615,5 +5615,17 @@
     "next_pr": "LB-007",
     "next_required_g2_generation": 35,
     "next_required_g3_generation": 22
+  },
+  "schema42_lb007_unified_policy_diagnostics_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "product_commit": "2bbee36",
+    "evidence": [
+      "PolicyDenied WorkspaceDenied CapabilityDenied PrivilegedRouteUnavailable and ElevationRequired preserve canonical code and project Denied plus policy through the shared mapper.",
+      "LB-007 policy unit/contracts/enforcement tests and all-targets Clippy PASS."
+    ],
+    "next_pr": "LB-008",
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22
   }
 }
