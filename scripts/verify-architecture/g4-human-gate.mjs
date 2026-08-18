@@ -2259,11 +2259,90 @@ export function normalizeSchema42DashboardObservabilityAmendment20260818(doc){
   return n;
 }
 
+const SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18 = Object.freeze({
+  addedRules:{
+    schema42_toolbox_amendment_ratified:true,
+    schema42_toolbox_owner_prs:["LB-012"],
+    schema42_toolbox_next_g2_review_generation:34,
+    schema42_toolbox_next_g3_review_generation:22,
+    toolbox_public_tools_forbidden:true,
+    toolbox_preserves_existing_eight_core_plus_elevated_exec_surface:true,
+    toolbox_system_or_user_path_persistent_mutation_forbidden:true,
+    toolbox_runtime_download_install_or_update_forbidden:true,
+    toolbox_resolver_required:true,
+    toolbox_bundled_name_resolution_must_not_fall_through_to_ambient_path:true,
+    toolbox_build_time_download_and_sha256_verification_required:true,
+    toolbox_release_manifest_and_third_party_notices_required:true,
+    toolbox_permission_inherits_existing_mode:true,
+    toolbox_edit_process_execution_forbidden:true,
+    toolbox_full_token:"current_windows_user_token",
+    toolbox_elevated_uses_existing_route_only_when_target_or_operation_requires_administrator:true,
+    toolbox_aria2c:{logical_name:"aria2c",version:"1.37.0",source:"https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",archive_sha256:"67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",executable:"runtime/toolbox/bin/aria2c.exe",executable_sha256:"be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"},
+    toolbox_7z:{logical_name:"7z",version:"26.02",source:"https://www.7-zip.org/a/7z2602-extra.7z",archive_sha256:"081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a",source_member:"x64/7za.exe",executable:"runtime/toolbox/bin/7z.exe",executable_sha256:"35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2"},
+    toolbox_jq:{logical_name:"jq",version:"1.8.2",source:"https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe",archive_sha256:"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",executable:"runtime/toolbox/bin/jq.exe",executable_sha256:"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"},
+    toolbox_curl:{bundled:false,source:"windows-system-runtime",executable:"%SystemRoot%/System32/curl.exe",startup_existence_probe_required:true,startup_capability_probe_required:true,missing_error:"RuntimeUnavailable",capability_missing_error:"CapabilityUnavailable",fallback_download_forbidden:true},
+  },
+  replacedRules:{
+    stable_public_error_codes:{
+      current:["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","CapabilityUnavailable","InvalidShellSyntax","PrivilegedRouteUnavailable","ProcessTimedOut"],
+      baseline:["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","InvalidShellSyntax","PrivilegedRouteUnavailable","ProcessTimedOut"]
+    },
+    public_typed_error_taxonomy:{
+      current:["InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied","InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut","ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable","RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"],
+      baseline:["InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied","InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut","ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"]
+    },
+    schema42_windows_execution_policy_next_g2_review_generation:{current:34,baseline:33},
+  },
+  addedWritablePaths:{
+    "LB-012":["tests/unit/runtime/**","runtime-manifest.toml","runtime/toolbox/**","scripts/prepare-toolbox.mjs","scripts/verify-runtime-manifest/**","src-tauri/tauri.conf.json","package.json","THIRD_PARTY_NOTICES.md"]
+  },
+  addedArtifacts:{
+    "LB-012":[
+      "ToolboxResolver with pinned bundled aria2c 7z jq plus probed Windows System32 curl",
+      "build-time-only toolbox acquisition and release packaging with exact versions sources and SHA256 in runtime manifest and third-party notices"
+    ]
+  },
+  addedTests:{
+    "LB-012":[
+      "aria2c 1.37.0 7z 26.02 and jq 1.8.2 are downloaded only during the build preparation step from the frozen sources, verified against the frozen archive and executable SHA256 values, included in the release payload, and never downloaded installed or updated at runtime",
+      "ToolboxResolver never accepts ambient PATH aria2c 7z or jq as toolbox authority and never persistently modifies system or user PATH; logical toolbox invocation resolves to the LocalBridge-controlled executable identity",
+      "Windows curl is not bundled: startup probes exact System32 curl.exe existence and required capabilities, returning RuntimeUnavailable when absent and CapabilityUnavailable when present but insufficient, with no silent fallback download",
+      "Toolbox adds no MCP public tool and the advertised catalog remains exactly eight core tools plus elevated_exec; agent_workflow and exec_command remain the execution entrypoints",
+      "Edit gains no process authority from Toolbox, Full toolbox execution stays under the current ordinary-user token, and only administrator-required destination or operation uses the existing reviewed elevated route",
+      "runtime-manifest and THIRD_PARTY_NOTICES record toolbox logical name version source archive SHA256 executable path and executable SHA256, and packaged aria2c 7z jq cannot resolve from coincidental system PATH installations"
+    ]
+  },
+  addedNonGoals:{
+    "LB-012":["new Toolbox MCP public tools","system or user PATH modification","runtime toolbox downloader updater or package manager"]
+  }
+});
+
+export function hasExactSchema42ToolboxAmendment20260818(doc){
+  if(doc?.schema_version!==42)return false;
+  for(const [k,v] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v))return false;
+  for(const [k,v] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedWritablePaths)) for(const item of items) if(!doc?.prs?.[id]?.writable_paths?.includes(item))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedArtifacts)) for(const item of items) if(!doc?.prs?.[id]?.required_artifacts?.includes(item))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedTests)) for(const item of items) if(!doc?.prs?.[id]?.required_tests?.includes(item))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedNonGoals)) for(const item of items) if(!doc?.prs?.[id]?.non_goals?.includes(item))return false;
+  return true;
+}
+export function normalizeSchema42ToolboxAmendment20260818(doc){
+  const n=structuredClone(doc??null); if(!n)return n;
+  for(const k of Object.keys(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedRules)) delete n.rules[k];
+  for(const [k,v] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.replacedRules)) n.rules[k]=structuredClone(v.baseline);
+  for(const [id,items] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedWritablePaths)) if(n.prs?.[id]) n.prs[id].writable_paths=(n.prs[id].writable_paths??[]).filter(x=>!items.includes(x));
+  for(const [id,items] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedArtifacts)) if(n.prs?.[id]) n.prs[id].required_artifacts=(n.prs[id].required_artifacts??[]).filter(x=>!items.includes(x));
+  for(const [id,items] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedTests)) if(n.prs?.[id]) n.prs[id].required_tests=(n.prs[id].required_tests??[]).filter(x=>!items.includes(x));
+  for(const [id,items] of Object.entries(SCHEMA42_TOOLBOX_AMENDMENT_2026_08_18.addedNonGoals)) if(n.prs?.[id]) n.prs[id].non_goals=(n.prs[id].non_goals??[]).filter(x=>!items.includes(x));
+  return n;
+}
+
 const SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18 = Object.freeze({
   addedRules:{
     schema42_windows_execution_policy_amendment_ratified:true,
     schema42_windows_execution_policy_owner_prs:["LB-006","LB-007","LB-012"],
-    schema42_windows_execution_policy_next_g2_review_generation:34,
+    schema42_windows_execution_policy_next_g2_review_generation:33,
     schema42_windows_execution_policy_next_g3_review_generation:22,
     full_hard_process_authority_boundary:"current_windows_user_token",
     full_direct_command_classifier_scope:"direct_invocation_routing_and_accidental_system_maintenance_guard",
@@ -2290,14 +2369,6 @@ const SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18 = Object.freeze({
     schema42_future_transport_diagnostics_must_distinguish_malformed_request_from_transport_interruption:true,
   },
   replacedRules:{
-    stable_public_error_codes:{
-      current:["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","CapabilityUnavailable","InvalidShellSyntax","PrivilegedRouteUnavailable","ProcessTimedOut"],
-      baseline:["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","InvalidShellSyntax","PrivilegedRouteUnavailable","ProcessTimedOut"]
-    },
-    public_typed_error_taxonomy:{
-      current:["InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied","InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut","ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable","RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"],
-      baseline:["InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied","InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut","ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"]
-    },
     windows_system_management_programs:{
       current:["reg.exe","schtasks.exe","sc.exe","netsh.exe","bcdedit.exe","dism.exe","pnputil.exe","powercfg.exe","wevtutil.exe","net.exe","net1.exe","fsutil.exe","mountvol.exe","reagentc.exe","manage-bde.exe","fltmc.exe","auditpol.exe","vssadmin.exe"],
       baseline:["reg.exe","schtasks.exe","sc.exe","netsh.exe","bcdedit.exe","dism.exe","pnputil.exe","powercfg.exe","wevtutil.exe"]
@@ -3203,6 +3274,8 @@ export function validatePreG4GateAuthorization(
   const findings = [];
   let authorizationContracts = contractsDoc;
   if ((authorizationContracts?.schema_version ?? 0) >= 42) {
+    if (!hasExactSchema42ToolboxAmendment20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-toolbox-20260818-drift`);
+    authorizationContracts = normalizeSchema42ToolboxAmendment20260818(authorizationContracts);
     if (!hasExactSchema42WindowsExecutionPolicyAmendment20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-windows-execution-policy-20260818-drift`);
     authorizationContracts = normalizeSchema42WindowsExecutionPolicyAmendment20260818(authorizationContracts);
     if (!hasExactSchema42DashboardObservabilityAmendment20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-dashboard-observability-20260818-drift`);
