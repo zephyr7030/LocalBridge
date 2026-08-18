@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5077,6 +5077,17 @@
       "Architecture PASS."
     ],
     "next_pr": "LB-015",
+    "g4_unlocked": false
+  },
+  "schema41_lb015_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "Dashboard contract/hardening/window chrome and UI token contracts PASS.",
+      "Backend UI projection/challenge tests 9/9 PASS.",
+      "Frontend Vitest 7/7, production build, UI-language and architecture PASS.",
+      "Dashboard read-only PermissionMode and backend-owned CurrentTask/service health projections remain intact after schema40 health repair."
+    ],
+    "next_pr": "LB-016",
     "g4_unlocked": false
   }
 }
