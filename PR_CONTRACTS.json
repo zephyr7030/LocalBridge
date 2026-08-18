@@ -773,6 +773,7 @@
       "PolicyDenied",
       "WorkspaceDenied",
       "RuntimeUnavailable",
+      "CapabilityUnavailable",
       "InvalidShellSyntax",
       "PrivilegedRouteUnavailable",
       "ProcessTimedOut"
@@ -792,6 +793,7 @@
       "SessionUnavailable",
       "OutputTruncated",
       "RuntimeUnavailable",
+      "CapabilityUnavailable",
       "RuntimeProtocolMismatch",
       "RuntimeCapabilityMismatch",
       "FileChanged",
@@ -1218,7 +1220,7 @@
       "LB-007",
       "LB-012"
     ],
-    "schema42_windows_execution_policy_next_g2_review_generation": 33,
+    "schema42_windows_execution_policy_next_g2_review_generation": 34,
     "schema42_windows_execution_policy_next_g3_review_generation": 22,
     "full_hard_process_authority_boundary": "current_windows_user_token",
     "full_direct_command_classifier_scope": "direct_invocation_routing_and_accidental_system_maintenance_guard",
@@ -1242,7 +1244,58 @@
     "permission_mode_elevated_selection_separate_from_administrator_route_readiness": true,
     "schema42_mcp_transport_diagnostics_deferred_to_diagnostics_logging": true,
     "schema42_mcp_transport_not_current_repair_blocker": true,
-    "schema42_future_transport_diagnostics_must_distinguish_malformed_request_from_transport_interruption": true
+    "schema42_future_transport_diagnostics_must_distinguish_malformed_request_from_transport_interruption": true,
+    "schema42_toolbox_amendment_ratified": true,
+    "schema42_toolbox_owner_prs": ["LB-012"],
+    "schema42_toolbox_next_g2_review_generation": 34,
+    "schema42_toolbox_next_g3_review_generation": 22,
+    "toolbox_public_tools_forbidden": true,
+    "toolbox_preserves_existing_eight_core_plus_elevated_exec_surface": true,
+    "toolbox_system_or_user_path_persistent_mutation_forbidden": true,
+    "toolbox_runtime_download_install_or_update_forbidden": true,
+    "toolbox_resolver_required": true,
+    "toolbox_bundled_name_resolution_must_not_fall_through_to_ambient_path": true,
+    "toolbox_build_time_download_and_sha256_verification_required": true,
+    "toolbox_release_manifest_and_third_party_notices_required": true,
+    "toolbox_permission_inherits_existing_mode": true,
+    "toolbox_edit_process_execution_forbidden": true,
+    "toolbox_full_token": "current_windows_user_token",
+    "toolbox_elevated_uses_existing_route_only_when_target_or_operation_requires_administrator": true,
+    "toolbox_aria2c": {
+      "logical_name": "aria2c",
+      "version": "1.37.0",
+      "source": "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
+      "archive_sha256": "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",
+      "executable": "runtime/toolbox/aria2c/aria2c.exe",
+      "executable_sha256": "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"
+    },
+    "toolbox_7z": {
+      "logical_name": "7z",
+      "version": "26.02",
+      "source": "https://www.7-zip.org/a/7z2602-extra.7z",
+      "archive_sha256": "081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a",
+      "source_member": "x64/7za.exe",
+      "executable": "runtime/toolbox/7z/7z.exe",
+      "executable_sha256": "35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2"
+    },
+    "toolbox_jq": {
+      "logical_name": "jq",
+      "version": "1.8.2",
+      "source": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe",
+      "archive_sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+      "executable": "runtime/toolbox/jq/jq.exe",
+      "executable_sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+    },
+    "toolbox_curl": {
+      "bundled": false,
+      "source": "windows-system-runtime",
+      "executable": "%SystemRoot%/System32/curl.exe",
+      "startup_existence_probe_required": true,
+      "startup_capability_probe_required": true,
+      "missing_error": "RuntimeUnavailable",
+      "capability_missing_error": "CapabilityUnavailable",
+      "fallback_download_forbidden": true
+    }
   },
   "prs": {
     "LB-000": {
@@ -2385,7 +2438,15 @@
         "src-tauri/src/runtime/**",
         "tests/unit/privilege/**",
         "tests/integration/privilege/**",
-        "runtime-policy.toml"
+        "tests/unit/runtime/**",
+        "runtime-policy.toml",
+        "runtime-manifest.toml",
+        "runtime/toolbox/**",
+        "scripts/prepare-toolbox.mjs",
+        "scripts/verify-runtime-manifest/**",
+        "src-tauri/tauri.conf.json",
+        "package.json",
+        "THIRD_PARTY_NOTICES.md"
       ],
       "forbidden_paths": [
         "src/features/**",
@@ -2402,7 +2463,9 @@
         "Broker-backed privileged filesystem operations that are not constrained to the active workspace once Elevated is Active",
         "stable privileged tool advertisement with Broker-gated call-time authorization for already-connected MCP sessions",
         "one Broker authorization truth shared by elevated process shell and filesystem routes with real-client route parity",
-        "structured elevated process and shell stdout stderr observation plus retained output continuation when inline output is truncated"
+        "structured elevated process and shell stdout stderr observation plus retained output continuation when inline output is truncated",
+        "ToolboxResolver with pinned bundled aria2c 7z jq plus probed Windows System32 curl",
+        "build-time-only toolbox acquisition and release packaging with exact versions sources and SHA256 in runtime manifest and third-party notices"
       ],
       "required_tests": [
         "no TTL/expires_at behavior",
@@ -2433,13 +2496,22 @@
         "an already-connected MCP session sees elevated_exec continuously before and after entering Elevated or Broker activation; Full and Edit calls remain typed denied, Elevated without Active Broker remains awaiting authorization, Active Broker enables only reviewed administrator operations, and ordinary exec_command remains current-user throughout",
         "one real connected MCP client with PermissionMode Elevated and Active Broker successfully exercises process shell and filesystem elevated_exec variants through the same administrator authorization truth; switching back to Full immediately closes all three privileged routes",
         "elevated process and shell results expose structured stdout and stderr separately from outcome and exit_code; when either stream exceeds the inline limit the response supplies a real readable retained output_ref rather than only truncated=true",
-        "permission_mode=elevated alone does not claim an administrator token: administrator_token_available and elevated_route_available remain false until the Broker is Active and UAC authorization is valid, and all three elevated_exec operation families use that same readiness truth"
+        "permission_mode=elevated alone does not claim an administrator token: administrator_token_available and elevated_route_available remain false until the Broker is Active and UAC authorization is valid, and all three elevated_exec operation families use that same readiness truth",
+        "aria2c 1.37.0 7z 26.02 and jq 1.8.2 are downloaded only during the build preparation step from the frozen sources, verified against the frozen archive and executable SHA256 values, included in the release payload, and never downloaded installed or updated at runtime",
+        "ToolboxResolver never accepts ambient PATH aria2c 7z or jq as toolbox authority and never persistently modifies system or user PATH; logical toolbox invocation resolves to the LocalBridge-controlled executable identity",
+        "Windows curl is not bundled: startup probes exact System32 curl.exe existence and required capabilities, returning RuntimeUnavailable when absent and CapabilityUnavailable when present but insufficient, with no silent fallback download",
+        "Toolbox adds no MCP public tool and the advertised catalog remains exactly eight core tools plus elevated_exec; agent_workflow and exec_command remain the execution entrypoints",
+        "Edit gains no process authority from Toolbox, Full toolbox execution stays under the current ordinary-user token, and only administrator-required destination or operation uses the existing reviewed elevated route",
+        "runtime-manifest and THIRD_PARTY_NOTICES record toolbox logical name version source archive SHA256 executable path and executable SHA256, and packaged aria2c 7z jq cannot resolve from coincidental system PATH installations"
       ],
       "non_goals": [
         "UI",
         "administrator password storage",
         "automatic UAC approval",
-        "permanent Windows service"
+        "permanent Windows service",
+        "new Toolbox MCP public tools",
+        "system or user PATH modification",
+        "runtime toolbox downloader updater or package manager"
       ]
     }
   }

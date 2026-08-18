@@ -5492,5 +5492,21 @@
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "schema42_toolbox_amendment_2026_08_18": {
+    "status": "RATIFIED",
+    "owner_pr": "LB-012",
+    "rules": [
+      "aria2c 1.37.0, logical 7z backed by 7za 26.02 x64, and jq 1.8.2 are build-time-only pinned downloads with frozen source archive and executable SHA256 and are carried in the release payload",
+      "runtime download install and update are forbidden and bundled aria2c 7z jq never fall through to ambient PATH",
+      "curl is Windows System32 only, is not bundled, and requires startup existence/capability probing with RuntimeUnavailable or CapabilityUnavailable",
+      "ToolboxResolver owns executable identity without persistent system/user PATH modification and adds no MCP public tool",
+      "Toolbox inherits Edit Full Elevated authority without creating a privilege bypass",
+      "runtime manifest and third-party notices carry exact toolbox provenance"
+    ],
+    "next_required_g2_generation": 34,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }

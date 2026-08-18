@@ -2263,7 +2263,7 @@ const SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18 = Object.freeze({
   addedRules:{
     schema42_windows_execution_policy_amendment_ratified:true,
     schema42_windows_execution_policy_owner_prs:["LB-006","LB-007","LB-012"],
-    schema42_windows_execution_policy_next_g2_review_generation:33,
+    schema42_windows_execution_policy_next_g2_review_generation:34,
     schema42_windows_execution_policy_next_g3_review_generation:22,
     full_hard_process_authority_boundary:"current_windows_user_token",
     full_direct_command_classifier_scope:"direct_invocation_routing_and_accidental_system_maintenance_guard",
@@ -2290,6 +2290,14 @@ const SCHEMA42_WINDOWS_EXECUTION_POLICY_AMENDMENT_2026_08_18 = Object.freeze({
     schema42_future_transport_diagnostics_must_distinguish_malformed_request_from_transport_interruption:true,
   },
   replacedRules:{
+    stable_public_error_codes:{
+      current:["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","CapabilityUnavailable","InvalidShellSyntax","PrivilegedRouteUnavailable","ProcessTimedOut"],
+      baseline:["PolicyDenied","WorkspaceDenied","RuntimeUnavailable","InvalidShellSyntax","PrivilegedRouteUnavailable","ProcessTimedOut"]
+    },
+    public_typed_error_taxonomy:{
+      current:["InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied","InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut","ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable","RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"],
+      baseline:["InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied","InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut","ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"]
+    },
     windows_system_management_programs:{
       current:["reg.exe","schtasks.exe","sc.exe","netsh.exe","bcdedit.exe","dism.exe","pnputil.exe","powercfg.exe","wevtutil.exe","net.exe","net1.exe","fsutil.exe","mountvol.exe","reagentc.exe","manage-bde.exe","fltmc.exe","auditpol.exe","vssadmin.exe"],
       baseline:["reg.exe","schtasks.exe","sc.exe","netsh.exe","bcdedit.exe","dism.exe","pnputil.exe","powercfg.exe","wevtutil.exe"]
