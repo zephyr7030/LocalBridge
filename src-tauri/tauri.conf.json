@@ -5,7 +5,7 @@
   "identifier": "com.localbridge.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run toolbox:prepare && npm run build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../tests/artifacts/frontend-dist"
   },
@@ -20,6 +20,11 @@
     "targets": ["nsis"],
     "icon": ["../assets/icons/localbridge.ico"],
     "externalBin": ["binaries/dummy-sidecar"],
+    "resources": {
+      "target/toolbox-stage/": "runtime/toolbox/",
+      "../runtime-manifest.toml": "runtime-manifest.toml",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
     "windows": {
       "nsis": {
         "installMode": "perMachine"

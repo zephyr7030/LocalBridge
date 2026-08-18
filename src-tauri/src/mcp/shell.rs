@@ -470,7 +470,7 @@ fn powershell_single_quoted_literal(value: &Path) -> String {
 fn hardened_powershell_script(command: &str, management_module: &Path) -> String {
     let management_module = powershell_single_quoted_literal(management_module);
     format!(
-        "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;Import-Module -Name '{management_module}' -ErrorAction Stop;[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{command}"
+        "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;Import-Module -Name '{management_module}' -ErrorAction Stop;Remove-Item Alias:curl -Force -ErrorAction SilentlyContinue;[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{command}"
     )
 }
 
@@ -518,6 +518,13 @@ where
 
     pub fn discovery_summary(&self) -> ShellDiscoverySummary {
         self.resolver.discovery_summary()
+    }
+
+    pub fn resolved_kind(
+        &self,
+        selector: ShellSelector,
+    ) -> Result<ResolvedShellKind, ShellResolveError> {
+        self.resolver.resolve(selector).map(|shell| shell.kind)
     }
 
     pub fn direct_spec(

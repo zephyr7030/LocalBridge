@@ -78,6 +78,49 @@ lb000_feasibility_status = "PASS"
 [policy]
 file = "runtime-policy.toml"
 
+[toolbox]
+runtime_root = "runtime/toolbox"
+build_prepare_script = "scripts/prepare-toolbox.mjs"
+runtime_download = false
+runtime_update = false
+persistent_path_mutation = false
+public_tools = false
+
+[toolbox.aria2c]
+logical_name = "aria2c"
+version = "1.37.0"
+source = "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+archive_sha256 = "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288"
+executable = "runtime/toolbox/bin/aria2c.exe"
+executable_sha256 = "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"
+
+[toolbox.seven_zip]
+logical_name = "7z"
+version = "26.02"
+source = "https://www.7-zip.org/a/7z2602-extra.7z"
+archive_sha256 = "081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a"
+source_member = "x64/7za.exe"
+executable = "runtime/toolbox/bin/7z.exe"
+executable_sha256 = "35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2"
+
+[toolbox.jq]
+logical_name = "jq"
+version = "1.8.2"
+source = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe"
+archive_sha256 = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+executable = "runtime/toolbox/bin/jq.exe"
+executable_sha256 = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+
+[toolbox.curl]
+bundled = false
+source = "windows-system-runtime"
+executable = "%SystemRoot%/System32/curl.exe"
+startup_existence_probe = true
+startup_capability_probe = true
+missing_error = "RuntimeUnavailable"
+capability_missing_error = "CapabilityUnavailable"
+fallback_download = false
+
 [verification]
 compatibility_gate = "LB-000"
 packaging_gate = "LB-018"
@@ -98,6 +141,7 @@ arch = "x86_64"
 bundle_python = true
 bundle_coding_tools_mcp = true
 bundle_tunnel_client = true
+bundle_toolbox = true
 bundle_webview2 = false
 webview2_source = "windows-system-runtime"
 external_python_dependency = false

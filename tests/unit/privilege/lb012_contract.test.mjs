@@ -14,6 +14,12 @@ const orchestrator = read("src-tauri/src/runtime/orchestrator.rs");
 const main = read("src-tauri/src/main.rs");
 const lib = read("src-tauri/src/lib.rs");
 const tauri = read("src-tauri/tauri.conf.json");
+const facade = read("src-tauri/src/mcp/facade.rs");
+const toolbox = read("src-tauri/src/mcp/toolbox.rs");
+const runtimeManifest = read("runtime-manifest.toml");
+const toolboxPrepare = read("scripts/prepare-toolbox.mjs");
+const thirdPartyNotices = read("THIRD_PARTY_NOTICES.md");
+const packageJson = JSON.parse(read("package.json"));
 
 for (const forbidden of ["expires_at", "expiresAt", "expiry", "admin_ttl", "privilege_ttl", "lease_deadline", "lease_expires"]) {
   if (`${state}\n${control}`.toLowerCase().includes(forbidden.toLowerCase())) {
@@ -156,4 +162,45 @@ if (!(assign >= 0 && resume > assign)) throw new Error("LB-012 elevated process 
 if (execution.includes("std::process::Command") || execution.includes("Command::new(")) throw new Error("LB-012 elevated execution has process/shell fallback");
 if (/requireAdministrator|highestAvailable/i.test(tauri)) throw new Error("LB-012 whole LocalBridge app requests elevation");
 
-console.log("LB012_CONTRACT=PASS no_ttl=true explicit_uac=true active_gate=true broker_only=true administrator_gateway=true privileged_filesystem=true trusted_shell=true structured_exec=true no_auto_uac=true");
+for (const required of [
+  "pub const V1_CORE_TOOL_NAMES: [&str; 8]",
+  "CapabilityUnavailable",
+  "ToolboxResolver::probe(runtime.install_root())",
+  ".rewrite_command(kind, &request.execution.command)",
+  '"PATH":self.toolbox.child_path()',
+  '"NoDefaultCurrentDirectoryInExePath":"1"',
+]) if (!facade.includes(required)) throw new Error(`LB-012 schema42 Toolbox facade integration missing: ${required}`);
+for (const required of [
+  "struct ToolboxResolver",
+  "run_bounded_command",
+  'join("System32")',
+  'join("curl.exe")',
+  'output.contains("protocols:")',
+  'output.contains("http")',
+  'output.contains("https")',
+  "ARIA2C_SHA256",
+  "SEVEN_ZIP_SHA256",
+  "JQ_SHA256",
+]) if (!toolbox.includes(required)) throw new Error(`LB-012 schema42 Toolbox resolver missing: ${required}`);
+if (/https?:\/\//i.test(toolbox) || toolbox.includes("reqwest") || toolbox.includes("set_var(\"PATH\"") || toolbox.includes("setx")) throw new Error("LB-012 Toolbox runtime contains downloader or persistent PATH mutation");
+for (const required of [
+  'runtime_download = false',
+  'runtime_update = false',
+  'persistent_path_mutation = false',
+  'public_tools = false',
+  'version = "1.37.0"',
+  'version = "26.02"',
+  'version = "1.8.2"',
+  'executable = "%SystemRoot%/System32/curl.exe"',
+  'capability_missing_error = "CapabilityUnavailable"',
+]) if (!runtimeManifest.includes(required)) throw new Error(`LB-012 schema42 Toolbox manifest missing: ${required}`);
+if (packageJson.scripts?.["toolbox:prepare"] !== "node scripts/prepare-toolbox.mjs") throw new Error("LB-012 Toolbox build preparation script missing");
+if (!tauri.includes('"beforeDevCommand": "npm run dev"') || !tauri.includes('"beforeBuildCommand": "npm run toolbox:prepare && npm run build"') || !tauri.includes('"target/toolbox-stage/": "runtime/toolbox/"')) throw new Error("LB-012 Toolbox is not build-only packaged resource");
+for (const pin of [
+  "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",
+  "081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a",
+  "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+]) if (!toolboxPrepare.includes(pin) || !thirdPartyNotices.includes(pin)) throw new Error(`LB-012 Toolbox provenance pin missing: ${pin}`);
+if (!shell.includes("Remove-Item Alias:curl -Force -ErrorAction SilentlyContinue")) throw new Error("LB-012 PowerShell curl alias can bypass exact System32 resolver");
+
+console.log("LB012_CONTRACT=PASS no_ttl=true explicit_uac=true active_gate=true broker_only=true administrator_gateway=true privileged_filesystem=true trusted_shell=true structured_exec=true toolbox=true no_auto_uac=true");

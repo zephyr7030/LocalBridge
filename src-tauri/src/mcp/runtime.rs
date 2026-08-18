@@ -176,6 +176,7 @@ pub struct CodingToolsRuntime {
     session: McpSession,
     port: u16,
     workspace: PathBuf,
+    install_root: PathBuf,
 }
 
 impl fmt::Debug for CodingToolsRuntime {
@@ -280,6 +281,7 @@ impl CodingToolsRuntime {
             session,
             port: config.port,
             workspace: config.workspace,
+            install_root: config.install_root,
         })
     }
 
@@ -293,6 +295,10 @@ impl CodingToolsRuntime {
 
     pub fn workspace(&self) -> &Path {
         &self.workspace
+    }
+
+    pub fn install_root(&self) -> &Path {
+        &self.install_root
     }
 
     pub const fn process_snapshot(&self) -> &ProcessSnapshot {

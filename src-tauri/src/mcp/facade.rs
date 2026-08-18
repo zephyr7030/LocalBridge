@@ -27,6 +27,7 @@ use super::task_state::{
     CommandOwner, CommandTaskStateError, CommandTaskStateStore, CommandTerminalStatus,
     TerminalCommandSnapshot,
 };
+use super::toolbox::{ToolboxError, ToolboxErrorKind, ToolboxResolver};
 use super::workflow_checkpoint::{WorkflowCheckpoint, WorkflowCheckpointStore};
 use super::verification_planner::VerificationPlanner;
 
@@ -59,6 +60,7 @@ pub enum FacadeErrorCode {
     SessionUnavailable,
     OutputTruncated,
     RuntimeUnavailable,
+    CapabilityUnavailable,
     RuntimeProtocolMismatch,
     RuntimeCapabilityMismatch,
     FileChanged,
@@ -84,6 +86,7 @@ impl FacadeErrorCode {
             Self::SessionUnavailable => "SessionUnavailable",
             Self::OutputTruncated => "OutputTruncated",
             Self::RuntimeUnavailable => "RuntimeUnavailable",
+            Self::CapabilityUnavailable => "CapabilityUnavailable",
             Self::RuntimeProtocolMismatch => "RuntimeProtocolMismatch",
             Self::RuntimeCapabilityMismatch => "RuntimeCapabilityMismatch",
             Self::FileChanged => "FileChanged",
@@ -101,7 +104,7 @@ impl FacadeErrorCode {
             Self::PolicyDenied | Self::CapabilityDenied => "policy",
             Self::InvalidShellSyntax => "shell_syntax",
             Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => "privileged_route",
-            Self::RuntimeUnavailable | Self::RuntimeProtocolMismatch | Self::RuntimeCapabilityMismatch => "runtime",
+            Self::RuntimeUnavailable | Self::CapabilityUnavailable | Self::RuntimeProtocolMismatch | Self::RuntimeCapabilityMismatch => "runtime",
             Self::ProcessTimedOut => "process_timeout",
             Self::ProcessFailed | Self::ProcessCancelled | Self::SessionUnavailable | Self::OutputTruncated => "command_runtime",
             Self::FileChanged | Self::PatchConflict | Self::AmbiguousMatch => "edit_conflict",
@@ -115,7 +118,7 @@ impl FacadeErrorCode {
             Self::PolicyDenied | Self::CapabilityDenied => "查看 workspace_context.capabilities 或使用 dry_run 获取允许路线",
             Self::InvalidShellSyntax => "按所选 Windows Shell 的原生语法修正命令",
             Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => "检查 workspace_context 中的权限模式与管理员路由状态",
-            Self::RuntimeUnavailable | Self::RuntimeProtocolMismatch | Self::RuntimeCapabilityMismatch => "查看 workspace_context.shell_discovery 与运行时诊断",
+            Self::RuntimeUnavailable | Self::CapabilityUnavailable | Self::RuntimeProtocolMismatch | Self::RuntimeCapabilityMismatch => "查看 workspace_context.shell_discovery 与运行时诊断",
             Self::ProcessTimedOut => "提高 timeout_ms 或缩小单次任务",
             Self::ProcessCancelled => "重新发起命令",
             Self::SessionUnavailable => "重新执行命令以创建新会话",
@@ -641,7 +644,7 @@ fn public_error_output_schema() -> Value {
             "code":{"type":"string","enum":[
                 "InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied",
                 "InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
-                "ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable",
+                "ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
                 "RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"
             ]},
             "message":{"type":"string"},
@@ -1511,6 +1514,7 @@ pub struct CodingToolsRuntimeAdapter {
     runtime: CodingToolsRuntime,
     workspace: PathBuf,
     shell_executor: ShellExecutor,
+    toolbox: ToolboxResolver,
     public_commands: PublicCommandSessions,
     task_state: CommandTaskStateStore,
     workflow_checkpoint: WorkflowCheckpointStore,
@@ -1522,6 +1526,7 @@ pub struct CodingToolsRuntimeAdapter {
 impl CodingToolsRuntimeAdapter {
     fn new(runtime: CodingToolsRuntime) -> Result<Self, FacadeError> {
         let workspace = runtime.workspace().to_path_buf();
+        let toolbox = ToolboxResolver::probe(runtime.install_root());
         let task_state =
             CommandTaskStateStore::for_workspace(&workspace).map_err(normalize_task_state_error)?;
         let workflow_checkpoint = WorkflowCheckpointStore::for_workspace(&workspace)
@@ -1530,6 +1535,7 @@ impl CodingToolsRuntimeAdapter {
             runtime,
             workspace,
             shell_executor: ShellExecutor::default(),
+            toolbox,
             public_commands: PublicCommandSessions::default(),
             task_state,
             workflow_checkpoint,
@@ -2001,7 +2007,8 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             },
             "git":{"available":true},
             "bundled_python":{"available":true},
-            "bundled_node":{"available":false,"reason":"not_bundled"}
+            "bundled_node":{"available":false,"reason":"not_bundled"},
+            "toolbox":self.toolbox.discovery()
         })
     }
 
@@ -2146,8 +2153,16 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         }
         request.execution.cwd = PathBuf::from(normalized_cwd);
         self.validate_static_workspace_script(&request.execution)?;
-        let public_session_id = self.public_commands.start_session(&self.task_state, request.owner_task_id.clone())?;
         let selector = request.execution.shell;
+        let kind = self
+            .shell_executor
+            .resolved_kind(selector)
+            .map_err(|error| normalize_shell_error(error, selector))?;
+        request.execution.command = self
+            .toolbox
+            .rewrite_command(kind, &request.execution.command)
+            .map_err(normalize_toolbox_error)?;
+        let public_session_id = self.public_commands.start_session(&self.task_state, request.owner_task_id.clone())?;
         let outcome = (|| {
             let invocation = self
                 .shell_executor
@@ -2162,7 +2177,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 "verbosity":"full",
                 "env":{
                     "COMSPEC":invocation.comspec.to_string_lossy(),
-                    "LOCALBRIDGE_OUTPUT_ENCODING":invocation.output_encoding
+                    "LOCALBRIDGE_OUTPUT_ENCODING":invocation.output_encoding,
+                    "PATH":self.toolbox.child_path(),
+                    "NoDefaultCurrentDirectoryInExePath":"1"
                 }
             });
             if let Some(stdin) = request.stdin {
@@ -3318,7 +3335,8 @@ fn compact_project_discovery(
         "runtime_availability": {
             "git": runtime.get("git").cloned().unwrap_or(Value::Null),
             "bundled_python": runtime.get("bundled_python").cloned().unwrap_or(Value::Null),
-            "bundled_node": runtime.get("bundled_node").cloned().unwrap_or(Value::Null)
+            "bundled_node": runtime.get("bundled_node").cloned().unwrap_or(Value::Null),
+            "toolbox": runtime.get("toolbox").cloned().unwrap_or(Value::Null)
         },
         "trusted_shells": trusted_shells
     })
@@ -5580,6 +5598,18 @@ fn normalize_runtime_error(error: CodingToolsRuntimeError) -> FacadeError {
     }
 }
 
+fn normalize_toolbox_error(error: ToolboxError) -> FacadeError {
+    let code = match error.kind {
+        ToolboxErrorKind::RuntimeUnavailable => FacadeErrorCode::RuntimeUnavailable,
+        ToolboxErrorKind::CapabilityUnavailable => FacadeErrorCode::CapabilityUnavailable,
+    };
+    FacadeError::new(
+        code,
+        "Toolbox executable unavailable",
+        false,
+    )
+}
+
 fn runtime_fault_name(fault: &RuntimeFault) -> &'static str {
     match fault {
         RuntimeFault::WorkspaceMissing => "workspace_missing",
@@ -6288,6 +6318,95 @@ fn sanitize_object_array(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn schema42_toolbox_runs_pinned_tools_through_public_exec_without_ambient_shadowing() {
+        use crate::mcp::{CodingToolsPermissionMode, CodingToolsRuntimeConfig, InternalBearer};
+        use std::net::{Ipv4Addr, TcpListener};
+        use std::time::Duration;
+
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!(
+            "localbridge-lb012-toolbox-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&workspace).unwrap();
+        for name in ["aria2c.cmd", "7z.cmd", "jq.cmd", "curl.cmd"] {
+            std::fs::write(workspace.join(name), b"@echo LB_TOOLBOX_FAKE_SHADOW\r\n").unwrap();
+        }
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let runtime = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                port,
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new("LB012_TOOLBOX_SYNTHETIC_BEARER").unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled coding runtime for Toolbox acceptance");
+        let mut facade = AgentFacade::from_coding_runtime(runtime, policy()).unwrap();
+        assert_eq!(
+            facade.public_tools(PermissionMode::Full)["tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            8
+        );
+        let context = facade
+            .call_tool(
+                PermissionMode::Full,
+                "workspace_context",
+                json!({"detail":"compact"}),
+                None,
+                |_| {},
+            )
+            .unwrap();
+        let toolbox = &context["structuredContent"]["data"]["runtime_availability"]["toolbox"];
+        for name in ["aria2c", "7z", "jq", "curl"] {
+            assert_eq!(toolbox[name]["status"], "ready", "{name} probe was not ready: {toolbox:#}");
+        }
+
+        for (command, shell, expected) in [
+            ("aria2c --version", "cmd", "aria2 version 1.37.0"),
+            ("7z", "cmd", "7-Zip (a) 26.02"),
+            ("jq --version", "cmd", "jq-1.8.2"),
+            ("curl --version", "cmd", "curl "),
+            ("curl --version", "windows_powershell", "curl "),
+        ] {
+            let result = facade
+                .call_tool(
+                    PermissionMode::Full,
+                    "exec_command",
+                    json!({"command":command,"shell":shell,"yield_time_ms":10000,"timeout_ms":10000,"max_output_bytes":65536}),
+                    None,
+                    |_| {},
+                )
+                .unwrap();
+            assert_eq!(result["isError"], false, "{result:#}");
+            let output = result["structuredContent"]["data"]["output"]
+                .as_str()
+                .unwrap_or_default();
+            assert!(output.contains(expected), "{command} did not use expected Toolbox executable: {output}");
+            assert!(!output.contains("LB_TOOLBOX_FAKE_SHADOW"), "{command} resolved through workspace shadow: {output}");
+        }
+
+        let mut runtime = facade.into_runtime();
+        runtime.stop().unwrap();
+        drop(runtime);
+        std::fs::remove_dir_all(workspace).unwrap();
+    }
 
     fn test_task_state(label: &str) -> CommandTaskStateStore {
         let nonce = std::time::SystemTime::now()

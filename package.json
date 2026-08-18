@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --config vite.config.ts",
     "build": "tsc -b && vite build --config vite.config.ts",
+    "toolbox:prepare": "node scripts/prepare-toolbox.mjs",
     "test": "vitest run",
     "verify:architecture": "node scripts/verify-architecture/index.mjs",
     "verify:architecture:activation": "node scripts/verify-architecture/activation.test.mjs",

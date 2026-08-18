@@ -22,6 +22,10 @@ const treeSha = (root, excludedName = "runtime-metadata.json") => {
 };
 
 const text = readFileSync("runtime-manifest.toml", "utf8");
+const toolboxPrepare = readFileSync("scripts/prepare-toolbox.mjs", "utf8");
+const thirdPartyNotices = readFileSync("THIRD_PARTY_NOTICES.md", "utf8");
+const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+const tauri = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
 const required = [
   'target = "windows-x86_64"',
   'target_os = "windows"',
@@ -63,6 +67,64 @@ const exact = [
 for (const item of exact) if (!text.includes(item)) throw new Error(`LB-006 exact runtime manifest requirement missing: ${item}`);
 if (text.includes("TO_BE_FILLED_BY_LB_006")) throw new Error("LB-006 runtime manifest still contains placeholder");
 
+const toolboxExact = [
+  'runtime_root = "runtime/toolbox"',
+  'build_prepare_script = "scripts/prepare-toolbox.mjs"',
+  'runtime_download = false',
+  'runtime_update = false',
+  'persistent_path_mutation = false',
+  'public_tools = false',
+  'logical_name = "aria2c"',
+  'version = "1.37.0"',
+  'source = "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"',
+  'archive_sha256 = "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288"',
+  'executable = "runtime/toolbox/bin/aria2c.exe"',
+  'executable_sha256 = "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"',
+  'logical_name = "7z"',
+  'version = "26.02"',
+  'source = "https://www.7-zip.org/a/7z2602-extra.7z"',
+  'archive_sha256 = "081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a"',
+  'source_member = "x64/7za.exe"',
+  'executable = "runtime/toolbox/bin/7z.exe"',
+  'executable_sha256 = "35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2"',
+  'logical_name = "jq"',
+  'version = "1.8.2"',
+  'source = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe"',
+  'archive_sha256 = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"',
+  'executable = "runtime/toolbox/bin/jq.exe"',
+  'executable_sha256 = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"',
+  'source = "windows-system-runtime"',
+  'executable = "%SystemRoot%/System32/curl.exe"',
+  'startup_existence_probe = true',
+  'startup_capability_probe = true',
+  'missing_error = "RuntimeUnavailable"',
+  'capability_missing_error = "CapabilityUnavailable"',
+  'fallback_download = false',
+  'bundle_toolbox = true',
+];
+for (const item of toolboxExact) if (!text.includes(item)) throw new Error(`schema42 toolbox manifest requirement missing: ${item}`);
+if (packageJson.scripts?.["toolbox:prepare"] !== "node scripts/prepare-toolbox.mjs") throw new Error("schema42 toolbox build preparation script missing");
+if (tauri.build?.beforeDevCommand !== "npm run dev" || !tauri.build?.beforeBuildCommand?.includes("npm run toolbox:prepare")) throw new Error("schema42 toolbox acquisition is not build-only");
+if (tauri.bundle?.resources?.["target/toolbox-stage/"] !== "runtime/toolbox/") throw new Error("schema42 toolbox release resource mapping missing");
+for (const marker of [
+  "release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",
+  "7z2602-extra.7z",
+  "jq-1.8.2/jq-windows-amd64.exe",
+  "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",
+  "081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a",
+  "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+]) if (!toolboxPrepare.includes(marker) || !thirdPartyNotices.includes(marker)) throw new Error(`schema42 toolbox provenance missing: ${marker}`);
+const systemRootMarker = String.fromCharCode(37) + "SystemRoot" + String.fromCharCode(37);
+if (![systemRootMarker,"System32","curl.exe"].every((marker) => toolboxPrepare.includes(marker)) || toolboxPrepare.includes("setx") || toolboxPrepare.includes("process.env.PATH =")) throw new Error("schema42 toolbox PATH/curl build contract drifted");
+const toolboxStage = "src-tauri/target/toolbox-stage/bin";
+if (existsSync(toolboxStage)) {
+  for (const [name, expected] of [
+    ["aria2c.exe", "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"],
+    ["7z.exe", "35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2"],
+    ["jq.exe", "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"],
+  ]) if (sha(join(toolboxStage, name)) !== expected) throw new Error(`schema42 toolbox staged executable SHA256 mismatch: ${name}`);
+}
+
 const pythonMeta = JSON.parse(readFileSync("runtime/python/runtime-metadata.json", "utf8"));
 const codingMeta = JSON.parse(readFileSync("runtime/coding-tools-mcp/runtime-metadata.json", "utf8"));
 if (pythonMeta.version !== "3.12.10" || pythonMeta.external_python_fallback !== false || pythonMeta.runtime_pip_present !== false || pythonMeta.isolated !== true || pythonMeta.user_site_enabled !== false) throw new Error("Python runtime metadata contract mismatch");
@@ -95,4 +157,4 @@ const scanInstallerDirs = (root) => {
 scanInstallerDirs("runtime/python");
 scanInstallerDirs("runtime/coding-tools-mcp");
 
-console.log("RUNTIME_MANIFEST_VERIFY=PASS python=3.12.10 coding_tools=0.2.2 pyjwt=2.10.1 exact_hashes=true runtime_pip=false external_python_fallback=false");
+console.log("RUNTIME_MANIFEST_VERIFY=PASS python=3.12.10 coding_tools=0.2.2 toolbox=aria2c-1.37.0,7z-26.02,jq-1.8.2 system32_curl=true exact_hashes=true runtime_download=false");
