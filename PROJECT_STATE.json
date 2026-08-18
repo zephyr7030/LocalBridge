@@ -5334,5 +5334,13 @@
     "next": "G3 LB-013",
     "g4_unlocked": false,
     "decision_commit": "0c21acdeea09986d7a427a94a06b2c77144cecba"
+  },
+  "schema42_lb013_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB013 contract PASS",
+      "background 19/19 PASS"
+    ],
+    "next_pr": "LB-014"
   }
 }
