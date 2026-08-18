@@ -5282,5 +5282,13 @@
       "26 tunnel/runtime tests PASS"
     ],
     "next_pr": "LB-009"
+  },
+  "schema42_lb009_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB009 orchestrator contract PASS",
+      "8 orchestrator tests PASS"
+    ],
+    "next_pr": "LB-010"
   }
 }
