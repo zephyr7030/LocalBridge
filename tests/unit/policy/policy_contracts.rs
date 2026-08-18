@@ -342,7 +342,6 @@ fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
         json!({"command":"New-Item Function:lbgen12 -Value { Write-Output ok }; lbgen12","shell":"windows_powershell"}),
         json!({"command":"sc Function:lbgen12 -Value 'Write-Output ok'; lbgen12","shell":"powershell"}),
         json!({"command":"Set-Item Env:LB_GEN12 harmless","shell":"windows_powershell"}),
-        json!({"command":"cmd /c echo safe","shell":"windows_powershell"}),
         json!({"command":"set x=docker & %x% ps","shell":"cmd"}),
         json!({"command":"$x='C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'; $p=[System.Diagnostics.Process]::Start($x,'ps'); $p.WaitForExit()","shell":"windows_powershell"}),
         json!({"command":"$t=[type]::GetType('System.Diagnostics.Process'); $t::Start($x,'ps')","shell":"powershell"}),
@@ -585,5 +584,130 @@ fn schema42_extended_system_management_is_operation_classified_across_workflow_i
         let mutating_workflow = policy.decide_public(mode,"agent_workflow",&json!({"action":"diagnose","commands":[{"command":"wevtutil.exe cl System","shell":"cmd"}]}));
         assert!(!mutating_workflow.allowed);
         assert_eq!(mutating_workflow.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+    }
+}
+
+#[test]
+fn schema42_extended_windows_system_management_defaults_to_privileged_with_narrow_readonly_seams() {
+    let policy = policy();
+    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
+        for (command, shell) in [
+            ("reagentc.exe /info", "cmd"),
+            ("manage-bde.exe -status", "cmd"),
+            ("fltmc.exe filters", "cmd"),
+            ("auditpol.exe /get /category:*", "cmd"),
+            ("vssadmin.exe list shadows", "windows_powershell"),
+        ] {
+            assert!(
+                policy
+                    .decide_public(mode, "exec_command", &json!({"command":command,"shell":shell}))
+                    .allowed,
+                "frozen read-only system-management command was denied: {command}"
+            );
+        }
+        for (command, shell) in [
+            ("net.exe user", "cmd"),
+            ("net1.exe localgroup", "cmd"),
+            ("fsutil.exe fsinfo drives", "cmd"),
+            ("mountvol.exe", "cmd"),
+            ("reagentc.exe /enable", "cmd"),
+            ("manage-bde.exe -on C:", "cmd"),
+            ("fltmc.exe unload example", "cmd"),
+            ("auditpol.exe /set /category:* /success:enable", "cmd"),
+            ("vssadmin.exe delete shadows /all", "windows_powershell"),
+        ] {
+            let decision = policy.decide_public(
+                mode,
+                "exec_command",
+                &json!({"command":command,"shell":shell}),
+            );
+            assert!(!decision.allowed, "system-management command escaped: {command}");
+            assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+        }
+    }
+}
+
+#[test]
+fn schema42_shell_specific_classifiers_allow_ordinary_development_without_weakening_dynamic_review() {
+    let policy = policy();
+    for command in [
+        "set",
+        "set /p X=prompt",
+        "set X=value",
+        "copy test\\a.txt test\\b.txt",
+        "move test\\a.txt test\\b.txt",
+        "ren test\\a.txt b.txt",
+        "cmd /c echo nested-ok",
+        "cmd /k echo nested-ok",
+    ] {
+        assert!(
+            policy
+                .decide_public(PermissionMode::Full, "exec_command", &json!({"command":command,"shell":"cmd"}))
+                .allowed,
+            "ordinary CMD operation was over-classified: {command}"
+        );
+    }
+    for command in ["cmd /c net.exe user", "cmd /k sc.exe query"] {
+        let decision = policy.decide_public(
+            PermissionMode::Full,
+            "exec_command",
+            &json!({"command":command,"shell":"cmd"}),
+        );
+        assert!(!decision.allowed, "nested system-management command escaped: {command}");
+        assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+    }
+    for command in [
+        "Set-Variable -Name LocalBridgeProbe -Value ok",
+        "Set-Content test\\probe.txt ok",
+        "New-Item test\\probe.txt",
+        "Copy-Item test\\a.txt test\\b.txt",
+        "Move-Item test\\a.txt test\\b.txt",
+        "Remove-Item test\\a.txt",
+        "cmd /c echo nested-ok",
+        "[System.Security.Principal.WindowsIdentity]::GetCurrent()",
+        "[WindowsIdentity]::GetCurrent()",
+    ] {
+        assert!(
+            policy
+                .decide_public(PermissionMode::Full, "exec_command", &json!({"command":command,"shell":"windows_powershell"}))
+                .allowed,
+            "ordinary PowerShell operation was over-classified: {command}"
+        );
+    }
+    for command in [
+        "New-Item Function:lb42 -Value { Write-Output ok }",
+        "Set-Content Alias:lb42 docker",
+        "Remove-Item HKLM:\\SOFTWARE\\LocalBridge",
+        "$n='PSModuleAutoLoadingPreference'; Set-Variable -Name $n -Value All",
+        "cmd /c net.exe user",
+    ] {
+        assert!(
+            !policy
+                .decide_public(PermissionMode::Full, "exec_command", &json!({"command":command,"shell":"windows_powershell"}))
+                .allowed,
+            "dynamic/provider/system-management surface escaped review: {command}"
+        );
+    }
+}
+
+#[test]
+fn schema42_quoted_nested_cmd_classifies_the_static_inner_command() {
+    let policy = policy();
+    for command in ["cmd /c \"echo nested-ok\"", "cmd /k \"echo nested-ok\""] {
+        assert!(
+            policy
+                .decide_public(PermissionMode::Full, "exec_command", &json!({"command":command,"shell":"cmd"}))
+                .allowed,
+            "quoted ordinary nested cmd was over-classified: {command}"
+        );
+    }
+    for command in ["cmd /c \"sc.exe query\"", "cmd /c \"echo ok & net.exe user\""] {
+        let decision = policy.decide_public(
+            PermissionMode::Full,
+            "exec_command",
+            &json!({"command":command,"shell":"cmd"}),
+        );
+        assert!(!decision.allowed, "quoted nested system command escaped: {command}");
+        assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
     }
 }

@@ -401,3 +401,44 @@ fn runtime_failure_is_grounded_in_real_forwarding_event_then_returns_idle() {
     assert!(matches!(active_state(&states[1]), Some(task) if task.state == TaskExecutionState::Failed));
     assert_eq!(states[2], CurrentTaskStatus::Idle);
 }
+
+#[test]
+fn schema42_shell_specific_ordinary_commands_forward_but_system_management_does_not() {
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut guard = McpGuard::new(FakeRuntime::new(calls.clone()), policy());
+    for (command, shell) in [
+        ("set X=value", "cmd"),
+        ("copy test\\a.txt test\\b.txt", "cmd"),
+        ("move test\\a.txt test\\b.txt", "cmd"),
+        ("ren test\\a.txt b.txt", "cmd"),
+        ("cmd /c echo nested-ok", "cmd"),
+        ("Set-Content test\\probe.txt ok", "windows_powershell"),
+        ("New-Item test\\probe.txt", "windows_powershell"),
+        ("[System.Security.Principal.WindowsIdentity]::GetCurrent()", "windows_powershell"),
+    ] {
+        let result = guard.call_tool(
+            PermissionMode::Full,
+            ToolCallRequest::new("exec_command", json!({"cmd":command,"shell":shell})),
+            |_| {},
+        );
+        assert!(result.is_ok(), "ordinary command did not forward: {command}");
+    }
+    let forwarded = calls.borrow().len();
+    for (command, shell) in [
+        ("net.exe user", "cmd"),
+        ("fsutil.exe fsinfo drives", "cmd"),
+        ("cmd /c sc.exe query", "cmd"),
+        ("New-Item Function:lb42 -Value { Write-Output ok }", "windows_powershell"),
+    ] {
+        let result = guard.call_tool(
+            PermissionMode::Full,
+            ToolCallRequest::new("exec_command", json!({"cmd":command,"shell":shell})),
+            |_| {},
+        );
+        assert!(
+            matches!(result, Err(GuardError::Denied(_))),
+            "review-required command forwarded: {command}"
+        );
+    }
+    assert_eq!(calls.borrow().len(), forwarded);
+}

@@ -38,6 +38,15 @@ const WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS: &[&str] = &[
     "pnputil.exe",
     "powercfg.exe",
     "wevtutil.exe",
+    "net.exe",
+    "net1.exe",
+    "fsutil.exe",
+    "mountvol.exe",
+    "reagentc.exe",
+    "manage-bde.exe",
+    "fltmc.exe",
+    "auditpol.exe",
+    "vssadmin.exe",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1015,7 +1024,7 @@ fn static_workspace_script_invocation(shell: &str, command: &str) -> Option<(Str
     None
 }
 
-fn review_word(word: &str) -> bool {
+fn powershell_review_word(word: &str) -> bool {
     let lower = word.to_ascii_lowercase();
     matches!(
         lower.as_str(),
@@ -1131,6 +1140,34 @@ fn review_word(word: &str) -> bool {
     )
 }
 
+fn cmd_review_word(word: &str) -> bool {
+    let lower = word.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "docker"
+            | "docker.exe"
+            | "podman"
+            | "podman.exe"
+            | "wsl"
+            | "wsl.exe"
+            | "powershell"
+            | "powershell.exe"
+            | "pwsh"
+            | "pwsh.exe"
+            | "rundll32"
+            | "rundll32.exe"
+            | "regsvr32"
+            | "regsvr32.exe"
+            | "mshta"
+            | "mshta.exe"
+            | "wscript"
+            | "wscript.exe"
+            | "cscript"
+            | "cscript.exe"
+            | "call"
+    )
+}
+
 fn simple_static_command_words(command: &str) -> Option<Vec<String>> {
     let mut words = Vec::new();
     let mut word = String::new();
@@ -1162,6 +1199,12 @@ fn frozen_readonly_system_management_invocation(command: &str) -> bool {
         "powercfg" => matches!(args, [op] if ["/query","/getactivescheme","/list","/a"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed))),
         "wevtutil" => matches!(args, [op] if op.eq_ignore_ascii_case("el"))
             || matches!(args, [op, _log] if op.eq_ignore_ascii_case("gl")),
+        "reagentc" => matches!(args, [op] if op.eq_ignore_ascii_case("/info")),
+        "manage-bde" => matches!(args, [op] | [op, _] if op.eq_ignore_ascii_case("-status")),
+        "fltmc" => args.is_empty()
+            || matches!(args, [op] if ["filters", "instances", "volumes"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed))),
+        "auditpol" => args.first().is_some_and(|op| op.eq_ignore_ascii_case("/get")),
+        "vssadmin" => args.first().is_some_and(|op| op.eq_ignore_ascii_case("list")),
         _ => false,
     }
 }
@@ -1411,9 +1454,22 @@ fn cmd_if_segment_system_management_target(command: &str) -> bool {
         // executable appears later in the static command text.
         condition + 1
     };
-    words
-        .get(command_start)
-        .is_some_and(|word| windows_system_management_program_token(word))
+    let Some(target) = words.get(command_start) else {
+        return false;
+    };
+    if windows_system_management_program_token(target) {
+        return true;
+    }
+    let target = target.rsplit(['\\', '/']).next().unwrap_or(target);
+    if matches!(target.to_ascii_lowercase().as_str(), "cmd" | "cmd.exe")
+        && words
+            .get(command_start + 1)
+            .is_some_and(|switch| matches!(switch.to_ascii_lowercase().as_str(), "/c" | "/k"))
+    {
+        let inner = words[command_start + 2..].join(" ");
+        return !inner.is_empty() && cmd_invocation_requires_review(&inner);
+    }
+    false
 }
 
 fn cmd_if_system_management_target(command: &str) -> bool {
@@ -1695,22 +1751,110 @@ fn powershell_member_invocation_requires_review(command: &str) -> bool {
     false
 }
 
-fn flush_review_word(word: &mut String) -> bool {
+fn flush_powershell_review_word(word: &mut String) -> bool {
     if word.is_empty() {
         return false;
     }
-    let requires_review = review_word(word);
+    let requires_review = powershell_review_word(word);
     word.clear();
     requires_review
 }
 
 fn flush_cmd_review_word(word: &mut String) -> bool {
     let lower = word.to_ascii_lowercase();
-    if matches!(lower.as_str(), "rmdir" | "rd") {
+    if matches!(
+        lower.as_str(),
+        "set" | "copy" | "move" | "ren" | "rename" | "rmdir" | "rd"
+    ) {
         word.clear();
         return false;
     }
-    flush_review_word(word)
+    let requires_review = cmd_review_word(word);
+    word.clear();
+    requires_review
+}
+
+fn static_nested_cmd_inner(command: &str) -> Option<&str> {
+    let trimmed = command.trim();
+    let (program, rest) = if let Some(quoted) = trimmed.strip_prefix('"') {
+        let end = quoted.find('"')?;
+        (&quoted[..end], &quoted[end + 1..])
+    } else {
+        let end = trimmed.find(char::is_whitespace)?;
+        (&trimmed[..end], &trimmed[end..])
+    };
+    let program = program.rsplit(['\\', '/']).next().unwrap_or(program);
+    if !matches!(program.to_ascii_lowercase().as_str(), "cmd" | "cmd.exe") {
+        return None;
+    }
+    let rest = rest.trim_start();
+    let switch_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    if !matches!(rest[..switch_end].to_ascii_lowercase().as_str(), "/c" | "/k") {
+        return None;
+    }
+    let inner = rest[switch_end..].trim_start();
+    (!inner.is_empty()).then_some(inner)
+}
+
+fn nested_cmd_body(inner: &str) -> &str {
+    let inner = inner.trim();
+    inner
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .filter(|value| !value.is_empty())
+        .unwrap_or(inner)
+}
+
+fn powershell_readonly_identity_diagnostic(command: &str) -> bool {
+    let compact = command
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<String>();
+    compact.eq_ignore_ascii_case("[System.Security.Principal.WindowsIdentity]::GetCurrent()")
+        || compact.eq_ignore_ascii_case("[WindowsIdentity]::GetCurrent()")
+}
+
+fn powershell_provider_target(token: &str) -> bool {
+    let lower = token.trim_matches(['\'', '"']).to_ascii_lowercase();
+    [
+        "alias:", "function:", "variable:", "env:", "registry::", "hklm:", "hkcu:",
+        "hkcr:", "hku:", "hkcc:", "cert:", "wsman:",
+    ]
+    .iter()
+    .any(|prefix| lower.starts_with(prefix))
+}
+
+fn powershell_ordinary_development_invocation(command: &str) -> bool {
+    let Some(words) = simple_static_command_words(command) else {
+        return false;
+    };
+    let verb = words[0].to_ascii_lowercase();
+    if !matches!(
+        verb.as_str(),
+        "set-variable"
+            | "set-content"
+            | "new-item"
+            | "copy-item"
+            | "move-item"
+            | "remove-item"
+    ) {
+        return false;
+    }
+    if words
+        .iter()
+        .skip(1)
+        .any(|word| powershell_provider_target(word))
+    {
+        return false;
+    }
+    if verb == "set-variable"
+        && words
+            .iter()
+            .any(|word| word.eq_ignore_ascii_case("PSModuleAutoLoadingPreference"))
+    {
+        return false;
+    }
+    true
 }
 
 fn powershell_simple_get_command_diagnostic(command: &str) -> bool {
@@ -1795,8 +1939,21 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
     if powershell_simple_get_command_diagnostic(command)
         || powershell_readonly_command_discovery(command)
         || powershell_readonly_version_diagnostic(command)
+        || powershell_readonly_identity_diagnostic(command)
+        || powershell_ordinary_development_invocation(command)
     {
         return false;
+    }
+
+    if let Some(inner) = static_nested_cmd_inner(command) {
+        let body = nested_cmd_body(inner);
+        if (inner.trim().starts_with('"') && inner.trim().ends_with('"'))
+            || !command
+            .chars()
+            .any(|ch| matches!(ch, ';' | '|' | '&' | '\r' | '\n' | '{' | '}'))
+        {
+            return cmd_invocation_requires_review(body);
+        }
     }
 
     if powershell_static_system_management_target(command)
@@ -1835,7 +1992,7 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
         }
 
         if ch == '\'' {
-            if word_is_command && flush_review_word(&mut word) {
+            if word_is_command && flush_powershell_review_word(&mut word) {
                 return true;
             }
             word.clear();
@@ -1844,7 +2001,7 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
             continue;
         }
         if ch == '"' {
-            if word_is_command && flush_review_word(&mut word) {
+            if word_is_command && flush_powershell_review_word(&mut word) {
                 return true;
             }
             word.clear();
@@ -1856,7 +2013,7 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
             return true;
         }
         if ch == '&' {
-            if word_is_command && flush_review_word(&mut word) {
+            if word_is_command && flush_powershell_review_word(&mut word) {
                 return true;
             }
             word.clear();
@@ -1879,7 +2036,7 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
             command_boundary = false;
             continue;
         }
-        if word_is_command && flush_review_word(&mut word) {
+        if word_is_command && flush_powershell_review_word(&mut word) {
             return true;
         }
         word.clear();
@@ -1888,7 +2045,7 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
             command_boundary = true;
         }
     }
-    word_is_command && flush_review_word(&mut word)
+    word_is_command && flush_powershell_review_word(&mut word)
 }
 
 fn cmd_chained_literal_script_requires_review(command: &str) -> bool {
@@ -1927,11 +2084,55 @@ fn cmd_chained_literal_script_requires_review(command: &str) -> bool {
     false
 }
 
+fn cmd_chained_nested_shell_requires_review(command: &str) -> bool {
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, ch) in command.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '^' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if quoted || !matches!(ch, '&' | '|' | '\r' | '\n' | '(') {
+            continue;
+        }
+        let mut start = index + ch.len_utf8();
+        while command[start..]
+            .chars()
+            .next()
+            .is_some_and(|next| next.is_whitespace() || matches!(next, '&' | '|' | '('))
+        {
+            start += command[start..].chars().next().unwrap().len_utf8();
+        }
+        if start < command.len() {
+            if let Some(inner) = static_nested_cmd_inner(&command[start..]) {
+                if cmd_invocation_requires_review(nested_cmd_body(inner)) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 fn cmd_invocation_requires_review(command: &str) -> bool {
+    if let Some(inner) = static_nested_cmd_inner(command) {
+        return cmd_invocation_requires_review(nested_cmd_body(inner));
+    }
     if cmd_static_system_management_target(command) || cmd_if_system_management_target(command) {
         return true;
     }
     if cmd_chained_literal_script_requires_review(command) {
+        return true;
+    }
+    if cmd_chained_nested_shell_requires_review(command) {
         return true;
     }
     let mut chars = command.chars().peekable();
@@ -2461,12 +2662,16 @@ mod schema36_shell_classifier_tests {
     #[test]
     fn command_position_and_dynamic_control_flow_remain_fail_closed() {
         for command in [
-            "cmd /c echo nested",
             "pwsh -NoProfile -Command whoami",
             "%COMSPEC% /c whoami",
-            "echo ok && cmd /c whoami",
             "if 1==1 %COMSPEC% /c whoami",
         ] {
+            assert!(shell_invocation_requires_review("cmd", command), "{command}");
+        }
+        for command in ["cmd /c echo nested", "echo ok && cmd /c whoami"] {
+            assert!(!shell_invocation_requires_review("cmd", command), "{command}");
+        }
+        for command in ["echo ok && cmd /c sc.exe query", "if 1==1 cmd /c net.exe user"] {
             assert!(shell_invocation_requires_review("cmd", command), "{command}");
         }
     }
