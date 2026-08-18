@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5428,5 +5428,20 @@
       "Elevated filesystem route is not marked broken on current disk: Broker-backed process shell filesystem route tests passed; real-client parity remains required",
       "historical permission_mode and Broker readiness mismatch is retained as evidence, while current contract keeps selected mode separate from administrator-token readiness"
     ]
+  },
+  "schema42_lb006_windows_execution_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commit": "c31b089db1084ee0f3cd83fea3ef55e81f2ad0cb",
+    "evidence": [
+      "schema42 execution-platform contract and runtime-manifest verification PASS.",
+      "Real bundled-runtime NUL redirection and Windows native output decoding E2E PASS; LB-006 coding runtime integration 5/5 PASS.",
+      "Full cargo test --locked PASS including 245 library tests and all integration/migration/doc targets; explicit live-UAC test remains intentionally ignored.",
+      "cargo clippy --locked --all-targets -- -D warnings PASS; frontend 8/8 and production build PASS; architecture, G4 fail-closed and git diff --check PASS."
+    ],
+    "next_pr": "LB-007",
+    "next_required_g2_generation": 33,
+    "next_required_g3_generation": 22,
+    "g4_unlocked": false
   }
 }
