@@ -398,6 +398,7 @@ pub struct PolicyEnforcementRuntime {
     port: u16,
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
+    task_state: CommandTaskStateStore,
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
     sessions: Arc<Mutex<HashMap<String, McpSession>>>,
@@ -484,6 +485,7 @@ impl PolicyEnforcementRuntime {
         let guard = AgentFacade::from_coding_runtime(coding_runtime, policy)
             .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
         let task_state = guard.command_task_state();
+        let runtime_task_state = task_state.clone();
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| PolicyEnforcementError::BindFailed)?;
         listener
@@ -526,6 +528,7 @@ impl PolicyEnforcementRuntime {
             port,
             permission_mode,
             current_task,
+            task_state: runtime_task_state,
             guard: Some(guard),
             public_policy,
             sessions,
@@ -574,6 +577,15 @@ impl PolicyEnforcementRuntime {
 
     pub fn current_task_projection(&self) -> CurrentTaskProjection {
         self.current_task.clone()
+    }
+
+    pub fn task_aggregate_snapshot(&self) -> Value {
+        let Some(guard)=self.guard.as_ref() else { return task_control_snapshot_with_terminal(&self.current_task.actual_snapshot(),&self.task_state); };
+        match guard.try_lock() {
+            Ok(guard)=>guard.task_aggregate_snapshot(),
+            Err(TryLockError::WouldBlock)=>task_control_snapshot_with_terminal(&self.current_task.actual_snapshot(),&self.task_state),
+            Err(TryLockError::Poisoned(error))=>error.into_inner().task_aggregate_snapshot(),
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -1321,19 +1333,10 @@ fn handle_task_control(
     let action = arguments.get("action").and_then(Value::as_str).ok_or(())?;
     let before = current_task.actual_snapshot();
     let data = match action {
-        "get" => {
-            let mut data = task_control_snapshot_with_terminal(&before, task_state);
-            if matches!(before, CurrentTaskStatus::Idle) {
-                let durable = match guard.try_lock() {
-                    Ok(guard) => guard.durable_coding_task_snapshot(),
-                    Err(TryLockError::WouldBlock) => None,
-                    Err(TryLockError::Poisoned(error)) => {
-                        error.into_inner().durable_coding_task_snapshot()
-                    }
-                };
-                if let Some(durable) = durable { data = durable_task_snapshot_with_terminal(durable, task_state); }
-            }
-            data
+        "get" => match guard.try_lock() {
+            Ok(guard) => guard.task_aggregate_snapshot(),
+            Err(TryLockError::WouldBlock) => task_control_snapshot_with_terminal(&before, task_state),
+            Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
         }
         "cancel" => {
             let active = active_requests
@@ -1374,20 +1377,17 @@ fn handle_task_control(
                     .unwrap_or(false),
             };
             let cancelled = cancelled.saturating_add(u64::from(durable_cancelled));
-            if cancelled > 0 {
-                json!({
-                    "state":"cancel_requested",
-                    "cancelled_requests":cancelled,
-                    "durable_task_cancelled":durable_cancelled
-                })
-            } else {
-                let after = current_task.actual_snapshot();
-                let mut data = task_control_snapshot_with_terminal(&after, task_state);
-                if let Some(object) = data.as_object_mut() {
-                    object.insert("cancelled_requests".into(), Value::from(0));
-                }
-                data
+            if cancelled > 0 { wait_for_task_cancel_settlement(current_task, Duration::from_millis(500)); }
+            let mut data = match guard.try_lock() {
+                Ok(guard) => guard.task_aggregate_snapshot(),
+                Err(TryLockError::WouldBlock) => task_control_snapshot_with_terminal(&current_task.actual_snapshot(), task_state),
+                Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
+            };
+            if let Some(object) = data.as_object_mut() {
+                object.insert("cancelled_requests".into(), Value::from(cancelled));
+                object.insert("durable_task_cancelled".into(), Value::Bool(durable_cancelled));
             }
+            data
         }
         _ => {
             return write_rpc_error(
@@ -1405,6 +1405,13 @@ fn handle_task_control(
         stable_success(data, "Task control completed"),
         Some(session),
     )
+}
+
+fn wait_for_task_cancel_settlement(current_task: &CurrentTaskProjection, max_wait: Duration) {
+    let deadline = Instant::now() + max_wait;
+    while !matches!(current_task.actual_snapshot(), CurrentTaskStatus::Idle) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn cancel_task_targets(
@@ -1442,6 +1449,7 @@ fn task_control_snapshot_with_terminal(
     data
 }
 
+#[cfg(test)]
 fn durable_task_snapshot_with_terminal(mut durable: Value, task_state: &CommandTaskStateStore) -> Value {
     let terminal = durable.get("task_id").and_then(Value::as_str).and_then(|task_id| task_state.latest_terminal_for_task(task_id)).map(terminal_command_value).unwrap_or(Value::Null);
     if let Some(object)=durable.as_object_mut(){ object.insert("last_terminal_command".into(),terminal); }
@@ -4753,7 +4761,7 @@ mod tests {
             "task_control cancel blocked behind the facade execution mutex"
         );
         assert_eq!(
-            cancel.body["result"]["structuredContent"]["data"]["state"], "cancel_requested",
+            cancel.body["result"]["structuredContent"]["data"]["state"], "idle",
             "{:#?}",
             cancel.body
         );
@@ -4851,7 +4859,7 @@ mod tests {
         );
         assert_eq!(
             cancel.body["result"]["structuredContent"]["data"]["state"],
-            "cancel_requested",
+            "idle",
             "{:#?}",
             cancel.body
         );

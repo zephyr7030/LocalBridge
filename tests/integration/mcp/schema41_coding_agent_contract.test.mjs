@@ -18,7 +18,7 @@ const requireAll = (source, markers, label) => {
   for (const marker of markers) assert.ok(source.includes(marker), `${label} missing ${marker}`);
 };
 
-assert.ok(facade.includes("pub const AGENT_API_REVISION: u32 = 41;"), "schema41 facade revision drift");
+assert.ok(facade.includes("pub const AGENT_API_REVISION: u32 = 42;"), "schema42 facade revision drift");
 requireAll(facade, [
   'pub const V1_CORE_TOOL_NAMES: [&str; 8]',
   '"workspace_context"', '"agent_workflow"', '"exec_command"', '"command_control"',
@@ -38,7 +38,7 @@ requireAll(checkpoint, [
 requireAll(context, ["struct ContextService", "discover_instructions", "search_text", "select_related_files", "read_relevant_ranges"], "ContextService");
 requireAll(edit, ["struct CodingEditService", "apply_patch", "FileChanged", "PatchConflict", "AmbiguousMatch", "atomic"], "CodingEditService");
 requireAll(planner, ["struct VerificationPlanner", "priority", "source", "plan"], "VerificationPlanner");
-requireAll(server, ["durable_coding_task_snapshot", "cancel_durable_workflow", "stable_success(data, \"Task control completed\")"], "task_control durable Task integration");
+requireAll(server, ["task_aggregate_snapshot", "cancel_durable_workflow", "stable_success(data, \"Task control completed\")"], "task_control TaskAggregate integration");
 requireAll(policy, ['phase == Some("verify")', "process_exec"], "phase=verify capability policy");
 requireAll(http, ["total_timeout: Option<Duration>", "remaining_until(deadline)"], "command-control end-to-end transport deadline");
 requireAll(server, ["poll wait_ms budget exceeded", "write wait_ms budget exceeded", "kill wait_ms budget exceeded"], "command-control wall-clock budget regression");
@@ -76,7 +76,7 @@ const semantic = spawnSync(
 assert.equal(
   semantic.status,
   0,
-  "schema41 semantic acceptance failed\nSTDOUT:\n" + semantic.stdout + "\nSTDERR:\n" + semantic.stderr,
+  "schema42 semantic acceptance failed\nSTDOUT:\n" + semantic.stdout + "\nSTDERR:\n" + semantic.stderr,
 );
 const semanticLog = semantic.stdout + "\n" + semantic.stderr;
 for (const testName of [
@@ -98,6 +98,12 @@ for (const testName of [
   "schema41_private_patch_errors_keep_canonical_conflict_codes",
   "schema41_document_create_existing_target_returns_file_changed",
   "schema41_workflow_workdir_and_wait_budget_are_discoverable",
+  "schema42_task_aggregate_waiting_is_not_idle",
+  "schema42_command_summary_is_status_derived",
+  "schema42_document_eof_is_not_truncation",
+  "schema42_command_kill_leaves_workflow_waiting",
+  "task_control_cancel_reaches_running_call_without_waiting_for_facade_execution_lock",
+  "task_control_cancel_owns_detached_public_command_session",
   "durable_task_terminal_ignores_newer_unrelated_command",
   "schema28_public_runtime_behavior_is_real_end_to_end",
 ]) {

@@ -31,7 +31,7 @@ use super::workflow_checkpoint::{WorkflowCheckpoint, WorkflowCheckpointStore};
 use super::verification_planner::VerificationPlanner;
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 41;
+pub const AGENT_API_REVISION: u32 = 42;
 pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
     "workspace_context",
     "agent_workflow",
@@ -1206,6 +1206,8 @@ pub trait WorkspaceRuntimeAdapter {
     fn durable_command_terminal(&self, _session_id: &str) -> Option<Value> {
         None
     }
+    fn current_command_snapshot(&self) -> Option<Value> { None }
+    fn latest_terminal_command_snapshot(&self) -> Option<Value> { None }
 }
 
 static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -2370,8 +2372,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         } else {
             String::new()
         };
-        let mut truncated =
-            requested_end.is_some_and(|value| value > end) || natural_end < total_lines;
+        let mut truncated = document_range_was_truncated(start, requested_end, max_lines, total_lines);
         if text.len() > max_bytes {
             let mut boundary = max_bytes.min(text.len());
             while boundary > 0 && !text.is_char_boundary(boundary) {
@@ -2576,21 +2577,21 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         }
         match terminal.status {
             CommandTerminalStatus::Completed => {
-                Some(stable_success(Value::Object(data), "Command completed"))
+                Some(stable_success(Value::Object(data), command_summary("completed")))
             }
             CommandTerminalStatus::Failed => Some(stable_command_error(
                 FacadeErrorCode::ProcessFailed,
-                "命令执行失败",
+                command_summary("failed"),
                 data,
             )),
             CommandTerminalStatus::TimedOut => Some(stable_command_error(
                 FacadeErrorCode::ProcessTimedOut,
-                "命令执行超时",
+                command_summary("timed_out"),
                 data,
             )),
             CommandTerminalStatus::Cancelled => Some(stable_command_error(
                 FacadeErrorCode::ProcessCancelled,
-                "命令已取消",
+                command_summary("cancelled"),
                 data,
             )),
             CommandTerminalStatus::Lost => Some(stable_command_error(
@@ -2600,7 +2601,17 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             )),
         }
     }
-}
+
+
+    fn current_command_snapshot(&self) -> Option<Value> {
+        let owner=self.task_state.current_owner()?;
+        Some(json!({"state":"running","task_id":owner.task_id,"session_id":owner.session_id}))
+    }
+
+    fn latest_terminal_command_snapshot(&self) -> Option<Value> {
+        let terminal=self.task_state.latest_terminal()?;
+        Some(json!({"task_id":terminal.owner.task_id,"session_id":terminal.owner.session_id,"status":terminal.status.as_str(),"exit_code":terminal.exit_code,"signal":terminal.signal,"timed_out":terminal.timed_out,"cancelled":terminal.cancelled,"output_refs":terminal.output_refs,"error_code":terminal.error_code,"completed_at_ms":terminal.completed_at_ms}))
+    }}
 
 impl CodingToolsRuntimeAdapter {
     fn normalize_command_result(
@@ -2659,14 +2670,12 @@ impl CodingToolsRuntimeAdapter {
             && public_status == "cancelled")
             .then(|| data.clone());
         let result = match public_status {
-            "failed" => stable_command_error(FacadeErrorCode::ProcessFailed, "命令执行失败", data),
-            "timed_out" => {
-                stable_command_error(FacadeErrorCode::ProcessTimedOut, "命令执行超时", data)
-            }
-            "cancelled" => {
-                stable_command_error(FacadeErrorCode::ProcessCancelled, "命令已取消", data)
-            }
-            _ => stable_success(Value::Object(data), "Command completed"),
+            "running" => stable_success(Value::Object(data), command_summary("running")),
+            "completed" => stable_success(Value::Object(data), command_summary("completed")),
+            "failed" => stable_command_error(FacadeErrorCode::ProcessFailed, command_summary("failed"), data),
+            "timed_out" => stable_command_error(FacadeErrorCode::ProcessTimedOut, command_summary("timed_out"), data),
+            "cancelled" => stable_command_error(FacadeErrorCode::ProcessCancelled, command_summary("cancelled"), data),
+            _ => stable_command_error(FacadeErrorCode::SessionUnavailable, command_summary("lost"), data),
         };
         if public_status != "running" {
             self.public_commands.mark_terminal(
@@ -2676,9 +2685,17 @@ impl CodingToolsRuntimeAdapter {
             )?;
         }
         if let Some(data) = successful_kill_data {
-            return Ok(stable_success(Value::Object(data), "Command terminated"));
+            self.mark_owner_workflow_waiting_after_kill(public_session_id)?;
+            return Ok(stable_success(Value::Object(data), command_summary("cancelled")));
         }
         Ok(result)
+    }
+
+    fn mark_owner_workflow_waiting_after_kill(&self, session_id: &str) -> Result<(), FacadeError> {
+        let Some(stored)=self.workflow_checkpoint.load().map_err(workflow_checkpoint_error)? else { return Ok(()); };
+        let mut checkpoint=stored;
+        settle_checkpoint_after_command_kill(&mut checkpoint, session_id);
+        self.workflow_checkpoint.save(&checkpoint).map_err(workflow_checkpoint_error)
     }
 
     fn safe_command_output_for_session(&mut self, raw: &Value, public_session_id: &str) -> String {
@@ -2816,6 +2833,25 @@ fn public_stderr_page(raw: &Value, public_output_ref: &str, requested_offset: u6
         "total_bytes":total,
         "truncated":next_offset.is_some()
     }), "Command output read"))
+}
+
+fn document_range_was_truncated(start: usize, requested_end: Option<usize>, max_lines: usize, total_lines: usize) -> bool {
+    let requested_actual_end=requested_end.unwrap_or(total_lines).min(total_lines);
+    let limited_end=start.saturating_add(max_lines.saturating_sub(1)).min(total_lines);
+    limited_end < requested_actual_end
+}
+
+fn settle_checkpoint_after_command_kill(checkpoint: &mut WorkflowCheckpoint, session_id: &str) {
+    if checkpoint.completed || checkpoint.current_session_id.as_deref()!=Some(session_id) { return; }
+    checkpoint.current_session_id=None; checkpoint.command_inflight=false;
+    if checkpoint.next_step.is_none() { checkpoint.next_step=Some(if checkpoint.is_coding_task(){"verify"}else{"resume"}.into()); }
+}
+
+fn command_summary(status: &str) -> &'static str {
+    match status {
+        "running" => "Command running", "completed" => "Command completed", "failed" => "Command failed",
+        "cancelled" => "Command cancelled", "timed_out" => "Command timed out", _ => "Command lost",
+    }
 }
 
 fn command_public_status(
@@ -3275,6 +3311,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         self.adapter.take_runtime_fault()
     }
 
+    #[cfg(test)]
     pub(crate) fn durable_coding_task_snapshot(&self) -> Option<Value> {
         let stored = self.adapter.load_workflow_checkpoint().ok().flatten()?;
         let checkpoint: WorkflowCheckpoint = serde_json::from_value(stored).ok()?;
@@ -3303,6 +3340,33 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "completed":settled,
             "output_refs":checkpoint.output_refs
         }))
+    }
+
+    fn durable_workflow_current_snapshot(&self) -> Option<Value> {
+        let stored = self.adapter.load_workflow_checkpoint().ok().flatten()?;
+        let checkpoint: WorkflowCheckpoint = serde_json::from_value(stored).ok()?;
+        if checkpoint.completed { return None; }
+        let state = if checkpoint.current_session_id.is_some() || checkpoint.command_inflight || checkpoint.patch_inflight || checkpoint.directory_inflight { "running" } else { "waiting" };
+        Some(json!({
+            "state":state, "task_id":checkpoint.workflow_id, "kind":if checkpoint.is_coding_task(){"coding_workflow"}else{"workflow"},
+            "current_step":checkpoint.current_step, "next_step":checkpoint.next_step
+        }))
+    }
+
+    pub(crate) fn task_aggregate_snapshot(&self) -> Value {
+        let current_workflow = self.durable_workflow_current_snapshot();
+        let current_command = self.adapter.current_command_snapshot();
+        let last_command = self.adapter.latest_terminal_command_snapshot();
+        let state = if current_command.is_some() || current_workflow.as_ref().and_then(|v|v.get("state")).and_then(Value::as_str)==Some("running") { "active" }
+            else if current_workflow.is_some() { "waiting" } else { "idle" };
+        let mut aggregate=json!({"state":state,"current_workflow":current_workflow,"current_command":current_command,"last_command":last_command,"last_terminal_command":last_command});
+        if let (Some(object),Some(workflow))=(aggregate.as_object_mut(),current_workflow.as_ref().and_then(Value::as_object)){
+            for key in ["task_id","kind","current_step","next_step"] { if let Some(value)=workflow.get(key){ object.insert(key.into(),value.clone()); } }
+        } else if let (Some(object),Some(command))=(aggregate.as_object_mut(),current_command.as_ref().and_then(Value::as_object)){
+            object.insert("kind".into(),Value::String("command".into()));
+            for key in ["task_id","session_id"] { if let Some(value)=command.get(key){ object.insert(key.into(),value.clone()); } }
+        }
+        aggregate
     }
 
     pub(crate) fn cancel_durable_workflow(&mut self) -> Result<bool, FacadeError> {
@@ -3523,7 +3587,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 "elevated_route":{"available":false,"reason":"broker_state_required"}
             }),
         );
-        data.insert("current_task".into(), self.durable_coding_task_snapshot().unwrap_or_else(|| json!({"state":"idle"})));
+        data.insert("current_task".into(), self.task_aggregate_snapshot());
         data.insert("detail".into(), Value::String(detail.into()));
         data.insert("coding_profile".into(), Value::String("coding-agent-v1".into()));
         if detail == "full" {
@@ -6567,6 +6631,42 @@ mod tests {
         AgentFacade::with_adapter(
             ResumeAdapter { catalog: compatible_catalog(), state, first_execution_runs: false }, policy(),
         ).unwrap().durable_coding_task_snapshot().unwrap()
+    }
+
+    #[test]
+    fn schema42_task_aggregate_waiting_is_not_idle() {
+        let state=ResumeFixtureState::new();
+        let mut checkpoint=WorkflowCheckpoint::new_coding("lb-schema42".into(),json!({"action":"bugfix","path":"."}),"schema42".into());
+        checkpoint.next_step=Some("edit".into());
+        *state.checkpoint.lock().unwrap()=Some(serde_json::to_value(checkpoint).unwrap());
+        let facade=AgentFacade::with_adapter(ResumeAdapter{catalog:compatible_catalog(),state,first_execution_runs:false},policy()).unwrap();
+        let aggregate=facade.task_aggregate_snapshot();
+        assert_eq!(aggregate["state"],"waiting");
+        assert_eq!(aggregate["current_workflow"]["state"],"waiting");
+        assert!(aggregate["current_command"].is_null());
+    }
+
+    #[test]
+    fn schema42_command_summary_is_status_derived() {
+        assert_eq!(command_summary("running"),"Command running");
+        assert_eq!(command_summary("completed"),"Command completed");
+        assert_ne!(command_summary("running"),command_summary("completed"));
+    }
+
+    #[test]
+    fn schema42_document_eof_is_not_truncation() {
+        assert!(!document_range_was_truncated(1,Some(9999),10_000,100));
+        assert!(document_range_was_truncated(1,None,100,1000));
+        assert!(!document_range_was_truncated(20,Some(40),100,1000));
+    }
+
+    #[test]
+    fn schema42_command_kill_leaves_workflow_waiting() {
+        let mut checkpoint=WorkflowCheckpoint::new_coding("lb-kill".into(),json!({"action":"bugfix"}),"kill".into());
+        checkpoint.current_session_id=Some("s1".into()); checkpoint.command_inflight=true; checkpoint.next_step=None;
+        settle_checkpoint_after_command_kill(&mut checkpoint,"s1");
+        assert!(checkpoint.current_session_id.is_none()); assert!(!checkpoint.command_inflight);
+        assert_eq!(checkpoint.next_step.as_deref(),Some("verify")); assert!(!checkpoint.completed);
     }
 
     #[test]
