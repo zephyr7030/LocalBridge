@@ -254,6 +254,10 @@ impl CommandTaskStateStore {
             .cloned()
     }
 
+    pub(crate) fn latest_terminal_for_task(&self, task_id: &str) -> Option<TerminalCommandSnapshot> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).state.terminal_commands.iter().rev().find(|terminal| terminal.owner.task_id == task_id).cloned()
+    }
+
     pub(crate) fn terminal_for_session(&self, session_id: &str) -> Option<TerminalCommandSnapshot> {
         self.0
             .lock()

@@ -30,7 +30,7 @@ use super::http::{McpCancellationClient, McpHealthClient};
 use super::policy::CapabilityPolicy;
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use super::shell::{ShellExecutionSpec, ShellExecutor, ShellSelector};
-use super::task_state::CommandTaskStateStore;
+use super::task_state::{CommandTaskStateStore, TerminalCommandSnapshot};
 
 const CURRENT_PROTOCOL_VERSION: &str = "2025-11-25";
 const COMPATIBLE_PROTOCOL_VERSION: &str = "2025-06-18";
@@ -1331,16 +1331,7 @@ fn handle_task_control(
                         error.into_inner().durable_coding_task_snapshot()
                     }
                 };
-                if let Some(durable) = durable {
-                    let terminal = data
-                        .get("last_terminal_command")
-                        .cloned()
-                        .unwrap_or(Value::Null);
-                    data = durable;
-                    if let Some(object) = data.as_object_mut() {
-                        object.insert("last_terminal_command".into(), terminal);
-                    }
-                }
+                if let Some(durable) = durable { data = durable_task_snapshot_with_terminal(durable, task_state); }
             }
             data
         }
@@ -1375,11 +1366,11 @@ fn handle_task_control(
                 },
             )?;
             let durable_cancelled = match guard.try_lock() {
-                Ok(mut guard) => guard.cancel_durable_coding_task().unwrap_or(false),
+                Ok(mut guard) => guard.cancel_durable_workflow().unwrap_or(false),
                 Err(TryLockError::WouldBlock) => false,
                 Err(TryLockError::Poisoned(error)) => error
                     .into_inner()
-                    .cancel_durable_coding_task()
+                    .cancel_durable_workflow()
                     .unwrap_or(false),
             };
             let cancelled = cancelled.saturating_add(u64::from(durable_cancelled));
@@ -1442,25 +1433,33 @@ fn task_control_snapshot_with_terminal(
 ) -> Value {
     let mut data = task_control_snapshot(status);
     if let Some(object) = data.as_object_mut() {
-        let terminal = task_state.latest_terminal().map(|terminal| {
-            json!({
-                "task_id": terminal.owner.task_id,
-                "session_id": terminal.owner.session_id,
-                "status": terminal.status.as_str(),
-                "exit_code": terminal.exit_code,
-                "signal": terminal.signal,
-                "timed_out": terminal.timed_out,
-                "cancelled": terminal.cancelled,
-                "output_refs": terminal.output_refs,
-                "error_code": terminal.error_code
-            })
-        });
+        let terminal = task_state.latest_terminal().map(terminal_command_value);
         object.insert(
             "last_terminal_command".into(),
             terminal.unwrap_or(Value::Null),
         );
     }
     data
+}
+
+fn durable_task_snapshot_with_terminal(mut durable: Value, task_state: &CommandTaskStateStore) -> Value {
+    let terminal = durable.get("task_id").and_then(Value::as_str).and_then(|task_id| task_state.latest_terminal_for_task(task_id)).map(terminal_command_value).unwrap_or(Value::Null);
+    if let Some(object)=durable.as_object_mut(){ object.insert("last_terminal_command".into(),terminal); }
+    durable
+}
+
+fn terminal_command_value(terminal: TerminalCommandSnapshot) -> Value {
+    json!({
+        "task_id": terminal.owner.task_id,
+        "session_id": terminal.owner.session_id,
+        "status": terminal.status.as_str(),
+        "exit_code": terminal.exit_code,
+        "signal": terminal.signal,
+        "timed_out": terminal.timed_out,
+        "cancelled": terminal.cancelled,
+        "output_refs": terminal.output_refs,
+        "error_code": terminal.error_code
+    })
 }
 
 fn task_control_snapshot(status: &CurrentTaskStatus) -> Value {
@@ -2205,6 +2204,14 @@ mod tests {
                 let _ = CloseHandle(self.handle);
             }
         }
+    }
+
+    #[test]
+    fn durable_task_terminal_ignores_newer_unrelated_command() {
+        let workspace=temp_workspace(); let store=CommandTaskStateStore::open_at(workspace.join("owned-terminal.json")).unwrap();
+        let a=CommandOwner::new("workflow-a","lb-session-a"); store.begin(a.clone()).unwrap(); store.finalize(TerminalCommandSnapshot::new(a.clone(),CommandTerminalStatus::Completed,Some(0),None,false,false,vec!["lb-output-a".into()],None)).unwrap();
+        let b=CommandOwner::new("direct-b","lb-session-b"); store.begin(b.clone()).unwrap(); store.finalize(TerminalCommandSnapshot::new(b,CommandTerminalStatus::TimedOut,None,None,true,false,vec!["lb-output-b".into()],Some("ProcessTimedOut".into()))).unwrap();
+        let data=durable_task_snapshot_with_terminal(json!({"task_id":"workflow-a","state":"waiting"}),&store); assert_eq!(data["last_terminal_command"]["task_id"],"workflow-a"); assert_eq!(data["last_terminal_command"]["session_id"],"lb-session-a"); cleanup_test_directory(&workspace);
     }
 
     #[test]
@@ -3382,6 +3389,14 @@ mod tests {
             nonempty.body
         );
         assert!(workspace.join("schema30-nonempty/keep.txt").is_file());
+        let cancelled_failed_workflow = public_tool_call(
+            pep.port(),
+            &session,
+            6945,
+            "task_control",
+            json!({"action":"cancel"}),
+        );
+        assert_eq!(cancelled_failed_workflow.body["result"]["structuredContent"]["data"]["durable_task_cancelled"], true, "{:#?}", cancelled_failed_workflow.body);
         let escaped_directory = public_tool_call(
             pep.port(),
             &session,
@@ -3746,18 +3761,25 @@ mod tests {
             empty_poll.body
         );
 
+        let wait_started = Instant::now();
+        let waited_poll = public_tool_call(pep.port(), &session, poll_id + 1, "command_control", json!({"action":"poll","session_id":public_session,"wait_ms":500}));
+        assert!(wait_started.elapsed() <= Duration::from_millis(1500), "poll wait_ms budget exceeded: {:?}", wait_started.elapsed());
+        assert_eq!(waited_poll.body["result"]["structuredContent"]["data"]["output"], "");
+
+        let write_started = Instant::now();
         let written = public_tool_call(
             pep.port(),
             &session,
-            poll_id + 1,
+            poll_id + 2,
             "command_control",
             json!({
                 "action":"write",
                 "session_id":public_session,
                 "chars":"after-start\n",
-                "wait_ms":1000
+                "wait_ms":500
             }),
         );
+        assert!(write_started.elapsed() <= Duration::from_millis(1500), "write wait_ms budget exceeded: {:?}", write_started.elapsed());
         assert_eq!(
             written.body["result"]["isError"], false,
             "{:#?}",
@@ -3772,10 +3794,11 @@ mod tests {
             written.body
         );
 
+        let kill_started = Instant::now();
         let killed = public_tool_call(
             pep.port(),
             &session,
-            poll_id + 2,
+            poll_id + 3,
             "command_control",
             json!({"action":"kill","session_id":public_session,"signal":"TERM","wait_ms":1000}),
         );
@@ -3784,12 +3807,13 @@ mod tests {
             "healthy kill regressed: {:#?}",
             killed.body
         );
+        assert!(kill_started.elapsed() <= Duration::from_millis(2000), "kill wait_ms budget exceeded: {:?}", kill_started.elapsed());
         assert_eq!(killed.body["result"]["structuredContent"]["ok"], true);
         assert_eq!(
             killed.body["result"]["structuredContent"]["data"]["status"],
             "cancelled"
         );
-        for id in [poll_id + 3, poll_id + 4] {
+        for id in [poll_id + 4, poll_id + 5] {
             let terminal = public_tool_call(
                 pep.port(),
                 &session,

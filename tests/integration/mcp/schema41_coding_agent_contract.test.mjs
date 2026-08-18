@@ -7,6 +7,7 @@ import path from "node:path";
 const read = (path) => readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
 const facade = read("src-tauri/src/mcp/facade.rs");
 const server = read("src-tauri/src/mcp/server.rs");
+const http = read("src-tauri/src/mcp/http.rs");
 const policy = read("src-tauri/src/mcp/policy.rs");
 const checkpoint = read("src-tauri/src/mcp/workflow_checkpoint.rs");
 const context = read("src-tauri/src/mcp/context_service.rs");
@@ -37,8 +38,10 @@ requireAll(checkpoint, [
 requireAll(context, ["struct ContextService", "discover_instructions", "search_text", "select_related_files", "read_relevant_ranges"], "ContextService");
 requireAll(edit, ["struct CodingEditService", "apply_patch", "FileChanged", "PatchConflict", "AmbiguousMatch", "atomic"], "CodingEditService");
 requireAll(planner, ["struct VerificationPlanner", "priority", "source", "plan"], "VerificationPlanner");
-requireAll(server, ["durable_coding_task_snapshot", "cancel_durable_coding_task", "stable_success(data, \"Task control completed\")"], "task_control durable Task integration");
+requireAll(server, ["durable_coding_task_snapshot", "cancel_durable_workflow", "stable_success(data, \"Task control completed\")"], "task_control durable Task integration");
 requireAll(policy, ['phase == Some("verify")', "process_exec"], "phase=verify capability policy");
+requireAll(http, ["total_timeout: Option<Duration>", "remaining_until(deadline)"], "command-control end-to-end transport deadline");
+requireAll(server, ["poll wait_ms budget exceeded", "write wait_ms budget exceeded", "kill wait_ms budget exceeded"], "command-control wall-clock budget regression");
 requireAll(facade, ["output_ref", "command_control", "resume_coding_task", "coding_verification_plan", "apply_coding_patch", "schema41 stale-projection compatibility", "expected_files_from_checkpoint", "schema41_stale_schema39_client_can_complete_durable_coding_task", "schema41_stale_schema39_resume_rechecks_verify_policy_in_edit_mode"], "coding capability reachability");
 
 const matrix = {
@@ -88,6 +91,15 @@ for (const testName of [
   "durable_checkpoint_omits_stdin_while_initial_execution_still_receives_it",
   "schema40_health_probe_remains_authenticated_while_facade_lock_is_held",
   "schema40_real_root_process_alive_but_mcp_unresponsive_is_not_ready",
+  "schema41_incomplete_checkpoint_cannot_be_overwritten_by_unrelated_workflow",
+  "schema41_resume_rejects_changed_git_head_before_side_effects",
+  "schema41_workspace_context_projects_durable_task_truth",
+  "schema41_stderr_pages_share_one_sanitized_public_byte_space",
+  "schema41_private_patch_errors_keep_canonical_conflict_codes",
+  "schema41_document_create_existing_target_returns_file_changed",
+  "schema41_workflow_workdir_and_wait_budget_are_discoverable",
+  "durable_task_terminal_ignores_newer_unrelated_command",
+  "schema28_public_runtime_behavior_is_real_end_to_end",
 ]) {
   assert.ok(semanticLog.includes(testName + " ... ok"), "semantic proof did not execute " + testName);
 }

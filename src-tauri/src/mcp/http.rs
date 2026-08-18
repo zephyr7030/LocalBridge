@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -320,6 +320,7 @@ impl McpSession {
             &payload,
             transport_timeout,
             transport_timeout,
+            Some(transport_timeout),
         )?;
         if response.status != 200 {
             return Err(CodingToolsRuntimeError::HttpStatus(response.status));
@@ -374,6 +375,7 @@ impl McpSession {
             &payload,
             transport_timeout,
             transport_timeout,
+            None,
         )?;
         if response.status == 202 {
             Ok(())
@@ -423,7 +425,15 @@ fn post_json(
         payload,
         Duration::from_millis(500),
         Duration::from_secs(2),
+        None,
     )
+}
+
+fn remaining_until(deadline: Instant) -> Result<Duration, CodingToolsRuntimeError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|value| !value.is_zero())
+        .ok_or(CodingToolsRuntimeError::ConnectionUnavailable)
 }
 
 fn post_json_with_timeouts(
@@ -433,16 +443,24 @@ fn post_json_with_timeouts(
     payload: &Value,
     connect_timeout: Duration,
     io_timeout: Duration,
+    total_timeout: Option<Duration>,
 ) -> Result<HttpResponse, CodingToolsRuntimeError> {
+    let deadline = total_timeout.and_then(|timeout| Instant::now().checked_add(timeout));
+    let connect_timeout = match deadline {
+        Some(deadline) => remaining_until(deadline)?,
+        None => connect_timeout,
+    };
     let address = SocketAddrV4::new(Ipv4Addr::LOCALHOST, port);
     let mut stream = TcpStream::connect_timeout(&address.into(), connect_timeout)
         .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
-    stream
-        .set_read_timeout(Some(io_timeout))
-        .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
-    stream
-        .set_write_timeout(Some(io_timeout))
-        .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+    if deadline.is_none() {
+        stream
+            .set_read_timeout(Some(io_timeout))
+            .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+        stream
+            .set_write_timeout(Some(io_timeout))
+            .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+    }
 
     let mut body =
         serde_json::to_vec(payload).map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
@@ -466,16 +484,62 @@ fn post_json_with_timeouts(
     request.extend_from_slice(b"\r\n");
     request.extend_from_slice(&body);
 
-    let write_result = stream.write_all(&request).and_then(|_| stream.flush());
+    let write_result = if let Some(deadline) = deadline {
+        (|| {
+            let mut written = 0usize;
+            while written < request.len() {
+                stream
+                    .set_write_timeout(Some(remaining_until(deadline)?))
+                    .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+                let count = stream
+                    .write(&request[written..])
+                    .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+                if count == 0 {
+                    return Err(CodingToolsRuntimeError::ConnectionUnavailable);
+                }
+                written += count;
+            }
+            stream
+                .set_write_timeout(Some(remaining_until(deadline)?))
+                .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+            stream
+                .flush()
+                .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)
+        })()
+    } else {
+        stream
+            .write_all(&request)
+            .and_then(|_| stream.flush())
+            .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)
+    };
     zero_bytes(&mut request);
     zero_bytes(&mut body);
-    write_result.map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+    write_result?;
 
     let mut response = Vec::new();
-    stream
-        .take((MAX_HTTP_RESPONSE_BYTES + 1) as u64)
-        .read_to_end(&mut response)
-        .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+    if let Some(deadline) = deadline {
+        let mut buffer = [0u8; 8192];
+        loop {
+            stream
+                .set_read_timeout(Some(remaining_until(deadline)?))
+                .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => {
+                    response.extend_from_slice(&buffer[..count]);
+                    if response.len() > MAX_HTTP_RESPONSE_BYTES {
+                        return Err(CodingToolsRuntimeError::ProtocolMismatch);
+                    }
+                }
+                Err(_) => return Err(CodingToolsRuntimeError::ConnectionUnavailable),
+            }
+        }
+    } else {
+        stream
+            .take((MAX_HTTP_RESPONSE_BYTES + 1) as u64)
+            .read_to_end(&mut response)
+            .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+    }
     if response.len() > MAX_HTTP_RESPONSE_BYTES {
         return Err(CodingToolsRuntimeError::ProtocolMismatch);
     }
