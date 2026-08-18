@@ -202,7 +202,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "BLOCKED"
+      "status": "READY"
     },
     {
       "id": "LB-014",
@@ -331,9 +331,9 @@
       "review_status": "PASS",
       "review_generation": 30,
       "review_provenance": {
-        "generation": 29,
+        "generation": 30,
         "kind": "independent_adversarial",
-        "commit": "2517f5d9ff435648f45fd52e13b7df7d8417262f",
+        "commit": "1083059c890a157f19e3a71664997827344f557d",
         "invalidated_generations": [
           {
             "generation": 8,
@@ -404,8 +404,8 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "BLOCKED",
-      "review_status": "BLOCKED",
+      "status": "IN_PROGRESS",
+      "review_status": "REQUIRED",
       "review_generation": 19,
       "human_review_status": "BLOCKED",
       "human_review_generation": 3,
@@ -500,6 +500,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": null,
-  "current_group": "G2"
+  "current_pr": "LB-013",
+  "current_group": "G3"
 }
