@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4983,6 +4983,17 @@
       "Architecture PASS."
     ],
     "next_pr": "LB-011",
+    "g4_unlocked": false
+  },
+  "schema41_lb011_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB011 security boundary and UAC static contracts PASS.",
+      "Privilege module 23/23 PASS.",
+      "Broker IPC 6 PASS; one explicit live-UAC test remains intentionally ignored.",
+      "Architecture PASS before transition."
+    ],
+    "next_pr": "LB-012",
     "g4_unlocked": false
   }
 }
