@@ -130,6 +130,8 @@ impl ToolboxResolver {
         let mut output = String::with_capacity(command.len());
         let mut cursor = 0usize;
         let mut command_target = true;
+        let mut quote = None;
+        let mut escaped = false;
         while cursor < command.len() {
             let ch = command[cursor..].chars().next().expect("cursor is on a character boundary");
             if command_target {
@@ -159,8 +161,33 @@ impl ToolboxResolver {
             }
             output.push(ch);
             cursor += ch.len_utf8();
-            if is_separator(ch) {
-                command_target = true;
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match kind {
+                ResolvedShellKind::Cmd => {
+                    if ch == '^' {
+                        escaped = true;
+                    } else if ch == '"' {
+                        quote = if quote == Some('"') { None } else { Some('"') };
+                    } else if quote.is_none() && is_separator(ch) {
+                        command_target = true;
+                    }
+                }
+                ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
+                    if quote == Some('"') && ch == '`' {
+                        escaped = true;
+                    } else if quote == Some(ch) && matches!(ch, '\'' | '"') {
+                        quote = None;
+                    } else if quote.is_none() && matches!(ch, '\'' | '"') {
+                        quote = Some(ch);
+                    } else if quote.is_none() && ch == '`' {
+                        escaped = true;
+                    } else if quote.is_none() && is_separator(ch) {
+                        command_target = true;
+                    }
+                }
             }
         }
         Ok(output)
@@ -324,6 +351,28 @@ mod tests {
         let powershell = resolver.rewrite_command(ResolvedShellKind::WindowsPowerShell, "curl --version | jq .").unwrap();
         assert!(powershell.starts_with(r"& 'C:\Windows\System32\curl.exe'"));
         assert!(powershell.contains(r"| & 'C:\LocalBridge\runtime\toolbox\bin\jq.exe'"));
+    }
+
+    #[test]
+    fn quoted_toolbox_names_after_literal_separators_remain_inert() {
+        let resolver = ready();
+        let cmd = resolver
+            .rewrite_command(
+                ResolvedShellKind::Cmd,
+                r#"echo "jq | aria2c & 7z ; curl" && 7z --help"#,
+            )
+            .unwrap();
+        assert!(cmd.contains(r#""jq | aria2c & 7z ; curl""#));
+        assert!(cmd.ends_with(r#"&& "C:\LocalBridge\runtime\toolbox\bin\7z.exe" --help"#));
+
+        let powershell = resolver
+            .rewrite_command(
+                ResolvedShellKind::WindowsPowerShell,
+                "Write-Output 'jq | aria2c & 7z ; curl'; jq .",
+            )
+            .unwrap();
+        assert!(powershell.contains("'jq | aria2c & 7z ; curl'"));
+        assert!(powershell.ends_with(r"; & 'C:\LocalBridge\runtime\toolbox\bin\jq.exe' ."));
     }
 
     #[test]
