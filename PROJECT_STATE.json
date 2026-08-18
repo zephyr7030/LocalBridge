@@ -5261,5 +5261,18 @@
     "next_required_g2_generation": 32,
     "next_required_g3_generation": 22,
     "g4_unlocked": false
+  },
+  "schema42_lb007_system_management_acceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "product_commit": "5c9ab0e",
+    "evidence": [
+      "policy contracts 10/10 PASS",
+      "policy enforcement 10/10 PASS",
+      "schema42 pnputil powercfg wevtutil read-only versus mutation workflow-indirection regression PASS",
+      "Clippy all-targets/all-features -D warnings PASS",
+      "architecture and diff check PASS"
+    ],
+    "next_pr": "LB-008"
   }
 }
