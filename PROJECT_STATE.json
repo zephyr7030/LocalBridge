@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4994,6 +4994,30 @@
       "Architecture PASS before transition."
     ],
     "next_pr": "LB-012",
+    "g4_unlocked": false
+  },
+  "schema41_lb012_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB012 contract PASS.",
+      "Real elevated_exec broker-only server test PASS.",
+      "Architecture PASS."
+    ],
+    "next_action": "Run fresh G2 generation30 independent adversarial review on final semantic-repair tree.",
+    "g4_unlocked": false
+  },
+  "schema41_g2_generation30_pending_2026_08_18": {
+    "status": "REVIEW_REQUIRED",
+    "generation": 30,
+    "generation_consumed": false,
+    "baseline_commit": "6f2f88df5b22d8f42bba7b51fb0cde6e88bffbc2",
+    "product_commit": "6bb363cb84e03cb201b7bb38dbcf975d39f2a12a",
+    "focus": [
+      "schema41 semantic invariants",
+      "schema40 independent authenticated health",
+      "policy/tunnel/orchestrator/broker regression"
+    ],
+    "g3_generation20_blocked": true,
     "g4_unlocked": false
   }
 }
