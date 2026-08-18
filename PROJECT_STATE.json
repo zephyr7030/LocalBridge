@@ -5459,5 +5459,38 @@
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_33_2026_08_18": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "generation": 33,
+    "kind": "independent_adversarial",
+    "reviewed_baseline_commit": "7c0be51b01289fe44dfcadf1e7d9d0a220987c3e",
+    "reopen_from_pr": "LB-012",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-012",
+        "title": "Elevated retained-output storage is cumulatively unbounded for the PEP lifetime",
+        "evidence": [
+          "PublicCommandSessions.outputs stores local_content strings for elevated continuation handles, while source search found no output-handle removal, pruning, or eviction path.",
+          "retain_local_output inserts each large stdout/stderr stream into the long-lived AgentFacade; reap_command_sessions only settles running command sessions and does not reclaim output handles.",
+          "Each elevated execution is individually bounded by MAX_ELEVATED_OUTPUT_BYTES=1 MiB, but repeated reviewed elevated calls can accumulate retained local output without a count or aggregate byte bound until PolicyEnforcementRuntime stops."
+        ],
+        "required_fix": "Keep the existing continuation API and add one small deterministic aggregate retention bound with eviction; prove old handles expire and newest retained output remains readable."
+      }
+    ],
+    "fresh_group_release": [
+      "schema42 machine semantic and execution-platform acceptance PASS",
+      "full serial cargo test --locked PASS",
+      "cargo clippy --locked --all-targets -- -D warnings PASS",
+      "frontend tests and production build PASS",
+      "runtime-manifest UI-language architecture and G4 fail-closed regressions PASS",
+      "git diff --check PASS with clean worktree"
+    ],
+    "next_required_g2_generation": 34,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }

@@ -192,7 +192,7 @@
         "LB-011"
       ],
       "gate": "G2",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-013",
@@ -327,13 +327,13 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
-      "review_generation": 32,
+      "status": "REWORK_REQUIRED",
+      "review_status": "FAIL",
+      "review_generation": 33,
       "review_provenance": {
-        "generation": 32,
+        "generation": 33,
         "kind": "independent_adversarial",
-        "commit": "0c21acdeea09986d7a427a94a06b2c77144cecba",
+        "commit": "7c0be51b01289fe44dfcadf1e7d9d0a220987c3e",
         "invalidated_generations": [
           {
             "generation": 8,
@@ -402,7 +402,7 @@
           }
         ]
       },
-      "reopen_from_pr": "LB-006"
+      "reopen_from_pr": "LB-012"
     },
     {
       "id": "G3",
