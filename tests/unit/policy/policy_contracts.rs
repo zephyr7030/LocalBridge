@@ -554,3 +554,36 @@ fn elevated_exec_review_consumes_real_program_args_and_workdir() {
         );
     }
 }
+
+
+#[test]
+fn schema42_extended_system_management_is_operation_classified_across_workflow_indirection() {
+    let policy = policy();
+    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
+        for (command, shell) in [
+            ("pnputil.exe /enum-drivers", "cmd"),
+            ("powercfg.exe /query", "cmd"),
+            ("wevtutil.exe el", "cmd"),
+            ("wevtutil.exe gl System", "windows_powershell"),
+        ] {
+            let decision = policy.decide_public(mode, "exec_command", &json!({"command":command,"shell":shell}));
+            assert!(decision.allowed, "frozen read-only system-management command was denied: {command}");
+        }
+        for (command, shell) in [
+            ("pnputil.exe /add-driver driver.inf /install", "cmd"),
+            ("powercfg.exe /setactive deadbeef", "cmd"),
+            ("wevtutil.exe cl System", "cmd"),
+            ("pnputil.exe /future-operation", "windows_powershell"),
+            ("echo before && pnputil.exe /enum-drivers", "cmd"),
+        ] {
+            let decision = policy.decide_public(mode, "exec_command", &json!({"command":command,"shell":shell}));
+            assert!(!decision.allowed, "system-management mutation/unknown escaped privileged route: {command}");
+            assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+        }
+        let read_only_workflow = policy.decide_public(mode,"agent_workflow",&json!({"action":"diagnose","commands":[{"command":"pnputil.exe /enum-drivers","shell":"cmd"}]}));
+        assert!(read_only_workflow.allowed);
+        let mutating_workflow = policy.decide_public(mode,"agent_workflow",&json!({"action":"diagnose","commands":[{"command":"wevtutil.exe cl System","shell":"cmd"}]}));
+        assert!(!mutating_workflow.allowed);
+        assert_eq!(mutating_workflow.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
+    }
+}

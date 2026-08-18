@@ -35,6 +35,9 @@ const WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS: &[&str] = &[
     "netsh.exe",
     "bcdedit.exe",
     "dism.exe",
+    "pnputil.exe",
+    "powercfg.exe",
+    "wevtutil.exe",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1128,6 +1131,41 @@ fn review_word(word: &str) -> bool {
     )
 }
 
+fn simple_static_command_words(command: &str) -> Option<Vec<String>> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    for ch in command.chars() {
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => word.push(ch),
+            None if matches!(ch, '\'' | '"') => quote = Some(ch),
+            None if ch.is_whitespace() => {
+                if !word.is_empty() { words.push(std::mem::take(&mut word)); }
+            }
+            None if matches!(ch, '&' | '|' | ';' | '<' | '>' | '\r' | '\n' | '%' | '!' | '$' | '`' | '^') => return None,
+            None => word.push(ch),
+        }
+    }
+    if quote.is_some() { return None; }
+    if !word.is_empty() { words.push(word); }
+    (!words.is_empty()).then_some(words)
+}
+
+fn frozen_readonly_system_management_invocation(command: &str) -> bool {
+    let Some(words) = simple_static_command_words(command) else { return false; };
+    let program = words[0].rsplit(['\\', '/']).next().unwrap_or(&words[0]);
+    let program = program.strip_suffix(".exe").unwrap_or(program).to_ascii_lowercase();
+    let args = &words[1..];
+    match program.as_str() {
+        "pnputil" => matches!(args, [op] if op.eq_ignore_ascii_case("/enum-drivers")),
+        "powercfg" => matches!(args, [op] if ["/query","/getactivescheme","/list","/a"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed))),
+        "wevtutil" => matches!(args, [op] if op.eq_ignore_ascii_case("el"))
+            || matches!(args, [op, _log] if op.eq_ignore_ascii_case("gl")),
+        _ => false,
+    }
+}
+
 fn windows_system_management_program_token(token: &str) -> bool {
     let token = token.trim_matches(['\'', '"']);
     let basename = token.rsplit(['\\', '/']).next().unwrap_or(token);
@@ -1140,6 +1178,7 @@ fn windows_system_management_program_token(token: &str) -> bool {
 }
 
 fn powershell_static_system_management_target(command: &str) -> bool {
+    if frozen_readonly_system_management_invocation(command) { return false; }
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Quote {
         None,
@@ -1240,6 +1279,7 @@ fn powershell_static_system_management_target(command: &str) -> bool {
 }
 
 fn cmd_static_system_management_target(command: &str) -> bool {
+    if frozen_readonly_system_management_invocation(command) { return false; }
     fn finish_target(token: &mut String, is_target: &mut bool) -> bool {
         let requires_privilege = *is_target && windows_system_management_program_token(token);
         token.clear();
