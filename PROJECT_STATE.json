@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G2",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -4891,5 +4891,41 @@
     "human_review_generation": 3,
     "g4_unlocked": false,
     "next_action": "Human G3-to-G4 detailed review generation3 is required before G4."
+  },
+  "schema41_adversarial_reopen_2026_08_18": {
+    "status": "REWORK_REQUIRED",
+    "owner_pr": "LB-006",
+    "confirmed_defects": [
+      "verification_planner_precedence",
+      "changed_file_awareness",
+      "mixed_node_rust_project_discovery",
+      "strict_phase_sequence",
+      "persist_completion_guard",
+      "edit_existing_file_toctou",
+      "edit_new_file_create_race",
+      "instruction_negation",
+      "durable_stdin_redaction",
+      "context_relevance"
+    ],
+    "attack_test_required": [
+      "junction_reparse_context_boundary"
+    ],
+    "schema40_followup": [
+      "facade_mutex_wouldblock_stale_ready",
+      "real_process_alive_mcp_unresponsive_fault_injection"
+    ],
+    "invalidated": {
+      "g2": {
+        "generation": 29,
+        "commit": "2517f5d9ff435648f45fd52e13b7df7d8417262f"
+      },
+      "g3": {
+        "generation": 19,
+        "commit": "ffd4bfdcf0089e85f85c29d4a0ac1c551c566faa"
+      }
+    },
+    "next_required_g2_generation": 30,
+    "next_required_g3_generation": 20,
+    "g4_unlocked": false
   }
 }
