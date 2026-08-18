@@ -5274,5 +5274,13 @@
       "architecture and diff check PASS"
     ],
     "next_pr": "LB-008"
+  },
+  "schema42_lb008_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB008 tunnel contract PASS",
+      "26 tunnel/runtime tests PASS"
+    ],
+    "next_pr": "LB-009"
   }
 }
