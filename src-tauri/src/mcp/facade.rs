@@ -3593,7 +3593,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
 
         // schema41 stale-projection compatibility: an older downstream client that only knows
         // action/objective/path/patch/resume can still drive the same durable coding task.
-        if !dry_run_requested
+        if agent_action_allows_write(action)
+            && !dry_run_requested
             && patch.is_none()
             && !has_directory_changes
             && !has_commands
