@@ -5352,5 +5352,24 @@
       "startup 6/6 PASS"
     ],
     "next_pr": "LB-015"
+  },
+  "schema42_lb015_current_history_ui_acceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "product_commit": "06e62ce",
+    "evidence": [
+      "backend UI 10/10 PASS including TaskAggregate projection separation",
+      "background 19/19 PASS",
+      "orchestrator 8/8 PASS",
+      "frontend 8/8 PASS",
+      "production build PASS",
+      "UI language PASS",
+      "LB015 dashboard contract PASS",
+      "Clippy all-targets/all-features -D warnings PASS",
+      "architecture and G4 fail-closed PASS",
+      "git diff check PASS"
+    ],
+    "next_pr": "LB-016",
+    "remaining_schema42_product_changes": false
   }
 }
