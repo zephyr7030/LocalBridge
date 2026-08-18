@@ -125,7 +125,7 @@
         "LB-004"
       ],
       "gate": "G2",
-      "status": "REWORK_REQUIRED"
+      "status": "PASS"
     },
     {
       "id": "LB-007",
@@ -135,7 +135,7 @@
         "LB-006"
       ],
       "gate": "G2",
-      "status": "BLOCKED"
+      "status": "READY"
     },
     {
       "id": "LB-008",
@@ -327,7 +327,7 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "REWORK_REQUIRED",
+      "status": "IN_PROGRESS",
       "review_status": "REQUIRED",
       "review_generation": 29,
       "review_provenance": {
@@ -500,6 +500,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "current_group": "G2"
 }

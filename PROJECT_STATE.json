@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4924,6 +4924,22 @@
         "commit": "ffd4bfdcf0089e85f85c29d4a0ac1c551c566faa"
       }
     },
+    "next_required_g2_generation": 30,
+    "next_required_g3_generation": 20,
+    "g4_unlocked": false
+  },
+  "schema41_lb006_semantic_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commit": "6bb363cb84e03cb201b7bb38dbcf975d39f2a12a",
+    "evidence": [
+      "VerificationPlanner semantic tests PASS: real Git changed-set gating, required precedence, mixed Node+Rust discovery, negative instruction handling.",
+      "Strict prepare->edit->verify->persist and persist-completeness behavior PASS; durable stdin is scrubbed while initial in-memory stdin execution remains intact.",
+      "Conflict-aware edit tests PASS: exclusive existing-file precondition/write lifecycle and atomic create_new race; ContextService deep relevance and real Windows junction escape test PASS.",
+      "Schema40 health tests PASS: health works while facade mutex is held; real suspended MCP root remains alive while authenticated probe becomes non-Ready, then recovers after resume.",
+      "MCP semantic suite 95/95 PASS; schema41 machine acceptance now executes semantic Rust tests; Clippy -D warnings, runtime manifest, architecture, G4 fail-closed and diff check PASS."
+    ],
+    "next_pr": "LB-007",
     "next_required_g2_generation": 30,
     "next_required_g3_generation": 20,
     "g4_unlocked": false
