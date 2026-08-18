@@ -5342,5 +5342,15 @@
       "background 19/19 PASS"
     ],
     "next_pr": "LB-014"
+  },
+  "schema42_lb014_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB014 contract PASS",
+      "single-instance 1/1 PASS",
+      "autostart 3/3 PASS",
+      "startup 6/6 PASS"
+    ],
+    "next_pr": "LB-015"
   }
 }
