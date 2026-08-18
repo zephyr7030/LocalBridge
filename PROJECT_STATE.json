@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4685,6 +4685,16 @@
     "next_pr": "LB-007",
     "next_required_g2_generation": 29,
     "next_required_g3_generation": 19,
+    "g4_unlocked": false
+  },
+  "schema41_stale_projection_lb007_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "evidence": [
+      "Fresh policy contracts 9/9 PASS.",
+      "Fresh policy enforcement 10/10 PASS on final stale-projection-compatible product tree; fail-closed control-plane and mode boundaries preserved."
+    ],
+    "next_pr": "LB-008",
     "g4_unlocked": false
   }
 }
