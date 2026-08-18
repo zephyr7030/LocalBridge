@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5099,6 +5099,31 @@
       "G4 human-gate fail-closed and architecture PASS."
     ],
     "next_pr": "LB-017",
+    "g4_unlocked": false
+  },
+  "schema41_lb017_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "evidence": [
+      "LB017 diagnostics contract PASS.",
+      "Diagnostics backend behavior 4/4 PASS.",
+      "Architecture PASS."
+    ],
+    "next_action": "Run fresh G3 generation20 independent adversarial review.",
+    "g4_unlocked": false
+  },
+  "schema41_g3_generation20_pending_2026_08_18": {
+    "status": "REVIEW_REQUIRED",
+    "generation": 20,
+    "generation_consumed": false,
+    "baseline_commit": "b47cabc48a76e1301e823966d6f555bdd439b127",
+    "product_commit": "6bb363cb84e03cb201b7bb38dbcf975d39f2a12a",
+    "focus": [
+      "schema41 semantic repair preserved through desktop layer",
+      "schema40 backend health truth preserved in dashboard/onboarding",
+      "current-task projection and admin consent unchanged",
+      "fixed-window native E2E"
+    ],
+    "human_review_status": "BLOCKED",
     "g4_unlocked": false
   }
 }
