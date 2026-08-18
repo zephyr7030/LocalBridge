@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-011",
+  "current_pr": "LB-012",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -4725,6 +4725,16 @@
       "Fresh runtime::recovery 16/16 PASS including process-alive/authenticated-MCP-unresponsive recovery through existing five-attempt path."
     ],
     "next_pr": "LB-011",
+    "g4_unlocked": false
+  },
+  "schema41_stale_projection_lb011_reacceptance_2026_08_18": {
+    "status": "PASS",
+    "owner_pr": "LB-011",
+    "evidence": [
+      "LB011 security and UAC boundary scripts PASS.",
+      "Fresh privilege module 23/23 PASS; Broker/UAC/IPC/token boundaries unchanged."
+    ],
+    "next_pr": "LB-012",
     "g4_unlocked": false
   }
 }
