@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5811,6 +5811,35 @@
     ],
     "group_transition": "G2_REVIEW_REQUIRED",
     "next_required_g2_generation": 36,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_36_2026_08_19": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "generation": 36,
+    "kind": "independent_adversarial",
+    "reviewed_baseline_commit": "33cfe51064f55910a846cfa638db641ef76c9d51",
+    "reopen_from_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "title": "elevated_exec error structuredContent does not satisfy its advertised outputSchema",
+        "evidence": [
+          "src-tauri/src/mcp/server.rs elevated_exec_output_schema third branch allows only ok plus error and closes additional properties; nested error allows only code/message/retryable.",
+          "handle_elevated_exec denial and ElevationRequired paths return FacadeError::to_mcp_result structuredContent, which additionally contains state/summary/task_id/warnings/next_step/output_refs/data and diagnostic error_code/phase/cause/http_status/rule_category/remediation.",
+          "Existing real elevated_exec tests assert the canonical error code but do not validate returned structuredContent against the served outputSchema; ARCH-030 only proves a local schema function exists."
+        ],
+        "required_fix": "Make the privileged extension failure outputSchema describe the same common failure envelope and Unified Error Diagnostics fields that the server actually returns, and add a real served-schema/error-instance regression."
+      }
+    ],
+    "verified_passes": [
+      "Generation35 empty MCP HTTP failure hole is closed; remaining write_empty call sites are successful 202/204 only.",
+      "JSON-RPC and parser transport diagnostics remain mapped; Tunnel HTTP400, policy diagnostics, LB010 correlation, LB011 Broker and LB012 Toolbox/Elevated owner gates passed before review."
+    ],
+    "next_required_g2_generation": 37,
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
