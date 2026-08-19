@@ -36,6 +36,8 @@ pub struct MainProjection {
     current_command: Option<CurrentCommandProjection>,
     last_command: Option<LastCommandProjection>,
     last_tool: Option<LastToolProjection>,
+    current_activity: Option<CurrentActivityProjection>,
+    last_activity: Option<LastActivityProjection>,
     projection_revision: u64,
     tunnel_id: Option<String>,
     runtime_key_saved: bool,
@@ -77,6 +79,27 @@ struct LastToolProjection {
     kind: &'static str,
     summary: Option<String>,
     age_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurrentActivityProjection {
+    kind: &'static str,
+    state: &'static str,
+    summary: Option<String>,
+    elapsed_ms: Option<u64>,
+    step: Option<String>,
+    progress_current: Option<u64>,
+    progress_total: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LastActivityProjection {
+    kind: &'static str,
+    summary: Option<String>,
+    outcome: &'static str,
+    completed_at_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -314,6 +337,8 @@ fn get_main_projection_blocking(
         current_command: current_command_projection(&task_aggregate),
         last_command: last_command_projection(&task_aggregate),
         last_tool: snapshot.last_tool.as_ref().map(last_tool_projection),
+        current_activity: current_activity_projection(&task_aggregate),
+        last_activity: last_activity_projection(&task_aggregate),
         projection_revision,
         tunnel_id,
         runtime_key_saved: metadata.has_runtime_key,
@@ -997,6 +1022,43 @@ fn last_command_projection(aggregate: &Value) -> Option<LastCommandProjection> {
     let completed=terminal.get("completed_at_ms").and_then(Value::as_u64).unwrap_or(0);
     let now=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64;
     Some(LastCommandProjection{status,age_ms:now.saturating_sub(completed)})
+}
+fn activity_kind_code(value: &Value) -> Option<&'static str> {
+    match value.as_str()? {
+        "read" => Some("read"), "search" => Some("search"), "modify" => Some("modify"),
+        "command" => Some("command"), "git" => Some("git"), "build" => Some("build"),
+        "test" => Some("test"), "admin" => Some("admin"), "other" => Some("other"), _ => None,
+    }
+}
+fn current_activity_projection(aggregate: &Value) -> Option<CurrentActivityProjection> {
+    let activity = aggregate.get("current_activity")?.as_object()?;
+    let kind = activity_kind_code(activity.get("kind")?)?;
+    let state = match activity.get("state")?.as_str()? {
+        "running" => "running", "waiting" => "waiting", "waiting_input" => "waiting_input",
+        "cancelling" => "cancelling", _ => return None,
+    };
+    Some(CurrentActivityProjection {
+        kind, state,
+        summary: activity.get("summary").and_then(Value::as_str).map(str::to_owned),
+        elapsed_ms: activity.get("elapsed_ms").and_then(Value::as_u64),
+        step: activity.get("step").and_then(Value::as_str).map(str::to_owned),
+        progress_current: activity.get("progress_current").and_then(Value::as_u64),
+        progress_total: activity.get("progress_total").and_then(Value::as_u64),
+    })
+}
+fn last_activity_projection(aggregate: &Value) -> Option<LastActivityProjection> {
+    let activity = aggregate.get("last_activity")?.as_object()?;
+    let kind = activity_kind_code(activity.get("kind")?)?;
+    let outcome = match activity.get("outcome")?.as_str()? {
+        "completed" => "completed", "failed" => "failed", "cancelled" => "cancelled",
+        "timed_out" => "timed_out", "lost" => "lost", _ => return None,
+    };
+    Some(LastActivityProjection {
+        kind,
+        summary: activity.get("summary").and_then(Value::as_str).map(str::to_owned),
+        outcome,
+        completed_at_ms: activity.get("completed_at_ms")?.as_u64()?,
+    })
 }
 fn legacy_task_projection_from_aggregate(aggregate:&Value, elapsed_ms:Option<u64>)->Option<TaskProjection>{
     if let Some(command)=current_command_projection(aggregate){ return Some(TaskProjection{kind:"command",summary:None,state:match command.state{"running"=>"running","waiting_input"=>"waiting","cancelling"=>"running",_=>"running"},elapsed_ms}); }

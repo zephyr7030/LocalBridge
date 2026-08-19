@@ -88,10 +88,16 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .service-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;margin:0 0 10px}
 .secondary.service-restart{background:#fff5df;border-color:rgba(182,106,0,.28);color:var(--admin-accent)}
 .secondary.service-stop{background:#fff0f1;border-color:rgba(215,0,21,.25);color:var(--status-fault)}
-.task-row{display:flex;align-items:center;gap:10px;min-height:26px;padding:2px;font-size:var(--font-body)}
-.last-tool-row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:24px;padding:0 2px 2px 20px;font-size:var(--font-auxiliary);color:#6e6e73}
-.last-tool-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.last-tool-age{flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums}
+.task-row,.last-tool-row{display:grid;grid-template-columns:8px minmax(0,1fr) max-content;align-items:center;column-gap:10px;min-height:26px;padding:2px;font-size:var(--font-body)}
+.activity-row-main,.last-activity-left{grid-column:2;min-width:0;display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+.activity-action,.activity-outcome{flex:0 0 auto}
+.activity-summary{min-width:0;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.activity-elapsed,.last-tool-age{grid-column:3;flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums;color:#6e6e73}
+.activity-dot-spacer{width:8px;height:8px}
+.last-activity-left.outcome-completed{color:var(--status-ready)}
+.last-activity-left.outcome-failed,.last-activity-left.outcome-lost{color:var(--status-fault)}
+.last-activity-left.outcome-cancelled{color:#6e6e73}
+.last-activity-left.outcome-timed_out{color:var(--status-starting)}
 .activity-dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:var(--status-unknown)}
 .activity-dot.task-idle,.activity-dot.task-cancelled{background:var(--status-unknown)}
 .activity-dot.task-running{background:var(--status-ready);animation:task-pulse 1.35s ease-in-out infinite}

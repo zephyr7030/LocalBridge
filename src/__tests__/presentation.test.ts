@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessText, currentActivityText, formatLastToolAge, lastCommandText, lastToolText, privilegeText, serviceVisualState, taskText } from "../presentation";
+import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, privilegeText, serviceVisualState, taskText } from "../presentation";
 
 describe("LB-015 presentation", () => {
   it("maps frozen Chinese wording", () => {
@@ -22,23 +22,23 @@ describe("LB-015 presentation", () => {
     expect(taskText({ kind: "admin", summary: "安装设备驱动", state: "blocked", elapsedMs: null })).toBe("管理员操作  安装设备驱动  已阻止");
     expect(taskText({ kind: "test", summary: "cargo test", state: "failed", elapsedMs: null })).toBe("运行测试  cargo test  执行失败");
     expect(taskText({ kind: "command", summary: "cargo build", state: "cancelled", elapsedMs: null })).toBe("运行命令  cargo build  已取消");
-    const last = { kind: "command" as const, summary: "git status", ageMs: 59_000 };
-    expect(lastToolText(last)).toBe("上次执行工具：运行命令  git status");
     expect(formatLastToolAge(59_000)).toBe("59S前");
     expect(formatLastToolAge(59 * 60_000)).toBe("59分钟前");
     expect(formatLastToolAge(60 * 60_000)).toBe("大于1小时");
     expect(formatLastToolAge(3 * 24 * 60 * 60_000)).toBe("大于3天");
   });
   it("keeps schema42 current state separate from command history", () => {
-    expect(currentActivityText(null, null)).toBe("空闲");
-    expect(currentActivityText({ state: "waiting" }, null)).toBe("任务等待继续");
-    expect(currentActivityText({ state: "running" }, null)).toBe("任务执行中…");
-    expect(currentActivityText(null, { state: "running" })).toBe("运行命令…");
-    expect(currentActivityText({ state: "waiting" }, { state: "waiting_input" })).toBe("等待输入…");
-    expect(currentActivityText({ state: "waiting" }, { state: "cancelling" })).toBe("正在取消…");
-    expect(lastCommandText({ status: "completed", ageMs: 1 })).toContain("结果：成功");
-    expect(lastCommandText({ status: "cancelled", ageMs: 1 })).toContain("结果：已取消");
-    expect(currentActivityText(null, null)).toBe("空闲");
+    const base = { kind: "other" as const, summary: null, elapsedMs: null, step: null, progressCurrent: null, progressTotal: null };
+    expect(currentActivityText(null)).toBe("空闲");
+    expect(currentActivityText({ ...base, state: "waiting" })).toBe("任务等待继续");
+    expect(currentActivityText({ ...base, state: "running" })).toBe("任务执行中…");
+    expect(currentActivityText({ ...base, kind: "command", state: "running" })).toBe("运行命令…");
+    expect(currentActivityText({ ...base, kind: "command", state: "waiting_input" })).toBe("等待输入…");
+    expect(currentActivityText({ ...base, kind: "command", state: "cancelling" })).toBe("正在取消…");
+    expect(currentActivityDetail({ ...base, state: "running", step: "verify", progressCurrent: 2, progressTotal: 4 })).toBe("验证 2/4");
+    const last = { kind: "git" as const, summary: "status", outcome: "completed" as const, completedAtMs: 1 };
+    expect(lastActivityAction(last)).toBe("Git 操作");
+    expect(lastActivityOutcome(last)).toBe("成功");
   });
 
 });

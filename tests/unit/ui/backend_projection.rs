@@ -53,7 +53,8 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     }
     let rendered = serde_json::to_string(&MainProjection {
         permission: "admin", privilege: "active", local_environment_service: "online", tunnel_service: "online", coding_service: "online",
-        current_project: None, projects: vec![], current_task: None, current_workflow: None, current_command: None, last_command: None, last_tool: None, projection_revision: 7, tunnel_id: Some("tunnel_01401401401401401401401401401401".to_owned()),
+        current_project: None, projects: vec![], current_task: None, current_workflow: None, current_command: None, last_command: None, last_tool: None,
+        current_activity: None, last_activity: None, projection_revision: 7, tunnel_id: Some("tunnel_01401401401401401401401401401401".to_owned()),
         runtime_key_saved: true, auto_start: true, close_window_continue_running: true,
         reconnect: None,
     }).unwrap();
@@ -68,11 +69,24 @@ fn schema42_task_aggregate_projection_separates_current_and_history() {
         "state":"waiting",
         "current_workflow":{"state":"waiting"},
         "current_command":null,
-        "last_command":{"status":"cancelled","completed_at_ms":0}
+        "last_command":{"status":"cancelled","completed_at_ms":0},
+        "current_activity":{"kind":"other","state":"waiting","summary":null,"elapsed_ms":null,"step":"verify","progress_current":2,"progress_total":4},
+        "last_activity":{"kind":"command","summary":"cargo test","outcome":"cancelled","completed_at_ms":7}
     });
     assert_eq!(current_workflow_projection(&waiting).unwrap().state, "waiting");
     assert!(current_command_projection(&waiting).is_none());
     assert_eq!(last_command_projection(&waiting).unwrap().status, "cancelled");
+    let current = current_activity_projection(&waiting).unwrap();
+    assert_eq!(current.kind, "other");
+    assert_eq!(current.state, "waiting");
+    assert_eq!(current.step.as_deref(), Some("verify"));
+    assert_eq!(current.progress_current, Some(2));
+    assert_eq!(current.progress_total, Some(4));
+    let last = last_activity_projection(&waiting).unwrap();
+    assert_eq!(last.kind, "command");
+    assert_eq!(last.summary.as_deref(), Some("cargo test"));
+    assert_eq!(last.outcome, "cancelled");
+    assert_eq!(last.completed_at_ms, 7);
     let idle = serde_json::json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null});
     assert!(current_workflow_projection(&idle).is_none());
     assert!(current_command_projection(&idle).is_none());
