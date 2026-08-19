@@ -214,8 +214,10 @@ fn exact_five_attempts_backoff_nonretryable_and_manual_generation_are_determinis
         }
         other => panic!("expected exhaustion, got {other:?}"),
     };
+    let request_id = runtime.active_outage().unwrap().request_id.clone();
     assert_eq!(controller.clock().sleeps, [1,2,5,10,30].map(Duration::from_secs));
     assert_eq!(controller.current_attempt(), 5);
+    assert_eq!(runtime.active_outage().unwrap().request_id, request_id);
     assert!(!runtime.mark_user_attention_required(generation));
 
     let sleeps_after_exhaustion = controller.clock().sleeps.len();
@@ -250,6 +252,7 @@ fn exact_five_attempts_backoff_nonretryable_and_manual_generation_are_determinis
     );
     let new_generation = match manual { RecoveryOutcome::Recovered { generation, .. } => generation, other => panic!("{other:?}") };
     assert_ne!(new_generation, generation);
+    assert_ne!(runtime.active_outage().unwrap().request_id, request_id);
 }
 
 #[test]

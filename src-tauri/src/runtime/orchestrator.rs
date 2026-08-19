@@ -3,6 +3,7 @@ use std::fmt;
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::credentials::CredentialStore;
@@ -1106,6 +1107,7 @@ impl OutageGenerationId {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutageGeneration {
     pub id: OutageGenerationId,
+    pub request_id: String,
     pub component: RuntimeComponent,
     pub fault: RuntimeFault,
     user_attention_emitted: bool,
@@ -1131,8 +1133,11 @@ impl OutageTracker {
     ) -> OutageGenerationId {
         self.next_generation = self.next_generation.saturating_add(1).max(1);
         let id = OutageGenerationId(self.next_generation);
+        static REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
+        let request_generation = REQUEST_GENERATION.fetch_add(1, Ordering::Relaxed);
         self.active = Some(OutageGeneration {
             id,
+            request_id: format!("req-recovery-{}-{request_generation}", std::process::id()),
             component,
             fault,
             user_attention_emitted: false,
