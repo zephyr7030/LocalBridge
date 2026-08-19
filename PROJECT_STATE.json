@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": null,
+  "current_pr": "LB-018PRE",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G3",
+  "current_group": "G4",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -6236,5 +6236,18 @@
     "human_review_generation": 3,
     "g4_unlocked": false,
     "review_decision_commit": "7bfafadc2e82291645de9f1842b0eb5805861bf1"
+  },
+  "g3_human_review_generation_3_2026_08_19": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 3,
+    "kind": "human_manual_test_review",
+    "user_evidence_ref": "conversation:2026-08-19:user-explicit-human-review-pass",
+    "claims_treated_as_untrusted_evidence": true,
+    "reviewer_verification": "Fresh independent G3 generation23 PASS plus complete machine-verifiable G3 gates were used to cross-check the user manual/detail PASS before accepting the human Gate.",
+    "executor_pre_authorizations": [],
+    "pre_authorization_inventory_complete": true,
+    "g4_unlocked": true,
+    "next_pr": "LB-018PRE"
   }
 }

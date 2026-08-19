@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": null,
+    "current_pr": "LB-018PRE",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -42,7 +42,7 @@
     ],
     "advance_only_after_acceptance": true,
     "governance_transition_updates_current_pr": true,
-    "current_group": "G3",
+    "current_group": "G4",
     "group_review_gate_required": true,
     "next_group_locked_until_review_pass": true,
     "pre_g4_human_review_gate_required": true,
@@ -256,7 +256,7 @@
         "LB-017"
       ],
       "gate": "G4",
-      "status": "BLOCKED"
+      "status": "READY"
     },
     {
       "id": "LB-018",
@@ -428,7 +428,7 @@
       "status": "PASS",
       "review_status": "PASS",
       "review_generation": 23,
-      "human_review_status": "REQUIRED",
+      "human_review_status": "PASS",
       "human_review_generation": 3,
       "review_provenance": {
         "generation": 23,
@@ -511,6 +511,23 @@
             "cause": "schema41_waiting_derived_settlement_amendment_2026_08_18"
           }
         ]
+      },
+      "human_review_provenance": {
+        "generation": 3,
+        "kind": "human_manual_test_review",
+        "commit": "1ba9983b9b3be8d0f42503021ebf5ac88cba0fb9",
+        "claims_treated_as_untrusted_evidence": true,
+        "pre_authorization_inventory_complete": true,
+        "evidence_records": [
+          {
+            "id": "G3-HUMAN-G3-20260819",
+            "source": "user_manual_test",
+            "evidence_ref": "conversation:2026-08-19:user-explicit-human-review-pass",
+            "verification": "Fresh independent generation23 review cross-checked all machine-verifiable G3 contracts, full Rust/frontend/release gates, and the recently repaired diagnostics/Dashboard/background seams; the user explicit manual/detail review PASS is accepted for the remaining human-observable scope.",
+            "reviewer_disposition": "accepted_after_review"
+          }
+        ],
+        "executor_pre_authorizations": []
       }
     },
     {
@@ -521,11 +538,11 @@
         "LB-018",
         "LB-019"
       ],
-      "status": "BLOCKED",
+      "status": "READY",
       "review_status": "BLOCKED",
       "review_generation": 0
     }
   ],
-  "current_pr": null,
-  "current_group": "G3"
+  "current_pr": "LB-018PRE",
+  "current_group": "G4"
 }
