@@ -222,7 +222,11 @@ impl FilesystemService {
     ) -> Result<FilesystemListResult, FilesystemError> {
         validate_walk_bounds(max_depth, max_entries)?;
         let root = self.authority.resolve_existing(path).map_err(map_path_error)?;
-        if !root.is_dir() || metadata_is_reparse(&fs::symlink_metadata(&root).map_err(|_| FilesystemError::Io)?) {
+        if !root.is_dir()
+            || metadata_is_reparse(
+                &fs::symlink_metadata(&root).map_err(|_| FilesystemError::Io)?,
+            )
+        {
             return Err(FilesystemError::InvalidArgument);
         }
         let depth = if recursive { max_depth } else { 1 };
@@ -237,7 +241,19 @@ impl FilesystemService {
         max_entries: usize,
     ) -> Result<FilesystemStatResult, FilesystemError> {
         let target = self.authority.resolve_existing(path).map_err(map_path_error)?;
-        let metadata = fs::symlink_metadata(&target).map_err(|_| FilesystemError::Io)?;
+        #[cfg(windows)]
+        let target_handle = self
+            .authority
+            .open_validated_handle(&target, 0)
+            .map_err(map_path_error)?;
+        #[cfg(windows)]
+        let stable_target = target_handle.final_path().to_path_buf();
+        #[cfg(windows)]
+        let metadata = target_handle.metadata().map_err(|_| FilesystemError::Io)?;
+        #[cfg(not(windows))]
+        let stable_target = target;
+        #[cfg(not(windows))]
+        let metadata = fs::symlink_metadata(&stable_target).map_err(|_| FilesystemError::Io)?;
         if metadata_is_reparse(&metadata) {
             return Err(FilesystemError::OutsideAuthority);
         }
@@ -246,7 +262,7 @@ impl FilesystemService {
         let mut truncated = false;
         if calculate_size && metadata.is_dir() {
             validate_walk_bounds(max_depth, max_entries)?;
-            let walked = self.walk(&target, max_depth, max_entries)?;
+            let walked = self.walk(&stable_target, max_depth, max_entries)?;
             size = walked
                 .entries
                 .iter()
@@ -257,7 +273,7 @@ impl FilesystemService {
             truncated = walked.truncated;
         }
         Ok(FilesystemStatResult {
-            path: self.display_path(&target)?,
+            path: self.display_path(&stable_target)?,
             kind: metadata_kind(&metadata),
             size,
             modified_ms: modified_ms(&metadata),
@@ -277,7 +293,21 @@ impl FilesystemService {
             return Err(FilesystemError::LimitExceeded);
         }
         let target = self.authority.resolve_existing(path).map_err(map_path_error)?;
-        let metadata = fs::symlink_metadata(&target).map_err(|_| FilesystemError::Io)?;
+        #[cfg(windows)]
+        let target_handle = {
+            use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
+            self.authority
+                .open_validated_handle(&target, FILE_GENERIC_READ)
+                .map_err(map_path_error)?
+        };
+        #[cfg(windows)]
+        let stable_target = target_handle.final_path().to_path_buf();
+        #[cfg(windows)]
+        let metadata = target_handle.metadata().map_err(|_| FilesystemError::Io)?;
+        #[cfg(not(windows))]
+        let stable_target = target;
+        #[cfg(not(windows))]
+        let metadata = fs::symlink_metadata(&stable_target).map_err(|_| FilesystemError::Io)?;
         if !metadata.is_file() || metadata_is_reparse(&metadata) {
             return Err(FilesystemError::InvalidArgument);
         }
@@ -285,7 +315,10 @@ impl FilesystemService {
         if offset > total_bytes {
             return Err(FilesystemError::InvalidArgument);
         }
-        let mut file = File::open(&target).map_err(|_| FilesystemError::Io)?;
+        #[cfg(windows)]
+        let mut file = target_handle.into_file();
+        #[cfg(not(windows))]
+        let mut file = File::open(&stable_target).map_err(|_| FilesystemError::Io)?;
         file.seek(SeekFrom::Start(offset)).map_err(|_| FilesystemError::Io)?;
         let remaining = total_bytes.saturating_sub(offset).min(max_bytes as u64) as usize;
         let mut bytes = vec![0u8; remaining];
@@ -295,7 +328,7 @@ impl FilesystemService {
             Err(_) => ("base64", STANDARD.encode(&bytes)),
         };
         Ok(FilesystemReadResult {
-            path: self.display_path(&target)?,
+            path: self.display_path(&stable_target)?,
             offset,
             total_bytes,
             returned_bytes: bytes.len(),
@@ -1020,14 +1053,33 @@ impl FilesystemService {
 
     pub(crate) fn hash(&self, path: &str) -> Result<FilesystemHashResult, FilesystemError> {
         let target = self.authority.resolve_existing(path).map_err(map_path_error)?;
-        let metadata = fs::symlink_metadata(&target).map_err(|_| FilesystemError::Io)?;
+        #[cfg(windows)]
+        let target_handle = {
+            use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
+            self.authority
+                .open_validated_handle(&target, FILE_GENERIC_READ)
+                .map_err(map_path_error)?
+        };
+        #[cfg(windows)]
+        let stable_target = target_handle.final_path().to_path_buf();
+        #[cfg(windows)]
+        let metadata = target_handle.metadata().map_err(|_| FilesystemError::Io)?;
+        #[cfg(not(windows))]
+        let stable_target = target;
+        #[cfg(not(windows))]
+        let metadata = fs::symlink_metadata(&stable_target).map_err(|_| FilesystemError::Io)?;
         if !metadata.is_file() || metadata_is_reparse(&metadata) {
             return Err(FilesystemError::InvalidArgument);
         }
+        #[cfg(windows)]
+        let mut file = target_handle.into_file();
         Ok(FilesystemHashResult {
-            path: self.display_path(&target)?,
+            path: self.display_path(&stable_target)?,
             algorithm: "sha256",
-            sha256: sha256_file(&target)?,
+            #[cfg(windows)]
+            sha256: sha256_open_file(&mut file)?,
+            #[cfg(not(windows))]
+            sha256: sha256_file(&stable_target)?,
             bytes: metadata.len(),
         })
     }

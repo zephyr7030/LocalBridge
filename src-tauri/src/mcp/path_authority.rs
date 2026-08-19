@@ -57,6 +57,13 @@ impl ValidatedPathHandle {
         &self.final_path
     }
 
+    pub(crate) fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
+        let file = std::mem::ManuallyDrop::new(unsafe {
+            File::from_raw_handle(self.handle as RawHandle)
+        });
+        file.metadata()
+    }
+
     pub(crate) fn into_file(self) -> File {
         let handle = self.handle;
         std::mem::forget(self);
