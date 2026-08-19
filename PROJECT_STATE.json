@@ -5651,5 +5651,19 @@
     "next_pr": "LB-010",
     "next_required_g2_generation": 35,
     "next_required_g3_generation": 22
+  },
+  "schema42_lb010_retry_correlation_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-010",
+    "product_commit": "7fa0e3b441fd77895ee4fa0dfeda61f6dd2c2091",
+    "evidence": [
+      "One outage generation now owns one stable request_id across all automatic reconnect attempts; attempt remains the existing monotonic RecoveryController counter.",
+      "Manual retry creates a fresh outage generation and therefore a fresh request_id instead of reusing the exhausted correlation identity.",
+      "Focused recovery regression PASS, LB-010 production-watchdog contract PASS, all-targets Clippy -D warnings PASS, and git diff check PASS.",
+      "Repository-wide cargo fmt --check remains blocked by pre-existing formatting debt outside this eight-line LB-010 change; no unrelated formatting was rewritten."
+    ],
+    "next_pr": "LB-011",
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22
   }
 }
