@@ -82,6 +82,13 @@ export function isPublicPath(value) {
 
 export function sanitizePublicText(value, text) {
   const path = slash(value);
+  if (path === "package.json") {
+    const manifest = JSON.parse(text);
+    const publicScripts = new Set(["dev", "build", "toolbox:prepare", "test"]);
+    manifest.scripts = Object.fromEntries(Object.entries(manifest.scripts ?? {}).filter(([name]) => publicScripts.has(name)));
+    manifest.license = manifest.license ?? "MIT";
+    return `${JSON.stringify(manifest, null, 2)}\n`;
+  }
   if (path === "runtime-manifest.toml") {
     return text.replace(/(?:^|\r?\n)\[verification\]\r?\n[\s\S]*?(?=\r?\n\[privileged_broker\])/m, "\n");
   }

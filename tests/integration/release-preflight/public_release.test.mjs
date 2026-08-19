@@ -20,6 +20,10 @@ const sanitizedManifest = sanitizePublicText("runtime-manifest.toml", manifest);
 assert.equal(sanitizedManifest.includes("LB-018"), false);
 assert.equal(sanitizedManifest.includes("[privileged_broker]"), true);
 assert.equal(sanitizePublicText("runtime-policy.toml", 'status = "LB_007_STABLE_PUBLIC_POLICY"\n').trim(), 'status = "stable_public_policy"');
+const publicPackage = JSON.parse(sanitizePublicText("package.json", JSON.stringify({ scripts: { dev: "vite", build: "vite build", test: "vitest run", "toolbox:prepare": "node scripts/prepare-toolbox.mjs", "verify:architecture:negative": "node private/PR_INDEX.json", "verify:lb001": "internal" } })));
+assert.deepEqual(Object.keys(publicPackage.scripts), ["dev", "build", "test", "toolbox:prepare"]);
+assert.equal(publicPackage.license, "MIT");
+assert.equal(JSON.stringify(publicPackage).includes("PR_INDEX.json"), false);
 
 const syntheticSecret = "sk-" + "A".repeat(36);
 assert.equal(scanTextForSensitive(`Runtime API Key=${syntheticSecret}`, "fixture").high.length, 1);
