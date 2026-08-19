@@ -5678,5 +5678,20 @@
     "next_pr": "LB-012",
     "next_required_g2_generation": 35,
     "next_required_g3_generation": 22
+  },
+  "schema42_lb012_final_g2_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "product_commit": null,
+    "evidence": [
+      "Fresh LB-012 contract plus ARCH-026/027/031 PASS with formal verifier environment.",
+      "Fresh elevated_exec and Toolbox Rust behavior filters PASS; runtime-manifest and diff checks PASS.",
+      "Fresh LB-011 Broker IPC/trust tests from the immediately preceding owner reacceptance remain on the same product tree; Unified Error Diagnostics adds no LB-012 owner code."
+    ],
+    "group_transition": "G2_REVIEW_REQUIRED",
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
