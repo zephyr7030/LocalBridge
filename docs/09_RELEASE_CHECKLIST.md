@@ -12,6 +12,19 @@
 - [ ] recovery/workspace switch tests
 - [ ] no real OpenAI key required
 
+## LB-018PRE Public Repository Hygiene
+
+- [ ] `.coding-tools` generated task/performance state is untracked and ignored while local copies may remain
+- [ ] current tracked tree and all reachable private Git history scanned for high-confidence credentials
+- [ ] absolute user/machine paths, debug dumps and machine-specific residue reported without exposing matched secret values
+- [ ] clean committed checkout completes locked frontend + Rust release-style build without developer Python/venv assumptions
+- [ ] root LICENSE exists; Cargo/npm/runtime/toolbox license metadata and THIRD_PARTY_NOTICES are verified
+- [ ] public README / SECURITY / CONTRIBUTING / Issue / PR templates present
+- [ ] public Windows GitHub Actions runs format hygiene, unit tests, Rust tests, Clippy and release build
+- [ ] public source export uses explicit allow/deny policy and a one-commit fresh Git history
+- [ ] public source contains no internal contracts, review state, authorization records, internal skills/templates or private Git history
+- [ ] distributable payload checker rejects caches/tests/logs/secrets/dev Tunnel config/private governance/machine paths
+
 ## Supply Chain
 
 - [ ] runtime manifest valid
@@ -181,14 +194,14 @@
 - [ ] backend push/event or equivalent wakeup is the primary delivery path for real tool-call state; periodic polling is not the short-task transport
 - [ ] every real tool call is visibly represented for at least 500ms without delaying the tool's real response
 - [ ] dashboard has one current-task status region
-- [ ] first-row idle/no-task state is explicit `等待命令`, always visible, never `空闲`, and does not append relative age
-- [ ] second row uses exact prefix `上次执行工具：`, one secret-redacted user-facing tool label/summary, and far-right relative age
+- [ ] first-row idle/no-task state is explicit `空闲`, always visible, and does not append relative age
+- [ ] second row uses exact prefix `上次执行：`, one secret-redacted user-facing activity label/summary, and far-right relative age
 - [ ] tool category uses stable domain classification
 - [ ] task summary is secret-redacted
 - [ ] raw MCP tool IDs are not shown
 - [ ] denied call never appears as running
 - [ ] elevated waiting state matches privilege state
-- [ ] terminal task returns to `等待命令`
+- [ ] terminal task returns to `空闲` when no current workflow and no current command remain
 - [ ] no recent activity list
 - [ ] no activity feed/timeline
 - [ ] only one last-tool metadata row is retained; it does not become history/feed/list
@@ -203,7 +216,7 @@
 - [ ] active indicator is a small green pulse
 - [ ] animation does not shift layout
 - [ ] prefers-reduced-motion uses static indicator
-- [ ] `等待命令` is neutral, low-presence and always visible
+- [ ] `空闲` is neutral, low-presence and always visible
 
 ## Credentials & Projects
 

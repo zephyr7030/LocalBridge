@@ -162,3 +162,20 @@ exit condition
 Schema36 不改变 schema35 绿色化边界：immutable app/runtime 直接从 canonical install root 运行；mutable non-secret state 集中在 `%LOCALAPPDATA%\LocalBridge`；Runtime API Key 只在 Credential Manager。普通 foreground、`--background` 和登录自启动保持当前普通用户/Medium Integrity 且无 UAC。
 
 新增 runtime/capability/policy explain 属于只读诊断，不得安装 PowerShell/Python/Node、修改 PATH、注册系统服务、写计划任务或为自检产生系统级副作用。
+
+## LB-018PRE public release hygiene
+
+正式 Runtime Packaging 前，必须从已提交且 clean 的私有工作树执行：
+
+```text
+node tests/integration/release-preflight/public_release.test.mjs
+node scripts/public-release/preflight.mjs verify-local-state
+node scripts/public-release/preflight.mjs scan-sensitive
+node scripts/public-release/preflight.mjs verify-license
+node scripts/public-release/preflight.mjs clean-build
+node scripts/public-release/preflight.mjs export-public
+```
+
+公开源码仓库由显式 allow/deny policy 生成并重新初始化 Git 历史。`PR_CONTRACTS.json`、`PR_INDEX.json`、`PROJECT_STATE.json`、`START_HERE.md`、`FINAL_REVIEW.json`、`governance/**`、`skills/**`、`templates/**`、本机 `.coding-tools/**` 状态与私有仓库历史均不得复制到公开仓库；`.gitignore` 仅作防御，不可替代对已跟踪文件和历史的排除。
+
+LB-018 生成最终 bundle 后，另外执行 `node scripts/public-release/preflight.mjs audit-package <bundle-root>`；该检查禁止源码缓存、测试目录、日志/dump、secret、开发 Tunnel 配置、Cloudflare runtime、内部治理材料和本机路径进入发布物。
