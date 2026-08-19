@@ -5951,6 +5951,7 @@
     "current_group": "G3",
     "current_pr": "LB-013",
     "next_required_g3_generation": 22,
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "review_decision_commit": "302d6cd7c3a579a4ac1198dbed62fb6c14ff1a6f"
   }
 }

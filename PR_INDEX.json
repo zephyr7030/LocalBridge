@@ -333,7 +333,7 @@
       "review_provenance": {
         "generation": 37,
         "kind": "independent_adversarial",
-        "commit": "60afc5d20683f7608e6342025e389c0552d9c35b",
+        "commit": "302d6cd7c3a579a4ac1198dbed62fb6c14ff1a6f",
         "invalidated_generations": [
           {
             "generation": 8,
