@@ -2275,6 +2275,13 @@ const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
     request_diagnostics_fields:["request_id","connection_id","attempt","error_code","phase","cause","http_status","duration_ms"],
     request_retry_preserves_request_id_required:true,
     request_retry_increments_attempt_required:true,
+    request_diagnostics_event_driven_required:true,
+    request_diagnostics_ui_observation_trigger_forbidden:true,
+    request_diagnostics_public_tool_calls_required:true,
+    request_diagnostics_recovery_attempts_required:true,
+    request_connection_id_semantics:"logical connection or retry-attempt correlation; MCP uses the serving connection/session identity and recovery uses one identity per automatic attempt",
+    request_timestamp_semantics:"timestamp is Unix epoch milliseconds",
+    request_diagnostics_retention:"bounded redacted process-lifetime diagnostics store and export",
     request_start_log_fields:["timestamp","request_id","connection_id","attempt","tool"],
     request_end_log_fields:["request_id","connection_id","attempt","outcome","error_code","phase","cause","http_status","duration_ms"],
     tunnel_mcp_transport_failure_phase_transport_required:true,
@@ -2286,18 +2293,29 @@ const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
     schema42_transport_diagnostics_current_required:true,
   },
   replacedRules:{
+    schema42_mcp_transport_blip_out_of_scope:{current:false,baseline:true},
     schema42_mcp_transport_diagnostics_deferred_to_diagnostics_logging:{current:false,baseline:true},
     schema42_mcp_transport_not_current_repair_blocker:{current:false,baseline:true},
   },
   addedWritablePaths:{
-    "LB-006":["src-tauri/src/diagnostics/error.rs","src-tauri/src/diagnostics/mod.rs"]
+    "LB-006":["src-tauri/src/diagnostics/error.rs","src-tauri/src/diagnostics/mod.rs"],
+    "LB-017":[
+      "src-tauri/src/mcp/server.rs",
+      "src-tauri/src/app/background.rs",
+      "scripts/verify-architecture/g4-human-gate.mjs",
+      "scripts/verify-architecture/g4-human-gate.test.mjs"
+    ]
   },
   addedArtifacts:{
     "LB-006":["shared Unified Error Diagnostics mapper preserving detailed canonical error.code while adding stable error_code phase cause metadata"],
     "LB-007":["policy failures projected through the shared Unified Error Diagnostics mapper without renaming existing detailed canonical policy codes"],
     "LB-008":["Tunnel transport diagnostic mapping with stable cause and optional HTTP status without RuntimeUnavailable misclassification"],
     "LB-010":["recovery request correlation retaining one request_id across retries while incrementing attempt"],
-    "LB-017":["bounded redacted request diagnostic start/end records reusing the existing diagnostics store"]
+    "LB-017":[
+      "bounded redacted request diagnostic start/end records reusing the existing diagnostics store",
+      "event-driven MCP request and runtime recovery diagnostic hooks with no UI-read side effects",
+      "recovery diagnostic correlation reusing the exact existing OutageGeneration request_id"
+    ]
   },
   addedTests:{
     "LB-006":[
@@ -2311,7 +2329,10 @@ const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
     "LB-017":[
       "request start logging records timestamp request_id connection_id attempt and tool; request end records request_id connection_id attempt outcome error_code phase cause http_status and duration_ms",
       "request diagnostic engineering fields remain out of the normal Diagnostics UI but are available in redacted diagnostic logs or export",
-      "successful retry records preserve the request_id used by preceding failed attempts and show incremented attempt values without leaking secrets"
+      "successful retry records preserve the request_id used by preceding failed attempts and show incremented attempt values without leaking secrets",
+      "public MCP tool requests record start/end at execution boundaries even when Dashboard and Diagnostics are never opened",
+      "runtime recovery attempts record start/end from backend lifecycle events and reuse the exact OutageGeneration request_id rather than synthesizing another id",
+      "reading Dashboard or Diagnostics does not create, close or advance request diagnostic records"
     ]
   }
 });
