@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5724,5 +5724,20 @@
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "schema42_lb006_generation35_http_diagnostics_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commit": "9b671505a4d90362fd8329117757887c2c4080fc",
+    "resolves_generation": 35,
+    "evidence": [
+      "All non-success public MCP HTTP paths now use Unified Error Diagnostics; 202/204 success responses remain empty.",
+      "400/405 protocol or request failures project InvalidRequest plus mcp; stale/missing session and 503 availability failures project Unavailable plus mcp with stable causes and http_status.",
+      "HTTP parser socket/EOF/framing failures remain Unavailable plus transport and JSON-RPC failures retain MCP diagnostics.",
+      "Focused helper and real bundled-runtime stale-session E2E PASS; full serial Rust suite, all-targets Clippy, schema42 execution-platform, frontend build/tests, runtime-manifest, G4 regression and diff check PASS."
+    ],
+    "next_pr": "LB-007",
+    "next_required_g2_generation": 36,
+    "next_required_g3_generation": 22
   }
 }
