@@ -109,6 +109,10 @@ pub fn mcp_invalid(cause: impl Into<String>) -> ErrorDiagnostic {
     ErrorDiagnostic::new(DiagnosticErrorCode::InvalidRequest, DiagnosticPhase::Mcp, cause)
 }
 
+pub fn mcp_unavailable(cause: impl Into<String>) -> ErrorDiagnostic {
+    ErrorDiagnostic::new(DiagnosticErrorCode::Unavailable, DiagnosticPhase::Mcp, cause)
+}
+
 pub fn mcp_unknown(cause: impl Into<String>) -> ErrorDiagnostic {
     ErrorDiagnostic::new(DiagnosticErrorCode::Unknown, DiagnosticPhase::Mcp, cause)
 }

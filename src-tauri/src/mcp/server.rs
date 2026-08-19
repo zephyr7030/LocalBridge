@@ -10,7 +10,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
-use crate::diagnostics::error::{mcp_invalid, mcp_unknown, transport_unavailable};
+use crate::diagnostics::error::{
+    ErrorDiagnostic, mcp_invalid, mcp_unavailable, mcp_unknown, transport_unavailable,
+};
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
@@ -813,7 +815,12 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         }
         match listener.accept() {
             Ok((mut stream, _)) if workers.len() >= MAX_CONNECTION_WORKERS => {
-                let _ = write_empty(&mut stream, 503, None);
+                let _ = write_mcp_http_error(
+                    &mut stream,
+                    503,
+                    mcp_unavailable("server_busy"),
+                    None,
+                );
             }
             Ok((stream, _)) => {
                 let worker_guard = Arc::clone(&guard);
@@ -922,11 +929,21 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
     };
 
     if request.path != "/mcp" {
-        return write_empty(&mut stream, 404, None);
+        return write_mcp_http_error(
+            &mut stream,
+            404,
+            mcp_invalid("endpoint_not_found"),
+            None,
+        );
     }
     if request.method == "DELETE" {
         let Some(session) = request.header("mcp-session-id") else {
-            return write_empty(&mut stream, 400, None);
+            return write_mcp_http_error(
+                &mut stream,
+                400,
+                mcp_invalid("session_id_required"),
+                None,
+            );
         };
         if sessions
             .lock()
@@ -936,11 +953,21 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         {
             return write_empty(&mut stream, 204, None);
         }
-        return write_empty(&mut stream, 404, None);
+        return write_mcp_http_error(
+            &mut stream,
+            404,
+            mcp_unavailable("session_not_found"),
+            None,
+        );
     }
     if request.method == "GET" {
         let Some(session) = request.header("mcp-session-id") else {
-            return write_empty(&mut stream, 400, None);
+            return write_mcp_http_error(
+                &mut stream,
+                400,
+                mcp_invalid("session_id_required"),
+                None,
+            );
         };
         let mode = *permission_mode
             .read()
@@ -956,13 +983,23 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let Some(stored) = sessions.get_mut(session) else {
-                return write_empty(&mut stream, 404, None);
+                return write_mcp_http_error(
+                    &mut stream,
+                    404,
+                    mcp_unavailable("session_not_found"),
+                    None,
+                );
             };
             if request
                 .header("mcp-protocol-version")
                 .is_some_and(|version| version != stored.protocol)
             {
-                return write_empty(&mut stream, 400, Some(session));
+                return write_mcp_http_error(
+                    &mut stream,
+                    400,
+                    mcp_invalid("protocol_version_mismatch"),
+                    Some(session),
+                );
             }
             if stored.tool_catalog_signature != current_signature {
                 stored.tool_catalog_signature = current_signature;
@@ -982,7 +1019,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         return write_empty(&mut stream, 204, Some(session));
     }
     if request.method != "POST" {
-        return write_empty(&mut stream, 405, None);
+        return write_mcp_http_error(
+            &mut stream,
+            405,
+            mcp_invalid("method_not_allowed"),
+            None,
+        );
     }
 
     let payload: Value = match serde_json::from_slice(&request.body) {
@@ -1096,7 +1138,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         .get(session)
         .cloned();
     let Some(stored_session) = stored_session else {
-        return write_empty(&mut stream, 404, None);
+        return write_mcp_http_error(
+            &mut stream,
+            404,
+            mcp_unavailable("session_not_found"),
+            None,
+        );
     };
     let mode = *permission_mode
         .read()
@@ -1112,7 +1159,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(session);
-        return write_empty(&mut stream, 404, None);
+        return write_mcp_http_error(
+            &mut stream,
+            404,
+            mcp_unavailable("session_stale"),
+            None,
+        );
     }
     if request
         .header("mcp-protocol-version")
@@ -1139,15 +1191,30 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     privileged_request_id(privileged_requests, request_id)
                 {
                     let Some(privileged) = privileged else {
-                        return write_empty(&mut stream, 503, Some(session));
+                        return write_mcp_http_error(
+                            &mut stream,
+                            503,
+                            mcp_unavailable("privileged_cancellation_unavailable"),
+                            Some(session),
+                        );
                     };
                     if privileged.cancel_execute(broker_request_id).is_err() {
-                        return write_empty(&mut stream, 503, Some(session));
+                        return write_mcp_http_error(
+                            &mut stream,
+                            503,
+                            mcp_unavailable("privileged_cancellation_failed"),
+                            Some(session),
+                        );
                     }
                     return write_empty(&mut stream, 202, Some(session));
                 }
                 if cancellation.cancel_request(request_id).is_err() {
-                    return write_empty(&mut stream, 503, Some(session));
+                    return write_mcp_http_error(
+                        &mut stream,
+                        503,
+                        mcp_unavailable("cancellation_unavailable"),
+                        Some(session),
+                    );
                 }
                 for _ in 0..2 {
                     thread::sleep(Duration::from_millis(25));
@@ -1216,7 +1283,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 );
             }
             if stopping.load(Ordering::Acquire) {
-                return write_empty(&mut stream, 503, Some(session));
+                return write_mcp_http_error(
+                    &mut stream,
+                    503,
+                    mcp_unavailable("server_stopping"),
+                    Some(session),
+                );
             }
             let mode = *permission_mode
                 .read()
@@ -1266,7 +1338,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if stopping.load(Ordering::Acquire) {
                 remove_active_request(active_requests, &id);
-                return write_empty(&mut stream, 503, Some(session));
+                return write_mcp_http_error(
+                    &mut stream,
+                    503,
+                    mcp_unavailable("server_stopping"),
+                    Some(session),
+                );
             }
             let result = guard.call_tool(mode, name, arguments, Some(&id), |status| {
                 current_task.project(status);
@@ -2383,11 +2460,21 @@ fn write_rpc_error(
 
 fn write_http_diagnostic_error(stream: &mut TcpStream, error: HttpReadError) -> Result<(), ()> {
     let diagnostic = transport_unavailable(error.cause, Some(error.status));
+    write_mcp_http_error(stream, error.status, diagnostic, None)
+}
+
+fn write_mcp_http_error(
+    stream: &mut TcpStream,
+    status: u16,
+    mut diagnostic: ErrorDiagnostic,
+    session: Option<&str>,
+) -> Result<(), ()> {
+    diagnostic.http_status = Some(status);
     write_json(
         stream,
-        error.status,
+        status,
         &json!({"error":diagnostic.to_value()}),
-        None,
+        session,
     )
 }
 
@@ -2519,6 +2606,38 @@ mod tests {
         assert_eq!(response.body["error"]["cause"], "unsupported_transfer_encoding");
         assert_eq!(response.body["error"]["http_status"], 400);
         let _ = client.shutdown(std::net::Shutdown::Both);
+    }
+
+    #[test]
+    fn schema42_public_mcp_http_failures_are_diagnostic_while_success_stays_empty() {
+        for (status, diagnostic, error_code, cause) in [
+            (400, mcp_invalid("session_id_required"), "InvalidRequest", "session_id_required"),
+            (404, mcp_unavailable("session_not_found"), "Unavailable", "session_not_found"),
+            (503, mcp_unavailable("server_stopping"), "Unavailable", "server_stopping"),
+        ] {
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+            let (mut server, _) = listener.accept().unwrap();
+            write_mcp_http_error(&mut server, status, diagnostic, None).unwrap();
+            drop(server);
+            let response = parse_client_response(client);
+            assert_eq!(response.status, status);
+            assert_eq!(response.body["error"]["error_code"], error_code);
+            assert_eq!(response.body["error"]["phase"], "mcp");
+            assert_eq!(response.body["error"]["cause"], cause);
+            assert_eq!(response.body["error"]["http_status"], status);
+        }
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        write_empty(&mut server, 204, None).unwrap();
+        drop(server);
+        let response = parse_client_response(client);
+        assert_eq!(response.status, 204);
+        assert!(response.body.is_null());
     }
 
     #[test]
@@ -3861,6 +3980,10 @@ mod tests {
             &json!({"jsonrpc":"2.0","id":6975,"method":"ping","params":{}}),
         );
         assert_eq!(stale_full_session.status, 404);
+        assert_eq!(stale_full_session.body["error"]["error_code"], "Unavailable");
+        assert_eq!(stale_full_session.body["error"]["phase"], "mcp");
+        assert_eq!(stale_full_session.body["error"]["cause"], "session_stale");
+        assert_eq!(stale_full_session.body["error"]["http_status"], 404);
         session = initialize(pep.port(), 6976)
             .session
             .expect("schema28 Edit reconnect session");
