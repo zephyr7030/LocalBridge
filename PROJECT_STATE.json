@@ -6084,6 +6084,10 @@
       "src-tauri/src/mcp/server.rs",
       "src-tauri/src/app/background.rs"
     ],
+    "exact_verifier_paths": [
+      "scripts/verify-architecture/g4-human-gate.mjs",
+      "scripts/verify-architecture/g4-human-gate.test.mjs"
+    ],
     "review_executed": false,
     "g4_unlocked": false
   }

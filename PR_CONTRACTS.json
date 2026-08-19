@@ -2289,6 +2289,8 @@
         "src-tauri/src/commands/**",
         "src-tauri/src/mcp/server.rs",
         "src-tauri/src/app/background.rs",
+        "scripts/verify-architecture/g4-human-gate.mjs",
+        "scripts/verify-architecture/g4-human-gate.test.mjs",
         "tests/integration/diagnostics/**"
       ],
       "forbidden_paths": [
