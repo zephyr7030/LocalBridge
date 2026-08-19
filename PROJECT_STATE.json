@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-007",
+  "current_pr": "LB-008",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5737,6 +5737,18 @@
       "Focused helper and real bundled-runtime stale-session E2E PASS; full serial Rust suite, all-targets Clippy, schema42 execution-platform, frontend build/tests, runtime-manifest, G4 regression and diff check PASS."
     ],
     "next_pr": "LB-007",
+    "next_required_g2_generation": 36,
+    "next_required_g3_generation": 22
+  },
+  "schema42_lb007_generation35_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-007",
+    "product_commit": null,
+    "evidence": [
+      "Fresh LB-007 policy contract and enforcement targets PASS after the LB-006 HTTP diagnostics repair.",
+      "Policy canonical codes continue to project Denied plus policy through the shared mapper; no policy product change required."
+    ],
+    "next_pr": "LB-008",
     "next_required_g2_generation": 36,
     "next_required_g3_generation": 22
   }
