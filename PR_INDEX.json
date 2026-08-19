@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": "LB-017",
+    "current_pr": null,
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -425,15 +425,15 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
-      "review_generation": 22,
-      "human_review_status": "BLOCKED",
+      "status": "PASS",
+      "review_status": "PASS",
+      "review_generation": 23,
+      "human_review_status": "REQUIRED",
       "human_review_generation": 3,
       "review_provenance": {
-        "generation": 22,
+        "generation": 23,
         "kind": "independent_adversarial",
-        "commit": "24db8198baf46967b9d536ed45532cfa24f488a2",
+        "commit": "c22c9342bcd6eee5f7f762f174105351f5ace4e4",
         "invalidated_generations": [
           {
             "generation": 6,
@@ -526,6 +526,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-017",
+  "current_pr": null,
   "current_group": "G3"
 }

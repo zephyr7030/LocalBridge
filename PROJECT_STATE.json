@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": null,
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -6213,6 +6213,27 @@
       "complete serial Rust suite, all-target Clippy, frontend test/build, runtime manifest, UI language, LB-017 contract, architecture verifier, G4 fail-closed regression and git diff check PASS"
     ],
     "review_executed": false,
+    "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_23_2026_08_19": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "independent_adversarial",
+    "generation": 23,
+    "reviewed_baseline_commit": "c22c9342bcd6eee5f7f762f174105351f5ace4e4",
+    "finding": "No blocking G3 defect found on the committed schema42 repair baseline after fresh full Group Release verification and focused adversarial review of the repaired diagnostics, Dashboard, onboarding and background/recovery seams.",
+    "verified_passes": [
+      "LB-013 through LB-017 current contract tests PASS",
+      "complete cargo test --locked -- --test-threads=1 PASS",
+      "cargo clippy --locked --all-targets -- -D warnings PASS",
+      "npm test and production build PASS",
+      "runtime manifest, UI language, architecture and G4 human-gate regression PASS",
+      "focused source audit confirmed recovery diagnostics are emitted at real retry attempt boundaries using the authoritative outage request_id; MCP special handlers terminally close request diagnostics; active request tracking is bounded; recent diagnostics deduplicate per source transition; open logs materializes redacted JSON",
+      "Dashboard consumes backend currentActivity/lastActivity through backend wake delivery and configured foreground startup remains UI-first/backend-owned",
+      "git diff --check PASS and review baseline worktree clean"
+    ],
+    "human_review_status": "REQUIRED",
+    "human_review_generation": 3,
     "g4_unlocked": false
   }
 }
