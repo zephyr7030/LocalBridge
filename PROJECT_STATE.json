@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -6143,5 +6143,19 @@
     "human_review_status": "BLOCKED",
     "g4_unlocked": false,
     "review_decision_commit": "24db8198baf46967b9d536ed45532cfa24f488a2"
+  },
+  "schema42_lb015_contract_consistency_repair_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "contract_commit": "cc78d83",
+    "evidence": [
+      "LB-015 required tests now use schema42 idle wording 空闲 and exact last-activity prefix 上次执行：",
+      "PROJECT_STATE START_HERE product UX acceptance and final-review current authority are synchronized",
+      "LB015 contract regression rejects stale pre-schema42 wording",
+      "schema42 Dashboard architecture normalizer rejects stale inherited LB-015 clauses",
+      "LB015 contract and architecture verification PASS"
+    ],
+    "next_pr": "LB-016",
+    "g4_unlocked": false
   }
 }
