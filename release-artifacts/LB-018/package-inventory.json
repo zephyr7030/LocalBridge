@@ -1,0 +1,446 @@
+{
+  "schema": 1,
+  "source_commit": "bb387437d630f41849843327f4874e784d757f68",
+  "payload_files": [
+    {
+      "path": "LocalBridge.exe",
+      "bytes": 7532544,
+      "sha256": "775be4af983c8b94c5d06fdf4593abb703502ef474994af6f1f07fadb5c558ee"
+    },
+    {
+      "path": "localbridge-privileged-broker.exe",
+      "bytes": 523264,
+      "sha256": "c724f30875faedb26352c0157d30e5ac9bfd2ad82bdb88301706aea8674de780"
+    },
+    {
+      "path": "runtime-manifest.toml",
+      "bytes": 5624,
+      "sha256": "1d71b0a697352f9b2600a08399575b1da8895830da1e406aa474a1f7e3c24b8b"
+    },
+    {
+      "path": "runtime-policy.toml",
+      "bytes": 4797,
+      "sha256": "a225cfa1e776e9506fe63aefb32426ab2211c52f4a5ad069494d2b7794571b14"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1081,
+      "sha256": "6705250b28867dc48191b0ab8bfabaaa6467be247a2900b82f09f1e5c6d493dd"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 2273,
+      "sha256": "cfe54723c849eacbf0f9d6a24fd8b9c9289e3b77737c722509cb89359f14ef3c"
+    },
+    {
+      "path": "runtime/python/libcrypto-3.dll",
+      "bytes": 5231472,
+      "sha256": "ccfffddcd3defb8d899026298af9af43bc186130f8483d77e97c93233d5f27d7"
+    },
+    {
+      "path": "runtime/python/libffi-8.dll",
+      "bytes": 39696,
+      "sha256": "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a"
+    },
+    {
+      "path": "runtime/python/libssl-3.dll",
+      "bytes": 794992,
+      "sha256": "007142039f04d04e0ed607bda53de095e5bc6a8a10d26ecedde94ea7d2d7eefe"
+    },
+    {
+      "path": "runtime/python/LICENSE.txt",
+      "bytes": 36874,
+      "sha256": "e502c6b880ff58d614901495a9009c136539cd0b1e2a2abb8fc00b934c203419"
+    },
+    {
+      "path": "runtime/python/pyexpat.pyd",
+      "bytes": 205304,
+      "sha256": "d615e193d1affcdbfe504e90d3621cbdcff94bf72b79d899126534507fd6d27a"
+    },
+    {
+      "path": "runtime/python/python.cat",
+      "bytes": 574231,
+      "sha256": "5d85439736ae088d9680b391e2bca55ca7e9cc5b41a12ebe8e2f554506c7e72e"
+    },
+    {
+      "path": "runtime/python/python.exe",
+      "bytes": 104952,
+      "sha256": "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a"
+    },
+    {
+      "path": "runtime/python/python3.dll",
+      "bytes": 70376,
+      "sha256": "fb975a606e7fbf74f64260e3f60c3490b4f74a183c0926fd6ed1ac4c52ac7b1c"
+    },
+    {
+      "path": "runtime/python/python312.dll",
+      "bytes": 6945272,
+      "sha256": "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120"
+    },
+    {
+      "path": "runtime/python/python312.zip",
+      "bytes": 3835482,
+      "sha256": "fb131c0ef7e35cc5250a74c8cd18744bf4115fb8163710711f3758d7df3d1f88"
+    },
+    {
+      "path": "runtime/python/python312._pth",
+      "bytes": 87,
+      "sha256": "3840e706682aa41ec7e599a50763bec6c6ddd6bde66e81c64afe2394539ea4fa"
+    },
+    {
+      "path": "runtime/python/pythonw.exe",
+      "bytes": 104304,
+      "sha256": "d72294fb338bc2fc8896d25a7395a4db466425427e1559e77185d5135a830681"
+    },
+    {
+      "path": "runtime/python/runtime-metadata.json",
+      "bytes": 1001,
+      "sha256": "8119db97224100733bc168519e37d9d231c7ed32c208208ff4aac188b95dbfdd"
+    },
+    {
+      "path": "runtime/python/select.pyd",
+      "bytes": 33136,
+      "sha256": "d4d7181b11db0bd22a6cd5cda6f8583d1f5c77615fd0a6ca33350619d6e0438a"
+    },
+    {
+      "path": "runtime/python/sqlite3.dll",
+      "bytes": 1583608,
+      "sha256": "8daa45684bf6688fca28d956b2e8942f2fa98f656675ce68e6d61dd869848a7a"
+    },
+    {
+      "path": "runtime/python/unicodedata.pyd",
+      "bytes": 1140592,
+      "sha256": "208ee1cd3cbad0828433ca7246b05be2b1ff5569983d27d296c0b38888585488"
+    },
+    {
+      "path": "runtime/python/vcruntime140.dll",
+      "bytes": 120400,
+      "sha256": "052ad6a20d375957e82aa6a3c441ea548d89be0981516ca7eb306e063d5027f4"
+    },
+    {
+      "path": "runtime/python/vcruntime140_1.dll",
+      "bytes": 49776,
+      "sha256": "6a99bc0128e0c7d6cbbf615fcc26909565e17d4ca3451b97f8987f9c6acbc6c8"
+    },
+    {
+      "path": "runtime/python/winsound.pyd",
+      "bytes": 31736,
+      "sha256": "100e8d676777603c7258daf9b2f23ef001f09f1596d8708de359326fff72bddd"
+    },
+    {
+      "path": "runtime/python/_asyncio.pyd",
+      "bytes": 74096,
+      "sha256": "c77de90cad749087a0c5dc5e19d78d24f6ef44e7e5ac19b8420cfc0cea62395d"
+    },
+    {
+      "path": "runtime/python/_bz2.pyd",
+      "bytes": 86896,
+      "sha256": "65f610646d10d5babea080e060d244b546ec52c54012e5e937dc72dcc2e2e7bc"
+    },
+    {
+      "path": "runtime/python/_ctypes.pyd",
+      "bytes": 127480,
+      "sha256": "0e56107a891100535f2da79d85a5ae65ff1227b4765bd108f8593ac1a1110d81"
+    },
+    {
+      "path": "runtime/python/_decimal.pyd",
+      "bytes": 262000,
+      "sha256": "aeacfead2befcc0768063a037bb64bd32109ae09cb144e5f571b04dd7965db9d"
+    },
+    {
+      "path": "runtime/python/_elementtree.pyd",
+      "bytes": 135160,
+      "sha256": "5009a9a53c03ef8387443b5cf6ce08e5c3a79727466a0b931c5bbca915bf89ca"
+    },
+    {
+      "path": "runtime/python/_hashlib.pyd",
+      "bytes": 68976,
+      "sha256": "03d233dbace599168eaffec823de6ed7beec8c2a4ebfe9b8a3d8e042a59af3ba"
+    },
+    {
+      "path": "runtime/python/_lzma.pyd",
+      "bytes": 161136,
+      "sha256": "e3deecc1f59a3b811c608861decd84de1e8df8bafd5e2b39188861318c5a38cf"
+    },
+    {
+      "path": "runtime/python/_msi.pyd",
+      "bytes": 46584,
+      "sha256": "b49332bae154ebdd8c3d5e7ddfdde336d9c47f91ba028dc67bafb2420b3dbb5c"
+    },
+    {
+      "path": "runtime/python/_multiprocessing.pyd",
+      "bytes": 37368,
+      "sha256": "2c636df7059cb0dd7e978dd735c7c5c8ddb09cf94754cf9e232296b96c5c545a"
+    },
+    {
+      "path": "runtime/python/_overlapped.pyd",
+      "bytes": 57336,
+      "sha256": "662126ff80c3a1b4cedf74074029c12ae4743e6d3b37376e39ac70aacb7d4d3c"
+    },
+    {
+      "path": "runtime/python/_queue.pyd",
+      "bytes": 33784,
+      "sha256": "48e76e0ad63f6932b4a77b5819f41c1e7595636ca8d9e824f0943a14b8bb5035"
+    },
+    {
+      "path": "runtime/python/_socket.pyd",
+      "bytes": 85496,
+      "sha256": "3efa4636cf9e350856f6927d67a4c2564bf9bd2758a00bbf17d3aece5b60016d"
+    },
+    {
+      "path": "runtime/python/_sqlite3.pyd",
+      "bytes": 126184,
+      "sha256": "64b51df2805c58b023a875e8ae3be7ac7f61ef664f32ca6c90f6315da47ef0bc"
+    },
+    {
+      "path": "runtime/python/_ssl.pyd",
+      "bytes": 179432,
+      "sha256": "0bc527d2dbc50009f43b2ed5d5982c4f63f4b647647ffa9eda612dcda80f6040"
+    },
+    {
+      "path": "runtime/python/_uuid.pyd",
+      "bytes": 27128,
+      "sha256": "acce4f281d7ffb2dec0997527faf25b1df62ad7bd3032c568ddcf65c90edc867"
+    },
+    {
+      "path": "runtime/python/_wmi.pyd",
+      "bytes": 40304,
+      "sha256": "a980f1e7a29842bd946863fc2693fbeb555a9dc0f9e1630dfed9a2fcdef3ece2"
+    },
+    {
+      "path": "runtime/python/_zoneinfo.pyd",
+      "bytes": 49656,
+      "sha256": "76f1439cda82ab6976df6ba505c4079444703f6d44d8b0259ce59c0ff4279fb4"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/envutils.py",
+      "bytes": 579,
+      "sha256": "8e626b60d67d99a1345824180ca57a3e8b6d7e8201422d0792f51d92c10887b8"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/errors.py",
+      "bytes": 935,
+      "sha256": "093f7b25119424cdc029d9939ef699190703d688b80888c79a05ee4f8752977e"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/landlock_exec.py",
+      "bytes": 1741,
+      "sha256": "55018b031d6894bbb28cb6641a70eb55cfa983b0b20689fc4eb121ba181c2ed5"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/oauth.py",
+      "bytes": 9477,
+      "sha256": "02edeb316535d1b336cf22565fffd3261871413f6e049f05a2ed74af530ea6f2"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/patching.py",
+      "bytes": 16651,
+      "sha256": "8a4127b416bdaa3f19ea02a9232a14a955a0a78aab7e08aa29394343b309076f"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/processes.py",
+      "bytes": 16941,
+      "sha256": "71ff1cff5be803a9f45e7826b9879089b0ff26304c8d046c252ce499a9425ae2"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/project_context.py",
+      "bytes": 6534,
+      "sha256": "f1aeb52f1138c4a4ac5bd48891260890de9d0c23839294630cfc1fb8fe19344d"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/protocol.py",
+      "bytes": 5288,
+      "sha256": "88fb0b60e5c1936b60e01416e5af6a848e1dabda03610ee5a559d9bc3c98c9c5"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/server.py",
+      "bytes": 234437,
+      "sha256": "ae421e22ded7fb284e540e6903ebe7515ac01c854c050de1dbdfa6e1f5b3775d"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/telemetry.py",
+      "bytes": 12617,
+      "sha256": "c21992746699f1c1d2cd4c9809743692b10bccd06ffcbbb37cce1fec70e02960"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/textutils.py",
+      "bytes": 5129,
+      "sha256": "9db7c446360031af786d56b069008252330f5efe0fea134440ad7cbb278012be"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/tool_results.py",
+      "bytes": 16222,
+      "sha256": "537125b7d67bb0ee6046c229367488c2dd03520917663b89e76816cacc1d64e0"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/transport_http.py",
+      "bytes": 3196,
+      "sha256": "6402e9072215155818255221f6269bb72837a6bdb59dd78060a53e2fc5238ba7"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/transport_stdio.py",
+      "bytes": 1869,
+      "sha256": "7115125f3a0a636c7897bfc6b4d76b00824cebe5e03f31829f98849659c9f755"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/__init__.py",
+      "bytes": 65,
+      "sha256": "55dc79e0dd2ab24d8703dc7f470bbae0fb3ca97bfdada54c59c420ebd48b0d87"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/coding_tools_mcp/__main__.py",
+      "bytes": 126,
+      "sha256": "e3da8125e07d746071a0732df115f5a79882a20bbba609e593948bccffd53fe7"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/LICENSE",
+      "bytes": 11558,
+      "sha256": "1eb85fc97224598dad1852b5d6483bbcf0aa8608790dcc657a5a2a761ae9c8c6"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/pyproject.toml",
+      "bytes": 1325,
+      "sha256": "d0e4e9a53be14850f8dae8af9ac5a1143f0bf8445021c3dbbb17de573e744b02"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/README.md",
+      "bytes": 10887,
+      "sha256": "bcaf6260aff4caccb7935ac1ab887b66b305b2cdb47c6f7f72f11ba442e463ca"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/runtime-metadata.json",
+      "bytes": 865,
+      "sha256": "0434f2ce441a1fc7352d7be35fab9dcaaed0f0592012ff36e8f17e164c56e89b"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/algorithms.py",
+      "bytes": 30409,
+      "sha256": "70aafe5c48a87b4981b6a24c09a1c4b30a95380d59f0fbabb7949bdc18bee411"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/api_jwk.py",
+      "bytes": 4451,
+      "sha256": "e85d6beeb9a6f15e6a12704a03fc4c8d2f51ed5a0035ed7f04bd680f616b0231"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/api_jws.py",
+      "bytes": 11762,
+      "sha256": "68cf2fcea41fea646b030edb472f8ca23fe98d6b0a49543260af3de807cc8c95"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/api_jwt.py",
+      "bytes": 14512,
+      "sha256": "3864f886893597903a147fca75cad4e60eaee8443c07b7a6d2bf6418cf526200"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/exceptions.py",
+      "bytes": 1211,
+      "sha256": "6d420e27ebfdb63a294cb4be158393737905c7958fe4866dee4b0dfc71351bd4"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/help.py",
+      "bytes": 1808,
+      "sha256": "bc574dce342801c874e1708c6290a4c81d9b95aa8700602a42bb5ff6748f91d9"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/jwks_client.py",
+      "bytes": 4259,
+      "sha256": "a7d6fe21b42aa36b4481ef598adde848f04535e3eac21a3de952db9d4ac7516b"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/jwk_set_cache.py",
+      "bytes": 959,
+      "sha256": "8412a637e82253bf86dfb2ff5ca81cfce66ed9a878c1d6e3d59346fc6928484f"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/py.typed",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/types.py",
+      "bytes": 99,
+      "sha256": "567846bff545bb96bbfe6acfa12081ec768d2eb25d84cf12ab5b127c483480b5"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/utils.py",
+      "bytes": 3640,
+      "sha256": "8713a3bc3061781621cfe4483e2133ed0f3c7525124cccc474a13f5b0d95749c"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/warnings.py",
+      "bytes": 59,
+      "sha256": "e745d63a7c8db086aacd425393a5c7362203ca488befadc6600f763234ca9a89"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/jwt/__init__.py",
+      "bytes": 1711,
+      "sha256": "541daf14ab9ba138dc0c6799f2bf94a8afddcf736c412404ab24922026f2f178"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/PyJWT-2.10.1.dist-info/AUTHORS.rst",
+      "bytes": 322,
+      "sha256": "925ce43461029eedbf558ec0b7cf7fc4b045def5120ebb97937c70814071cf07"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/PyJWT-2.10.1.dist-info/LICENSE",
+      "bytes": 1085,
+      "sha256": "797a7a20231d4c433e9f1911db1731d06b5828b98f499819a034f7c0f56f5ce5"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/PyJWT-2.10.1.dist-info/METADATA",
+      "bytes": 3990,
+      "sha256": "1247b017a0fa294f1219a690cd561fc54514d4ffe0b3f769d6961392862f031f"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/PyJWT-2.10.1.dist-info/RECORD",
+      "bytes": 1397,
+      "sha256": "bff42db0a58e3f02eb957fbc0baa704ba691933fb65210ece7874ddb008694e0"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/PyJWT-2.10.1.dist-info/top_level.txt",
+      "bytes": 4,
+      "sha256": "44fe431cdc896ccab691ad0599f4e0a12690ce1ededebe57b825823bc6b4d24f"
+    },
+    {
+      "path": "runtime/coding-tools-mcp/site-packages/PyJWT-2.10.1.dist-info/WHEEL",
+      "bytes": 91,
+      "sha256": "3d9504c5d7fbd548bfb28ebb417a724ae1ed0a2dfe277c2f1783912ba93f4bc5"
+    },
+    {
+      "path": "runtime/tunnel-client/LICENSE",
+      "bytes": 10758,
+      "sha256": "f4c1d7ba32ef5bcf5cf03e2eefec5825ebafedf50fa330a36700a49c605c1ef4"
+    },
+    {
+      "path": "runtime/tunnel-client/tunnel-client.exe",
+      "bytes": 20798464,
+      "sha256": "7d3c7d492ce84b52835e11865a835a8a5bcd4a669dee84e169aa11b314dc952a"
+    },
+    {
+      "path": "runtime/toolbox/bin/7z.exe",
+      "bytes": 1334784,
+      "sha256": "35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2"
+    },
+    {
+      "path": "runtime/toolbox/bin/aria2c.exe",
+      "bytes": 5649408,
+      "sha256": "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"
+    },
+    {
+      "path": "runtime/toolbox/bin/curl.cmd",
+      "bytes": 48,
+      "sha256": "55b9e53043820e47f1671f191b3a77859c03298db0d1bb13aa889b1bf428d685"
+    },
+    {
+      "path": "runtime/toolbox/bin/jq.exe",
+      "bytes": 1035264,
+      "sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+    }
+  ],
+  "installer": {
+    "file": "LocalBridge_0.1.0_x64-setup.exe",
+    "bytes": 20821027,
+    "sha256": "f188627fdf272a10715518a5eca7cac007d733c7e9aaaeb829fbf27aca6dec56"
+  }
+}
