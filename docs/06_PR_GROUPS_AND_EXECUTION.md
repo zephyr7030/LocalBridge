@@ -1,6 +1,6 @@
 # 06 — PR Groups & Execution
 
-20 个 PR 不变，严格按编号顺序执行，并增加组级对抗审查 Gate。
+21 个 PR，严格按执行顺序串行推进，并增加组级对抗审查 Gate。G4 在 LB-018 前新增一次性 `LB-018PRE` 发布前仓库卫生/公开源码准备 Gate。
 
 ```text
 组内 PR 全部 PASS
@@ -186,9 +186,12 @@ LB-016：
 ## G4 — 打包与发布
 
 ```text
+LB-018PRE Pre-release Repository Hygiene + Public Source Prep
 LB-018 Runtime Packaging
 LB-019 Release / Clean-machine / Reboot E2E
 ```
+
+`LB-018PRE` 只负责发布前仓库卫生、敏感信息/历史扫描、许可证与公开文档、CI、可复现 clean-checkout 预检，以及生成具有全新 Git 历史的公开源码快照。当前本地 `PR_CONTRACTS.json` / `PR_INDEX.json` / `PROJECT_STATE.json` / `START_HERE.md` / `FINAL_REVIEW.json` / `governance/**` / `skills/**` / `templates/**` 等内部合同、状态机、授权/审查材料不得进入 GitHub 公开源码仓库；`.gitignore` 不能替代对已跟踪文件与私有 Git 历史的排除。`LB-018PRE` 禁止修改产品功能，`LB-018` 继续负责真正的 Runtime Packaging。
 
 ### G3 → G4 人工实测细审核 Gate
 
@@ -236,7 +239,7 @@ user_audit_status
 
 人工 Gate PASS 前，所有记录的执行智能体预授权都必须 `user_audit_status = PASS`。人工 PASS/FAIL 均必须绑定独立 `human_review_provenance` 和仅修改 `PR_INDEX.json` / `PROJECT_STATE.json` 的 decision commit。
 
-人工 PASS 才允许：`G4 = READY`、`LB-018 = READY`、`current_group = G4`。人工 FAIL 必须回开具体 G3 PR，并把 G3 智能体审查重新置为 REQUIRED；修复后必须重新执行 G3 独立对抗审查，旧 PASS 不得沿用。
+人工 PASS 才允许：`G4 = READY`、`LB-018PRE = READY`、`LB-018 = BLOCKED`、`current_group = G4`、`current_pr = LB-018PRE`。`LB-018PRE` PASS 后才允许 `LB-018 = READY`。人工 FAIL 必须回开具体 G3 PR，并把 G3 智能体审查重新置为 REQUIRED；修复后必须重新执行 G3 独立对抗审查，旧 PASS 不得沿用。
 
 ## 组内推进
 

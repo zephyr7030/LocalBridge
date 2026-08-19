@@ -65,8 +65,8 @@
     "G4 remains blocked after G3 adversarial PASS until a separate human manual/detail review is accepted as PASS",
     "Human review treats user/executor factual claims as untrusted evidence and requires user-audited concrete executor pre-authorizations"
   ],
-  "execution_plan_version": 21,
-  "total_prs": 20,
+  "execution_plan_version": 22,
+  "total_prs": 21,
   "architecture_decisions_pending_lb000": [
     "Policy Enforcement implementation: upstream / adapter / Rust Guard",
     "Windows process ownership: Job Object exact design",

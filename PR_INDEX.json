@@ -28,6 +28,7 @@
       "LB-015",
       "LB-016",
       "LB-017",
+      "LB-018PRE",
       "LB-018",
       "LB-019"
     ],
@@ -249,6 +250,15 @@
       "status": "PASS"
     },
     {
+      "id": "LB-018PRE",
+      "title": "Pre-release Repository Hygiene + Public Source Prep",
+      "depends_on": [
+        "LB-017"
+      ],
+      "gate": "G4",
+      "status": "BLOCKED"
+    },
+    {
       "id": "LB-018",
       "title": "Runtime Packaging",
       "depends_on": [
@@ -257,7 +267,8 @@
         "LB-011",
         "LB-014",
         "LB-016",
-        "LB-017"
+        "LB-017",
+        "LB-018PRE"
       ],
       "gate": "G4",
       "status": "BLOCKED"
@@ -506,6 +517,7 @@
       "id": "G4",
       "title": "Packaging & Release",
       "prs": [
+        "LB-018PRE",
         "LB-018",
         "LB-019"
       ],

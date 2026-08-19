@@ -914,7 +914,7 @@ assert.doesNotMatch(validatePreG4GateAuthorization(generation2Contracts, {
 
 const base = {
   execution: { current_group: "G3", current_pr: null },
-  prs: [{ id: "LB-017", status: "PASS" }, { id: "LB-018", status: "BLOCKED" }],
+  prs: [{ id: "LB-017", status: "PASS" }, { id: "LB-018PRE", status: "BLOCKED" }, { id: "LB-018", status: "BLOCKED" }],
   groups: [
     { id: "G3", prs: ["LB-013", "LB-014", "LB-015", "LB-016", "LB-017"], status: "PASS", review_status: "PASS", review_generation: 1,
       review_provenance: { generation: 1, kind: "independent_adversarial", commit: reviewCommit }, human_review_status: "REQUIRED", human_review_generation: 1 },
@@ -924,8 +924,8 @@ const base = {
 const reviewAfter = structuredClone(base);
 const humanBefore = structuredClone(base);
 const humanAfterPass = structuredClone(base);
-humanAfterPass.execution = { current_group: "G4", current_pr: "LB-018" };
-humanAfterPass.prs.find((p) => p.id === "LB-018").status = "READY";
+humanAfterPass.execution = { current_group: "G4", current_pr: "LB-018PRE" };
+humanAfterPass.prs.find((p) => p.id === "LB-018PRE").status = "READY";
 humanAfterPass.groups.find((g) => g.id === "G3").human_review_status = "PASS";
 humanAfterPass.groups.find((g) => g.id === "G4").status = "READY";
 const git = {
@@ -942,7 +942,7 @@ const git = {
 assert.deepEqual(validateG4HumanGate(base, git), []);
 const bypass = structuredClone(base);
 bypass.groups.find((g) => g.id === "G4").status = "READY";
-bypass.prs.find((p) => p.id === "LB-018").status = "READY";
+bypass.prs.find((p) => p.id === "LB-018PRE").status = "READY";
 assert.match(validateG4HumanGate(bypass, git).join("|"), /g4-unlocked-without-double-pass/);
 
 const passed = structuredClone(humanAfterPass);

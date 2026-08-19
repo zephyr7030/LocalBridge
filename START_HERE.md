@@ -64,7 +64,7 @@ UI             = Apple-inspired 极简
 Runtime API Key= secure store；无明文/CLI
 授权项目       = 同时最多一个
 项目移除       = 永不删除磁盘文件
-PR             = 20
+PR             = 21
 Groups         = 5
 组间审查       = mandatory independent adversarial PASS
 ```

@@ -3324,6 +3324,37 @@ export function normalizeG3HumanReviewAmendment(prs) {
 
 function normalizeAuthorizedSemanticCorrections(prs) {
   const normalized = normalizeG3HumanReviewAmendment(normalizeG3HumanReviewGeneration2Amendment(prs));
+  const lb018pre = normalized?.["LB-018PRE"];
+  if (lb018pre) {
+    const expected = {
+      writable_paths: [".gitignore", ".gitattributes", "LICENSE", "README.md", "SECURITY.md", "CONTRIBUTING.md", ".github/**", "scripts/public-release/**", "tests/integration/release-preflight/**", "docs/05_MAINTENANCE_RELEASE.md", "docs/09_RELEASE_CHECKLIST.md", "THIRD_PARTY_NOTICES.md", "release-artifacts/preflight/**"],
+      forbidden_paths: ["src/**", "src-tauri/src/**", "runtime/**"],
+      required_artifacts: [
+        "repository hygiene baseline with .gitignore and public-source allow/deny policy",
+        "working-tree and full reachable Git-history sensitive-data scan report covering API keys Tunnel credentials test tokens absolute user paths machine information debug dumps logs and secret-like fixtures",
+        "clean-checkout reproducible release-build preflight using locked Rust and npm dependency graphs without developer-machine Python venv PATH or unpublished local state",
+        "project LICENSE plus third-party license and NOTICE audit for Rust npm Tauri system WebView2 bundled Python coding runtime Tunnel aria2 7-Zip and jq distribution obligations",
+        "public README covering purpose eight-core-plus-elevated_exec tool structure three permission modes security model installation development build and known limitations",
+        "public SECURITY and CONTRIBUTING guidance plus GitHub Issue and Pull Request templates",
+        "Windows GitHub Actions CI for formatting unit tests critical contract tests frontend build Rust test Clippy and release-build preflight",
+        "fresh-history public-source export that excludes all private governance contracts review state authorization records internal execution templates and historical governance evidence",
+        "release-package content audit excluding source caches test directories logs keys development Tunnel configuration machine paths and private governance material",
+      ],
+      required_tests: [
+        "secret scanner examines current tracked content and all reachable Git history and fails closed on high-confidence credentials or unapproved machine-specific sensitive data",
+        "public-source export denylist excludes AGENTS.md START_HERE.md PR_INDEX.json PR_CONTRACTS.json PROJECT_STATE.json FINAL_REVIEW.json governance/** skills/** templates/** authorization records and internal governance-only docs",
+        "public-source export initializes fresh Git history and never copies or pushes the private LocalBridge .git history",
+        "public-source snapshot contains only explicitly public product source public docs build CI security license and required development material and passes a denylist regression",
+        "clean checkout installs locked npm dependencies and uses Cargo.lock then completes the release build/preflight without system Python or developer venv assumptions",
+        "license audit accounts for bundled and system-provided components and THIRD_PARTY_NOTICES matches redistributable payload obligations",
+        "GitHub Actions Windows workflow runs formatting Rust tests Clippy frontend tests/build critical public contract tests and release-build preflight",
+        "release content checker fails closed if caches tests logs secrets development Tunnel configuration private governance files or absolute local-user machine paths enter the distributable payload",
+        "private governance evidence remains available in the local private worktree while absent from the public-source snapshot",
+      ],
+      non_goals: ["product feature changes", "runtime packaging implementation owned by LB-018", "clean-machine live release acceptance owned by LB-019", "publishing private governance history"],
+    };
+    if (canonicalJson(lb018pre) === canonicalJson(expected)) delete normalized["LB-018PRE"];
+  }
   const lb016 = normalized?.["LB-016"];
   if (Array.isArray(lb016?.required_artifacts)) {
     lb016.required_artifacts = lb016.required_artifacts.filter((item) =>
@@ -3339,6 +3370,21 @@ function normalizeAuthorizedSemanticCorrections(prs) {
         return replacement ? replacement[1] : item;
       });
   }
+  return normalized;
+}
+
+function normalizeExactLb018PrePlanAmendment(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  const lb018pre = normalized?.prs?.["LB-018PRE"];
+  if (!lb018pre) return normalized;
+  const expected = {
+    writable_paths: [".gitignore", ".gitattributes", "LICENSE", "README.md", "SECURITY.md", "CONTRIBUTING.md", ".github/**", "scripts/public-release/**", "tests/integration/release-preflight/**", "docs/05_MAINTENANCE_RELEASE.md", "docs/09_RELEASE_CHECKLIST.md", "THIRD_PARTY_NOTICES.md", "release-artifacts/preflight/**"],
+    forbidden_paths: ["src/**", "src-tauri/src/**", "runtime/**"],
+    required_artifacts: ["repository hygiene baseline with .gitignore and public-source allow/deny policy", "working-tree and full reachable Git-history sensitive-data scan report covering API keys Tunnel credentials test tokens absolute user paths machine information debug dumps logs and secret-like fixtures", "clean-checkout reproducible release-build preflight using locked Rust and npm dependency graphs without developer-machine Python venv PATH or unpublished local state", "project LICENSE plus third-party license and NOTICE audit for Rust npm Tauri system WebView2 bundled Python coding runtime Tunnel aria2 7-Zip and jq distribution obligations", "public README covering purpose eight-core-plus-elevated_exec tool structure three permission modes security model installation development build and known limitations", "public SECURITY and CONTRIBUTING guidance plus GitHub Issue and Pull Request templates", "Windows GitHub Actions CI for formatting unit tests critical contract tests frontend build Rust test Clippy and release-build preflight", "fresh-history public-source export that excludes all private governance contracts review state authorization records internal execution templates and historical governance evidence", "release-package content audit excluding source caches test directories logs keys development Tunnel configuration machine paths and private governance material"],
+    required_tests: ["secret scanner examines current tracked content and all reachable Git history and fails closed on high-confidence credentials or unapproved machine-specific sensitive data", "public-source export denylist excludes AGENTS.md START_HERE.md PR_INDEX.json PR_CONTRACTS.json PROJECT_STATE.json FINAL_REVIEW.json governance/** skills/** templates/** authorization records and internal governance-only docs", "public-source export initializes fresh Git history and never copies or pushes the private LocalBridge .git history", "public-source snapshot contains only explicitly public product source public docs build CI security license and required development material and passes a denylist regression", "clean checkout installs locked npm dependencies and uses Cargo.lock then completes the release build/preflight without system Python or developer venv assumptions", "license audit accounts for bundled and system-provided components and THIRD_PARTY_NOTICES matches redistributable payload obligations", "GitHub Actions Windows workflow runs formatting Rust tests Clippy frontend tests/build critical public contract tests and release-build preflight", "release content checker fails closed if caches tests logs secrets development Tunnel configuration private governance files or absolute local-user machine paths enter the distributable payload", "private governance evidence remains available in the local private worktree while absent from the public-source snapshot"],
+    non_goals: ["product feature changes", "runtime packaging implementation owned by LB-018", "clean-machine live release acceptance owned by LB-019", "publishing private governance history"],
+  };
+  if (canonicalJson(lb018pre) === canonicalJson(expected)) delete normalized.prs["LB-018PRE"];
   return normalized;
 }
 
@@ -3390,7 +3436,7 @@ export function validatePreG4GateAuthorization(
   laterRatification = G3_SIX_SCREEN_CONTRACT_RATIFICATION,
 ) {
   const findings = [];
-  let authorizationContracts = contractsDoc;
+  let authorizationContracts = normalizeExactLb018PrePlanAmendment(contractsDoc);
   if ((authorizationContracts?.schema_version ?? 0) >= 42) {
     if (!hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(authorizationContracts)) findings.push(`${expected.id}:schema42-unified-error-diagnostics-20260819-drift`);
     authorizationContracts = normalizeSchema42UnifiedErrorDiagnosticsAmendment20260819(authorizationContracts);
@@ -3789,6 +3835,7 @@ function validateHumanReviewProvenance(progress, g3, git, findings) {
   const beforeG3 = before?.groups?.find((candidate) => candidate.id === "G3");
   const afterG3 = after?.groups?.find((candidate) => candidate.id === "G3");
   const afterG4 = after?.groups?.find((candidate) => candidate.id === "G4");
+  const afterLb18Pre = after?.prs?.find((candidate) => candidate.id === "LB-018PRE");
   const afterLb18 = after?.prs?.find((candidate) => candidate.id === "LB-018");
   if (beforeG3?.status !== "PASS"
     || beforeG3?.review_status !== "PASS"
@@ -3801,9 +3848,10 @@ function validateHumanReviewProvenance(progress, g3, git, findings) {
     if (afterG3?.status !== "PASS"
       || afterG3?.review_status !== "PASS"
       || afterG4?.status !== "READY"
-      || afterLb18?.status !== "READY"
+      || afterLb18Pre?.status !== "READY"
+      || afterLb18?.status !== "BLOCKED"
       || after?.execution?.current_group !== "G4"
-      || after?.execution?.current_pr !== "LB-018") {
+      || after?.execution?.current_pr !== "LB-018PRE") {
       findings.push("human-review-pass-unlock-transition");
     }
   } else {
@@ -3812,6 +3860,7 @@ function validateHumanReviewProvenance(progress, g3, git, findings) {
     if (afterG3?.status !== "REWORK_REQUIRED"
       || afterG3?.review_status !== "REQUIRED"
       || afterG4?.status !== "BLOCKED"
+      || afterLb18Pre?.status !== "BLOCKED"
       || afterLb18?.status !== "BLOCKED"
       || after?.execution?.current_group !== "G3"
       || !g3.prs?.includes(reopenedId)
@@ -3827,15 +3876,16 @@ export function validateG4HumanGate(progress, git) {
   const prs = progress?.prs ?? [];
   const g3 = groups.find((candidate) => candidate.id === "G3");
   const g4 = groups.find((candidate) => candidate.id === "G4");
+  const lb18pre = prs.find((candidate) => candidate.id === "LB-018PRE");
   const lb18 = prs.find((candidate) => candidate.id === "LB-018");
-  if (!g3 || !g4 || !lb18) return findings;
+  if (!g3 || !g4 || !lb18pre || !lb18) return findings;
   const humanStatus = g3.human_review_status ?? "BLOCKED";
   const humanGeneration = g3.human_review_generation ?? 0;
   if (!HUMAN_REVIEW_STATUSES.has(humanStatus) || !Number.isInteger(humanGeneration) || humanGeneration < 0) {
     findings.push("human-review-state");
     return findings;
   }
-  const g4Unlocked = g4.status !== "BLOCKED" || lb18.status !== "BLOCKED";
+  const g4Unlocked = g4.status !== "BLOCKED" || lb18pre.status !== "BLOCKED" || lb18.status !== "BLOCKED";
   if (g4Unlocked && !(g3.status === "PASS" && g3.review_status === "PASS" && humanStatus === "PASS")) {
     findings.push("g4-unlocked-without-double-pass");
   }
@@ -3846,6 +3896,7 @@ export function validateG4HumanGate(progress, git) {
     if (g3.status !== "PASS"
       || g3.review_status !== "PASS"
       || g4.status !== "BLOCKED"
+      || lb18pre.status !== "BLOCKED"
       || lb18.status !== "BLOCKED"
       || progress?.execution?.current_group !== "G3"
       || progress?.execution?.current_pr !== null) {
@@ -3859,6 +3910,7 @@ export function validateG4HumanGate(progress, git) {
     if (g3.status !== "REWORK_REQUIRED"
       || g3.review_status !== "REQUIRED"
       || g4.status !== "BLOCKED"
+      || lb18pre.status !== "BLOCKED"
       || lb18.status !== "BLOCKED"
       || progress?.execution?.current_group !== "G3"
       || !g3.prs?.includes(reopenedId)
@@ -3870,11 +3922,13 @@ export function validateG4HumanGate(progress, git) {
     const afterReview = git.jsonAt(g3.review_provenance.commit, "PR_INDEX.json");
     const afterG3 = afterReview?.groups?.find((candidate) => candidate.id === "G3");
     const afterG4 = afterReview?.groups?.find((candidate) => candidate.id === "G4");
+    const afterLb18Pre = afterReview?.prs?.find((candidate) => candidate.id === "LB-018PRE");
     const afterLb18 = afterReview?.prs?.find((candidate) => candidate.id === "LB-018");
     if (afterG3?.human_review_status !== "REQUIRED"
       || !Number.isInteger(afterG3?.human_review_generation)
       || afterG3.human_review_generation < 1
       || afterG4?.status !== "BLOCKED"
+      || afterLb18Pre?.status !== "BLOCKED"
       || afterLb18?.status !== "BLOCKED"
       || afterReview?.execution?.current_group !== "G3"
       || afterReview?.execution?.current_pr !== null) {

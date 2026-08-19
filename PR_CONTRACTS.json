@@ -2341,6 +2341,56 @@
         "workspace policy changes"
       ]
     },
+    "LB-018PRE": {
+      "writable_paths": [
+        ".gitignore",
+        ".gitattributes",
+        "LICENSE",
+        "README.md",
+        "SECURITY.md",
+        "CONTRIBUTING.md",
+        ".github/**",
+        "scripts/public-release/**",
+        "tests/integration/release-preflight/**",
+        "docs/05_MAINTENANCE_RELEASE.md",
+        "docs/09_RELEASE_CHECKLIST.md",
+        "THIRD_PARTY_NOTICES.md",
+        "release-artifacts/preflight/**"
+      ],
+      "forbidden_paths": [
+        "src/**",
+        "src-tauri/src/**",
+        "runtime/**"
+      ],
+      "required_artifacts": [
+        "repository hygiene baseline with .gitignore and public-source allow/deny policy",
+        "working-tree and full reachable Git-history sensitive-data scan report covering API keys Tunnel credentials test tokens absolute user paths machine information debug dumps logs and secret-like fixtures",
+        "clean-checkout reproducible release-build preflight using locked Rust and npm dependency graphs without developer-machine Python venv PATH or unpublished local state",
+        "project LICENSE plus third-party license and NOTICE audit for Rust npm Tauri system WebView2 bundled Python coding runtime Tunnel aria2 7-Zip and jq distribution obligations",
+        "public README covering purpose eight-core-plus-elevated_exec tool structure three permission modes security model installation development build and known limitations",
+        "public SECURITY and CONTRIBUTING guidance plus GitHub Issue and Pull Request templates",
+        "Windows GitHub Actions CI for formatting unit tests critical contract tests frontend build Rust test Clippy and release-build preflight",
+        "fresh-history public-source export that excludes all private governance contracts review state authorization records internal execution templates and historical governance evidence",
+        "release-package content audit excluding source caches test directories logs keys development Tunnel configuration machine paths and private governance material"
+      ],
+      "required_tests": [
+        "secret scanner examines current tracked content and all reachable Git history and fails closed on high-confidence credentials or unapproved machine-specific sensitive data",
+        "public-source export denylist excludes AGENTS.md START_HERE.md PR_INDEX.json PR_CONTRACTS.json PROJECT_STATE.json FINAL_REVIEW.json governance/** skills/** templates/** authorization records and internal governance-only docs",
+        "public-source export initializes fresh Git history and never copies or pushes the private LocalBridge .git history",
+        "public-source snapshot contains only explicitly public product source public docs build CI security license and required development material and passes a denylist regression",
+        "clean checkout installs locked npm dependencies and uses Cargo.lock then completes the release build/preflight without system Python or developer venv assumptions",
+        "license audit accounts for bundled and system-provided components and THIRD_PARTY_NOTICES matches redistributable payload obligations",
+        "GitHub Actions Windows workflow runs formatting Rust tests Clippy frontend tests/build critical public contract tests and release-build preflight",
+        "release content checker fails closed if caches tests logs secrets development Tunnel configuration private governance files or absolute local-user machine paths enter the distributable payload",
+        "private governance evidence remains available in the local private worktree while absent from the public-source snapshot"
+      ],
+      "non_goals": [
+        "product feature changes",
+        "runtime packaging implementation owned by LB-018",
+        "clean-machine live release acceptance owned by LB-019",
+        "publishing private governance history"
+      ]
+    },
     "LB-018": {
       "writable_paths": [
         "src-tauri/**",
