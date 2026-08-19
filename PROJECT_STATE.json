@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-018PRE",
+  "current_pr": "LB-018",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -6250,5 +6250,25 @@
     "g4_unlocked": true,
     "next_pr": "LB-018PRE",
     "human_review_decision_commit": "91b2b8fb5ba231588634a8151f2e18cd62f1fc7e"
+  },
+  "lb018pre_public_release_hygiene_2026_08_19": {
+    "status": "PASS",
+    "implementation_commits": [
+      "0df08225491371cc2f8b8169e65975c17f5f57f9",
+      "d233497fdbb6bde16edfc2a27fd7855f3d2d06d0",
+      "9256404bfddce235dfcf778ce1969e48387de173",
+      "eb23e69c2e51c984a3f23837637cbdd01299a5af"
+    ],
+    "evidence": [
+      "full reachable history sensitive scan PASS: 659 commits, 439 tracked files, zero high-confidence secrets and zero machine/debug warnings",
+      "license audit PASS: 166 npm packages and 419 Cargo third-party packages with license metadata plus runtime/toolbox notices",
+      "fresh-history public source export PASS: 276 files, three sanitized public metadata files, exactly one commit, zero remotes, private governance excluded",
+      "clean committed checkout PASS: npm ci, frontend build, pinned toolbox prepare and cargo build --locked --release with external Python commands blocked",
+      "generated .coding-tools performance/task state untracked and ignored while local copies remain",
+      "public README/LICENSE/SECURITY/CONTRIBUTING/templates/Windows CI present",
+      "architecture, G4 human-gate regression, public release behavior, diff and clean worktree PASS"
+    ],
+    "public_repository_created": false,
+    "next_pr": "LB-018"
   }
 }
