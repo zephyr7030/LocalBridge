@@ -1,6 +1,7 @@
 mod bundle;
 mod context_service;
 mod edit_service;
+pub(crate) mod filesystem_service;
 mod facade;
 mod git_adapter;
 mod guard;

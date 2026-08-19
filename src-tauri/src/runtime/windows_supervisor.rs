@@ -298,6 +298,7 @@ impl WindowsProcessSupervisor {
         let application = wide_null(spec.executable.as_os_str());
         let environment = build_environment_block(&spec.environment, &spec.environment_removals);
         let creation_flags = CREATE_SUSPENDED
+            | CREATE_NO_WINDOW
             | if environment.is_some() {
                 CREATE_UNICODE_ENVIRONMENT
             } else {

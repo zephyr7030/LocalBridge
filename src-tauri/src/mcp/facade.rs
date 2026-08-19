@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use serde_json::{Map, Value, json};
 
 use crate::diagnostics::error::{
@@ -19,6 +20,7 @@ use crate::state::{
 
 use super::context_service::ContextService;
 use super::edit_service::{CodingEditError, CodingEditService};
+use super::filesystem_service::{FilesystemError, FilesystemSearchOptions, FilesystemService};
 use super::path_authority::{
     PathAuthority, PathAuthorityError, workspace_input_path_valid, workspace_relative_path_valid,
 };
@@ -36,10 +38,11 @@ use super::workflow_checkpoint::{WorkflowCheckpoint, WorkflowCheckpointStore};
 use super::verification_planner::VerificationPlanner;
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 42;
-pub const V1_CORE_TOOL_NAMES: [&str; 8] = [
+pub const AGENT_API_REVISION: u32 = 43;
+pub const V1_CORE_TOOL_NAMES: [&str; 9] = [
     "workspace_context",
     "agent_workflow",
+    "filesystem",
     "exec_command",
     "command_control",
     "task_control",
@@ -318,6 +321,38 @@ fn public_tool_schema(name: &str) -> Value {
                 "additionalProperties":false
             }),
         ),
+        "filesystem" => (
+            "Perform bounded LocalBridge-owned filesystem operations. Action-specific required fields are enforced by the server; list is non-recursive unless recursive=true; search is filename/metadata search, not text grep.",
+            json!({
+                "type":"object",
+                "properties":{
+                    "action":{"type":"string","enum":["list","stat","read","write","search","copy","move","delete","hash"]},
+                    "path":{"type":"string","minLength":1,"description":"Required for list/stat/read/write/search/delete/hash."},
+                    "source":{"type":"string","minLength":1,"description":"Required for copy/move."},
+                    "destination":{"type":"string","minLength":1,"description":"Required for copy/move."},
+                    "recursive":{"type":"boolean"},
+                    "max_depth":{"type":"integer","minimum":1,"maximum":64},
+                    "max_entries":{"type":"integer","minimum":1,"maximum":100000},
+                    "max_results":{"type":"integer","minimum":1,"maximum":10000},
+                    "offset":{"type":"integer","minimum":0},
+                    "max_bytes":{"type":"integer","minimum":1,"maximum":1048576},
+                    "content":{"type":"string","description":"Required for write; interpreted according to encoding."},
+                    "encoding":{"type":"string","enum":["utf8","base64"]},
+                    "pattern":{"type":"string","minLength":1,"description":"Required for search; matches file/directory names only."},
+                    "type":{"type":"string","enum":["file","directory"]},
+                    "min_size":{"type":"integer","minimum":0},
+                    "max_size":{"type":"integer","minimum":0},
+                    "modified_after":{"type":"integer","minimum":0,"description":"Unix epoch milliseconds."},
+                    "modified_before":{"type":"integer","minimum":0,"description":"Unix epoch milliseconds."},
+                    "sort_by":{"type":"string","enum":["path","size","modified"]},
+                    "sort_order":{"type":"string","enum":["asc","desc"]},
+                    "overwrite":{"type":"boolean"},
+                    "calculate_size":{"type":"boolean"}
+                },
+                "required":["action"],
+                "additionalProperties":false
+            }),
+        ),
         "exec_command" => (
             "Execute a command through a LocalBridge trusted logical shell selector.",
             json!({
@@ -510,6 +545,31 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "current_command":{"type":"object","additionalProperties":true}
             },
             "required":["action","state","workspace","project","git_before","patch_applied","directory_changes","commands"],
+            "additionalProperties":false
+        }),
+        "filesystem" => json!({
+            "type":"object",
+            "properties":{
+                "entries":{"type":"array","items":{"type":"object","additionalProperties":true}},
+                "scanned_entries":{"type":"integer","minimum":0},
+                "truncated":{"type":"boolean"},
+                "path":{"type":"string"},
+                "kind":{"type":"string"},
+                "size":{"type":"integer","minimum":0},
+                "modified_ms":{"type":["integer","null"],"minimum":0},
+                "calculated_size":{"type":"boolean"},
+                "offset":{"type":"integer","minimum":0},
+                "total_bytes":{"type":"integer","minimum":0},
+                "returned_bytes":{"type":"integer","minimum":0},
+                "eof":{"type":"boolean"},
+                "encoding":{"type":"string","enum":["utf8","base64"]},
+                "content":{"type":"string"},
+                "destination":{"type":["string","null"]},
+                "bytes":{"type":"integer","minimum":0},
+                "changed":{"type":"boolean"},
+                "algorithm":{"type":"string","enum":["sha256"]},
+                "sha256":{"type":"string","minLength":64,"maxLength":64}
+            },
             "additionalProperties":false
         }),
         "exec_command" => command_output_data_schema(),
@@ -1194,6 +1254,13 @@ pub trait WorkspaceRuntimeAdapter {
         allow_missing_leaf: bool,
     ) -> Result<String, FacadeError>;
     fn project_context(&self, path: &str) -> Result<Value, FacadeError>;
+    fn filesystem(&mut self, _arguments: Value) -> Result<Value, FacadeError> {
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "文件系统服务不可用",
+            false,
+        ))
+    }
     fn apply_directory_change(&mut self, action: &str, path: &str) -> Result<Value, FacadeError>;
     fn execute_shell(
         &mut self,
@@ -2055,6 +2122,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         Ok(json!({"selected_path":self.stable_workspace_relative_path(&selected)?}))
     }
 
+    fn filesystem(&mut self, arguments: Value) -> Result<Value, FacadeError> {
+        run_workspace_filesystem(&self.workspace, arguments)
+    }
+
     fn apply_directory_change(&mut self, action: &str, path: &str) -> Result<Value, FacadeError> {
         if !workspace_relative_path_valid(path) || path == "." {
             return Err(FacadeError::new(
@@ -2063,95 +2134,18 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 false,
             ));
         }
-        let authority = PathAuthority::active_workspace(&self.workspace)
-            .map_err(normalize_path_authority_error)?;
-        let target = authority
-            .input_path(path)
-            .map_err(normalize_path_authority_error)?;
-        let public_path = path.replace('\\', "/");
+        let service = FilesystemService::active_workspace(&self.workspace)
+            .map_err(normalize_filesystem_error)?;
         match action {
             "create_directory" => {
-                if std::fs::symlink_metadata(&target).is_ok() {
-                    return Err(FacadeError::new(
-                        FacadeErrorCode::InvalidArgument,
-                        "目标目录已存在",
-                        false,
-                    ));
-                }
-                let parent = target.parent().ok_or_else(invalid_argument)?;
-                let canonical_parent = std::fs::canonicalize(parent).map_err(|_| {
-                    FacadeError::new(FacadeErrorCode::NotFound, "父目录不存在", false)
-                })?;
-                if !authority.allows_canonical(&canonical_parent) || !canonical_parent.is_dir() {
-                    return Err(FacadeError::new(
-                        FacadeErrorCode::WorkspaceDenied,
-                        "目录路径越出当前工作区",
-                        false,
-                    ));
-                }
-                std::fs::create_dir(&target).map_err(|_| {
-                    FacadeError::new(FacadeErrorCode::Internal, "创建目录失败", false)
-                })?;
-                let canonical_target = match std::fs::canonicalize(&target) {
-                    Ok(value)
-                        if authority.allows_canonical(&value)
-                            && authority.canonical_root() != Some(value.as_path()) => value,
-                    _ => {
-                        let _ = std::fs::remove_dir(&target);
-                        return Err(FacadeError::new(
-                            FacadeErrorCode::WorkspaceDenied,
-                            "目录路径越出当前工作区",
-                            false,
-                        ));
-                    }
-                };
-                if !canonical_target.is_dir() {
-                    let _ = std::fs::remove_dir(&target);
-                    return Err(invalid_argument());
-                }
-                Ok(json!({"action":action,"path":public_path,"changed":true}))
+                let result = service.create_directory(path).map_err(normalize_filesystem_error)?;
+                Ok(json!({"action":action,"path":result.path,"changed":result.changed}))
             }
             "remove_empty_directory" => {
-                let metadata = std::fs::symlink_metadata(&target).map_err(|_| {
-                    FacadeError::new(FacadeErrorCode::NotFound, "目录不存在", false)
-                })?;
-                if metadata.file_type().is_symlink() {
-                    return Err(FacadeError::new(
-                        FacadeErrorCode::WorkspaceDenied,
-                        "拒绝清理重解析目录",
-                        false,
-                    ));
-                }
-                let canonical_target = authority
-                    .resolve_existing(path)
-                    .map_err(normalize_path_authority_error)?;
-                if authority.canonical_root() == Some(canonical_target.as_path()) {
-                    return Err(FacadeError::new(
-                        FacadeErrorCode::WorkspaceDenied,
-                        "拒绝清理工作区根目录",
-                        false,
-                    ));
-                }
-                if !canonical_target.is_dir() {
-                    return Err(invalid_argument());
-                }
-                if std::fs::read_dir(&canonical_target)
-                    .map_err(|_| {
-                        FacadeError::new(FacadeErrorCode::Internal, "读取目录失败", false)
-                    })?
-                    .next()
-                    .is_some()
-                {
-                    return Err(FacadeError::new(
-                        FacadeErrorCode::InvalidArgument,
-                        "仅允许删除空目录",
-                        false,
-                    ));
-                }
-                std::fs::remove_dir(&canonical_target).map_err(|_| {
-                    FacadeError::new(FacadeErrorCode::Internal, "删除空目录失败", false)
-                })?;
-                Ok(json!({"action":action,"path":public_path,"changed":true}))
+                let result = service
+                    .remove_empty_directory(path)
+                    .map_err(normalize_filesystem_error)?;
+                Ok(json!({"action":action,"path":result.path,"changed":result.changed}))
             }
             _ => Err(invalid_argument()),
         }
@@ -3401,6 +3395,10 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
         self.adapter.command_task_state()
     }
 
+    pub(crate) fn workspace_path(&self) -> &Path {
+        &self.adapter.workspace
+    }
+
     pub(crate) fn cancel_public_command_session(
         &mut self,
         session_id: &str,
@@ -3655,6 +3653,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         match name {
             "workspace_context" => self.workspace_context(mode, arguments, request_id),
             "agent_workflow" => self.agent_workflow(mode, arguments, request_id),
+            "filesystem" => self.adapter.filesystem(arguments),
             "exec_command" => self.exec_command(mode, arguments, request_id),
             "command_control" => self.command_control(arguments, request_id),
             "git_workflow" => self.git_workflow(arguments, request_id),
@@ -3727,6 +3726,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 "public_tools":public_tools,
                 "actions":{
                     "agent_workflow":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"],
+                    "filesystem":["list","stat","read","write","search","copy","move","delete","hash"],
                     "command_control":["poll","read","write","kill"],
                     "task_control":["get","cancel"],
                     "document_workflow":["inspect","create","convert","rebuild"]
@@ -5266,6 +5266,12 @@ fn public_task_kind(name: &str, arguments: &Value) -> TaskKind {
                 TaskKind::ExecuteCommand
             }
         }
+        "filesystem" => match arguments.get("action").and_then(Value::as_str) {
+            Some("search") => TaskKind::SearchCode,
+            Some("write" | "copy" | "move" | "delete") => TaskKind::ModifyFile,
+            Some("list" | "stat" | "read" | "hash") => TaskKind::ReadFile,
+            _ => TaskKind::Other,
+        },
         "git_workflow" => TaskKind::GitOperation,
         "document_workflow" => {
             if arguments.get("action").and_then(Value::as_str) == Some("inspect") {
@@ -5282,6 +5288,10 @@ fn public_task_kind(name: &str, arguments: &Value) -> TaskKind {
 fn public_safe_summary(name: &str, arguments: &Value) -> SafeTaskSummary {
     let value = match name {
         "exec_command" => arguments.get("command").and_then(Value::as_str),
+        "filesystem" => arguments
+            .get("path")
+            .or_else(|| arguments.get("source"))
+            .and_then(Value::as_str),
         "git_workflow" | "document_workflow" | "view_image" => {
             arguments.get("path").and_then(Value::as_str)
         }
@@ -5342,6 +5352,7 @@ fn public_workspace_paths_valid(name: &str, arguments: &Value) -> bool {
     };
     let keys: &[&str] = match name {
         "exec_command" => &["workdir"],
+        "filesystem" => &["path", "source", "destination"],
         "git_workflow" | "view_image" => &["path"],
         "document_workflow" => &["path", "source"],
         "agent_workflow" => &["path"],
@@ -5580,12 +5591,485 @@ fn required_string<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a 
         .ok_or_else(invalid_argument)
 }
 
+fn optional_bool(
+    object: &Map<String, Value>,
+    key: &str,
+    default: bool,
+) -> Result<bool, FacadeError> {
+    match object.get(key) {
+        None => Ok(default),
+        Some(value) => value.as_bool().ok_or_else(invalid_argument),
+    }
+}
+
+fn optional_u64(
+    object: &Map<String, Value>,
+    key: &str,
+    default: u64,
+) -> Result<u64, FacadeError> {
+    match object.get(key) {
+        None => Ok(default),
+        Some(value) => value.as_u64().ok_or_else(invalid_argument),
+    }
+}
+
+fn optional_u64_value(
+    object: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<u64>, FacadeError> {
+    match object.get(key) {
+        None => Ok(None),
+        Some(value) => value.as_u64().map(Some).ok_or_else(invalid_argument),
+    }
+}
+
+fn optional_usize(
+    object: &Map<String, Value>,
+    key: &str,
+    default: usize,
+) -> Result<usize, FacadeError> {
+    usize::try_from(optional_u64(object, key, default as u64)?).map_err(|_| invalid_argument())
+}
+
+fn optional_u32(
+    object: &Map<String, Value>,
+    key: &str,
+    default: u32,
+) -> Result<u32, FacadeError> {
+    u32::try_from(optional_u64(object, key, u64::from(default))?).map_err(|_| invalid_argument())
+}
+
+fn optional_choice(
+    object: &Map<String, Value>,
+    key: &str,
+    allowed: &[&str],
+) -> Result<Option<String>, FacadeError> {
+    let Some(value) = object.get(key) else {
+        return Ok(None);
+    };
+    let value = value.as_str().ok_or_else(invalid_argument)?;
+    allowed
+        .contains(&value)
+        .then(|| value.to_string())
+        .ok_or_else(invalid_argument)
+        .map(Some)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FilesystemAction {
+    List,
+    Stat,
+    Read,
+    Write,
+    Search,
+    Copy,
+    Move,
+    Delete,
+    Hash,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FilesystemRequest {
+    pub(crate) action: FilesystemAction,
+    pub(crate) path: Option<String>,
+    pub(crate) source: Option<String>,
+    pub(crate) destination: Option<String>,
+    pub(crate) recursive: bool,
+    pub(crate) max_depth: u32,
+    pub(crate) max_entries: usize,
+    pub(crate) max_results: usize,
+    pub(crate) offset: u64,
+    pub(crate) max_bytes: usize,
+    pub(crate) content: Option<Vec<u8>>,
+    pub(crate) pattern: Option<String>,
+    pub(crate) kind: Option<String>,
+    pub(crate) min_size: Option<u64>,
+    pub(crate) max_size: Option<u64>,
+    pub(crate) modified_after_ms: Option<u64>,
+    pub(crate) modified_before_ms: Option<u64>,
+    pub(crate) sort_by: String,
+    pub(crate) sort_order: String,
+    pub(crate) overwrite: bool,
+    pub(crate) calculate_size: bool,
+}
+
+impl FilesystemRequest {
+    pub(crate) fn path_inputs(&self) -> [Option<&str>; 3] {
+        [
+            self.path.as_deref(),
+            self.source.as_deref(),
+            self.destination.as_deref(),
+        ]
+    }
+
+    pub(crate) fn content_base64(&self) -> Option<String> {
+        self.content.as_ref().map(|content| STANDARD.encode(content))
+    }
+}
+
+pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRequest, FacadeError> {
+    let object = object_args(arguments)?;
+    let action = required_string(object, "action")?;
+    let mut request = FilesystemRequest {
+        action: FilesystemAction::List,
+        path: None,
+        source: None,
+        destination: None,
+        recursive: false,
+        max_depth: 16,
+        max_entries: 10_000,
+        max_results: 1_000,
+        offset: 0,
+        max_bytes: 65_536,
+        content: None,
+        pattern: None,
+        kind: None,
+        min_size: None,
+        max_size: None,
+        modified_after_ms: None,
+        modified_before_ms: None,
+        sort_by: "path".into(),
+        sort_order: "asc".into(),
+        overwrite: false,
+        calculate_size: false,
+    };
+    match action {
+        "list" => {
+            ensure_only_keys(object, &["action", "path", "recursive", "max_depth", "max_entries"])?;
+            request.action = FilesystemAction::List;
+            request.path = Some(required_string(object, "path")?.to_string());
+            request.recursive = optional_bool(object, "recursive", false)?;
+            request.max_depth = optional_u32(object, "max_depth", 16)?;
+            request.max_entries = optional_usize(object, "max_entries", 1_000)?;
+        }
+        "stat" => {
+            ensure_only_keys(object, &["action", "path", "calculate_size", "max_depth", "max_entries"])?;
+            request.action = FilesystemAction::Stat;
+            request.path = Some(required_string(object, "path")?.to_string());
+            request.calculate_size = optional_bool(object, "calculate_size", false)?;
+            request.max_depth = optional_u32(object, "max_depth", 16)?;
+            request.max_entries = optional_usize(object, "max_entries", 10_000)?;
+        }
+        "read" => {
+            ensure_only_keys(object, &["action", "path", "offset", "max_bytes"])?;
+            request.action = FilesystemAction::Read;
+            request.path = Some(required_string(object, "path")?.to_string());
+            request.offset = optional_u64(object, "offset", 0)?;
+            request.max_bytes = optional_usize(object, "max_bytes", 65_536)?;
+        }
+        "write" => {
+            ensure_only_keys(object, &["action", "path", "content", "encoding", "overwrite"])?;
+            request.action = FilesystemAction::Write;
+            request.path = Some(required_string(object, "path")?.to_string());
+            let content = required_string(object, "content")?;
+            let encoding = optional_choice(object, "encoding", &["utf8", "base64"])?
+                .unwrap_or_else(|| "utf8".into());
+            request.content = Some(if encoding == "base64" {
+                STANDARD.decode(content).map_err(|_| invalid_argument())?
+            } else {
+                content.as_bytes().to_vec()
+            });
+            request.overwrite = optional_bool(object, "overwrite", false)?;
+        }
+        "search" => {
+            ensure_only_keys(
+                object,
+                &[
+                    "action", "path", "pattern", "recursive", "max_depth", "max_entries",
+                    "max_results", "type", "min_size", "max_size", "modified_after",
+                    "modified_before", "sort_by", "sort_order",
+                ],
+            )?;
+            request.action = FilesystemAction::Search;
+            request.path = Some(required_string(object, "path")?.to_string());
+            request.pattern = Some(required_string(object, "pattern")?.to_string());
+            request.recursive = optional_bool(object, "recursive", true)?;
+            request.max_depth = optional_u32(object, "max_depth", 16)?;
+            request.max_entries = optional_usize(object, "max_entries", 10_000)?;
+            request.max_results = optional_usize(object, "max_results", 1_000)?;
+            request.kind = optional_choice(object, "type", &["file", "directory"])?;
+            request.min_size = optional_u64_value(object, "min_size")?;
+            request.max_size = optional_u64_value(object, "max_size")?;
+            request.modified_after_ms = optional_u64_value(object, "modified_after")?;
+            request.modified_before_ms = optional_u64_value(object, "modified_before")?;
+            request.sort_by = optional_choice(object, "sort_by", &["path", "size", "modified"])?
+                .unwrap_or_else(|| "path".into());
+            request.sort_order = optional_choice(object, "sort_order", &["asc", "desc"])?
+                .unwrap_or_else(|| "asc".into());
+        }
+        "copy" | "move" => {
+            ensure_only_keys(
+                object,
+                &["action", "source", "destination", "recursive", "overwrite", "max_depth", "max_entries"],
+            )?;
+            request.action = if action == "copy" {
+                FilesystemAction::Copy
+            } else {
+                FilesystemAction::Move
+            };
+            request.source = Some(required_string(object, "source")?.to_string());
+            request.destination = Some(required_string(object, "destination")?.to_string());
+            request.recursive = optional_bool(object, "recursive", false)?;
+            request.overwrite = optional_bool(object, "overwrite", false)?;
+            request.max_depth = optional_u32(object, "max_depth", 16)?;
+            request.max_entries = optional_usize(object, "max_entries", 10_000)?;
+        }
+        "delete" => {
+            ensure_only_keys(object, &["action", "path", "recursive", "max_depth", "max_entries"])?;
+            request.action = FilesystemAction::Delete;
+            request.path = Some(required_string(object, "path")?.to_string());
+            request.recursive = optional_bool(object, "recursive", false)?;
+            request.max_depth = optional_u32(object, "max_depth", 16)?;
+            request.max_entries = optional_usize(object, "max_entries", 10_000)?;
+        }
+        "hash" => {
+            ensure_only_keys(object, &["action", "path"])?;
+            request.action = FilesystemAction::Hash;
+            request.path = Some(required_string(object, "path")?.to_string());
+        }
+        _ => return Err(invalid_argument()),
+    }
+    if request.min_size.zip(request.max_size).is_some_and(|(min, max)| min > max)
+        || request
+            .modified_after_ms
+            .zip(request.modified_before_ms)
+            .is_some_and(|(min, max)| min > max)
+    {
+        return Err(invalid_argument());
+    }
+    Ok(request)
+}
+
+fn run_workspace_filesystem(workspace: &Path, arguments: Value) -> Result<Value, FacadeError> {
+    let request = parse_filesystem_request(&arguments)?;
+    let service = FilesystemService::active_workspace(workspace).map_err(normalize_filesystem_error)?;
+    let data = match request.action {
+        FilesystemAction::List => {
+            let result = service
+                .list(
+                    request.path.as_deref().expect("list path parsed"),
+                    request.recursive,
+                    request.max_depth,
+                    request.max_entries,
+                )
+                .map_err(normalize_filesystem_error)?;
+            serde_json::to_value(result).map_err(|_| command_state_internal_error())?
+        }
+        FilesystemAction::Stat => {
+            let result = service
+                .stat(
+                    request.path.as_deref().expect("stat path parsed"),
+                    request.calculate_size,
+                    request.max_depth,
+                    request.max_entries,
+                )
+                .map_err(normalize_filesystem_error)?;
+            serde_json::to_value(result).map_err(|_| command_state_internal_error())?
+        }
+        FilesystemAction::Read => {
+            let result = service
+                .read(
+                    request.path.as_deref().expect("read path parsed"),
+                    request.offset,
+                    request.max_bytes,
+                )
+                .map_err(normalize_filesystem_error)?;
+            serde_json::to_value(result).map_err(|_| command_state_internal_error())?
+        }
+        FilesystemAction::Write => {
+            let result = service
+                .write(
+                    request.path.as_deref().expect("write path parsed"),
+                    request.content.as_deref().expect("write content parsed"),
+                    request.overwrite,
+                )
+                .map_err(normalize_filesystem_error)?;
+            serde_json::to_value(result).map_err(|_| command_state_internal_error())?
+        }
+        FilesystemAction::Search => {
+            let options = FilesystemSearchOptions {
+                recursive: request.recursive,
+                max_depth: request.max_depth,
+                max_entries: request.max_entries,
+                max_results: request.max_results,
+                pattern: request.pattern.clone().expect("search pattern parsed"),
+                kind: request.kind.clone(),
+                min_size: request.min_size,
+                max_size: request.max_size,
+                modified_after_ms: request.modified_after_ms,
+                modified_before_ms: request.modified_before_ms,
+                sort_by: request.sort_by.clone(),
+                sort_order: request.sort_order.clone(),
+            };
+            let result = service
+                .search(request.path.as_deref().expect("search path parsed"), &options)
+                .map_err(normalize_filesystem_error)?;
+            serde_json::to_value(result).map_err(|_| command_state_internal_error())?
+        }
+        FilesystemAction::Copy | FilesystemAction::Move => {
+            let source = request.source.as_deref().expect("copy/move source parsed");
+            let destination = request.destination.as_deref().expect("copy/move destination parsed");
+            let result = if request.action == FilesystemAction::Copy {
+                service.copy(source, destination, request.recursive, request.overwrite, request.max_depth, request.max_entries)
+            } else {
+                service.move_path(source, destination, request.recursive, request.overwrite, request.max_depth, request.max_entries)
+            }
+            .map_err(normalize_filesystem_error)?;
+            serde_json::to_value(result).map_err(|_| command_state_internal_error())?
+        }
+        FilesystemAction::Delete => {
+            let result = service
+                .delete(
+                    request.path.as_deref().expect("delete path parsed"),
+                    request.recursive,
+                    request.max_depth,
+                    request.max_entries,
+                )
+                .map_err(normalize_filesystem_error)?;
+            serde_json::to_value(result).map_err(|_| command_state_internal_error())?
+        }
+        FilesystemAction::Hash => {
+            let result = service
+                .hash(request.path.as_deref().expect("hash path parsed"))
+                .map_err(normalize_filesystem_error)?;
+            serde_json::to_value(result).map_err(|_| command_state_internal_error())?
+        }
+    };
+    Ok(stable_success(data, "Filesystem operation completed"))
+}
+
+#[cfg(test)]
+mod schema43_filesystem_facade_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_workspace(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-schema43-facade-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn schema43_filesystem_is_flat_nine_core_contract() {
+        assert_eq!(AGENT_API_REVISION, 43);
+        assert_eq!(V1_CORE_TOOL_NAMES.len(), 9);
+        assert_eq!(V1_CORE_TOOL_NAMES[2], "filesystem");
+        let schema = public_tool_schema("filesystem");
+        let input = &schema["inputSchema"];
+        assert_eq!(input["type"], "object");
+        assert!(input.get("oneOf").is_none());
+        assert_eq!(input["additionalProperties"], false);
+        assert_eq!(input["required"], json!(["action"]));
+        assert_eq!(
+            input["properties"]["action"]["enum"],
+            json!(["list","stat","read","write","search","copy","move","delete","hash"])
+        );
+        for property in [
+            "action", "path", "source", "destination", "recursive", "max_depth",
+            "max_entries", "max_results", "offset", "max_bytes", "content", "encoding",
+            "pattern", "type", "min_size", "max_size", "modified_after", "modified_before",
+            "sort_by", "sort_order", "overwrite", "calculate_size",
+        ] {
+            assert!(input["properties"].get(property).is_some(), "missing {property}");
+        }
+    }
+
+    #[test]
+    fn schema43_workspace_filesystem_executes_and_fails_closed() {
+        let root = temp_workspace("io");
+        let outside = temp_workspace("outside");
+        std::fs::write(outside.join("outside.txt"), b"outside").unwrap();
+
+        let write = run_workspace_filesystem(
+            &root,
+            json!({"action":"write","path":"note.txt","content":"hello"}),
+        )
+        .unwrap();
+        assert_eq!(write["isError"], false);
+        assert_eq!(std::fs::read(root.join("note.txt")).unwrap(), b"hello");
+
+        let read = run_workspace_filesystem(
+            &root,
+            json!({"action":"read","path":"note.txt","max_bytes":3}),
+        )
+        .unwrap();
+        assert_eq!(read["structuredContent"]["data"]["content"], "hel");
+        assert_eq!(read["structuredContent"]["data"]["eof"], false);
+
+        let search = run_workspace_filesystem(
+            &root,
+            json!({"action":"search","path":".","pattern":"*.txt"}),
+        )
+        .unwrap();
+        assert_eq!(search["structuredContent"]["data"]["entries"][0]["path"], "note.txt");
+
+        let hash = run_workspace_filesystem(&root, json!({"action":"hash","path":"note.txt"})).unwrap();
+        assert_eq!(hash["structuredContent"]["data"]["algorithm"], "sha256");
+
+        assert_eq!(
+            run_workspace_filesystem(&root, json!({"action":"hash","path":"note.txt","recursive":true}))
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            run_workspace_filesystem(&root, json!({"action":"write","path":"missing.txt"}))
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::InvalidArgument
+        );
+        assert_eq!(
+            run_workspace_filesystem(
+                &root,
+                json!({"action":"read","path":outside.join("outside.txt").to_string_lossy()}),
+            )
+            .unwrap_err()
+            .code,
+            FacadeErrorCode::WorkspaceDenied
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+}
+
 fn invalid_argument() -> FacadeError {
     FacadeError::new(
         FacadeErrorCode::InvalidArgument,
         "LocalBridge 工具参数无效",
         false,
     )
+}
+
+fn normalize_filesystem_error(error: FilesystemError) -> FacadeError {
+    match error {
+        FilesystemError::InvalidArgument
+        | FilesystemError::LimitExceeded
+        | FilesystemError::Unsupported => invalid_argument(),
+        FilesystemError::NotFound => {
+            FacadeError::new(FacadeErrorCode::NotFound, "文件系统目标不存在", false)
+        }
+        FilesystemError::OutsideAuthority => FacadeError::new(
+            FacadeErrorCode::WorkspaceDenied,
+            "文件系统路径越出当前授权范围",
+            false,
+        ),
+        FilesystemError::AlreadyExists => FacadeError::new(
+            FacadeErrorCode::FileChanged,
+            "文件系统目标已存在",
+            false,
+        ),
+        FilesystemError::Io => {
+            FacadeError::new(FacadeErrorCode::Internal, "文件系统操作失败", false)
+        }
+    }
 }
 
 fn normalize_shell_error(_error: ShellResolveError, selector: ShellSelector) -> FacadeError {
@@ -5727,7 +6211,7 @@ fn normalize_coding_edit_error(error: CodingEditError) -> FacadeError {
     }
 }
 
-fn normalize_path_authority_error(error: PathAuthorityError) -> FacadeError {
+pub(crate) fn normalize_path_authority_error(error: PathAuthorityError) -> FacadeError {
     match error {
         PathAuthorityError::InvalidPath | PathAuthorityError::OutsideAuthority => FacadeError::new(
             FacadeErrorCode::WorkspaceDenied,
@@ -6462,7 +6946,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .len(),
-            8
+            9
         );
         let context = facade
             .call_tool(

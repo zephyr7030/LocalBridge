@@ -14,11 +14,13 @@ use localbridge_lib::mcp::{
     InternalBearer, PolicyEnforcementRuntime,
 };
 use localbridge_lib::privilege::{
-    BROKER_PROTOCOL_VERSION, BrokerClientSession, BrokerReady, BrokerRejectCode, BrokerRequest,
-    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, ElevatedExecOutcome,
-    ElevatedExecResult, ElevatedExecSpec, NamedPipeClient, NamedPipeServer, PrivilegeController,
-    PrivilegeIpcError, PrivilegedExecution, PrivilegedFilesystemAction, PrivilegedFilesystemSpec,
-    ServerHello, decode_frame, encode_frame, random_session_nonce,
+    AdministratorFilesystemAction, AdministratorFilesystemErrorCode, AdministratorFilesystemSortBy,
+    AdministratorFilesystemSortOrder,
+    AdministratorFilesystemSpec, BROKER_PROTOCOL_VERSION, BrokerClientSession, BrokerReady,
+    BrokerRejectCode, BrokerRequest, BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope,
+    ElevatedExecOutcome, ElevatedExecResult, ElevatedExecSpec, NamedPipeClient, NamedPipeServer,
+    PrivilegeController, PrivilegeIpcError, PrivilegedExecution, PrivilegedFilesystemAction,
+    PrivilegedFilesystemSpec, ServerHello, decode_frame, encode_frame, random_session_nonce,
 };
 use localbridge_lib::state::{PermissionMode, PrivilegeState};
 use serde_json::{Value, json};
@@ -386,6 +388,131 @@ fn actual_broker_structured_filesystem_roundtrips_outside_workspace_without_shel
 
     session.shutdown().unwrap();
     assert!(child.wait().unwrap().success());
+}
+
+fn schema43_admin_fs_spec(action: AdministratorFilesystemAction) -> AdministratorFilesystemSpec {
+    AdministratorFilesystemSpec {
+        action,
+        path: None,
+        source: None,
+        destination: None,
+        recursive: false,
+        max_depth: 16,
+        max_entries: 10_000,
+        max_results: 1_000,
+        offset: 0,
+        max_bytes: 65_536,
+        content_base64: None,
+        pattern: None,
+        kind: None,
+        min_size: None,
+        max_size: None,
+        modified_after_ms: None,
+        modified_before_ms: None,
+        sort_by: AdministratorFilesystemSortBy::Path,
+        sort_order: AdministratorFilesystemSortOrder::Asc,
+        overwrite: false,
+        calculate_size: false,
+    }
+}
+
+#[test]
+fn schema43_actual_broker_structured_filesystem_covers_all_nine_actions() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "lb43-broker-fs-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("source.txt");
+    let copied = root.join("copied.txt");
+    let moved = root.join("moved.txt");
+    let (mut child, mut session) = authenticated_broker(43);
+
+    let mut write = schema43_admin_fs_spec(AdministratorFilesystemAction::Write);
+    write.path = Some(source.to_string_lossy().into_owned());
+    write.content_base64 = Some("aGVsbG8=".into());
+    session.structured_filesystem(write).unwrap().unwrap();
+    assert_eq!(fs::read(&source).unwrap(), b"hello");
+
+    let mut stat = schema43_admin_fs_spec(AdministratorFilesystemAction::Stat);
+    stat.path = Some(source.to_string_lossy().into_owned());
+    let stat = session.structured_filesystem(stat).unwrap().unwrap();
+    assert!(matches!(
+        stat,
+        localbridge_lib::privilege::AdministratorFilesystemResult::Stat { size: 5, .. }
+    ));
+
+    let mut read = schema43_admin_fs_spec(AdministratorFilesystemAction::Read);
+    read.path = Some(source.to_string_lossy().into_owned());
+    let read = session.structured_filesystem(read).unwrap().unwrap();
+    assert!(matches!(
+        read,
+        localbridge_lib::privilege::AdministratorFilesystemResult::Read { ref content, .. }
+            if content == "hello"
+    ));
+
+    let mut hash = schema43_admin_fs_spec(AdministratorFilesystemAction::Hash);
+    hash.path = Some(source.to_string_lossy().into_owned());
+    let hash = session.structured_filesystem(hash).unwrap().unwrap();
+    assert!(matches!(
+        hash,
+        localbridge_lib::privilege::AdministratorFilesystemResult::Hash { ref sha256, .. }
+            if sha256 == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    ));
+
+    let mut list = schema43_admin_fs_spec(AdministratorFilesystemAction::List);
+    list.path = Some(root.to_string_lossy().into_owned());
+    let list = session.structured_filesystem(list).unwrap().unwrap();
+    assert!(matches!(
+        list,
+        localbridge_lib::privilege::AdministratorFilesystemResult::Entries { ref entries, .. }
+            if entries.iter().any(|entry| entry.path.ends_with("source.txt"))
+    ));
+
+    let mut search = schema43_admin_fs_spec(AdministratorFilesystemAction::Search);
+    search.path = Some(root.to_string_lossy().into_owned());
+    search.pattern = Some("*.txt".into());
+    search.recursive = true;
+    let search = session.structured_filesystem(search).unwrap().unwrap();
+    assert!(matches!(
+        search,
+        localbridge_lib::privilege::AdministratorFilesystemResult::Entries { ref entries, .. }
+            if entries.iter().any(|entry| entry.path.ends_with("source.txt"))
+    ));
+
+    let mut copy = schema43_admin_fs_spec(AdministratorFilesystemAction::Copy);
+    copy.source = Some(source.to_string_lossy().into_owned());
+    copy.destination = Some(copied.to_string_lossy().into_owned());
+    session.structured_filesystem(copy).unwrap().unwrap();
+    assert_eq!(fs::read(&copied).unwrap(), b"hello");
+
+    let mut move_spec = schema43_admin_fs_spec(AdministratorFilesystemAction::Move);
+    move_spec.source = Some(copied.to_string_lossy().into_owned());
+    move_spec.destination = Some(moved.to_string_lossy().into_owned());
+    session.structured_filesystem(move_spec).unwrap().unwrap();
+    assert!(!copied.exists());
+    assert_eq!(fs::read(&moved).unwrap(), b"hello");
+
+    let mut delete = schema43_admin_fs_spec(AdministratorFilesystemAction::Delete);
+    delete.path = Some(moved.to_string_lossy().into_owned());
+    session.structured_filesystem(delete).unwrap().unwrap();
+    assert!(!moved.exists());
+
+    let mut missing = schema43_admin_fs_spec(AdministratorFilesystemAction::Read);
+    missing.path = Some(root.join("missing.txt").to_string_lossy().into_owned());
+    assert_eq!(
+        session.structured_filesystem(missing).unwrap(),
+        Err(AdministratorFilesystemErrorCode::NotFound)
+    );
+    session.ping().unwrap();
+
+    session.shutdown().unwrap();
+    assert!(child.wait().unwrap().success());
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[derive(Debug)]

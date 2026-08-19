@@ -66,6 +66,23 @@ fn os_command_line(pid: u32) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+fn visible_descendant_windows(root_pid: u32) -> Vec<String> {
+    let script = format!(
+        "$all=Get-CimInstance Win32_Process; $ids=@({root_pid}); $out=@(); for($i=0;$i -lt 4;$i++){{ $next=@(); foreach($id in $ids){{ foreach($p in $all | Where-Object {{$_.ParentProcessId -eq $id}}){{ $gp=Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue; if($gp -and $gp.MainWindowHandle -ne 0){{ $out += ($p.ProcessId.ToString()+'|'+$p.Name+'|'+$gp.MainWindowHandle.ToString()) }}; $next += $p.ProcessId }} }}; $ids=$next }}; $out"
+    );
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .expect("query managed process visible windows");
+    assert!(output.status.success(), "visible-window process query failed");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 #[test]
 fn actual_bundled_runtime_is_authenticated_loopback_owned_and_secret_redacted() {
     let root = repo_root();
@@ -82,7 +99,46 @@ fn actual_bundled_runtime_is_authenticated_loopback_owned_and_secret_redacted() 
     assert!(runtime.endpoint().ends_with("/mcp"));
     assert!(runtime.unauthenticated_initialize_is_rejected().unwrap());
     assert!(runtime.root_is_running().unwrap());
-    assert_eq!(runtime.active_processes().unwrap(), 1);
+    assert!(
+        runtime.active_processes().unwrap() >= 1,
+        "supervised Job must own the coding runtime process tree"
+    );
+    let startup_windows = visible_descendant_windows(runtime.process_snapshot().pid);
+    assert!(
+        startup_windows.is_empty(),
+        "coding runtime startup created visible console descendants: {startup_windows:?}"
+    );
+
+    let managed_command = runtime
+        .call_tool(
+            "exec_command",
+            json!({
+                "cmd":"cmd.exe /d /c ping -n 10 127.0.0.1 >nul",
+                "timeout_ms":15000,
+                "yield_time_ms":0,
+                "max_output_bytes":4096
+            }),
+        )
+        .expect("start managed command no-console probe");
+    let managed_session = managed_command
+        .get("structuredContent")
+        .and_then(|value| value.get("session_id"))
+        .and_then(|value| value.as_str())
+        .expect("managed command session id")
+        .to_string();
+    std::thread::sleep(Duration::from_millis(250));
+    let command_windows = visible_descendant_windows(runtime.process_snapshot().pid);
+    assert!(
+        command_windows.is_empty(),
+        "managed command created visible console descendants: {command_windows:?}"
+    );
+    let killed = runtime
+        .call_tool(
+            "kill_session",
+            json!({"session_id":managed_session,"signal":"KILL","wait_ms":1000,"max_output_bytes":4096}),
+        )
+        .expect("kill managed command no-console probe");
+    assert_ne!(killed.get("isError").and_then(|value| value.as_bool()), Some(true));
 
     let tools = runtime.list_tools().expect("tools/list");
     let catalog = tools

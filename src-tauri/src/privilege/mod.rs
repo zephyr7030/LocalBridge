@@ -17,14 +17,18 @@ pub use control::{
 #[cfg(windows)]
 pub(crate) use execution::{ExecutionCancel, run_elevated_exec};
 #[cfg(windows)]
-pub(crate) use filesystem::run_privileged_filesystem;
+pub(crate) use filesystem::{run_administrator_filesystem, run_privileged_filesystem};
 pub use protocol::{
+    AdministratorFilesystemAction, AdministratorFilesystemEntry, AdministratorFilesystemKind,
+    AdministratorFilesystemResult, AdministratorFilesystemSortBy,
+    AdministratorFilesystemSortOrder, AdministratorFilesystemSpec,
     BROKER_PROTOCOL_VERSION, BrokerProtocolError, BrokerReady, BrokerRejectCode, BrokerRequest,
     BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, BrokerSession,
     ElevatedExecOutcome, ElevatedExecResult, ElevatedExecSpec, MAX_BROKER_FRAME_BYTES,
     MAX_ELEVATED_ARGS, MAX_ELEVATED_OUTPUT_BYTES, MAX_ELEVATED_REQUEST_ID_BYTES,
-    MAX_ELEVATED_STRING_BYTES, MAX_ELEVATED_TIMEOUT_MS, MAX_PRIVILEGED_FILE_BYTES,
-    PrivilegedFilesystemAction, PrivilegedFilesystemResult, PrivilegedFilesystemSpec,
+    MAX_ADMINISTRATOR_FILESYSTEM_CONTENT_BYTES, MAX_ELEVATED_STRING_BYTES,
+    MAX_ELEVATED_TIMEOUT_MS, MAX_PRIVILEGED_FILE_BYTES,
+    AdministratorFilesystemErrorCode, PrivilegedFilesystemAction, PrivilegedFilesystemResult, PrivilegedFilesystemSpec,
     SESSION_NONCE_BYTES, ServerHello, SessionNonce, decode_frame, encode_frame,
     valid_elevated_request_id,
 };

@@ -8,9 +8,11 @@ use std::time::Duration;
 use crate::state::{GenerationId, PrivilegeFault, PrivilegeState};
 
 use super::{
-    BrokerClientSession, BrokerRunError, ElevatedBrokerProcess, ElevatedExecResult,
-    ElevatedExecSpec, NamedPipeServer, PrivilegeIpcError, PrivilegedFilesystemResult,
-    PrivilegedFilesystemSpec, UacLaunchError, launch_broker_with_explicit_uac,
+    AdministratorFilesystemErrorCode, AdministratorFilesystemResult, AdministratorFilesystemSpec,
+    BrokerClientSession,
+    BrokerRunError, ElevatedBrokerProcess, ElevatedExecResult, ElevatedExecSpec, NamedPipeServer,
+    PrivilegeIpcError, PrivilegedFilesystemResult, PrivilegedFilesystemSpec, UacLaunchError,
+    launch_broker_with_explicit_uac,
 };
 
 const BROKER_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -225,6 +227,7 @@ impl PrivilegeController {
 pub enum PrivilegedExecError {
     GateClosed(PrivilegeState),
     Broker(PrivilegeFault),
+    Filesystem(AdministratorFilesystemErrorCode),
 }
 
 pub trait PrivilegedExecution: Send + Sync {
@@ -243,6 +246,12 @@ pub trait PrivilegedExecution: Send + Sync {
         &self,
         spec: PrivilegedFilesystemSpec,
     ) -> Result<PrivilegedFilesystemResult, PrivilegedExecError>;
+    fn structured_filesystem(
+        &self,
+        _spec: AdministratorFilesystemSpec,
+    ) -> Result<AdministratorFilesystemResult, PrivilegedExecError> {
+        Err(PrivilegedExecError::GateClosed(self.state()))
+    }
 }
 
 #[derive(Clone)]
@@ -356,6 +365,15 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
     ) -> Result<PrivilegedFilesystemResult, PrivilegedExecError> {
         self.require_gate()?;
         self.with_session(|session| session.filesystem(spec))
+    }
+
+    fn structured_filesystem(
+        &self,
+        spec: AdministratorFilesystemSpec,
+    ) -> Result<AdministratorFilesystemResult, PrivilegedExecError> {
+        self.require_gate()?;
+        self.with_session(|session| session.structured_filesystem(spec))?
+            .map_err(PrivilegedExecError::Filesystem)
     }
 }
 

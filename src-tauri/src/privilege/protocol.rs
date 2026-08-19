@@ -12,6 +12,7 @@ pub const MAX_ELEVATED_TIMEOUT_MS: u32 = 120_000;
 pub const MAX_ELEVATED_OUTPUT_BYTES: u32 = 1024 * 1024;
 pub const MAX_ELEVATED_REQUEST_ID_BYTES: usize = 128;
 pub const MAX_PRIVILEGED_FILE_BYTES: usize = 24 * 1024;
+pub const MAX_ADMINISTRATOR_FILESYSTEM_CONTENT_BYTES: usize = 1024 * 1024;
 const BROKER_PIPE_PREFIX: &str = r"\\.\pipe\LocalBridge-Privileged-";
 
 fn is_windows_verbatim_path(value: &str) -> bool {
@@ -86,6 +87,9 @@ pub enum BrokerRequest {
     Filesystem {
         spec: PrivilegedFilesystemSpec,
     },
+    StructuredFilesystem {
+        spec: AdministratorFilesystemSpec,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +127,12 @@ pub enum BrokerResponse {
     },
     FilesystemCompleted {
         filesystem: PrivilegedFilesystemResult,
+    },
+    StructuredFilesystemCompleted {
+        filesystem: AdministratorFilesystemResult,
+    },
+    StructuredFilesystemFailed {
+        code: AdministratorFilesystemErrorCode,
     },
     CancelAck,
     Rejected {
@@ -264,6 +274,225 @@ pub struct PrivilegedFilesystemResult {
     pub destination: Option<String>,
     pub content_base64: Option<String>,
     pub bytes: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdministratorFilesystemAction {
+    List,
+    Stat,
+    Read,
+    Write,
+    Search,
+    Copy,
+    Move,
+    Delete,
+    Hash,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdministratorFilesystemKind {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdministratorFilesystemSortBy {
+    Path,
+    Size,
+    Modified,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdministratorFilesystemSortOrder {
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdministratorFilesystemErrorCode {
+    InvalidArgument,
+    NotFound,
+    OutsideAuthority,
+    AlreadyExists,
+    LimitExceeded,
+    Unsupported,
+    Io,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdministratorFilesystemSpec {
+    pub action: AdministratorFilesystemAction,
+    pub path: Option<String>,
+    pub source: Option<String>,
+    pub destination: Option<String>,
+    pub recursive: bool,
+    pub max_depth: u32,
+    pub max_entries: u32,
+    pub max_results: u32,
+    pub offset: u64,
+    pub max_bytes: u32,
+    pub content_base64: Option<String>,
+    pub pattern: Option<String>,
+    pub kind: Option<AdministratorFilesystemKind>,
+    pub min_size: Option<u64>,
+    pub max_size: Option<u64>,
+    pub modified_after_ms: Option<u64>,
+    pub modified_before_ms: Option<u64>,
+    pub sort_by: AdministratorFilesystemSortBy,
+    pub sort_order: AdministratorFilesystemSortOrder,
+    pub overwrite: bool,
+    pub calculate_size: bool,
+}
+
+impl AdministratorFilesystemSpec {
+    pub fn validate(&self) -> Result<(), BrokerProtocolError> {
+        let paths_valid = self
+            .path
+            .as_deref()
+            .is_none_or(valid_privileged_absolute_path)
+            && self
+                .source
+                .as_deref()
+                .is_none_or(valid_privileged_absolute_path)
+            && self
+                .destination
+                .as_deref()
+                .is_none_or(valid_privileged_absolute_path);
+        let bounds_valid = self.max_depth > 0
+            && self.max_depth <= 64
+            && self.max_entries > 0
+            && self.max_entries <= 100_000
+            && self.max_results > 0
+            && self.max_results <= 10_000
+            && self.max_bytes > 0
+            && self.max_bytes <= 1024 * 1024
+            && self.min_size.zip(self.max_size).is_none_or(|(min, max)| min <= max)
+            && self
+                .modified_after_ms
+                .zip(self.modified_before_ms)
+                .is_none_or(|(min, max)| min <= max);
+        let content_valid = self.content_base64.as_ref().is_none_or(|value| {
+            value.len() <= MAX_ADMINISTRATOR_FILESYSTEM_CONTENT_BYTES.div_ceil(3) * 4 + 4
+                && !value.as_bytes().contains(&0)
+        });
+        let pattern_valid = self.pattern.as_ref().is_none_or(|value| {
+            !value.is_empty()
+                && value.len() <= MAX_ELEVATED_STRING_BYTES
+                && !value.as_bytes().contains(&0)
+                && !value.contains(['\n', '\r'])
+        });
+        if !paths_valid || !bounds_valid || !content_valid || !pattern_valid {
+            return Err(BrokerProtocolError::MalformedFrame);
+        }
+        let shape_valid = match self.action {
+            AdministratorFilesystemAction::List
+            | AdministratorFilesystemAction::Stat
+            | AdministratorFilesystemAction::Read
+            | AdministratorFilesystemAction::Delete
+            | AdministratorFilesystemAction::Hash => {
+                self.path.is_some()
+                    && self.source.is_none()
+                    && self.destination.is_none()
+                    && self.content_base64.is_none()
+                    && self.pattern.is_none()
+                    && self.kind.is_none()
+                    && self.min_size.is_none()
+                    && self.max_size.is_none()
+                    && self.modified_after_ms.is_none()
+                    && self.modified_before_ms.is_none()
+            }
+            AdministratorFilesystemAction::Write => {
+                self.path.is_some()
+                    && self.source.is_none()
+                    && self.destination.is_none()
+                    && self.content_base64.is_some()
+                    && self.pattern.is_none()
+                    && self.kind.is_none()
+                    && self.min_size.is_none()
+                    && self.max_size.is_none()
+                    && self.modified_after_ms.is_none()
+                    && self.modified_before_ms.is_none()
+            }
+            AdministratorFilesystemAction::Search => {
+                self.path.is_some()
+                    && self.source.is_none()
+                    && self.destination.is_none()
+                    && self.content_base64.is_none()
+                    && self.pattern.is_some()
+            }
+            AdministratorFilesystemAction::Copy | AdministratorFilesystemAction::Move => {
+                self.path.is_none()
+                    && self.source.is_some()
+                    && self.destination.is_some()
+                    && self.content_base64.is_none()
+                    && self.pattern.is_none()
+                    && self.kind.is_none()
+                    && self.min_size.is_none()
+                    && self.max_size.is_none()
+                    && self.modified_after_ms.is_none()
+                    && self.modified_before_ms.is_none()
+            }
+        };
+        shape_valid
+            .then_some(())
+            .ok_or(BrokerProtocolError::MalformedFrame)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdministratorFilesystemEntry {
+    pub path: String,
+    pub kind: String,
+    pub size: u64,
+    pub modified_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result_kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AdministratorFilesystemResult {
+    Entries {
+        action: AdministratorFilesystemAction,
+        entries: Vec<AdministratorFilesystemEntry>,
+        scanned_entries: u32,
+        truncated: bool,
+    },
+    Stat {
+        path: String,
+        kind: String,
+        size: u64,
+        modified_ms: Option<u64>,
+        calculated_size: bool,
+        scanned_entries: u32,
+        truncated: bool,
+    },
+    Read {
+        path: String,
+        offset: u64,
+        total_bytes: u64,
+        returned_bytes: u32,
+        eof: bool,
+        encoding: String,
+        content: String,
+    },
+    Mutation {
+        action: AdministratorFilesystemAction,
+        path: String,
+        destination: Option<String>,
+        bytes: u64,
+        changed: bool,
+    },
+    Hash {
+        path: String,
+        algorithm: String,
+        sha256: String,
+        bytes: u64,
+    },
 }
 
 fn valid_privileged_absolute_path(value: &str) -> bool {

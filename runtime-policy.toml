@@ -8,9 +8,9 @@ elevated_allowed_tools = ["server_info", "check_exec_environment", "get_default_
 blocked_tools = ["request_permissions"]
 
 [localbridge_public]
-edit_tools = ["workspace_context", "agent_workflow", "git_workflow", "document_workflow", "view_image"]
-full_tools = ["workspace_context", "agent_workflow", "exec_command", "command_control", "task_control", "git_workflow", "document_workflow", "view_image"]
-elevated_tools = ["workspace_context", "agent_workflow", "exec_command", "command_control", "task_control", "git_workflow", "document_workflow", "view_image"]
+edit_tools = ["workspace_context", "agent_workflow", "filesystem", "git_workflow", "document_workflow", "view_image"]
+full_tools = ["workspace_context", "agent_workflow", "filesystem", "exec_command", "command_control", "task_control", "git_workflow", "document_workflow", "view_image"]
+elevated_tools = ["workspace_context", "agent_workflow", "filesystem", "exec_command", "command_control", "task_control", "git_workflow", "document_workflow", "view_image"]
 unknown_action = "deny"
 network = "deny_unreviewed"
 privilege = "broker_only"

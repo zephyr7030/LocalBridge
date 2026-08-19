@@ -429,16 +429,16 @@ fn unknown_public_actions_and_public_policy_widening_fail_closed() {
     let base = include_str!("../../../runtime-policy.toml");
     let narrowed = base
         .replace(
-            "edit_tools = [\"workspace_context\", \"agent_workflow\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
-            "edit_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            "edit_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            "edit_tools = [\"workspace_context\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
         )
         .replace(
-            "full_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
-            "full_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            "full_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            "full_tools = [\"workspace_context\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
         )
         .replace(
-            "elevated_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
-            "elevated_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            "elevated_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+            "elevated_tools = [\"workspace_context\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
         );
     let narrowed = CapabilityPolicy::from_toml(&narrowed).expect("stricter policy remains valid");
     assert!(!narrowed.public_tool_allowed_for_list(PermissionMode::Full, "exec_command"));
@@ -453,12 +453,12 @@ fn unknown_public_actions_and_public_policy_widening_fail_closed() {
     );
 
     let widened = base.replace(
-        "edit_tools = [\"workspace_context\", \"agent_workflow\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
-        "edit_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+        "edit_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+        "edit_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"exec_command\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
     );
     assert!(CapabilityPolicy::from_toml(&widened).is_err());
     let unknown_tool = base.replace(
-        "full_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+        "full_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
         "full_tools = [\"workspace_context\", \"future_private_tool\"]",
     );
     assert!(CapabilityPolicy::from_toml(&unknown_tool).is_err());

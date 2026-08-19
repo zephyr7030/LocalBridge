@@ -210,6 +210,20 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                     }
                 }
             }
+            BrokerRequest::StructuredFilesystem { spec } => {
+                if spec.validate().is_err() {
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::Malformed,
+                    }
+                } else {
+                    match super::run_administrator_filesystem(spec) {
+                        Ok(filesystem) => {
+                            BrokerResponse::StructuredFilesystemCompleted { filesystem }
+                        }
+                        Err(code) => BrokerResponse::StructuredFilesystemFailed { code },
+                    }
+                }
+            }
         };
         let shutdown = matches!(response, BrokerResponse::ShutdownAck);
         pipe.write_frame(&encode_frame(&BrokerResponseEnvelope {
@@ -336,6 +350,20 @@ impl BrokerClientSession {
     ) -> Result<super::PrivilegedFilesystemResult, BrokerRunError> {
         match self.request(BrokerRequest::Filesystem { spec })? {
             BrokerResponse::FilesystemCompleted { filesystem } => Ok(filesystem),
+            _ => Err(BrokerRunError::UnexpectedResponse),
+        }
+    }
+
+    pub fn structured_filesystem(
+        &mut self,
+        spec: super::AdministratorFilesystemSpec,
+    ) -> Result<
+        Result<super::AdministratorFilesystemResult, super::AdministratorFilesystemErrorCode>,
+        BrokerRunError,
+    > {
+        match self.request(BrokerRequest::StructuredFilesystem { spec })? {
+            BrokerResponse::StructuredFilesystemCompleted { filesystem } => Ok(Ok(filesystem)),
+            BrokerResponse::StructuredFilesystemFailed { code } => Ok(Err(code)),
             _ => Err(BrokerRunError::UnexpectedResponse),
         }
     }

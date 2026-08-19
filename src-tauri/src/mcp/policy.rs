@@ -125,6 +125,7 @@ pub struct PublicActionDescriptor {
 const PUBLIC_CORE_TOOLS: &[&str] = &[
     "workspace_context",
     "agent_workflow",
+    "filesystem",
     "exec_command",
     "command_control",
     "task_control",
@@ -135,6 +136,7 @@ const PUBLIC_CORE_TOOLS: &[&str] = &[
 const PUBLIC_EDIT_MAX: &[&str] = &[
     "workspace_context",
     "agent_workflow",
+    "filesystem",
     "git_workflow",
     "document_workflow",
     "view_image",
@@ -644,6 +646,32 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             TaskKind::ReadFile,
             PublicCapabilityDeclaration::READ,
         )),
+        "filesystem" => {
+            let filesystem_action: &'static str = match action? {
+                "list" => "list",
+                "stat" => "stat",
+                "read" => "read",
+                "write" => "write",
+                "search" => "search",
+                "copy" => "copy",
+                "move" => "move",
+                "delete" => "delete",
+                "hash" => "hash",
+                _ => return None,
+            };
+            let (capability, task_kind, declaration) = match filesystem_action {
+                "search" => (Capability::Read, TaskKind::SearchCode, PublicCapabilityDeclaration::READ),
+                "list" | "stat" | "read" | "hash" => (Capability::Read, TaskKind::ReadFile, PublicCapabilityDeclaration::READ),
+                _ => (Capability::Write, TaskKind::ModifyFile, PublicCapabilityDeclaration::workflow(true, false, false, false, false)),
+            };
+            Some(public_descriptor(
+                "filesystem",
+                filesystem_action,
+                capability,
+                task_kind,
+                declaration,
+            ))
+        }
         "exec_command" if action.is_none() => Some(public_descriptor(
             "exec_command",
             if dry_run { "explain" } else { "execute" },
@@ -2555,7 +2583,7 @@ fn administrator_shell_executable(basename: &str) -> bool {
     )
 }
 
-fn explicit_control_plane_reference(value: &str) -> bool {
+pub(crate) fn explicit_control_plane_reference(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     [
         "localbridge",

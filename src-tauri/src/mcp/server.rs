@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, TryLockError, mpsc};
 use std::thread::{self, JoinHandle};
@@ -19,6 +19,9 @@ use crate::diagnostics::{
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
+    AdministratorFilesystemAction, AdministratorFilesystemErrorCode, AdministratorFilesystemKind,
+    AdministratorFilesystemResult,
+    AdministratorFilesystemSortBy, AdministratorFilesystemSortOrder, AdministratorFilesystemSpec,
     ElevatedExecOutcome, ElevatedExecSpec, PrivilegedExecError, PrivilegedExecution,
     PrivilegedFilesystemSpec,
 };
@@ -29,11 +32,13 @@ use crate::state::{
 
 use super::facade::{
     AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter, FacadeCallError, FacadeDenied,
-    FacadeError, FacadeErrorCode, AGENT_API_REVISION, public_error_output_schema,
+    FacadeError, FacadeErrorCode, FilesystemAction, FilesystemRequest, AGENT_API_REVISION,
+    normalize_path_authority_error, parse_filesystem_request, public_error_output_schema,
     public_tools_for_policy, stable_success, validate_workspace_context_probe,
 };
 use super::http::{McpCancellationClient, McpHealthClient};
-use super::policy::CapabilityPolicy;
+use super::path_authority::PathAuthority;
+use super::policy::{CapabilityPolicy, explicit_control_plane_reference};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use super::shell::{ShellExecutionSpec, ShellExecutor, ShellSelector};
 use super::task_state::{CommandTaskStateStore, TerminalCommandSnapshot};
@@ -77,6 +82,12 @@ struct ElevatedCallContext<'a> {
     active_requests: &'a Mutex<Vec<Value>>,
     privileged_requests: &'a Mutex<Vec<(Value, String)>>,
     stopping: &'a AtomicBool,
+}
+
+struct AdministratorFilesystemContext<'a> {
+    guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
+    privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
+    current_task: &'a CurrentTaskProjection,
 }
 
 struct TaskControlContext<'a> {
@@ -1316,6 +1327,22 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 );
                 return finalize_special_handler_request(&request_key, session, result);
             }
+            if name == "filesystem" {
+                if let Some(result) = handle_administrator_filesystem_if_needed(
+                    &mut stream,
+                    id.clone(),
+                    session,
+                    mode,
+                    &arguments,
+                    AdministratorFilesystemContext {
+                        guard,
+                        privileged,
+                        current_task,
+                    },
+                ) {
+                    return result;
+                }
+            }
             if name == "task_control" {
                 let request_key = request_diagnostic_key(&id);
                 record_mcp_request_start(&request_key, session, name);
@@ -1541,7 +1568,13 @@ fn handle_task_control(
                     .unwrap_or(false),
             };
             let cancelled = cancelled.saturating_add(u64::from(durable_cancelled));
-            if cancelled > 0 { wait_for_task_cancel_settlement(current_task, Duration::from_millis(500)); }
+            if cancelled > 0 {
+                wait_for_task_cancel_settlement(
+                    current_task,
+                    task_state,
+                    Duration::from_millis(1_500),
+                );
+            }
             let mut data = match guard.try_lock() {
                 Ok(guard) => guard.task_aggregate_snapshot(),
                 Err(TryLockError::WouldBlock) => task_control_snapshot_with_terminal(&current_task.actual_snapshot(), task_state),
@@ -1572,9 +1605,16 @@ fn handle_task_control(
     )
 }
 
-fn wait_for_task_cancel_settlement(current_task: &CurrentTaskProjection, max_wait: Duration) {
+fn wait_for_task_cancel_settlement(
+    current_task: &CurrentTaskProjection,
+    task_state: &CommandTaskStateStore,
+    max_wait: Duration,
+) {
     let deadline = Instant::now() + max_wait;
-    while !matches!(current_task.actual_snapshot(), CurrentTaskStatus::Idle) && Instant::now() < deadline {
+    while (!matches!(current_task.actual_snapshot(), CurrentTaskStatus::Idle)
+        || task_state.current_owner().is_some())
+        && Instant::now() < deadline
+    {
         thread::sleep(Duration::from_millis(10));
     }
 }
@@ -1849,6 +1889,427 @@ fn elevation_required_result() -> Value {
         true,
     )
     .to_mcp_result()
+}
+
+fn privileged_filesystem_unavailable_result() -> Value {
+    FacadeError::new(
+        FacadeErrorCode::PrivilegedRouteNotAvailable,
+        "管理员 Broker 文件系统操作不可用",
+        true,
+    )
+    .to_mcp_result()
+}
+
+fn filesystem_task_kind(action: FilesystemAction) -> TaskKind {
+    match action {
+        FilesystemAction::List
+        | FilesystemAction::Stat
+        | FilesystemAction::Read
+        | FilesystemAction::Hash => TaskKind::ReadFile,
+        FilesystemAction::Search => TaskKind::SearchCode,
+        FilesystemAction::Write
+        | FilesystemAction::Copy
+        | FilesystemAction::Move
+        | FilesystemAction::Delete => TaskKind::ModifyFile,
+    }
+}
+
+fn project_filesystem_task(
+    current_task: &CurrentTaskProjection,
+    kind: TaskKind,
+    state: TaskExecutionState,
+) {
+    current_task.project(
+        CurrentTaskStatus::project(kind, SafeTaskSummary::Omitted, state)
+            .expect("filesystem task state is valid"),
+    );
+}
+
+fn finish_filesystem_task(
+    current_task: &CurrentTaskProjection,
+    kind: TaskKind,
+    terminal: Option<TaskExecutionState>,
+) {
+    if let Some(state) = terminal {
+        project_filesystem_task(current_task, kind, state);
+    }
+    current_task.project(CurrentTaskStatus::Idle);
+}
+
+fn handle_administrator_filesystem_if_needed(
+    stream: &mut TcpStream,
+    id: Value,
+    session: &str,
+    mode: PermissionMode,
+    arguments: &Value,
+    context: AdministratorFilesystemContext<'_>,
+) -> Option<Result<(), ()>> {
+    let AdministratorFilesystemContext {
+        guard,
+        privileged,
+        current_task,
+    } = context;
+    if mode != PermissionMode::Elevated {
+        return None;
+    }
+    let execution_guard = guard
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let request = match parse_filesystem_request(arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            let request_key = request_diagnostic_key(&id);
+            record_mcp_request_start(&request_key, session, "filesystem");
+            project_filesystem_task(current_task, TaskKind::ModifyFile, TaskExecutionState::Blocked);
+            current_task.project(CurrentTaskStatus::Idle);
+            return Some(finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, error.to_mcp_result(), Some(session)),
+            ));
+        }
+    };
+    let kind = filesystem_task_kind(request.action);
+    if let Err(FacadeCallError::Denied(denied)) =
+        execution_guard.authorize_public_request(mode, "filesystem", arguments)
+    {
+        let request_key = request_diagnostic_key(&id);
+        record_mcp_request_start(&request_key, session, "filesystem");
+        project_filesystem_task(current_task, kind, TaskExecutionState::Blocked);
+        current_task.project(CurrentTaskStatus::Idle);
+        return Some(finalize_special_handler_request(
+            &request_key,
+            session,
+            write_rpc_result(stream, id, denied.to_mcp_result(), Some(session)),
+        ));
+    }
+    let spec = match administrator_filesystem_spec(execution_guard.workspace_path(), &request) {
+        Ok(Some(spec)) => spec,
+        Ok(None) => return None,
+        Err(error) => {
+            let request_key = request_diagnostic_key(&id);
+            record_mcp_request_start(&request_key, session, "filesystem");
+            project_filesystem_task(current_task, kind, TaskExecutionState::Blocked);
+            current_task.project(CurrentTaskStatus::Idle);
+            return Some(finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, error.to_mcp_result(), Some(session)),
+            ));
+        }
+    };
+    drop(execution_guard);
+
+    let request_key = request_diagnostic_key(&id);
+    record_mcp_request_start(&request_key, session, "filesystem");
+    let Some(privileged) = privileged else {
+        finish_filesystem_task(
+            current_task,
+            kind,
+            Some(TaskExecutionState::AwaitingAuthorization),
+        );
+        return Some(finalize_special_handler_request(
+            &request_key,
+            session,
+            write_rpc_result(stream, id, elevation_required_result(), Some(session)),
+        ));
+    };
+    if !matches!(privileged.state(), PrivilegeState::Active { .. }) {
+        finish_filesystem_task(
+            current_task,
+            kind,
+            Some(TaskExecutionState::AwaitingAuthorization),
+        );
+        return Some(finalize_special_handler_request(
+            &request_key,
+            session,
+            write_rpc_result(stream, id, elevation_required_result(), Some(session)),
+        ));
+    }
+
+    project_filesystem_task(current_task, kind, TaskExecutionState::Running);
+    let filesystem = match privileged.structured_filesystem(spec) {
+        Ok(filesystem) => filesystem,
+        Err(PrivilegedExecError::GateClosed(_)) => {
+            finish_filesystem_task(
+                current_task,
+                kind,
+                Some(TaskExecutionState::AwaitingAuthorization),
+            );
+            return Some(finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, elevation_required_result(), Some(session)),
+            ));
+        }
+        Err(PrivilegedExecError::Broker(_)) => {
+            finish_filesystem_task(current_task, kind, Some(TaskExecutionState::Failed));
+            return Some(finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(
+                    stream,
+                    id,
+                    privileged_filesystem_unavailable_result(),
+                    Some(session),
+                ),
+            ));
+        }
+        Err(PrivilegedExecError::Filesystem(code)) => {
+            finish_filesystem_task(current_task, kind, Some(TaskExecutionState::Failed));
+            return Some(finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(
+                    stream,
+                    id,
+                    administrator_filesystem_error_result(code),
+                    Some(session),
+                ),
+            ));
+        }
+    };
+    let data = match administrator_filesystem_result_data(filesystem) {
+        Ok(data) => data,
+        Err(error) => {
+            finish_filesystem_task(current_task, kind, Some(TaskExecutionState::Failed));
+            return Some(finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, error.to_mcp_result(), Some(session)),
+            ));
+        }
+    };
+    finish_filesystem_task(current_task, kind, None);
+    Some(finalize_special_handler_request(
+        &request_key,
+        session,
+        write_rpc_result(
+            stream,
+            id,
+            stable_success(data, "Filesystem operation completed"),
+            Some(session),
+        ),
+    ))
+}
+
+fn administrator_filesystem_spec(
+    workspace: &Path,
+    request: &FilesystemRequest,
+) -> Result<Option<AdministratorFilesystemSpec>, FacadeError> {
+    let authority = PathAuthority::active_workspace(workspace).map_err(normalize_path_authority_error)?;
+    let mut outside = false;
+    for path in request.path_inputs().into_iter().flatten() {
+        if !authority
+            .input_is_within_execution_root(path)
+            .map_err(normalize_path_authority_error)?
+        {
+            outside = true;
+        }
+    }
+    if !outside {
+        return Ok(None);
+    }
+
+    match request.action {
+        FilesystemAction::Write => {
+            validate_workspace_side_path(
+                &authority,
+                request.path.as_deref().expect("write path parsed"),
+                true,
+            )?;
+        }
+        FilesystemAction::Copy | FilesystemAction::Move => {
+            validate_workspace_side_path(
+                &authority,
+                request.source.as_deref().expect("copy/move source parsed"),
+                false,
+            )?;
+            validate_workspace_side_path(
+                &authority,
+                request.destination.as_deref().expect("copy/move destination parsed"),
+                true,
+            )?;
+        }
+        _ => {
+            validate_workspace_side_path(
+                &authority,
+                request.path.as_deref().expect("filesystem path parsed"),
+                false,
+            )?;
+        }
+    }
+
+    let path = request
+        .path
+        .as_deref()
+        .map(|path| administrator_absolute_path(&authority, path))
+        .transpose()?;
+    let source = request
+        .source
+        .as_deref()
+        .map(|path| administrator_absolute_path(&authority, path))
+        .transpose()?;
+    let destination = request
+        .destination
+        .as_deref()
+        .map(|path| administrator_absolute_path(&authority, path))
+        .transpose()?;
+    for candidate in [&path, &source, &destination].into_iter().flatten() {
+        if explicit_control_plane_reference(candidate) {
+            return Err(FacadeError::new(
+                FacadeErrorCode::PolicyDenied,
+                "LocalBridge 控制面路径禁止通过文件系统工具修改",
+                false,
+            ));
+        }
+    }
+
+    let max_entries = u32::try_from(request.max_entries).map_err(|_| {
+        FacadeError::new(FacadeErrorCode::InvalidArgument, "文件系统参数无效", false)
+    })?;
+    let max_results = u32::try_from(request.max_results).map_err(|_| {
+        FacadeError::new(FacadeErrorCode::InvalidArgument, "文件系统参数无效", false)
+    })?;
+    let max_bytes = u32::try_from(request.max_bytes).map_err(|_| {
+        FacadeError::new(FacadeErrorCode::InvalidArgument, "文件系统参数无效", false)
+    })?;
+    let spec = AdministratorFilesystemSpec {
+        action: match request.action {
+            FilesystemAction::List => AdministratorFilesystemAction::List,
+            FilesystemAction::Stat => AdministratorFilesystemAction::Stat,
+            FilesystemAction::Read => AdministratorFilesystemAction::Read,
+            FilesystemAction::Write => AdministratorFilesystemAction::Write,
+            FilesystemAction::Search => AdministratorFilesystemAction::Search,
+            FilesystemAction::Copy => AdministratorFilesystemAction::Copy,
+            FilesystemAction::Move => AdministratorFilesystemAction::Move,
+            FilesystemAction::Delete => AdministratorFilesystemAction::Delete,
+            FilesystemAction::Hash => AdministratorFilesystemAction::Hash,
+        },
+        path,
+        source,
+        destination,
+        recursive: request.recursive,
+        max_depth: request.max_depth,
+        max_entries,
+        max_results,
+        offset: request.offset,
+        max_bytes,
+        content_base64: request.content_base64(),
+        pattern: request.pattern.clone(),
+        kind: request.kind.as_deref().map(|kind| match kind {
+            "file" => AdministratorFilesystemKind::File,
+            "directory" => AdministratorFilesystemKind::Directory,
+            _ => unreachable!("filesystem parser restricts kind"),
+        }),
+        min_size: request.min_size,
+        max_size: request.max_size,
+        modified_after_ms: request.modified_after_ms,
+        modified_before_ms: request.modified_before_ms,
+        sort_by: match request.sort_by.as_str() {
+            "path" => AdministratorFilesystemSortBy::Path,
+            "size" => AdministratorFilesystemSortBy::Size,
+            "modified" => AdministratorFilesystemSortBy::Modified,
+            _ => unreachable!("filesystem parser restricts sort_by"),
+        },
+        sort_order: match request.sort_order.as_str() {
+            "asc" => AdministratorFilesystemSortOrder::Asc,
+            "desc" => AdministratorFilesystemSortOrder::Desc,
+            _ => unreachable!("filesystem parser restricts sort_order"),
+        },
+        overwrite: request.overwrite,
+        calculate_size: request.calculate_size,
+    };
+    spec.validate().map_err(|_| {
+        FacadeError::new(FacadeErrorCode::InvalidArgument, "文件系统参数无效", false)
+    })?;
+    Ok(Some(spec))
+}
+
+fn validate_workspace_side_path(
+    authority: &PathAuthority,
+    path: &str,
+    allow_missing_leaf: bool,
+) -> Result<(), FacadeError> {
+    if !authority
+        .input_is_within_execution_root(path)
+        .map_err(normalize_path_authority_error)?
+    {
+        return Ok(());
+    }
+    if allow_missing_leaf {
+        authority
+            .resolve_missing_leaf(path)
+            .map_err(normalize_path_authority_error)?;
+    } else {
+        authority
+            .resolve_existing(path)
+            .map_err(normalize_path_authority_error)?;
+    }
+    Ok(())
+}
+
+fn administrator_absolute_path(
+    authority: &PathAuthority,
+    path: &str,
+) -> Result<String, FacadeError> {
+    let absolute = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        authority.input_path(path).map_err(normalize_path_authority_error)?
+    };
+    Ok(absolute.to_string_lossy().into_owned())
+}
+
+fn administrator_filesystem_result_data(
+    filesystem: AdministratorFilesystemResult,
+) -> Result<Value, FacadeError> {
+    let mut data = serde_json::to_value(filesystem).map_err(|_| {
+        FacadeError::new(FacadeErrorCode::Internal, "文件系统结果投影失败", false)
+    })?;
+    let object = data.as_object_mut().ok_or_else(|| {
+        FacadeError::new(FacadeErrorCode::Internal, "文件系统结果投影失败", false)
+    })?;
+    object.remove("result_kind");
+    object.remove("action");
+    Ok(data)
+}
+
+fn administrator_filesystem_error_result(code: AdministratorFilesystemErrorCode) -> Value {
+    let (code, message, retryable) = match code {
+        AdministratorFilesystemErrorCode::InvalidArgument
+        | AdministratorFilesystemErrorCode::LimitExceeded => (
+            FacadeErrorCode::InvalidArgument,
+            "文件系统参数无效或超过限制",
+            false,
+        ),
+        AdministratorFilesystemErrorCode::NotFound => (
+            FacadeErrorCode::NotFound,
+            "文件系统对象不存在",
+            false,
+        ),
+        AdministratorFilesystemErrorCode::OutsideAuthority => (
+            FacadeErrorCode::WorkspaceDenied,
+            "文件系统路径超出授权范围",
+            false,
+        ),
+        AdministratorFilesystemErrorCode::AlreadyExists => (
+            FacadeErrorCode::FileChanged,
+            "目标文件系统对象已存在",
+            false,
+        ),
+        AdministratorFilesystemErrorCode::Unsupported => (
+            FacadeErrorCode::CapabilityDenied,
+            "该文件系统对象类型不受支持",
+            false,
+        ),
+        AdministratorFilesystemErrorCode::Io => (
+            FacadeErrorCode::Internal,
+            "文件系统操作未完成",
+            true,
+        ),
+    };
+    FacadeError::new(code, message, retryable).to_mcp_result()
 }
 
 fn append_elevated_exec_tool(result: &mut Value) {
@@ -2139,6 +2600,16 @@ fn handle_elevated_exec(
                     Some(session),
                 );
             }
+            Err(PrivilegedExecError::Filesystem(_)) => {
+                finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
+                return write_rpc_error(
+                    stream,
+                    id,
+                    -32603,
+                    "Privileged broker filesystem operation failed",
+                    Some(session),
+                );
+            }
         };
         let response = json!({
             "content": [{"type":"text","text":"Privileged filesystem operation completed"}],
@@ -2190,6 +2661,16 @@ fn handle_elevated_exec(
                     Some(session),
                 )
             }
+            PrivilegedExecError::Filesystem(_) => {
+                finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
+                write_rpc_error(
+                    stream,
+                    id,
+                    -32603,
+                    "Privileged broker execution failed",
+                    Some(session),
+                )
+            }
         };
     }
 
@@ -2216,6 +2697,16 @@ fn handle_elevated_exec(
             return write_rpc_result(stream, id, elevation_required_result(), Some(session));
         }
         Err(PrivilegedExecError::Broker(_)) => {
+            finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
+            return write_rpc_error(
+                stream,
+                id,
+                -32603,
+                "Privileged broker execution failed",
+                Some(session),
+            );
+        }
+        Err(PrivilegedExecError::Filesystem(_)) => {
             finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
             return write_rpc_error(
                 stream,
@@ -2909,6 +3400,7 @@ mod tests {
     struct FakePrivilegedExecution {
         state: RwLock<PrivilegeState>,
         starts: Mutex<Vec<ElevatedExecSpec>>,
+        structured_filesystems: Mutex<Vec<AdministratorFilesystemSpec>>,
         cancelled: AtomicBool,
         complete: AtomicBool,
     }
@@ -2920,6 +3412,7 @@ mod tests {
                     broker_generation: crate::state::GenerationId::new(77),
                 }),
                 starts: Mutex::new(Vec::new()),
+                structured_filesystems: Mutex::new(Vec::new()),
                 cancelled: AtomicBool::new(false),
                 complete: AtomicBool::new(false),
             }
@@ -2934,6 +3427,13 @@ mod tests {
 
         fn start_count(&self) -> usize {
             self.starts
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len()
+        }
+
+        fn structured_filesystem_count(&self) -> usize {
+            self.structured_filesystems
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .len()
@@ -3027,6 +3527,66 @@ mod tests {
                 destination: spec.destination,
                 content_base64: spec.content_base64,
                 bytes: 0,
+            })
+        }
+
+        fn structured_filesystem(
+            &self,
+            spec: AdministratorFilesystemSpec,
+        ) -> Result<AdministratorFilesystemResult, PrivilegedExecError> {
+            let state = self.state();
+            if !state.accepts_privileged_calls() {
+                return Err(PrivilegedExecError::GateClosed(state));
+            }
+            self.structured_filesystems
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(spec.clone());
+            Ok(match spec.action {
+                AdministratorFilesystemAction::List | AdministratorFilesystemAction::Search => {
+                    AdministratorFilesystemResult::Entries {
+                        action: spec.action,
+                        entries: Vec::new(),
+                        scanned_entries: 0,
+                        truncated: false,
+                    }
+                }
+                AdministratorFilesystemAction::Stat => AdministratorFilesystemResult::Stat {
+                    path: spec.path.unwrap(),
+                    kind: "file".into(),
+                    size: 0,
+                    modified_ms: None,
+                    calculated_size: spec.calculate_size,
+                    scanned_entries: 0,
+                    truncated: false,
+                },
+                AdministratorFilesystemAction::Read => AdministratorFilesystemResult::Read {
+                    path: spec.path.unwrap(),
+                    offset: spec.offset,
+                    total_bytes: 15,
+                    returned_bytes: 15,
+                    eof: true,
+                    encoding: "utf8".into(),
+                    content: "LB43_FAKE_ADMIN".into(),
+                },
+                AdministratorFilesystemAction::Write
+                | AdministratorFilesystemAction::Copy
+                | AdministratorFilesystemAction::Move
+                | AdministratorFilesystemAction::Delete => {
+                    AdministratorFilesystemResult::Mutation {
+                        action: spec.action,
+                        path: spec.path.or(spec.source).unwrap(),
+                        destination: spec.destination,
+                        bytes: 0,
+                        changed: true,
+                    }
+                }
+                AdministratorFilesystemAction::Hash => AdministratorFilesystemResult::Hash {
+                    path: spec.path.unwrap(),
+                    algorithm: "sha256".into(),
+                    sha256: "0".repeat(64),
+                    bytes: 0,
+                },
             })
         }
     }
@@ -4840,7 +5400,7 @@ mod tests {
             &json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}),
         );
         let full_catalog = full_tools.body["result"]["tools"].as_array().unwrap();
-        assert_eq!(full_catalog.len(), 9);
+        assert_eq!(full_catalog.len(), 10);
         assert!(
             full_catalog
                 .iter()
@@ -4953,7 +5513,7 @@ mod tests {
             .iter()
             .filter_map(|tool| tool["name"].as_str())
             .collect::<Vec<_>>();
-        assert_eq!(edit_tool_names.len(), 6);
+        assert_eq!(edit_tool_names.len(), 7);
         assert!(edit_tool_names.contains(&"agent_workflow"));
         assert!(edit_tool_names.contains(&"elevated_exec"));
         for process_tool in ["exec_command", "command_control", "task_control"] {
@@ -5038,16 +5598,16 @@ mod tests {
         let base_policy = fs::read_to_string(root.join("runtime-policy.toml")).unwrap();
         let narrowed_policy = base_policy
             .replace(
-                "edit_tools = [\"workspace_context\", \"agent_workflow\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
-                "edit_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "edit_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "edit_tools = [\"workspace_context\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
             )
             .replace(
-                "full_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
-                "full_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "full_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "full_tools = [\"workspace_context\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
             )
             .replace(
-                "elevated_tools = [\"workspace_context\", \"agent_workflow\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
-                "elevated_tools = [\"workspace_context\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "elevated_tools = [\"workspace_context\", \"agent_workflow\", \"filesystem\", \"exec_command\", \"command_control\", \"task_control\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
+                "elevated_tools = [\"workspace_context\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
             );
         pep.replace_policy(CapabilityPolicy::from_toml(&narrowed_policy).unwrap())
             .expect("live public policy narrowing");
@@ -6222,6 +6782,120 @@ mod tests {
         coding.stop().expect("MCP stop after privileged routing");
         drop(coding);
         cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn schema43_filesystem_routes_outside_workspace_only_through_active_broker() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let outside = std::env::temp_dir().join(format!("lb43-fs-outside-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&outside).unwrap();
+        let outside_file = outside.join("outside.txt");
+        fs::write(&outside_file, b"outside").unwrap();
+
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let fake = Arc::new(FakePrivilegedExecution::active());
+        let privileged: Arc<dyn PrivilegedExecution> = fake.clone();
+        let pep = PolicyEnforcementRuntime::start_with_privilege(
+            coding,
+            policy(&root),
+            PermissionMode::Full,
+            privileged,
+        )
+        .expect("PEP with schema43 filesystem route ready");
+
+        let full_session = initialize(pep.port(), 4300).session.unwrap();
+        let full_denied = public_tool_call(
+            pep.port(),
+            &full_session,
+            4301,
+            "filesystem",
+            json!({"action":"read","path":outside_file.to_string_lossy()}),
+        );
+        assert_tool_error(&full_denied, "WorkspaceDenied");
+        assert_eq!(fake.structured_filesystem_count(), 0);
+
+        pep.set_permission_mode(PermissionMode::Elevated);
+        fake.set_state(PrivilegeState::AwaitingUac);
+        let elevated_session = initialize(pep.port(), 4302).session.unwrap();
+        let awaiting = public_tool_call(
+            pep.port(),
+            &elevated_session,
+            4303,
+            "filesystem",
+            json!({"action":"read","path":outside_file.to_string_lossy()}),
+        );
+        assert_tool_error(&awaiting, "ElevationRequired");
+        assert_eq!(fake.structured_filesystem_count(), 0);
+
+        fake.set_state(PrivilegeState::Active {
+            broker_generation: crate::state::GenerationId::new(78),
+        });
+        let elevated = public_tool_call(
+            pep.port(),
+            &elevated_session,
+            4304,
+            "filesystem",
+            json!({"action":"read","path":outside_file.to_string_lossy(),"max_bytes":4096}),
+        );
+        assert_eq!(elevated.body["result"]["isError"], false, "{:#?}", elevated.body);
+        assert_eq!(
+            elevated.body["result"]["structuredContent"]["data"]["content"],
+            "LB43_FAKE_ADMIN"
+        );
+        assert!(
+            elevated.body["result"]["structuredContent"]["data"]
+                .get("result_kind")
+                .is_none()
+        );
+        assert_eq!(fake.structured_filesystem_count(), 1);
+
+        let inside = public_tool_call(
+            pep.port(),
+            &elevated_session,
+            4305,
+            "filesystem",
+            json!({"action":"read","path":"probe.txt"}),
+        );
+        assert_eq!(inside.body["result"]["isError"], false, "{:#?}", inside.body);
+        assert!(inside.body["result"]["structuredContent"]["data"]["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("LB009 PEP")));
+        assert_eq!(
+            fake.structured_filesystem_count(),
+            1,
+            "workspace-contained Elevated filesystem call incorrectly used Broker"
+        );
+
+        let control_plane = public_tool_call(
+            pep.port(),
+            &elevated_session,
+            4306,
+            "filesystem",
+            json!({"action":"delete","path":"C:\\ProgramData\\LocalBridge\\settings.json"}),
+        );
+        assert_tool_error(&control_plane, "PolicyDenied");
+        assert_eq!(fake.structured_filesystem_count(), 1);
+
+        let mut coding = pep.stop().expect("PEP stop after schema43 filesystem routing");
+        coding.stop().expect("MCP stop after schema43 filesystem routing");
+        drop(coding);
+        cleanup_test_directory(&workspace);
+        let _ = fs::remove_dir_all(outside);
     }
 
     #[test]

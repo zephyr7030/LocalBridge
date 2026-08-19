@@ -4,7 +4,16 @@ use std::io::Write as _;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
-use super::{PrivilegedFilesystemAction, PrivilegedFilesystemResult, PrivilegedFilesystemSpec};
+use crate::mcp::filesystem_service::{
+    FilesystemError, FilesystemMutationResult, FilesystemSearchOptions, FilesystemService,
+};
+
+use super::{
+    AdministratorFilesystemAction, AdministratorFilesystemEntry, AdministratorFilesystemErrorCode,
+    AdministratorFilesystemKind, AdministratorFilesystemResult, AdministratorFilesystemSortBy,
+    AdministratorFilesystemSortOrder, AdministratorFilesystemSpec, PrivilegedFilesystemAction,
+    PrivilegedFilesystemResult, PrivilegedFilesystemSpec,
+};
 
 pub(crate) fn run_privileged_filesystem(
     spec: PrivilegedFilesystemSpec,
@@ -94,6 +103,223 @@ pub(crate) fn run_privileged_filesystem(
                 bytes: 0,
             })
         }
+    }
+}
+
+pub(crate) fn run_administrator_filesystem(
+    spec: AdministratorFilesystemSpec,
+) -> Result<AdministratorFilesystemResult, AdministratorFilesystemErrorCode> {
+    spec.validate()
+        .map_err(|_| AdministratorFilesystemErrorCode::InvalidArgument)?;
+    let service = FilesystemService::broker_administrator();
+    match spec.action {
+        AdministratorFilesystemAction::List => {
+            let result = service
+                .list(
+                    administrator_path(&spec)?,
+                    spec.recursive,
+                    spec.max_depth,
+                    spec.max_entries as usize,
+                )
+                .map_err(administrator_filesystem_error)?;
+            Ok(AdministratorFilesystemResult::Entries {
+                action: spec.action,
+                entries: result.entries.into_iter().map(administrator_entry).collect(),
+                scanned_entries: u32::try_from(result.scanned_entries)
+                    .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                truncated: result.truncated,
+            })
+        }
+        AdministratorFilesystemAction::Stat => {
+            let result = service
+                .stat(
+                    administrator_path(&spec)?,
+                    spec.calculate_size,
+                    spec.max_depth,
+                    spec.max_entries as usize,
+                )
+                .map_err(administrator_filesystem_error)?;
+            Ok(AdministratorFilesystemResult::Stat {
+                path: result.path,
+                kind: result.kind.to_string(),
+                size: result.size,
+                modified_ms: result.modified_ms,
+                calculated_size: result.calculated_size,
+                scanned_entries: u32::try_from(result.scanned_entries)
+                    .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                truncated: result.truncated,
+            })
+        }
+        AdministratorFilesystemAction::Read => {
+            let result = service
+                .read(
+                    administrator_path(&spec)?,
+                    spec.offset,
+                    spec.max_bytes as usize,
+                )
+                .map_err(administrator_filesystem_error)?;
+            Ok(AdministratorFilesystemResult::Read {
+                path: result.path,
+                offset: result.offset,
+                total_bytes: result.total_bytes,
+                returned_bytes: u32::try_from(result.returned_bytes)
+                    .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                eof: result.eof,
+                encoding: result.encoding.to_string(),
+                content: result.content,
+            })
+        }
+        AdministratorFilesystemAction::Write => {
+            let bytes = STANDARD
+                .decode(
+                    spec.content_base64
+                        .as_deref()
+                        .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                )
+                .map_err(|_| AdministratorFilesystemErrorCode::InvalidArgument)?;
+            let result = service
+                .write(administrator_path(&spec)?, &bytes, spec.overwrite)
+                .map_err(administrator_filesystem_error)?;
+            Ok(administrator_mutation(spec.action, result))
+        }
+        AdministratorFilesystemAction::Search => {
+            let options = FilesystemSearchOptions {
+                recursive: spec.recursive,
+                max_depth: spec.max_depth,
+                max_entries: spec.max_entries as usize,
+                max_results: spec.max_results as usize,
+                pattern: spec
+                    .pattern
+                    .clone()
+                    .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                kind: spec.kind.map(|kind| match kind {
+                    AdministratorFilesystemKind::File => "file".to_string(),
+                    AdministratorFilesystemKind::Directory => "directory".to_string(),
+                }),
+                min_size: spec.min_size,
+                max_size: spec.max_size,
+                modified_after_ms: spec.modified_after_ms,
+                modified_before_ms: spec.modified_before_ms,
+                sort_by: match spec.sort_by {
+                    AdministratorFilesystemSortBy::Path => "path",
+                    AdministratorFilesystemSortBy::Size => "size",
+                    AdministratorFilesystemSortBy::Modified => "modified",
+                }
+                .to_string(),
+                sort_order: match spec.sort_order {
+                    AdministratorFilesystemSortOrder::Asc => "asc",
+                    AdministratorFilesystemSortOrder::Desc => "desc",
+                }
+                .to_string(),
+            };
+            let result = service
+                .search(administrator_path(&spec)?, &options)
+                .map_err(administrator_filesystem_error)?;
+            Ok(AdministratorFilesystemResult::Entries {
+                action: spec.action,
+                entries: result.entries.into_iter().map(administrator_entry).collect(),
+                scanned_entries: u32::try_from(result.scanned_entries)
+                    .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                truncated: result.truncated,
+            })
+        }
+        AdministratorFilesystemAction::Copy | AdministratorFilesystemAction::Move => {
+            let source = spec
+                .source
+                .as_deref()
+                .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?;
+            let destination = spec
+                .destination
+                .as_deref()
+                .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?;
+            let result = if spec.action == AdministratorFilesystemAction::Copy {
+                service.copy(
+                    source,
+                    destination,
+                    spec.recursive,
+                    spec.overwrite,
+                    spec.max_depth,
+                    spec.max_entries as usize,
+                )
+            } else {
+                service.move_path(
+                    source,
+                    destination,
+                    spec.recursive,
+                    spec.overwrite,
+                    spec.max_depth,
+                    spec.max_entries as usize,
+                )
+            }
+            .map_err(administrator_filesystem_error)?;
+            Ok(administrator_mutation(spec.action, result))
+        }
+        AdministratorFilesystemAction::Delete => {
+            let result = service
+                .delete(
+                    administrator_path(&spec)?,
+                    spec.recursive,
+                    spec.max_depth,
+                    spec.max_entries as usize,
+                )
+                .map_err(administrator_filesystem_error)?;
+            Ok(administrator_mutation(spec.action, result))
+        }
+        AdministratorFilesystemAction::Hash => {
+            let result = service
+                .hash(administrator_path(&spec)?)
+                .map_err(administrator_filesystem_error)?;
+            Ok(AdministratorFilesystemResult::Hash {
+                path: result.path,
+                algorithm: result.algorithm.to_string(),
+                sha256: result.sha256,
+                bytes: result.bytes,
+            })
+        }
+    }
+}
+
+fn administrator_path(
+    spec: &AdministratorFilesystemSpec,
+) -> Result<&str, AdministratorFilesystemErrorCode> {
+    spec.path
+        .as_deref()
+        .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)
+}
+
+fn administrator_filesystem_error(error: FilesystemError) -> AdministratorFilesystemErrorCode {
+    match error {
+        FilesystemError::InvalidArgument => AdministratorFilesystemErrorCode::InvalidArgument,
+        FilesystemError::NotFound => AdministratorFilesystemErrorCode::NotFound,
+        FilesystemError::OutsideAuthority => AdministratorFilesystemErrorCode::OutsideAuthority,
+        FilesystemError::AlreadyExists => AdministratorFilesystemErrorCode::AlreadyExists,
+        FilesystemError::LimitExceeded => AdministratorFilesystemErrorCode::LimitExceeded,
+        FilesystemError::Unsupported => AdministratorFilesystemErrorCode::Unsupported,
+        FilesystemError::Io => AdministratorFilesystemErrorCode::Io,
+    }
+}
+
+fn administrator_entry(
+    entry: crate::mcp::filesystem_service::FilesystemEntry,
+) -> AdministratorFilesystemEntry {
+    AdministratorFilesystemEntry {
+        path: entry.path,
+        kind: entry.kind.to_string(),
+        size: entry.size,
+        modified_ms: entry.modified_ms,
+    }
+}
+
+fn administrator_mutation(
+    action: AdministratorFilesystemAction,
+    result: FilesystemMutationResult,
+) -> AdministratorFilesystemResult {
+    AdministratorFilesystemResult::Mutation {
+        action,
+        path: result.path,
+        destination: result.destination,
+        bytes: result.bytes,
+        changed: result.changed,
     }
 }
 

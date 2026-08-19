@@ -1,5 +1,19 @@
 use std::path::{Component, Path, PathBuf};
 
+#[cfg(windows)]
+use std::ffi::OsString;
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+#[cfg(windows)]
+use std::ptr::{null, null_mut};
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, GetFinalPathNameByHandleW, OPEN_EXISTING,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathAuthorityScope {
     ActiveWorkspace,
@@ -25,8 +39,10 @@ impl PathAuthority {
         if !root.is_absolute() || is_verbatim_path(root) || !root.is_dir() {
             return Err(PathAuthorityError::InvalidPath);
         }
-        let canonical_root =
-            std::fs::canonicalize(root).map_err(|_| PathAuthorityError::InvalidPath)?;
+        let canonical_root = ordinary_path(
+            &std::fs::canonicalize(root).map_err(|_| PathAuthorityError::InvalidPath)?,
+        )
+        .ok_or(PathAuthorityError::InvalidPath)?;
         Ok(Self {
             scope: PathAuthorityScope::ActiveWorkspace,
             execution_root: Some(root.to_path_buf()),
@@ -72,16 +88,70 @@ impl PathAuthority {
         }
     }
 
+    pub fn input_is_within_execution_root(&self, raw: &str) -> Result<bool, PathAuthorityError> {
+        let candidate = self.input_path(raw)?;
+        match self.scope {
+            PathAuthorityScope::ActiveWorkspace => Ok(lexical_path_starts_with(
+                &candidate,
+                self.execution_root
+                    .as_ref()
+                    .expect("active workspace authority has execution root"),
+            )),
+            PathAuthorityScope::BrokerAdministrator => Ok(true),
+        }
+    }
+
     pub fn resolve_existing(&self, raw: &str) -> Result<PathBuf, PathAuthorityError> {
         let candidate = self.input_path(raw)?;
-        let canonical =
-            std::fs::canonicalize(candidate).map_err(|_| PathAuthorityError::NotFound)?;
+        let canonical = ordinary_path(
+            &std::fs::canonicalize(candidate).map_err(|_| PathAuthorityError::NotFound)?,
+        )
+        .ok_or(PathAuthorityError::InvalidPath)?;
         self.allows_canonical(&canonical)
             .then_some(canonical)
             .ok_or(PathAuthorityError::OutsideAuthority)
     }
 
+    pub fn resolve_missing_leaf(&self, raw: &str) -> Result<PathBuf, PathAuthorityError> {
+        let candidate = self.input_path(raw)?;
+        if std::fs::symlink_metadata(&candidate).is_ok() {
+            return self.resolve_existing(raw);
+        }
+        let parent = candidate.parent().ok_or(PathAuthorityError::InvalidPath)?;
+        let final_parent = self.revalidate_opened_path(parent)?;
+        if !final_parent.is_dir() {
+            return Err(PathAuthorityError::InvalidPath);
+        }
+        let name = candidate
+            .file_name()
+            .filter(|value| !value.is_empty())
+            .ok_or(PathAuthorityError::InvalidPath)?;
+        let resolved = final_parent.join(name);
+        self.allows_canonical(&resolved)
+            .then_some(resolved)
+            .ok_or(PathAuthorityError::OutsideAuthority)
+    }
+
+    pub fn revalidate_opened_path(&self, path: &Path) -> Result<PathBuf, PathAuthorityError> {
+        let final_path = final_opened_path(path)?;
+        self.allows_canonical(&final_path)
+            .then_some(final_path)
+            .ok_or(PathAuthorityError::OutsideAuthority)
+    }
+
+    pub fn revalidate_parent(&self, path: &Path) -> Result<PathBuf, PathAuthorityError> {
+        let parent = path.parent().ok_or(PathAuthorityError::InvalidPath)?;
+        let final_parent = self.revalidate_opened_path(parent)?;
+        final_parent
+            .is_dir()
+            .then_some(final_parent)
+            .ok_or(PathAuthorityError::InvalidPath)
+    }
+
     pub fn allows_canonical(&self, canonical: &Path) -> bool {
+        let Some(canonical) = ordinary_path(canonical) else {
+            return false;
+        };
         match self.scope {
             PathAuthorityScope::ActiveWorkspace => canonical.starts_with(
                 self.canonical_root
@@ -94,14 +164,14 @@ impl PathAuthority {
 
     pub fn discovery_stops_at(&self, canonical: &Path) -> bool {
         match self.scope {
-            PathAuthorityScope::ActiveWorkspace => {
-                self.canonical_root.as_deref() == Some(canonical)
-            }
+            PathAuthorityScope::ActiveWorkspace => ordinary_path(canonical)
+                .is_some_and(|canonical| self.canonical_root.as_deref() == Some(canonical.as_path())),
             PathAuthorityScope::BrokerAdministrator => false,
         }
     }
 
     pub fn display_path(&self, canonical: &Path) -> Result<String, PathAuthorityError> {
+        let canonical = ordinary_path(canonical).ok_or(PathAuthorityError::InvalidPath)?;
         let display = match self.scope {
             PathAuthorityScope::ActiveWorkspace => canonical
                 .strip_prefix(
@@ -116,8 +186,7 @@ impl PathAuthority {
                 if !canonical.is_absolute() {
                     return Err(PathAuthorityError::InvalidPath);
                 }
-                ordinary_path(canonical)
-                    .ok_or(PathAuthorityError::InvalidPath)?
+                canonical
                     .to_string_lossy()
                     .replace('\\', "/")
             }
@@ -212,6 +281,24 @@ fn administrator_absolute_path_valid(value: &str) -> bool {
 }
 
 #[cfg(windows)]
+fn lexical_path_starts_with(path: &Path, root: &Path) -> bool {
+    let mut path_components = path.components();
+    root.components().all(|root_component| {
+        path_components.next().is_some_and(|path_component| {
+            path_component
+                .as_os_str()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&root_component.as_os_str().to_string_lossy())
+        })
+    })
+}
+
+#[cfg(not(windows))]
+fn lexical_path_starts_with(path: &Path, root: &Path) -> bool {
+    path.starts_with(root)
+}
+
+#[cfg(windows)]
 pub(crate) fn is_verbatim_path(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
     let prefix = [b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
@@ -256,6 +343,58 @@ fn ordinary_path(path: &Path) -> Option<PathBuf> {
     Some(path.to_path_buf())
 }
 
+#[cfg(windows)]
+struct OwnedPathHandle(HANDLE);
+
+#[cfg(windows)]
+impl Drop for OwnedPathHandle {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+#[cfg(windows)]
+fn final_opened_path(path: &Path) -> Result<PathBuf, PathAuthorityError> {
+    let wide = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(PathAuthorityError::NotFound);
+    }
+    let handle = OwnedPathHandle(handle);
+    let needed = unsafe { GetFinalPathNameByHandleW(handle.0, null_mut(), 0, 0) };
+    if needed == 0 {
+        return Err(PathAuthorityError::InvalidPath);
+    }
+    let mut buffer = vec![0u16; needed as usize + 1];
+    let written = unsafe {
+        GetFinalPathNameByHandleW(handle.0, buffer.as_mut_ptr(), buffer.len() as u32, 0)
+    };
+    if written == 0 || written as usize >= buffer.len() {
+        return Err(PathAuthorityError::InvalidPath);
+    }
+    let final_path = PathBuf::from(OsString::from_wide(&buffer[..written as usize]));
+    ordinary_path(&final_path).ok_or(PathAuthorityError::InvalidPath)
+}
+
+#[cfg(not(windows))]
+fn final_opened_path(path: &Path) -> Result<PathBuf, PathAuthorityError> {
+    std::fs::canonicalize(path).map_err(|_| PathAuthorityError::NotFound)
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -285,8 +424,15 @@ mod tests {
         std::fs::write(outside.join("outside.txt"), b"outside").unwrap();
 
         let authority = PathAuthority::active_workspace(&workspace).unwrap();
+        let canonical_workspace = std::fs::canonicalize(&workspace).unwrap();
+        let canonical_inside = std::fs::canonicalize(workspace.join("inside.txt")).unwrap();
+        let canonical_outside = std::fs::canonicalize(outside.join("outside.txt")).unwrap();
+        assert!(authority.allows_canonical(&canonical_workspace));
+        assert!(authority.discovery_stops_at(&canonical_workspace));
+        assert_eq!(authority.display_path(&canonical_inside).unwrap(), "inside.txt");
+        assert!(!authority.allows_canonical(&canonical_outside));
         let inside = authority.resolve_existing("inside.txt").unwrap();
-        assert!(inside.starts_with(std::fs::canonicalize(&workspace).unwrap()));
+        assert!(inside.starts_with(authority.canonical_root().unwrap()));
         assert_eq!(authority.display_path(&inside).unwrap(), "inside.txt");
         let absolute_inside = authority
             .resolve_existing(workspace.join("inside.txt").to_string_lossy().as_ref())
