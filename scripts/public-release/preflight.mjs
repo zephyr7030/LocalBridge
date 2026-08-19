@@ -22,11 +22,10 @@ const SECRET_PATTERNS = [
 ];
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
-const quoteCmdArg = (value) => `"${String(value).replaceAll('"', '""')}"`;
 const run = (program, args, options = {}) => {
   const windowsNpm = process.platform === "win32" && program === "npm";
   const executable = windowsNpm ? (process.env.ComSpec || "cmd.exe") : program;
-  const spawnArgs = windowsNpm ? ["/d", "/s", "/c", `npm.cmd ${args.map(quoteCmdArg).join(" ")}`] : args;
+  const spawnArgs = windowsNpm ? ["/d", "/s", "/c", "npm.cmd", ...args] : args;
   const result = spawnSync(executable, spawnArgs, {
     cwd: options.cwd ?? root,
     env: options.env ?? process.env,
