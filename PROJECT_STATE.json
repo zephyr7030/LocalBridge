@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-014",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5964,6 +5964,18 @@
       "git diff --check PASS; no LB-013 product modification required."
     ],
     "next_pr": "LB-014",
+    "g4_unlocked": false
+  },
+  "lb014_schema42_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-014",
+    "product_patch_required": false,
+    "evidence": [
+      "LB014 static contract PASS.",
+      "Fresh autostart, single-instance and ui_ready Rust filters PASS.",
+      "git diff --check PASS; no product modification required."
+    ],
+    "next_pr": "LB-015",
     "g4_unlocked": false
   }
 }
