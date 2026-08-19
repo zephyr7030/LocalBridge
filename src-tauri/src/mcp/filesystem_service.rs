@@ -10,6 +10,22 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use super::path_authority::{PathAuthority, PathAuthorityError, PathAuthorityScope};
+#[cfg(windows)]
+use super::path_authority::ValidatedPathHandle;
+
+#[cfg(windows)]
+#[derive(Debug)]
+struct ValidatedDirectoryChain {
+    _handles: Vec<ValidatedPathHandle>,
+    final_path: PathBuf,
+}
+
+#[cfg(windows)]
+impl ValidatedDirectoryChain {
+    fn final_path(&self) -> &Path {
+        &self.final_path
+    }
+}
 
 pub(crate) const MAX_FILESYSTEM_READ_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_FILESYSTEM_ENTRIES: usize = 100_000;
@@ -135,6 +151,68 @@ impl FilesystemService {
         }
     }
 
+    #[cfg(windows)]
+    fn open_mutation_parent(
+        &self,
+        target: &Path,
+    ) -> Result<ValidatedDirectoryChain, FilesystemError> {
+        let parent = target.parent().ok_or(FilesystemError::InvalidArgument)?;
+        self.open_directory_chain(parent)
+    }
+
+    #[cfg(windows)]
+    fn open_directory_chain(
+        &self,
+        directory: &Path,
+    ) -> Result<ValidatedDirectoryChain, FilesystemError> {
+        use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
+        let final_directory = self
+            .authority
+            .revalidate_opened_path(directory)
+            .map_err(map_path_error)?;
+        let mut ancestors = final_directory
+            .ancestors()
+            .filter(|path| path.is_absolute())
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>();
+        ancestors.reverse();
+        let start = match self.authority.scope() {
+            PathAuthorityScope::ActiveWorkspace => {
+                let root = self
+                    .authority
+                    .canonical_root()
+                    .ok_or(FilesystemError::OutsideAuthority)?;
+                ancestors
+                    .iter()
+                    .position(|path| windows_path_eq(path, root))
+                    .ok_or(FilesystemError::OutsideAuthority)?
+            }
+            PathAuthorityScope::BrokerAdministrator => 0,
+        };
+        let mut handles = Vec::with_capacity(ancestors.len().saturating_sub(start));
+        for path in ancestors.into_iter().skip(start) {
+            let handle = self
+                .authority
+                .open_validated_handle(&path, FILE_LIST_DIRECTORY)
+                .map_err(map_path_error)?;
+            if !handle.final_path().is_dir() {
+                return Err(FilesystemError::InvalidArgument);
+            }
+            handles.push(handle);
+        }
+        let final_path = handles
+            .last()
+            .map(|handle| handle.final_path().to_path_buf())
+            .ok_or(FilesystemError::OutsideAuthority)?;
+        if !windows_path_eq(&final_path, &final_directory) {
+            return Err(FilesystemError::OutsideAuthority);
+        }
+        Ok(ValidatedDirectoryChain {
+            _handles: handles,
+            final_path,
+        })
+    }
+
     pub(crate) fn list(
         &self,
         path: &str,
@@ -245,39 +323,41 @@ impl FilesystemService {
             if !overwrite {
                 return Err(FilesystemError::AlreadyExists);
             }
-            self.authority
-                .revalidate_opened_path(&target)
-                .map_err(map_path_error)?;
         }
-        let parent = self
-            .authority
-            .revalidate_parent(&target)
-            .map_err(map_path_error)?;
+        #[cfg(windows)]
+        let parent_handle = self.open_mutation_parent(&target)?;
+        #[cfg(windows)]
+        let parent = parent_handle.final_path().to_path_buf();
+        #[cfg(not(windows))]
+        let parent = self.authority.revalidate_parent(&target).map_err(map_path_error)?;
+        let leaf = target
+            .file_name()
+            .ok_or(FilesystemError::InvalidArgument)?
+            .to_os_string();
         let temp = sibling_temp_path(&parent, &target)?;
         let result = (|| {
             write_new_synced(&temp, content)?;
-            let final_parent = self
-                .authority
-                .revalidate_parent(&target)
-                .map_err(map_path_error)?;
-            if final_parent != parent {
-                return Err(FilesystemError::OutsideAuthority);
-            }
-            if target.exists() {
-                self.authority
-                    .revalidate_opened_path(&target)
+            #[cfg(windows)]
+            {
+                use windows_sys::Win32::Storage::FileSystem::DELETE;
+                let temp_handle = self
+                    .authority
+                    .open_validated_handle(&temp, DELETE)
                     .map_err(map_path_error)?;
+                let committed = parent_handle.final_path().join(&leaf);
+                rename_handle_to_path(temp_handle.raw_handle(), &committed, overwrite)
+                    .map_err(map_rename_error)?;
+                Ok(())
             }
+            #[cfg(not(windows))]
             atomic_replace(&temp, &target, overwrite)
         })();
         if result.is_err() {
             let _ = fs::remove_file(&temp);
         }
         result?;
-        let final_target = self
-            .authority
-            .revalidate_opened_path(&target)
-            .map_err(map_path_error)?;
+        let committed_target = parent.join(&leaf);
+        let final_target = self.authority.revalidate_opened_path(&committed_target).map_err(map_path_error)?;
         Ok(FilesystemMutationResult {
             path: self.display_path(&final_target)?,
             destination: None,
@@ -365,9 +445,6 @@ impl FilesystemService {
                 .authority
                 .resolve_existing(destination)
                 .map_err(map_path_error)?;
-            if sha256_file(&source_path)? != sha256_file(&destination_final)? {
-                return Err(FilesystemError::Io);
-            }
             return Ok(FilesystemMutationResult {
                 path: self.display_path(&source_path)?,
                 destination: Some(self.display_path(&destination_final)?),
@@ -382,31 +459,70 @@ impl FilesystemService {
                 FilesystemError::InvalidArgument
             });
         }
-        self.authority
-            .revalidate_parent(&destination_path)
-            .map_err(map_path_error)?;
-        fs::create_dir(&destination_path).map_err(|_| FilesystemError::Io)?;
-        let copied = self.copy_directory_tree(
+        #[cfg(windows)]
+        {
+            let source_guard = self.open_directory_chain(&source_path)?;
+            let stable_source = source_guard.final_path().to_path_buf();
+            self.copy_directory_from_stable_root(
+                &stable_source,
+                destination,
+                max_depth,
+                max_entries,
+            )
+        }
+        #[cfg(not(windows))]
+        self.copy_directory_from_stable_root(
             &source_path,
-            &destination_path,
+            destination,
             max_depth,
             max_entries,
-        );
-        if copied.is_err() {
-            let _ = fs::remove_dir_all(&destination_path);
-        }
-        let bytes = copied?;
-        let destination_final = self
+        )
+    }
+
+    fn copy_directory_from_stable_root(
+        &self,
+        source_path: &Path,
+        destination: &str,
+        max_depth: u32,
+        max_entries: usize,
+    ) -> Result<FilesystemMutationResult, FilesystemError> {
+        self.create_directory(destination)?;
+        let destination_path = self
             .authority
             .resolve_existing(destination)
             .map_err(map_path_error)?;
-        if tree_manifest(&source_path, max_depth, max_entries)?
-            != tree_manifest(&destination_final, max_depth, max_entries)?
-        {
-            return Err(FilesystemError::Io);
-        }
+        #[cfg(windows)]
+        let destination_guard = self.open_directory_chain(&destination_path)?;
+        #[cfg(windows)]
+        let destination_final = destination_guard.final_path().to_path_buf();
+        #[cfg(not(windows))]
+        let destination_final = destination_path;
+
+        let copied = self.copy_directory_tree(
+            source_path,
+            &destination_final,
+            max_depth,
+            max_entries,
+        );
+        let verified = copied.and_then(|bytes| {
+            if tree_manifest(source_path, max_depth, max_entries)?
+                != tree_manifest(&destination_final, max_depth, max_entries)?
+            {
+                return Err(FilesystemError::Io);
+            }
+            Ok(bytes)
+        });
+        #[cfg(windows)]
+        drop(destination_guard);
+        let bytes = match verified {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let _ = self.delete(destination, true, max_depth, max_entries);
+                return Err(error);
+            }
+        };
         Ok(FilesystemMutationResult {
-            path: self.display_path(&source_path)?,
+            path: self.display_path(source_path)?,
             destination: Some(self.display_path(&destination_final)?),
             bytes,
             changed: true,
@@ -419,10 +535,17 @@ impl FilesystemService {
         target: &Path,
         overwrite: bool,
     ) -> Result<u64, FilesystemError> {
-        let source = self
-            .authority
-            .revalidate_opened_path(source)
-            .map_err(map_path_error)?;
+        #[cfg(windows)]
+        let source_handle = {
+            use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
+            self.authority
+                .open_validated_handle(source, FILE_GENERIC_READ)
+                .map_err(map_path_error)?
+        };
+        #[cfg(windows)]
+        let source = source_handle.final_path().to_path_buf();
+        #[cfg(not(windows))]
+        let source = self.authority.revalidate_opened_path(source).map_err(map_path_error)?;
         let source_metadata = fs::symlink_metadata(&source).map_err(|_| FilesystemError::Io)?;
         if !source_metadata.is_file() || metadata_is_reparse(&source_metadata) {
             return Err(FilesystemError::InvalidArgument);
@@ -434,13 +557,22 @@ impl FilesystemService {
             if !overwrite {
                 return Err(FilesystemError::AlreadyExists);
             }
-            self.authority
-                .revalidate_opened_path(target)
-                .map_err(map_path_error)?;
         }
+        #[cfg(windows)]
+        let parent_handle = self.open_mutation_parent(target)?;
+        #[cfg(windows)]
+        let parent = parent_handle.final_path().to_path_buf();
+        #[cfg(not(windows))]
         let parent = self.authority.revalidate_parent(target).map_err(map_path_error)?;
+        let leaf = target
+            .file_name()
+            .ok_or(FilesystemError::InvalidArgument)?
+            .to_os_string();
         let temp = sibling_temp_path(&parent, target)?;
         let result = (|| {
+            #[cfg(windows)]
+            let mut input = source_handle.into_file();
+            #[cfg(not(windows))]
             let mut input = File::open(&source).map_err(|_| FilesystemError::Io)?;
             let mut options = OpenOptions::new();
             options.write(true).create_new(true);
@@ -453,16 +585,85 @@ impl FilesystemService {
             let bytes = std::io::copy(&mut input, &mut output).map_err(|_| FilesystemError::Io)?;
             output.sync_all().map_err(|_| FilesystemError::Io)?;
             drop(output);
-            let final_parent = self.authority.revalidate_parent(target).map_err(map_path_error)?;
-            if final_parent != parent {
+            #[cfg(windows)]
+            {
+                use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_GENERIC_READ};
+                let temp_handle = self
+                    .authority
+                    .open_validated_handle(&temp, DELETE | FILE_GENERIC_READ)
+                    .map_err(map_path_error)?;
+                let committed_path = parent_handle.final_path().join(&leaf);
+                rename_handle_to_path(temp_handle.raw_handle(), &committed_path, overwrite)
+                    .map_err(map_rename_error)?;
+                let source_hash = sha256_open_file(&mut input)?;
+                let mut committed = temp_handle.into_file();
+                let destination_hash = sha256_open_file(&mut committed)?;
+                if source_hash != destination_hash {
+                    let _ = delete_raw_handle(file_raw_handle(&committed));
+                    return Err(FilesystemError::Io);
+                }
+                Ok(bytes)
+            }
+            #[cfg(not(windows))]
+            {
+                atomic_replace(&temp, target, overwrite)?;
+                Ok(bytes)
+            }
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temp);
+        }
+        result
+    }
+
+    #[cfg(windows)]
+    fn copy_open_file_atomic(
+        &self,
+        input: &mut File,
+        target: &Path,
+        overwrite: bool,
+    ) -> Result<u64, FilesystemError> {
+        if let Ok(metadata) = fs::symlink_metadata(target) {
+            if metadata_is_reparse(&metadata) || !metadata.is_file() {
                 return Err(FilesystemError::OutsideAuthority);
             }
-            if target.exists() {
-                self.authority
-                    .revalidate_opened_path(target)
-                    .map_err(map_path_error)?;
+            if !overwrite {
+                return Err(FilesystemError::AlreadyExists);
             }
-            atomic_replace(&temp, target, overwrite)?;
+        }
+        let parent_handle = self.open_mutation_parent(target)?;
+        let parent = parent_handle.final_path().to_path_buf();
+        let leaf = target
+            .file_name()
+            .ok_or(FilesystemError::InvalidArgument)?
+            .to_os_string();
+        let temp = sibling_temp_path(&parent, target)?;
+        let result = (|| {
+            input.seek(SeekFrom::Start(0)).map_err(|_| FilesystemError::Io)?;
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            use std::os::windows::fs::OpenOptionsExt;
+            options.share_mode(0);
+            let mut output = options.open(&temp).map_err(|_| FilesystemError::Io)?;
+            let bytes = std::io::copy(input, &mut output).map_err(|_| FilesystemError::Io)?;
+            output.sync_all().map_err(|_| FilesystemError::Io)?;
+            drop(output);
+
+            use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_GENERIC_READ};
+            let temp_handle = self
+                .authority
+                .open_validated_handle(&temp, DELETE | FILE_GENERIC_READ)
+                .map_err(map_path_error)?;
+            let committed_path = parent_handle.final_path().join(&leaf);
+            rename_handle_to_path(temp_handle.raw_handle(), &committed_path, overwrite)
+                .map_err(map_rename_error)?;
+            let source_hash = sha256_open_file(input)?;
+            let mut committed = temp_handle.into_file();
+            let destination_hash = sha256_open_file(&mut committed)?;
+            if source_hash != destination_hash {
+                let _ = delete_raw_handle(file_raw_handle(&committed));
+                return Err(FilesystemError::Io);
+            }
             Ok(bytes)
         })();
         if result.is_err() {
@@ -482,71 +683,168 @@ impl FilesystemService {
     ) -> Result<FilesystemMutationResult, FilesystemError> {
         validate_walk_bounds(max_depth, max_entries)?;
         let source_path = self.authority.resolve_existing(source).map_err(map_path_error)?;
-        let source_metadata = fs::symlink_metadata(&source_path).map_err(|_| FilesystemError::Io)?;
-        if metadata_is_reparse(&source_metadata) {
+        let initial_metadata = fs::symlink_metadata(&source_path).map_err(|_| FilesystemError::Io)?;
+        if metadata_is_reparse(&initial_metadata) {
             return Err(FilesystemError::OutsideAuthority);
         }
         let destination_path = self
             .authority
             .resolve_missing_leaf(destination)
             .map_err(map_path_error)?;
-        if source_metadata.is_dir() && !recursive {
-            return Err(FilesystemError::InvalidArgument);
-        }
-        if destination_path.exists() && !overwrite {
-            return Err(FilesystemError::AlreadyExists);
-        }
-        if source_metadata.is_dir() && destination_path.exists() {
-            return Err(FilesystemError::AlreadyExists);
-        }
-        self.authority
-            .revalidate_opened_path(&source_path)
-            .map_err(map_path_error)?;
-        self.authority
-            .revalidate_parent(&destination_path)
-            .map_err(map_path_error)?;
-        match rename_path(&source_path, &destination_path, overwrite) {
-            Ok(()) => {
-                let final_destination = self
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Storage::FileSystem::{
+                DELETE, FILE_GENERIC_READ, FILE_LIST_DIRECTORY,
+            };
+            let _source_parent_guard = self.open_directory_chain(
+                source_path
+                    .parent()
+                    .ok_or(FilesystemError::OutsideAuthority)?,
+            )?;
+            let desired_access = DELETE
+                | if initial_metadata.is_file() {
+                    FILE_GENERIC_READ
+                } else if initial_metadata.is_dir() {
+                    FILE_LIST_DIRECTORY
+                } else {
+                    return Err(FilesystemError::Unsupported);
+                };
+            let source_handle = self
+                .authority
+                .open_validated_handle(&source_path, desired_access)
+                .map_err(map_path_error)?;
+            let stable_source = source_handle.final_path().to_path_buf();
+            let source_metadata =
+                fs::symlink_metadata(&stable_source).map_err(|_| FilesystemError::Io)?;
+            if metadata_is_reparse(&source_metadata) {
+                return Err(FilesystemError::OutsideAuthority);
+            }
+            if source_metadata.is_dir() && !recursive {
+                return Err(FilesystemError::InvalidArgument);
+            }
+            if destination_path.exists() && !overwrite {
+                return Err(FilesystemError::AlreadyExists);
+            }
+            if source_metadata.is_dir() && destination_path.exists() {
+                return Err(FilesystemError::AlreadyExists);
+            }
+            let parent_handle = self.open_mutation_parent(&destination_path)?;
+            let destination_parent = parent_handle.final_path().to_path_buf();
+            let destination_leaf = destination_path
+                .file_name()
+                .ok_or(FilesystemError::InvalidArgument)?
+                .to_os_string();
+            let committed_path = destination_parent.join(&destination_leaf);
+            match rename_handle_to_path(source_handle.raw_handle(), &committed_path, overwrite) {
+                Ok(()) => {
+                    let bytes = if source_metadata.is_file() {
+                        source_metadata.len()
+                    } else {
+                        0
+                    };
+                    drop(source_handle);
+                    let committed = destination_parent.join(&destination_leaf);
+                    let final_destination = self
+                        .authority
+                        .revalidate_opened_path(&committed)
+                        .map_err(map_path_error)?;
+                    return Ok(FilesystemMutationResult {
+                        path: source.replace('\\', "/"),
+                        destination: Some(self.display_path(&final_destination)?),
+                        bytes,
+                        changed: true,
+                    });
+                }
+                Err(error) if is_cross_volume(&error) => {}
+                Err(error) => return Err(map_rename_error(error)),
+            }
+            drop(parent_handle);
+
+            if source_metadata.is_file() {
+                let mut source_file = source_handle.into_file();
+                let bytes = self.copy_open_file_atomic(
+                    &mut source_file,
+                    &destination_path,
+                    overwrite,
+                )?;
+                delete_raw_handle(file_raw_handle(&source_file)).map_err(|_| FilesystemError::Io)?;
+                let destination_final = self
                     .authority
-                    .revalidate_opened_path(&destination_path)
+                    .resolve_existing(destination)
                     .map_err(map_path_error)?;
                 return Ok(FilesystemMutationResult {
                     path: source.replace('\\', "/"),
-                    destination: Some(self.display_path(&final_destination)?),
-                    bytes: if source_metadata.is_file() { source_metadata.len() } else { 0 },
+                    destination: Some(self.display_path(&destination_final)?),
+                    bytes,
                     changed: true,
                 });
             }
-            Err(error) if is_cross_volume(&error) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+
+            let copied = self.copy_directory_from_stable_root(
+                &stable_source,
+                destination,
+                max_depth,
+                max_entries,
+            )?;
+            let mut scanned = 0usize;
+            self.delete_directory_contents_secure(
+                &stable_source,
+                0,
+                max_depth,
+                &mut scanned,
+                max_entries,
+            )?;
+            delete_raw_handle(source_handle.raw_handle()).map_err(|_| FilesystemError::Io)?;
+            Ok(copied)
+        }
+        #[cfg(not(windows))]
+        {
+            let source_metadata = initial_metadata;
+            if source_metadata.is_dir() && !recursive {
+                return Err(FilesystemError::InvalidArgument);
+            }
+            if destination_path.exists() && !overwrite {
                 return Err(FilesystemError::AlreadyExists);
             }
-            Err(_) => return Err(FilesystemError::Io),
+            if source_metadata.is_dir() && destination_path.exists() {
+                return Err(FilesystemError::AlreadyExists);
+            }
+            self.authority
+                .revalidate_opened_path(&source_path)
+                .map_err(map_path_error)?;
+            self.authority
+                .revalidate_parent(&destination_path)
+                .map_err(map_path_error)?;
+            match rename_path(&source_path, &destination_path, overwrite) {
+                Ok(()) => {
+                    let final_destination = self
+                        .authority
+                        .revalidate_opened_path(&destination_path)
+                        .map_err(map_path_error)?;
+                    return Ok(FilesystemMutationResult {
+                        path: source.replace('\\', "/"),
+                        destination: Some(self.display_path(&final_destination)?),
+                        bytes: if source_metadata.is_file() { source_metadata.len() } else { 0 },
+                        changed: true,
+                    });
+                }
+                Err(error) if is_cross_volume(&error) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(FilesystemError::AlreadyExists);
+                }
+                Err(_) => return Err(FilesystemError::Io),
+            }
+            let copied = self.copy(
+                source,
+                destination,
+                recursive,
+                overwrite,
+                max_depth,
+                max_entries,
+            )?;
+            self.delete(source, recursive, max_depth, max_entries)?;
+            Ok(copied)
         }
-        let copied = self.copy(
-            source,
-            destination,
-            recursive,
-            overwrite,
-            max_depth,
-            max_entries,
-        )?;
-        let destination_final = self
-            .authority
-            .resolve_existing(destination)
-            .map_err(map_path_error)?;
-        let verified = if source_metadata.is_file() {
-            sha256_file(&source_path)? == sha256_file(&destination_final)?
-        } else {
-            tree_manifest(&source_path, max_depth, max_entries)?
-                == tree_manifest(&destination_final, max_depth, max_entries)?
-        };
-        if !verified {
-            return Err(FilesystemError::Io);
-        }
-        self.delete(source, recursive, max_depth, max_entries)?;
-        Ok(copied)
     }
 
     pub(crate) fn delete(
@@ -567,32 +865,89 @@ impl FilesystemService {
         if metadata_is_reparse(&metadata) {
             return Err(FilesystemError::OutsideAuthority);
         }
-        self.authority
-            .revalidate_opened_path(&target)
-            .map_err(map_path_error)?;
-        self.authority
-            .revalidate_parent(&target)
-            .map_err(map_path_error)?;
-        if metadata.is_dir() {
-            if recursive {
-                let walked = self.walk(&target, max_depth, max_entries)?;
-                if walked.truncated {
-                    return Err(FilesystemError::LimitExceeded);
-                }
-                fs::remove_dir_all(&target).map_err(|_| FilesystemError::Io)?;
-            } else {
-                fs::remove_dir(&target).map_err(|error| {
-                    if error.kind() == std::io::ErrorKind::DirectoryNotEmpty {
-                        FilesystemError::InvalidArgument
-                    } else {
-                        FilesystemError::Io
-                    }
-                })?;
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_LIST_DIRECTORY};
+            let _parent_guard = self.open_directory_chain(
+                target
+                    .parent()
+                    .ok_or(FilesystemError::OutsideAuthority)?,
+            )?;
+            let desired_access = DELETE
+                | if metadata.is_dir() {
+                    FILE_LIST_DIRECTORY
+                } else if metadata.is_file() {
+                    0
+                } else {
+                    return Err(FilesystemError::Unsupported);
+                };
+            let target_handle = self
+                .authority
+                .open_validated_handle(&target, desired_access)
+                .map_err(map_path_error)?;
+            let stable_target = target_handle.final_path().to_path_buf();
+            let stable_metadata =
+                fs::symlink_metadata(&stable_target).map_err(|_| FilesystemError::Io)?;
+            if metadata_is_reparse(&stable_metadata) {
+                return Err(FilesystemError::OutsideAuthority);
             }
-        } else if metadata.is_file() {
-            fs::remove_file(&target).map_err(|_| FilesystemError::Io)?;
-        } else {
-            return Err(FilesystemError::Unsupported);
+            if stable_metadata.is_dir() {
+                if recursive {
+                    let mut scanned = 0usize;
+                    self.delete_directory_contents_secure(
+                        &stable_target,
+                        0,
+                        max_depth,
+                        &mut scanned,
+                        max_entries,
+                    )?;
+                } else if fs::read_dir(&stable_target)
+                    .map_err(|_| FilesystemError::Io)?
+                    .next()
+                    .is_some()
+                {
+                    return Err(FilesystemError::InvalidArgument);
+                }
+            } else if !stable_metadata.is_file() {
+                return Err(FilesystemError::Unsupported);
+            }
+            delete_raw_handle(target_handle.raw_handle()).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::DirectoryNotEmpty {
+                    FilesystemError::InvalidArgument
+                } else {
+                    FilesystemError::Io
+                }
+            })?;
+        }
+        #[cfg(not(windows))]
+        {
+            self.authority
+                .revalidate_opened_path(&target)
+                .map_err(map_path_error)?;
+            self.authority
+                .revalidate_parent(&target)
+                .map_err(map_path_error)?;
+            if metadata.is_dir() {
+                if recursive {
+                    let walked = self.walk(&target, max_depth, max_entries)?;
+                    if walked.truncated {
+                        return Err(FilesystemError::LimitExceeded);
+                    }
+                    fs::remove_dir_all(&target).map_err(|_| FilesystemError::Io)?;
+                } else {
+                    fs::remove_dir(&target).map_err(|error| {
+                        if error.kind() == std::io::ErrorKind::DirectoryNotEmpty {
+                            FilesystemError::InvalidArgument
+                        } else {
+                            FilesystemError::Io
+                        }
+                    })?;
+                }
+            } else if metadata.is_file() {
+                fs::remove_file(&target).map_err(|_| FilesystemError::Io)?;
+            } else {
+                return Err(FilesystemError::Unsupported);
+            }
         }
         Ok(FilesystemMutationResult {
             path: path.replace('\\', "/"),
@@ -600,6 +955,67 @@ impl FilesystemService {
             bytes: metadata.len(),
             changed: true,
         })
+    }
+
+    #[cfg(windows)]
+    fn delete_directory_contents_secure(
+        &self,
+        directory: &Path,
+        depth: u32,
+        max_depth: u32,
+        scanned: &mut usize,
+        max_entries: usize,
+    ) -> Result<(), FilesystemError> {
+        let mut children = fs::read_dir(directory)
+            .map_err(|_| FilesystemError::Io)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| FilesystemError::Io)?;
+        children.sort_by_key(|entry| entry.file_name());
+        if !children.is_empty() && depth >= max_depth {
+            return Err(FilesystemError::LimitExceeded);
+        }
+        for child in children {
+            if *scanned >= max_entries {
+                return Err(FilesystemError::LimitExceeded);
+            }
+            *scanned += 1;
+            let path = child.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
+            if metadata_is_reparse(&metadata) {
+                return Err(FilesystemError::OutsideAuthority);
+            }
+            use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_LIST_DIRECTORY};
+            let access = DELETE
+                | if metadata.is_dir() {
+                    FILE_LIST_DIRECTORY
+                } else if metadata.is_file() {
+                    0
+                } else {
+                    return Err(FilesystemError::Unsupported);
+                };
+            let handle = self
+                .authority
+                .open_validated_handle(&path, access)
+                .map_err(map_path_error)?;
+            let stable = handle.final_path().to_path_buf();
+            let stable_metadata = fs::symlink_metadata(&stable).map_err(|_| FilesystemError::Io)?;
+            if metadata_is_reparse(&stable_metadata) {
+                return Err(FilesystemError::OutsideAuthority);
+            }
+            if stable_metadata.is_dir() {
+                self.delete_directory_contents_secure(
+                    &stable,
+                    depth + 1,
+                    max_depth,
+                    scanned,
+                    max_entries,
+                )?;
+            } else if !stable_metadata.is_file() {
+                return Err(FilesystemError::Unsupported);
+            }
+            delete_raw_handle(handle.raw_handle()).map_err(|_| FilesystemError::Io)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn hash(&self, path: &str) -> Result<FilesystemHashResult, FilesystemError> {
@@ -624,14 +1040,30 @@ impl FilesystemService {
         if target.exists() {
             return Err(FilesystemError::AlreadyExists);
         }
-        self.authority
-            .revalidate_parent(&target)
-            .map_err(map_path_error)?;
-        fs::create_dir(&target).map_err(|_| FilesystemError::Io)?;
-        let final_target = match self.authority.revalidate_opened_path(&target) {
+        #[cfg(windows)]
+        let parent_handle = self.open_mutation_parent(&target)?;
+        #[cfg(windows)]
+        let stable_target = parent_handle.final_path().join(
+            target
+                .file_name()
+                .ok_or(FilesystemError::InvalidArgument)?,
+        );
+        #[cfg(not(windows))]
+        let stable_target = {
+            self.authority.revalidate_parent(&target).map_err(map_path_error)?;
+            target
+        };
+        fs::create_dir(&stable_target).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                FilesystemError::AlreadyExists
+            } else {
+                FilesystemError::Io
+            }
+        })?;
+        let final_target = match self.authority.revalidate_opened_path(&stable_target) {
             Ok(value) => value,
             Err(error) => {
-                let _ = fs::remove_dir(&target);
+                let _ = fs::remove_dir(&stable_target);
                 return Err(map_path_error(error));
             }
         };
@@ -647,36 +1079,9 @@ impl FilesystemService {
         &self,
         path: &str,
     ) -> Result<FilesystemMutationResult, FilesystemError> {
-        let target = self.authority.resolve_existing(path).map_err(map_path_error)?;
-        if self.authority.scope() == PathAuthorityScope::ActiveWorkspace
-            && self.authority.canonical_root() == Some(target.as_path())
-        {
-            return Err(FilesystemError::OutsideAuthority);
-        }
-        let metadata = fs::symlink_metadata(&target).map_err(|_| FilesystemError::Io)?;
-        if !metadata.is_dir() || metadata_is_reparse(&metadata) {
-            return Err(FilesystemError::InvalidArgument);
-        }
-        if fs::read_dir(&target)
-            .map_err(|_| FilesystemError::Io)?
-            .next()
-            .is_some()
-        {
-            return Err(FilesystemError::InvalidArgument);
-        }
-        self.authority
-            .revalidate_opened_path(&target)
-            .map_err(map_path_error)?;
-        self.authority
-            .revalidate_parent(&target)
-            .map_err(map_path_error)?;
-        fs::remove_dir(&target).map_err(|_| FilesystemError::Io)?;
-        Ok(FilesystemMutationResult {
-            path: path.replace('\\', "/"),
-            destination: None,
-            bytes: 0,
-            changed: true,
-        })
+        let mut result = self.delete(path, false, 1, 1)?;
+        result.bytes = 0;
+        Ok(result)
     }
 
     fn walk(
@@ -821,6 +1226,12 @@ fn metadata_is_reparse(metadata: &Metadata) -> bool {
     metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
+#[cfg(windows)]
+fn windows_path_eq(left: &Path, right: &Path) -> bool {
+    left.to_string_lossy()
+        .eq_ignore_ascii_case(right.to_string_lossy().as_ref())
+}
+
 #[cfg(not(windows))]
 fn metadata_is_reparse(metadata: &Metadata) -> bool {
     metadata.file_type().is_symlink()
@@ -876,36 +1287,93 @@ fn write_new_synced(path: &Path, content: &[u8]) -> Result<(), FilesystemError> 
 }
 
 #[cfg(windows)]
-fn atomic_replace(temp: &Path, target: &Path, overwrite: bool) -> Result<(), FilesystemError> {
+fn rename_handle_to_path(
+    source: windows_sys::Win32::Foundation::HANDLE,
+    destination: &Path,
+    overwrite: bool,
+) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        FILE_RENAME_INFO, FileRenameInfo, SetFileInformationByHandle,
     };
-    let temp = temp
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let target = target
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let flags = MOVEFILE_WRITE_THROUGH
-        | if overwrite {
-            MOVEFILE_REPLACE_EXISTING
-        } else {
-            0
-        };
-    if unsafe { MoveFileExW(temp.as_ptr(), target.as_ptr(), flags) } == 0 {
-        let error = std::io::Error::last_os_error();
-        return Err(if error.kind() == std::io::ErrorKind::AlreadyExists {
-            FilesystemError::AlreadyExists
-        } else {
-            FilesystemError::Io
-        });
+
+    let name = destination.as_os_str().encode_wide().collect::<Vec<_>>();
+    if name.is_empty() || name.len() > (u32::MAX as usize / 2) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid destination name",
+        ));
+    }
+    let offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let bytes = std::mem::size_of::<FILE_RENAME_INFO>()
+        + name.len().saturating_sub(1) * std::mem::size_of::<u16>();
+    let words = bytes.div_ceil(std::mem::size_of::<usize>());
+    let mut storage = vec![0usize; words];
+    let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    unsafe {
+        (*info).Anonymous.ReplaceIfExists = overwrite;
+        (*info).RootDirectory = std::ptr::null_mut();
+        (*info).FileNameLength = (name.len() * std::mem::size_of::<u16>()) as u32;
+        std::ptr::copy_nonoverlapping(
+            name.as_ptr().cast::<u8>(),
+            storage.as_mut_ptr().cast::<u8>().add(offset),
+            name.len() * std::mem::size_of::<u16>(),
+        );
+        if SetFileInformationByHandle(source, FileRenameInfo, info.cast(), bytes as u32) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn map_rename_error(error: std::io::Error) -> FilesystemError {
+    if error.kind() == std::io::ErrorKind::AlreadyExists {
+        FilesystemError::AlreadyExists
+    } else {
+        FilesystemError::Io
+    }
+}
+
+fn sha256_open_file(file: &mut File) -> Result<String, FilesystemError> {
+    file.seek(SeekFrom::Start(0)).map_err(|_| FilesystemError::Io)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|_| FilesystemError::Io)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+#[cfg(windows)]
+fn file_raw_handle(file: &File) -> windows_sys::Win32::Foundation::HANDLE {
+    use std::os::windows::io::AsRawHandle;
+    file.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE
+}
+
+#[cfg(windows)]
+fn delete_raw_handle(handle: windows_sys::Win32::Foundation::HANDLE) -> std::io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_DISPOSITION_INFO, FileDispositionInfo, SetFileInformationByHandle,
+    };
+    let info = FILE_DISPOSITION_INFO { DeleteFile: true };
+    if unsafe {
+        SetFileInformationByHandle(
+            handle,
+            FileDispositionInfo,
+            (&info as *const FILE_DISPOSITION_INFO).cast(),
+            std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(not(windows))]
@@ -914,28 +1382,6 @@ fn atomic_replace(temp: &Path, target: &Path, overwrite: bool) -> Result<(), Fil
         return Err(FilesystemError::AlreadyExists);
     }
     fs::rename(temp, target).map_err(|_| FilesystemError::Io)
-}
-
-#[cfg(windows)]
-fn rename_path(source: &Path, destination: &Path, overwrite: bool) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let flags = if overwrite { MOVEFILE_REPLACE_EXISTING } else { 0 };
-    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) } == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
 }
 
 #[cfg(not(windows))]
@@ -1077,6 +1523,22 @@ fn join_display(root: &str, relative: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    fn create_junction(link: &Path, target: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "mklink /J failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn workspace(label: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1163,5 +1625,219 @@ mod tests {
             service.hash("large-copy.bin").unwrap().sha256
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validated_parent_handle_closes_the_deterministic_check_then_swap_gap() {
+        let root = workspace("toctou-parent");
+        let outside = workspace("toctou-parent-outside");
+        let safe = root.join("safe");
+        let parent = safe.join("parent");
+        let outside_parent = outside.join("parent");
+        let displaced = root.join("safe-original");
+        let target = parent.join("target.txt");
+        fs::create_dir_all(&parent).unwrap();
+        fs::create_dir(&outside_parent).unwrap();
+        let service = FilesystemService::active_workspace(&root).unwrap();
+
+        // A path-only validation result has no lifetime: an ancestor of the
+        // checked parent can be replaced by an outside junction immediately
+        // after validation.
+        let checked = service.authority.revalidate_parent(&target).unwrap();
+        assert_eq!(
+            checked,
+            service.authority.resolve_existing("safe/parent").unwrap()
+        );
+        fs::rename(&safe, &displaced).unwrap();
+        create_junction(&safe, &outside);
+        assert_ne!(fs::canonicalize(safe.join("parent")).unwrap(), checked);
+        fs::remove_dir(&safe).unwrap();
+        fs::rename(&displaced, &safe).unwrap();
+
+        // The mutation primitive pins the whole directory chain without
+        // FILE_SHARE_DELETE. The same ancestor swap is rejected while the
+        // chain lives.
+        let parent_handle = service.open_mutation_parent(&target).unwrap();
+        assert!(fs::rename(&safe, &displaced).is_err());
+
+        let temp = parent.join("commit.tmp");
+        fs::write(&temp, b"inside").unwrap();
+        use windows_sys::Win32::Storage::FileSystem::DELETE;
+        let temp_handle = service
+            .authority
+            .open_validated_handle(&temp, DELETE)
+            .unwrap();
+        rename_handle_to_path(temp_handle.raw_handle(), &target, false).unwrap();
+        drop(temp_handle);
+        drop(parent_handle);
+
+        assert_eq!(fs::read(&target).unwrap(), b"inside");
+        assert!(!outside.join("target.txt").exists());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validated_source_handle_keeps_move_and_delete_bound_to_the_opened_object() {
+        use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_GENERIC_READ};
+
+        let root = workspace("toctou-source");
+        let source = root.join("source.txt");
+        let displaced = root.join("displaced.txt");
+        let moved = root.join("moved.txt");
+        fs::write(&source, b"original").unwrap();
+        let service = FilesystemService::active_workspace(&root).unwrap();
+
+        let source_handle = service
+            .authority
+            .open_validated_handle(&source, DELETE | FILE_GENERIC_READ)
+            .unwrap();
+        assert!(fs::rename(&source, &displaced).is_err());
+        rename_handle_to_path(source_handle.raw_handle(), &moved, false).unwrap();
+        drop(source_handle);
+        assert_eq!(fs::read(&moved).unwrap(), b"original");
+
+        let delete_handle = service
+            .authority
+            .open_validated_handle(&moved, DELETE)
+            .unwrap();
+        assert!(fs::rename(&moved, &displaced).is_err());
+        delete_raw_handle(delete_handle.raw_handle()).unwrap();
+        drop(delete_handle);
+        assert!(!moved.exists());
+        assert!(!displaced.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sensitive_mutations_reject_an_outside_workspace_junction() {
+        let root = workspace("toctou-junction");
+        let outside = workspace("toctou-junction-outside");
+        fs::write(root.join("copy-source.txt"), b"copy").unwrap();
+        fs::write(root.join("move-source.txt"), b"move").unwrap();
+        fs::write(outside.join("outside.txt"), b"outside").unwrap();
+        let link = root.join("escape");
+        create_junction(&link, &outside);
+        let service = FilesystemService::active_workspace(&root).unwrap();
+
+        assert_eq!(
+            service.write("escape/write.txt", b"blocked", true),
+            Err(FilesystemError::OutsideAuthority)
+        );
+        assert_eq!(
+            service.copy(
+                "copy-source.txt",
+                "escape/copied.txt",
+                false,
+                false,
+                8,
+                100,
+            ),
+            Err(FilesystemError::OutsideAuthority)
+        );
+        assert_eq!(
+            service.move_path(
+                "move-source.txt",
+                "escape/moved.txt",
+                false,
+                false,
+                8,
+                100,
+            ),
+            Err(FilesystemError::OutsideAuthority)
+        );
+        assert_eq!(
+            service.delete("escape/outside.txt", false, 8, 100),
+            Err(FilesystemError::OutsideAuthority)
+        );
+
+        assert!(!outside.join("write.txt").exists());
+        assert!(!outside.join("copied.txt").exists());
+        assert!(!outside.join("moved.txt").exists());
+        assert_eq!(fs::read(outside.join("outside.txt")).unwrap(), b"outside");
+        assert!(root.join("move-source.txt").exists());
+
+        fs::remove_dir(&link).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cross_volume_move_copies_verifies_then_deletes_the_opened_source() {
+        use std::path::{Component, Prefix};
+
+        fn drive(path: &Path) -> Option<u8> {
+            match path.components().next() {
+                Some(Component::Prefix(prefix)) => match prefix.kind() {
+                    Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => Some(letter),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+
+        let source_root = workspace("cross-volume-source");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let destination_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("schema43-cross-volume-{}-{nonce}", std::process::id()));
+        if drive(&source_root) == drive(&destination_root) {
+            fs::remove_dir_all(source_root).unwrap();
+            return;
+        }
+        fs::create_dir_all(&destination_root).unwrap();
+
+        let source_file = source_root.join("source.bin");
+        let destination_file = destination_root.join("destination.bin");
+        let payload = vec![0x5a; MAX_FILESYSTEM_READ_BYTES + 4096];
+        fs::write(&source_file, &payload).unwrap();
+
+        let source_directory = source_root.join("tree");
+        fs::create_dir(&source_directory).unwrap();
+        fs::create_dir(source_directory.join("nested")).unwrap();
+        fs::write(source_directory.join("a.txt"), b"alpha").unwrap();
+        fs::write(source_directory.join("nested").join("b.txt"), b"beta").unwrap();
+        let destination_directory = destination_root.join("tree-moved");
+
+        let service = FilesystemService::broker_administrator();
+        service
+            .move_path(
+                source_file.to_str().unwrap(),
+                destination_file.to_str().unwrap(),
+                false,
+                false,
+                8,
+                100,
+            )
+            .unwrap();
+        assert!(!source_file.exists());
+        assert_eq!(fs::read(&destination_file).unwrap(), payload);
+
+        service
+            .move_path(
+                source_directory.to_str().unwrap(),
+                destination_directory.to_str().unwrap(),
+                true,
+                false,
+                8,
+                100,
+            )
+            .unwrap();
+        assert!(!source_directory.exists());
+        assert_eq!(fs::read(destination_directory.join("a.txt")).unwrap(), b"alpha");
+        assert_eq!(
+            fs::read(destination_directory.join("nested").join("b.txt")).unwrap(),
+            b"beta"
+        );
+
+        fs::remove_dir_all(source_root).unwrap();
+        fs::remove_dir_all(destination_root).unwrap();
     }
 }

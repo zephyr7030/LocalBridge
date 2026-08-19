@@ -1,6 +1,3 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
-
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
@@ -21,12 +18,20 @@ pub(crate) fn run_privileged_filesystem(
     spec.validate().map_err(|_| ())?;
     let action = spec.action;
     let path = spec.path.clone();
+    let service = FilesystemService::broker_administrator();
     match action {
         PrivilegedFilesystemAction::ReadFile => {
-            let bytes = fs::read(&path).map_err(|_| ())?;
-            if bytes.len() > super::MAX_PRIVILEGED_FILE_BYTES {
+            let result = service
+                .read(&path, 0, super::MAX_PRIVILEGED_FILE_BYTES)
+                .map_err(|_| ())?;
+            if !result.eof || result.returned_bytes > super::MAX_PRIVILEGED_FILE_BYTES {
                 return Err(());
             }
+            let bytes = match result.encoding.to_string().as_str() {
+                "base64" => STANDARD.decode(result.content).map_err(|_| ())?,
+                "utf8" => result.content.into_bytes(),
+                _ => return Err(()),
+            };
             Ok(PrivilegedFilesystemResult {
                 action,
                 path,
@@ -41,14 +46,7 @@ pub(crate) fn run_privileged_filesystem(
             if bytes.len() > super::MAX_PRIVILEGED_FILE_BYTES {
                 return Err(());
             }
-            let mut file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&path)
-                .map_err(|_| ())?;
-            file.write_all(&bytes).map_err(|_| ())?;
-            file.flush().map_err(|_| ())?;
+            service.write(&path, &bytes, true).map_err(|_| ())?;
             Ok(PrivilegedFilesystemResult {
                 action,
                 path,
@@ -58,7 +56,7 @@ pub(crate) fn run_privileged_filesystem(
             })
         }
         PrivilegedFilesystemAction::CreateDirectory => {
-            fs::create_dir_all(&path).map_err(|_| ())?;
+            create_legacy_directory_all(&service, &path)?;
             Ok(PrivilegedFilesystemResult {
                 action,
                 path,
@@ -69,7 +67,17 @@ pub(crate) fn run_privileged_filesystem(
         }
         PrivilegedFilesystemAction::Rename => {
             let destination = spec.destination.clone().ok_or(())?;
-            fs::rename(&path, &destination).map_err(|_| ())?;
+            let metadata = service.stat(&path, false, 1, 1).map_err(|_| ())?;
+            service
+                .move_path(
+                    &path,
+                    &destination,
+                    metadata.kind == "directory",
+                    false,
+                    64,
+                    100_000,
+                )
+                .map_err(|_| ())?;
             Ok(PrivilegedFilesystemResult {
                 action,
                 path,
@@ -79,22 +87,9 @@ pub(crate) fn run_privileged_filesystem(
             })
         }
         PrivilegedFilesystemAction::Delete => {
-            let metadata = fs::symlink_metadata(&path).map_err(|_| ())?;
-            if metadata.file_type().is_symlink() {
-                if fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir()) {
-                    fs::remove_dir(&path).map_err(|_| ())?;
-                } else {
-                    fs::remove_file(&path).map_err(|_| ())?;
-                }
-            } else if metadata.is_dir() {
-                if spec.recursive {
-                    fs::remove_dir_all(&path).map_err(|_| ())?;
-                } else {
-                    fs::remove_dir(&path).map_err(|_| ())?;
-                }
-            } else {
-                fs::remove_file(&path).map_err(|_| ())?;
-            }
+            service
+                .delete(&path, spec.recursive, 64, 100_000)
+                .map_err(|_| ())?;
             Ok(PrivilegedFilesystemResult {
                 action,
                 path,
@@ -104,6 +99,34 @@ pub(crate) fn run_privileged_filesystem(
             })
         }
     }
+}
+
+fn create_legacy_directory_all(service: &FilesystemService, path: &str) -> Result<(), ()> {
+    let mut cursor = std::path::PathBuf::from(path);
+    let mut missing = Vec::new();
+    loop {
+        let current = cursor.to_str().ok_or(())?;
+        match service.stat(current, false, 1, 1) {
+            Ok(result) if result.kind == "directory" => break,
+            Ok(_) => return Err(()),
+            Err(FilesystemError::NotFound) => {
+                missing.push(cursor.file_name().ok_or(())?.to_os_string());
+                if !cursor.pop() {
+                    return Err(());
+                }
+            }
+            Err(_) => return Err(()),
+        }
+    }
+    for component in missing.into_iter().rev() {
+        cursor.push(component);
+        let current = cursor.to_str().ok_or(())?;
+        match service.create_directory(current) {
+            Ok(_) | Err(FilesystemError::AlreadyExists) => {}
+            Err(_) => return Err(()),
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn run_administrator_filesystem(
@@ -326,6 +349,7 @@ fn administrator_mutation(
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_root() -> std::path::PathBuf {
@@ -344,11 +368,19 @@ mod tests {
     #[test]
     fn structured_privileged_filesystem_supports_binary_roundtrip_rename_and_delete() {
         let root = temp_root();
-        let dir = root.join("admin-dir");
+        let dir = root.join("admin-dir").join("nested");
         let file = dir.join("payload.bin");
         let renamed = dir.join("renamed.bin");
         let payload = b"schema33\0binary";
 
+        run_privileged_filesystem(PrivilegedFilesystemSpec {
+            action: PrivilegedFilesystemAction::CreateDirectory,
+            path: dir.to_string_lossy().into_owned(),
+            destination: None,
+            content_base64: None,
+            recursive: false,
+        })
+        .unwrap();
         run_privileged_filesystem(PrivilegedFilesystemSpec {
             action: PrivilegedFilesystemAction::CreateDirectory,
             path: dir.to_string_lossy().into_owned(),

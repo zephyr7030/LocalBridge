@@ -3,15 +3,21 @@ use std::path::{Component, Path, PathBuf};
 #[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(windows)]
+use std::fs::File;
+#[cfg(windows)]
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+#[cfg(windows)]
+use std::os::windows::io::{FromRawHandle, RawHandle};
 #[cfg(windows)]
 use std::ptr::{null, null_mut};
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetFinalPathNameByHandleW, OPEN_EXISTING,
+    CreateFileW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FileAttributeTagInfo, GetFileInformationByHandleEx,
+    GetFinalPathNameByHandleW, OPEN_EXISTING,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +38,37 @@ pub struct PathAuthority {
     scope: PathAuthorityScope,
     execution_root: Option<PathBuf>,
     canonical_root: Option<PathBuf>,
+}
+
+#[cfg(windows)]
+#[derive(Debug)]
+pub(crate) struct ValidatedPathHandle {
+    handle: HANDLE,
+    final_path: PathBuf,
+}
+
+#[cfg(windows)]
+impl ValidatedPathHandle {
+    pub(crate) const fn raw_handle(&self) -> HANDLE {
+        self.handle
+    }
+
+    pub(crate) fn final_path(&self) -> &Path {
+        &self.final_path
+    }
+
+    pub(crate) fn into_file(self) -> File {
+        let handle = self.handle;
+        std::mem::forget(self);
+        unsafe { File::from_raw_handle(handle as RawHandle) }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ValidatedPathHandle {
+    fn drop(&mut self) {
+        unsafe { CloseHandle(self.handle) };
+    }
 }
 
 impl PathAuthority {
@@ -133,10 +170,73 @@ impl PathAuthority {
     }
 
     pub fn revalidate_opened_path(&self, path: &Path) -> Result<PathBuf, PathAuthorityError> {
-        let final_path = final_opened_path(path)?;
-        self.allows_canonical(&final_path)
-            .then_some(final_path)
-            .ok_or(PathAuthorityError::OutsideAuthority)
+        #[cfg(windows)]
+        {
+            Ok(self.open_validated_handle(path, 0)?.final_path().to_path_buf())
+        }
+        #[cfg(not(windows))]
+        {
+            let final_path = final_opened_path(path)?;
+            self.allows_canonical(&final_path)
+                .then_some(final_path)
+                .ok_or(PathAuthorityError::OutsideAuthority)
+        }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn open_validated_handle(
+        &self,
+        path: &Path,
+        desired_access: u32,
+    ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        let wide = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                desired_access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null(),
+                OPEN_EXISTING,
+                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(PathAuthorityError::NotFound);
+        }
+        let mut tag = FILE_ATTRIBUTE_TAG_INFO::default();
+        let tagged = unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileAttributeTagInfo,
+                (&mut tag as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+                std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            )
+        };
+        if tagged == 0 || tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            unsafe { CloseHandle(handle) };
+            return Err(if tagged == 0 {
+                PathAuthorityError::InvalidPath
+            } else {
+                PathAuthorityError::OutsideAuthority
+            });
+        }
+        let final_path = match final_path_from_handle(handle) {
+            Ok(path) if self.allows_canonical(&path) => path,
+            Ok(_) => {
+                unsafe { CloseHandle(handle) };
+                return Err(PathAuthorityError::OutsideAuthority);
+            }
+            Err(error) => {
+                unsafe { CloseHandle(handle) };
+                return Err(error);
+            }
+        };
+        Ok(ValidatedPathHandle { handle, final_path })
     }
 
     pub fn revalidate_parent(&self, path: &Path) -> Result<PathBuf, PathAuthorityError> {
@@ -344,44 +444,14 @@ fn ordinary_path(path: &Path) -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-struct OwnedPathHandle(HANDLE);
-
-#[cfg(windows)]
-impl Drop for OwnedPathHandle {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.0) };
-    }
-}
-
-#[cfg(windows)]
-fn final_opened_path(path: &Path) -> Result<PathBuf, PathAuthorityError> {
-    let wide = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let handle = unsafe {
-        CreateFileW(
-            wide.as_ptr(),
-            0,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            null(),
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            null_mut(),
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(PathAuthorityError::NotFound);
-    }
-    let handle = OwnedPathHandle(handle);
-    let needed = unsafe { GetFinalPathNameByHandleW(handle.0, null_mut(), 0, 0) };
+fn final_path_from_handle(handle: HANDLE) -> Result<PathBuf, PathAuthorityError> {
+    let needed = unsafe { GetFinalPathNameByHandleW(handle, null_mut(), 0, 0) };
     if needed == 0 {
         return Err(PathAuthorityError::InvalidPath);
     }
     let mut buffer = vec![0u16; needed as usize + 1];
     let written = unsafe {
-        GetFinalPathNameByHandleW(handle.0, buffer.as_mut_ptr(), buffer.len() as u32, 0)
+        GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, 0)
     };
     if written == 0 || written as usize >= buffer.len() {
         return Err(PathAuthorityError::InvalidPath);
