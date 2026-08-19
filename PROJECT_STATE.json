@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-015",
+  "current_pr": "LB-016",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5976,6 +5976,19 @@
       "git diff --check PASS; no product modification required."
     ],
     "next_pr": "LB-015",
+    "g4_unlocked": false
+  },
+  "lb015_schema42_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-015",
+    "product_patch_required": false,
+    "evidence": [
+      "LB015 Dashboard contract PASS.",
+      "ARCH-010 and ARCH-013 schema42 current/history projection PASS.",
+      "Backend schema42 TaskAggregate projection test PASS.",
+      "Frontend tests and production build PASS; no product modification required."
+    ],
+    "next_pr": "LB-016",
     "g4_unlocked": false
   }
 }
