@@ -6170,5 +6170,19 @@
     ],
     "next_pr": "LB-017",
     "g4_unlocked": false
+  },
+  "schema42_lb017_adversarial_repair_scope_2026_08_19": {
+    "status": "RATIFIED",
+    "owner_pr": "LB-017",
+    "exact_runtime_exception": "src-tauri/src/runtime/recovery.rs",
+    "findings": [
+      "recovery diagnostics must observe actual retry attempt boundaries rather than post-attempt watchdog snapshots",
+      "special MCP handlers must close request diagnostics on all terminal/early-return paths and active tracking is bounded at 32",
+      "recent user-facing diagnostics deduplicate per source transition so watchdog cadence cannot flood the 8-event ring",
+      "open logs must materialize a redacted diagnostics artifact in the directory it opens",
+      "LB-017 behavior gates must cover these paths instead of relying only on source markers"
+    ],
+    "review_executed": false,
+    "g4_unlocked": false
   }
 }

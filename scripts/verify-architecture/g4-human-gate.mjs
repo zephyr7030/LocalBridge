@@ -2288,6 +2288,12 @@ const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
     request_connection_id_semantics:"logical connection or retry-attempt correlation; MCP uses the serving connection/session identity and recovery uses one identity per automatic attempt",
     request_timestamp_semantics:"timestamp is Unix epoch milliseconds",
     request_diagnostics_retention:"bounded redacted process-lifetime diagnostics store and export",
+    request_diagnostics_active_tracking_bounded_required:true,
+    request_diagnostics_active_tracking_limit:32,
+    request_diagnostics_special_handler_terminal_required:true,
+    request_diagnostics_recovery_attempt_boundary_required:true,
+    diagnostic_recent_events_per_source_transition_dedup_required:true,
+    diagnostic_open_logs_materializes_redacted_snapshot_required:true,
     request_start_log_fields:["timestamp","request_id","connection_id","attempt","tool"],
     request_end_log_fields:["request_id","connection_id","attempt","outcome","error_code","phase","cause","http_status","duration_ms"],
     tunnel_mcp_transport_failure_phase_transport_required:true,
@@ -2308,6 +2314,7 @@ const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
     "LB-017":[
       "src-tauri/src/mcp/server.rs",
       "src-tauri/src/app/background.rs",
+      "src-tauri/src/runtime/recovery.rs",
       "scripts/verify-architecture/g4-human-gate.mjs",
       "scripts/verify-architecture/g4-human-gate.test.mjs"
     ]
@@ -2320,7 +2327,10 @@ const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
     "LB-017":[
       "bounded redacted request diagnostic start/end records reusing the existing diagnostics store",
       "event-driven MCP request and runtime recovery diagnostic hooks with no UI-read side effects",
-      "recovery diagnostic correlation reusing the exact existing OutageGeneration request_id"
+      "recovery diagnostic correlation reusing the exact existing OutageGeneration request_id",
+      "recovery attempt diagnostics emitted at actual retry execution boundaries rather than post-attempt watchdog sampling",
+      "bounded MCP request tracker with terminal cleanup for task_control and other special handlers",
+      "transition-deduplicated recent user event projection and materialized redacted log directory"
     ]
   },
   addedTests:{
@@ -2338,7 +2348,11 @@ const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
       "successful retry records preserve the request_id used by preceding failed attempts and show incremented attempt values without leaking secrets",
       "public MCP tool requests record start/end at execution boundaries even when Dashboard and Diagnostics are never opened",
       "runtime recovery attempts record start/end from backend lifecycle events and reuse the exact OutageGeneration request_id rather than synthesizing another id",
-      "reading Dashboard or Diagnostics does not create, close or advance request diagnostic records"
+      "reading Dashboard or Diagnostics does not create, close or advance request diagnostic records",
+      "an automatic recovery attempt emits exactly one diagnostic Start and End from the real attempt boundary even when the post-attempt runtime snapshot is Ready or Faulted and never exposes Recovering to the watchdog",
+      "task_control missing or invalid action and other special-handler early-return paths leave no active request diagnostic; active request tracking remains bounded under unmatched starts",
+      "stable repeated watchdog observations do not refill the recent-event ring with alternating duplicate runtime and Broker messages; each source logs only real state transitions",
+      "打开日志 materializes at least one redacted diagnostics artifact in the directory it opens rather than opening an empty logs directory"
     ]
   }
 });

@@ -263,6 +263,8 @@ const schema42Contracts = JSON.parse(readFileSync(new URL("../../PR_CONTRACTS.js
 assert.equal(hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(schema42Contracts), true);
 const schema42DiagnosticsDrift=structuredClone(schema42Contracts); schema42DiagnosticsDrift.rules.tunnel_http_400_diagnostic_phase="runtime"; assert.equal(hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(schema42DiagnosticsDrift),false);
 const schema42EventDiagnosticsDrift=structuredClone(schema42Contracts); schema42EventDiagnosticsDrift.rules.request_diagnostics_event_driven_required=false; assert.equal(hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(schema42EventDiagnosticsDrift),false);
+const schema42BoundedDiagnosticsDrift=structuredClone(schema42Contracts); schema42BoundedDiagnosticsDrift.rules.request_diagnostics_active_tracking_limit=0; assert.equal(hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(schema42BoundedDiagnosticsDrift),false);
+const schema42RecoveryPathDrift=structuredClone(schema42Contracts); schema42RecoveryPathDrift.prs["LB-017"].writable_paths=schema42RecoveryPathDrift.prs["LB-017"].writable_paths.filter(x=>x!=="src-tauri/src/runtime/recovery.rs"); assert.equal(hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(schema42RecoveryPathDrift),false);
 const schema42ToolboxContracts = normalizeSchema42UnifiedErrorDiagnosticsAmendment20260819(schema42Contracts);
 assert.equal(hasExactSchema42ToolboxAmendment20260818(schema42ToolboxContracts), true);
 const schema42ToolboxDrift=structuredClone(schema42Contracts); schema42ToolboxDrift.rules.toolbox_runtime_download_install_or_update_forbidden=false; assert.equal(hasExactSchema42ToolboxAmendment20260818(schema42ToolboxDrift),false);
