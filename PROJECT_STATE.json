@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -6031,6 +6031,18 @@
     "next_required_g3_generation": 22,
     "review_executed": false,
     "user_instruction": "repair progression without additional adversarial review",
+    "g4_unlocked": false
+  },
+  "schema42_user_reported_ui_and_diagnostics_rework_2026_08_19": {
+    "status": "REWORK_REQUIRED",
+    "source": "explicit_user_instruction",
+    "findings": [
+      "Dashboard frontend still consumes legacy currentWorkflow/currentCommand and lastCommand/lastTool instead of schema42 backend currentActivity/lastActivity",
+      "Unified request diagnostics are triggered by Dashboard/Diagnostics reads instead of backend runtime/recovery observation",
+      "LB-017 synthesizes a second request_id instead of reusing OutageGeneration.request_id"
+    ],
+    "reopen_from_pr": "LB-015",
+    "review_executed": false,
     "g4_unlocked": false
   }
 }
