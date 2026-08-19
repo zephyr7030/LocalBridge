@@ -6002,5 +6002,35 @@
     ],
     "next_pr": "LB-017",
     "g4_unlocked": false
+  },
+  "lb017_schema42_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-017",
+    "product_commit": "ffbc31f2eea06f501b2181fe83a2eb18f0c7154e",
+    "evidence": [
+      "Added bounded redacted request diagnostic start/end records to the existing diagnostics store.",
+      "One outage generation keeps one request_id across retry attempts; connection_id is per attempt; failed retry maps error_code phase cause and duration; successful retry closes the same correlation without error fields.",
+      "Request engineering fields are serialized only in internal DiagnosticsSnapshot/export and remain absent from normal DiagnosticsViewProjection/WebView API.",
+      "LB017 contract PASS, diagnostics Rust tests PASS, full serial Rust PASS, all-targets Clippy PASS, frontend tests/build PASS, runtime manifest/UI language/architecture/G4 regression/diff PASS."
+    ],
+    "next_required_g3_generation": 22,
+    "g3_repair_chain_complete": true,
+    "independent_adversarial_review_executed": false,
+    "g4_unlocked": false
+  },
+  "g3_schema42_repair_ready_2026_08_19": {
+    "status": "REVIEW_REQUIRED",
+    "decision": "REPAIR_CHAIN_COMPLETE",
+    "owner_prs": [
+      "LB-013",
+      "LB-014",
+      "LB-015",
+      "LB-016",
+      "LB-017"
+    ],
+    "next_required_g3_generation": 22,
+    "review_executed": false,
+    "user_instruction": "repair progression without additional adversarial review",
+    "g4_unlocked": false
   }
 }

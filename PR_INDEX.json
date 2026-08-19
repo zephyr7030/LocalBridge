@@ -246,7 +246,7 @@
         "LB-015"
       ],
       "gate": "G3",
-      "status": "READY"
+      "status": "PASS"
     },
     {
       "id": "LB-018",
@@ -414,8 +414,8 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "READY",
-      "review_status": "BLOCKED",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 20,
       "human_review_status": "BLOCKED",
       "human_review_generation": 3,
