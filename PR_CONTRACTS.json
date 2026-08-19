@@ -2343,6 +2343,7 @@
     },
     "LB-018PRE": {
       "writable_paths": [
+        ".coding-tools/**",
         ".gitignore",
         ".gitattributes",
         "LICENSE",
@@ -2363,6 +2364,7 @@
         "runtime/**"
       ],
       "required_artifacts": [
+        "generated local coding-tool performance task-history and task-state files remain local-only untracked ignored state and are absent from public source",
         "repository hygiene baseline with .gitignore and public-source allow/deny policy",
         "working-tree and full reachable Git-history sensitive-data scan report covering API keys Tunnel credentials test tokens absolute user paths machine information debug dumps logs and secret-like fixtures",
         "clean-checkout reproducible release-build preflight using locked Rust and npm dependency graphs without developer-machine Python venv PATH or unpublished local state",
@@ -2374,6 +2376,7 @@
         "release-package content audit excluding source caches test directories logs keys development Tunnel configuration machine paths and private governance material"
       ],
       "required_tests": [
+        "tracked source contains no .coding-tools generated performance task-history or task-state files while local ignored copies may remain on disk",
         "secret scanner examines current tracked content and all reachable Git history and fails closed on high-confidence credentials or unapproved machine-specific sensitive data",
         "public-source export denylist excludes AGENTS.md START_HERE.md PR_INDEX.json PR_CONTRACTS.json PROJECT_STATE.json FINAL_REVIEW.json governance/** skills/** templates/** authorization records and internal governance-only docs",
         "public-source export initializes fresh Git history and never copies or pushes the private LocalBridge .git history",
