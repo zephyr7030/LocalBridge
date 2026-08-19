@@ -27,7 +27,7 @@ jobs:
       - run: node scripts/public-release/preflight.mjs verify-license
       - run: npm test
       - run: npm run build
+      - run: node scripts/prepare-lb018-resources.mjs
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
-      - run: node scripts/prepare-toolbox.mjs
-      - run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release
+      - run: node node_modules/@tauri-apps/cli/tauri.js build --bundles nsis

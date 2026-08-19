@@ -52,12 +52,12 @@ LocalBridge 使用系统 WebView2，不捆绑 WebView2 Runtime；不依赖系统
 
 ```powershell
 npm ci
-node scripts/prepare-toolbox.mjs
+node scripts/prepare-lb018-resources.mjs
 npm test
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
 cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
-cargo build --manifest-path src-tauri/Cargo.toml --locked --release
+node node_modules/@tauri-apps/cli/tauri.js build --bundles nsis
 ```
 
 `aria2c`、`7z` 和 `jq` 只在构建准备阶段按固定来源与 SHA-256 获取；运行时不会自动下载或更新它们。

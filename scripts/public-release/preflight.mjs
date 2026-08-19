@@ -137,12 +137,15 @@ export async function scanRepositorySensitive() {
   return report;
 }
 
-async function walkFiles(base, current = base) {
+async function walkFiles(base, current = base, skippedDirectories = new Set()) {
   const files = [];
   for (const entry of await readdir(current, { withFileTypes: true })) {
     const absolute = resolve(current, entry.name);
-    if (entry.isDirectory()) files.push(...await walkFiles(base, absolute));
-    else if (entry.isFile()) files.push(absolute);
+    const rel = normalizeRepoPath(relative(base, absolute));
+    if (entry.isDirectory()) {
+      if (skippedDirectories.has(rel)) continue;
+      files.push(...await walkFiles(base, absolute, skippedDirectories));
+    } else if (entry.isFile()) files.push(absolute);
   }
   return files;
 }
@@ -207,9 +210,9 @@ async function cleanCheckoutBuild() {
   const env = { ...process.env, CI: "1", VIRTUAL_ENV: "", PYTHONHOME: "", PYTHONPATH: "", PATH: `${stubBin};${process.env.PATH ?? ""}` };
   run("npm", ["ci"], { cwd: checkout, env, stdio: "inherit" });
   run("npm", ["run", "build"], { cwd: checkout, env, stdio: "inherit" });
-  run("node", ["scripts/prepare-toolbox.mjs"], { cwd: checkout, env, stdio: "inherit" });
+  run("node", ["scripts/prepare-lb018-resources.mjs"], { cwd: checkout, env, stdio: "inherit" });
   run("cargo", ["build", "--manifest-path", "src-tauri/Cargo.toml", "--locked", "--release"], { cwd: checkout, env, stdio: "inherit" });
-  const report = { schema: 1, head: git(["rev-parse", "HEAD"], { cwd: checkout }).trim(), npm_ci: "PASS", frontend_build: "PASS", toolbox_prepare: "PASS", cargo_release_build: "PASS", external_python_environment: "blocked_by_preflight_stub" };
+  const report = { schema: 1, head: git(["rev-parse", "HEAD"], { cwd: checkout }).trim(), npm_ci: "PASS", frontend_build: "PASS", release_resource_prepare: "PASS", cargo_release_build: "PASS", external_python_environment: "blocked_by_preflight_stub" };
   await writeReport("clean-checkout-build.json", report);
   console.log(`PRE_RELEASE_CLEAN_CHECKOUT=PASS head=${report.head}`);
   return report;
@@ -217,9 +220,9 @@ async function cleanCheckoutBuild() {
 
 async function verifyPublicTree(base) {
   const violations = [];
-  for (const absolute of await walkFiles(base)) {
+  const generated = new Set([".git", "node_modules", "src-tauri/target", "tests/artifacts", "src-tauri/gen"]);
+  for (const absolute of await walkFiles(base, base, generated)) {
     const rel = normalizeRepoPath(relative(base, absolute));
-    if (rel.startsWith(".git/")) continue;
     if (isPrivatePath(rel) || !isPublicPath(rel)) violations.push({ path: rel, reason: "not_public_allowlisted" });
     const info = await stat(absolute);
     if (info.size > MAX_TEXT_BYTES) continue;

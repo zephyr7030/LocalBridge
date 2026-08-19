@@ -11,6 +11,7 @@ assert.equal(isPrivatePath("runtime/tunnel-client/cloudflared.exe"), true);
 assert.equal(isPublicPath("src/App.tsx"), true);
 assert.equal(isPublicPath("src-tauri/src/lib.rs"), true);
 assert.equal(isPublicPath("README.md"), true);
+assert.equal(isPublicPath("scripts/prepare-lb018-resources.mjs"), true);
 assert.equal(isPublicPath("tests/integration/mcp/coding_runtime.rs"), true);
 assert.equal(isPublicPath("tests/e2e/dashboard/lb015_contract.test.mjs"), false);
 assert.equal(isPublicPath("tests/integration/release-preflight/lb018pre.test.mjs"), true);
@@ -19,7 +20,7 @@ const manifest = '[verification]\ncompatibility_gate = "LB-000"\npackaging_gate 
 const sanitizedManifest = sanitizePublicText("runtime-manifest.toml", manifest);
 assert.equal(sanitizedManifest.includes("LB-018"), false);
 assert.equal(sanitizedManifest.includes("[privileged_broker]"), true);
-assert.equal(sanitizePublicText("runtime-policy.toml", 'status = "LB_007_STABLE_PUBLIC_POLICY"\n').trim(), 'status = "stable_public_policy"');
+assert.equal(sanitizePublicText("runtime-policy.toml", 'status = "LB_007_STABLE_PUBLIC_POLICY"\n'), 'status = "LB_007_STABLE_PUBLIC_POLICY"\n');
 const publicPackage = JSON.parse(sanitizePublicText("package.json", JSON.stringify({ scripts: { dev: "vite", build: "vite build", test: "vitest run", "toolbox:prepare": "node scripts/prepare-toolbox.mjs", "verify:architecture:negative": "node private/PR_INDEX.json", "verify:lb001": "internal" } })));
 assert.deepEqual(Object.keys(publicPackage.scripts), ["dev", "build", "test", "toolbox:prepare"]);
 assert.equal(publicPackage.license, "MIT");

@@ -32,3 +32,5 @@ release-artifacts/preflight/
 .DS_Store
 Thumbs.db
 Desktop.ini
+tests/artifacts/
+src-tauri/gen/

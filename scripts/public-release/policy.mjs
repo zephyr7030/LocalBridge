@@ -24,6 +24,7 @@ export const PRIVATE_PREFIXES = [
   "scripts/authorization-records/",
   "scripts/verify-architecture/",
   "tests/fixtures/architecture/",
+  "tests/integration/upstream_spike/",
 ];
 
 const PUBLIC_EXACT = new Set([
@@ -45,6 +46,7 @@ const PUBLIC_EXACT = new Set([
   "runtime-manifest.toml",
   "runtime-policy.toml",
   "scripts/prepare-toolbox.mjs",
+  "scripts/prepare-lb018-resources.mjs",
 ]);
 
 const PUBLIC_PREFIXES = [
@@ -91,9 +93,6 @@ export function sanitizePublicText(value, text) {
   }
   if (path === "runtime-manifest.toml") {
     return text.replace(/(?:^|\r?\n)\[verification\]\r?\n[\s\S]*?(?=\r?\n\[privileged_broker\])/m, "\n");
-  }
-  if (path === "runtime-policy.toml") {
-    return text.replace(/^status\s*=\s*"LB_[^"]+"\s*$/m, 'status = "stable_public_policy"');
   }
   return text;
 }
