@@ -1297,8 +1297,9 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if name == "elevated_exec" {
-                record_mcp_request_start(&request_diagnostic_key(&id), session, name);
-                return handle_elevated_exec(
+                let request_key = request_diagnostic_key(&id);
+                record_mcp_request_start(&request_key, session, name);
+                let result = handle_elevated_exec(
                     &mut stream,
                     id,
                     session,
@@ -1313,10 +1314,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         stopping,
                     },
                 );
+                return finalize_special_handler_request(&request_key, session, result);
             }
             if name == "task_control" {
-                record_mcp_request_start(&request_diagnostic_key(&id), session, name);
-                return handle_task_control(
+                let request_key = request_diagnostic_key(&id);
+                record_mcp_request_start(&request_key, session, name);
+                let result = handle_task_control(
                     &mut stream,
                     id,
                     session,
@@ -1333,6 +1336,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         privileged_requests,
                     },
                 );
+                return finalize_special_handler_request(&request_key, session, result);
             }
             active_requests
                 .lock()
@@ -1482,7 +1486,15 @@ fn handle_task_control(
         }
     }
 
-    let action = arguments.get("action").and_then(Value::as_str).ok_or(())?;
+    let Some(action) = arguments.get("action").and_then(Value::as_str) else {
+        return write_rpc_error(
+            stream,
+            id,
+            -32602,
+            "Invalid task_control action",
+            Some(session),
+        );
+    };
     let before = current_task.actual_snapshot();
     let data = match action {
         "get" => match guard.try_lock() {
@@ -2476,6 +2488,17 @@ fn request_diagnostic_key(id: &Value) -> String {
     serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
 }
 
+fn finalize_special_handler_request(
+    request_key: &str,
+    session: &str,
+    result: Result<(), ()>,
+) -> Result<(), ()> {
+    if result.is_err() {
+        record_mcp_request_error(request_key, session, mcp_unknown("special_handler_aborted"));
+    }
+    result
+}
+
 fn write_http_diagnostic_error(stream: &mut TcpStream, error: HttpReadError) -> Result<(), ()> {
     let diagnostic = transport_unavailable(error.cause, Some(error.status));
     write_mcp_http_error(stream, error.status, diagnostic, None)
@@ -3243,6 +3266,26 @@ mod tests {
     }
 
     #[test]
+    fn schema42_special_handler_abort_closes_request_diagnostics() {
+        crate::diagnostics::reset_request_diagnostics_for_test();
+        record_mcp_request_start("special-abort", "session-special", "task_control");
+        assert_eq!(crate::diagnostics::active_request_diagnostics_for_test(), 1);
+        assert!(
+            finalize_special_handler_request("special-abort", "session-special", Err(())).is_err()
+        );
+        assert_eq!(crate::diagnostics::active_request_diagnostics_for_test(), 0);
+        let events = crate::diagnostics::request_diagnostics_for_test();
+        let end = events
+            .iter()
+            .find(|event| event.kind == crate::diagnostics::RequestDiagnosticKind::End)
+            .expect("special handler abort terminal diagnostic");
+        assert_eq!(end.outcome.as_deref(), Some("failed"));
+        assert_eq!(end.error_code.as_deref(), Some("Unknown"));
+        assert_eq!(end.phase.as_deref(), Some("mcp"));
+        assert_eq!(end.cause.as_deref(), Some("special_handler_aborted"));
+    }
+
+    #[test]
     fn schema27_public_facade_runtime_semantics_are_real_end_to_end() {
         let root = repo_root();
         let workspace = temp_workspace();
@@ -3307,6 +3350,29 @@ mod tests {
             context.body["result"]["structuredContent"]["data"]["default_cwd"],
             "."
         );
+
+        crate::diagnostics::reset_request_diagnostics_for_test();
+        let invalid_task_control =
+            public_tool_call(pep.port(), &session, 6999, "task_control", json!({}));
+        assert_ne!(invalid_task_control.body, Value::Null);
+        assert_eq!(crate::diagnostics::active_request_diagnostics_for_test(), 0);
+        let task_events = crate::diagnostics::request_diagnostics_for_test();
+        let task_start = task_events
+            .iter()
+            .find(|event| {
+                event.kind == crate::diagnostics::RequestDiagnosticKind::Start
+                    && event.tool == "task_control"
+            })
+            .expect("task_control missing-action start diagnostic");
+        let task_end = task_events
+            .iter()
+            .find(|event| {
+                event.kind == crate::diagnostics::RequestDiagnosticKind::End
+                    && event.tool == "task_control"
+            })
+            .expect("task_control missing-action end diagnostic");
+        assert_eq!(task_start.request_id, task_end.request_id);
+        assert!(task_end.outcome.is_some());
 
         let absolute = public_tool_call(
             pep.port(),

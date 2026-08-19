@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::runtime::{RecoveryDisposition, RuntimeOutage};
+use crate::runtime::{
+    RecoveryAttemptEvent, RecoveryAttemptResult, RecoveryDisposition, RuntimeOutage,
+};
 use crate::state::{PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState};
 use error::{DiagnosticErrorCode, DiagnosticPhase, ErrorDiagnostic, transport_unavailable};
 
@@ -18,7 +20,9 @@ pub const DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const RECENT_EVENT_LIMIT: usize = 8;
 static RECENT_USER_EVENTS: OnceLock<Mutex<VecDeque<DiagnosticEvent>>> = OnceLock::new();
+static RECENT_USER_OBSERVATIONS: OnceLock<Mutex<RecentUserObservationState>> = OnceLock::new();
 const REQUEST_DIAGNOSTIC_LIMIT: usize = 16;
+const ACTIVE_REQUEST_DIAGNOSTIC_LIMIT: usize = 32;
 static REQUEST_DIAGNOSTICS: OnceLock<Mutex<RequestDiagnosticState>> = OnceLock::new();
 static MCP_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -155,7 +159,12 @@ struct ActiveRequestDiagnostic {
 struct ActiveRecoveryDiagnostic {
     generation: u64,
     request: ActiveRequestDiagnostic,
-    fault: RuntimeFault,
+}
+
+#[derive(Debug, Default)]
+struct RecentUserObservationState {
+    runtime: Option<(DiagnosticLevel, String)>,
+    broker: Option<(DiagnosticLevel, String)>,
 }
 
 #[derive(Debug, Default)]
@@ -294,157 +303,196 @@ fn record_recent_event(level: DiagnosticLevel, message: String) {
     events.truncate(RECENT_EVENT_LIMIT);
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RecentEventSource {
+    Runtime,
+    Broker,
+}
+
+fn record_recent_transition(
+    source: RecentEventSource,
+    event: Option<(DiagnosticLevel, String)>,
+) {
+    let mut observations = RECENT_USER_OBSERVATIONS
+        .get_or_init(|| Mutex::new(RecentUserObservationState::default()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let slot = match source {
+        RecentEventSource::Runtime => &mut observations.runtime,
+        RecentEventSource::Broker => &mut observations.broker,
+    };
+    if slot.as_ref() == event.as_ref() {
+        return;
+    }
+    *slot = event.clone();
+    drop(observations);
+    if let Some((level, message)) = event {
+        record_recent_event(level, message);
+    }
+}
+
 pub fn record_runtime_user_events(
     state: &RuntimeState,
     outage: Option<&DiagnosticsOutageInput>,
     privilege: &PrivilegeState,
 ) {
-    record_runtime_request_diagnostics(state, outage);
-    if let Some(outage) = outage {
-        record_recent_event(
+    let runtime_event = if let Some(outage) = outage {
+        Some((
             DiagnosticLevel::Error,
             format!(
                 "{}：{}",
                 component_label(outage.component),
                 runtime_fault_label(&outage.fault)
             ),
-        );
+        ))
     } else {
         match state {
-            RuntimeState::Ready => {
-                record_recent_event(DiagnosticLevel::Ok, "本地运行服务：已就绪".to_string())
-            }
-            RuntimeState::Recovering { component, .. } => record_recent_event(
+            RuntimeState::Ready => Some((DiagnosticLevel::Ok, "本地运行服务：已就绪".to_string())),
+            RuntimeState::Recovering { component, .. } => Some((
                 DiagnosticLevel::Warning,
                 format!("{}：正在自动恢复", component_label(*component)),
-            ),
-            RuntimeState::SwitchingWorkspace { .. } => record_recent_event(
+            )),
+            RuntimeState::SwitchingWorkspace { .. } => Some((
                 DiagnosticLevel::Warning,
                 "本地运行服务：正在切换项目".to_string(),
-            ),
-            RuntimeState::Faulted(fault) => record_recent_event(
+            )),
+            RuntimeState::Faulted(fault) => Some((
                 DiagnosticLevel::Error,
                 format!("本地运行服务：{}", runtime_fault_label(fault)),
-            ),
+            )),
             RuntimeState::StartingMcp
             | RuntimeState::WaitingMcpReady
             | RuntimeState::StartingPolicyEnforcement
             | RuntimeState::WaitingPolicyReady
             | RuntimeState::StartingTunnel
-            | RuntimeState::WaitingTunnelReady => record_recent_event(
+            | RuntimeState::WaitingTunnelReady => Some((
                 DiagnosticLevel::Warning,
                 "本地运行服务：正在启动".to_string(),
-            ),
-            RuntimeState::Stopped => {}
+            )),
+            RuntimeState::Stopped => None,
         }
-    }
+    };
+    record_recent_transition(RecentEventSource::Runtime, runtime_event);
 
     let broker = broker_diagnostics(privilege);
-    match broker.state {
-        BrokerDiagnosticState::Active => {
-            record_recent_event(DiagnosticLevel::Ok, "管理员权限：已启用".to_string())
-        }
-        BrokerDiagnosticState::Requested | BrokerDiagnosticState::Awaiting => record_recent_event(
+    let broker_event = match broker.state {
+        BrokerDiagnosticState::Active => Some((DiagnosticLevel::Ok, "管理员权限：已启用".to_string())),
+        BrokerDiagnosticState::Requested | BrokerDiagnosticState::Awaiting => Some((
             DiagnosticLevel::Warning,
             format!("管理员权限：{}", broker_state_label(broker.state)),
-        ),
-        BrokerDiagnosticState::Fault => {
-            record_recent_event(DiagnosticLevel::Error, "管理员权限：故障".to_string())
-        }
-        BrokerDiagnosticState::Off => {}
-    }
+        )),
+        BrokerDiagnosticState::Fault => Some((DiagnosticLevel::Error, "管理员权限：故障".to_string())),
+        BrokerDiagnosticState::Off => None,
+    };
+    record_recent_transition(RecentEventSource::Broker, broker_event);
 }
 
 fn request_diagnostic_log() -> &'static Mutex<RequestDiagnosticState> {
     REQUEST_DIAGNOSTICS.get_or_init(|| Mutex::new(RequestDiagnosticState::default()))
 }
 
-fn record_runtime_request_diagnostics(
-    state: &RuntimeState,
-    outage: Option<&DiagnosticsOutageInput>,
-) {
+pub fn record_recovery_attempt_event(event: &RecoveryAttemptEvent) {
     let mut log = request_diagnostic_log()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let recovering = match (state, outage) {
-        (RuntimeState::Recovering { component, attempt }, Some(outage))
-            if *attempt > 0 && *component == outage.component =>
-        {
-            Some((outage, *attempt))
+    match event {
+        RecoveryAttemptEvent::Started {
+            generation,
+            request_id,
+            component,
+            fault: _,
+            attempt,
+        } => {
+            let generation = generation.get();
+            if log.recovery_active.as_ref().is_some_and(|active| {
+                active.generation == generation
+                    && active.request.attempt == *attempt
+                    && active.request.request_id == *request_id
+            }) {
+                return;
+            }
+            if let Some(active) = log.recovery_active.take() {
+                push_request_end(
+                    &mut log,
+                    active.request,
+                    "lost",
+                    Some(ErrorDiagnostic::new(
+                        DiagnosticErrorCode::Unknown,
+                        DiagnosticPhase::Runtime,
+                        "recovery_attempt_replaced",
+                    )),
+                );
+            }
+            let request_id = request_id.clone();
+            let connection_id = format!("conn-{request_id}-{attempt}");
+            let tool = request_tool(*component).to_string();
+            push_request_event(
+                &mut log,
+                RequestDiagnosticEvent {
+                    kind: RequestDiagnosticKind::Start,
+                    timestamp_ms: timestamp_ms(),
+                    request_id: request_id.clone(),
+                    connection_id: connection_id.clone(),
+                    attempt: *attempt,
+                    tool: tool.clone(),
+                    outcome: None,
+                    error_code: None,
+                    phase: None,
+                    cause: None,
+                    http_status: None,
+                    duration_ms: None,
+                },
+            );
+            log.recovery_active = Some(ActiveRecoveryDiagnostic {
+                generation,
+                request: ActiveRequestDiagnostic {
+                    attempt: *attempt,
+                    request_id,
+                    connection_id,
+                    tool,
+                    started_at: Instant::now(),
+                },
+            });
         }
-        _ => None,
-    };
-
-    if let Some((outage, attempt)) = recovering {
-        if log.recovery_active.as_ref().is_some_and(|active| {
-            active.generation == outage.generation && active.request.attempt == attempt
-        }) {
-            return;
-        }
-        if let Some(active) = log.recovery_active.take() {
-            let diagnostic = if active.generation == outage.generation {
-                runtime_fault_diagnostic(&outage.fault)
-            } else {
-                runtime_fault_diagnostic(&active.fault)
+        RecoveryAttemptEvent::Finished {
+            generation,
+            request_id,
+            attempt,
+            result,
+            ..
+        } => {
+            let Some(active) = log.recovery_active.take() else {
+                return;
             };
-            push_request_end(&mut log, active.request, "failed", Some(diagnostic));
+            if active.generation != generation.get()
+                || active.request.attempt != *attempt
+                || active.request.request_id != *request_id
+            {
+                log.recovery_active = Some(active);
+                return;
+            }
+            match result {
+                RecoveryAttemptResult::Recovered => {
+                    push_request_end(&mut log, active.request, "success", None)
+                }
+                RecoveryAttemptResult::Failed(fault) => push_request_end(
+                    &mut log,
+                    active.request,
+                    "failed",
+                    Some(runtime_fault_diagnostic(fault)),
+                ),
+                RecoveryAttemptResult::Cancelled => push_request_end(
+                    &mut log,
+                    active.request,
+                    "cancelled",
+                    Some(ErrorDiagnostic::new(
+                        DiagnosticErrorCode::Cancelled,
+                        DiagnosticPhase::Runtime,
+                        "recovery_cancelled",
+                    )),
+                ),
+            }
         }
-        let request_id = outage.request_id.clone();
-        let connection_id = format!("conn-{}-{attempt}", outage.request_id);
-        let tool = request_tool(outage.component).to_string();
-        push_request_event(
-            &mut log,
-            RequestDiagnosticEvent {
-                kind: RequestDiagnosticKind::Start,
-                timestamp_ms: timestamp_ms(),
-                request_id: request_id.clone(),
-                connection_id: connection_id.clone(),
-                attempt,
-                tool: tool.clone(),
-                outcome: None,
-                error_code: None,
-                phase: None,
-                cause: None,
-                http_status: None,
-                duration_ms: None,
-            },
-        );
-        log.recovery_active = Some(ActiveRecoveryDiagnostic {
-            generation: outage.generation,
-            request: ActiveRequestDiagnostic {
-                attempt,
-                request_id,
-                connection_id,
-                tool,
-                started_at: Instant::now(),
-            },
-            fault: outage.fault.clone(),
-        });
-        return;
-    }
-
-    let Some(active) = log.recovery_active.take() else {
-        return;
-    };
-    match state {
-        RuntimeState::Ready => push_request_end(&mut log, active.request, "success", None),
-        RuntimeState::Faulted(fault) => push_request_end(
-            &mut log,
-            active.request,
-            "failed",
-            Some(runtime_fault_diagnostic(fault)),
-        ),
-        RuntimeState::Stopped => push_request_end(
-            &mut log,
-            active.request,
-            "cancelled",
-            Some(ErrorDiagnostic::new(
-                DiagnosticErrorCode::Cancelled,
-                DiagnosticPhase::Runtime,
-                "runtime_stopped",
-            )),
-        ),
-        _ => log.recovery_active = Some(active),
     }
 }
 
@@ -467,6 +515,38 @@ pub fn record_mcp_request_start(request_key: &str, connection_id: &str, tool: &s
     let mut log = request_diagnostic_log()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let active_key = mcp_active_key(request_key, &connection_id);
+    if let Some(replaced) = log.active_requests.remove(&active_key) {
+        push_request_end(
+            &mut log,
+            replaced,
+            "lost",
+            Some(ErrorDiagnostic::new(
+                DiagnosticErrorCode::Unknown,
+                DiagnosticPhase::Mcp,
+                "request_tracking_replaced",
+            )),
+        );
+    }
+    if log.active_requests.len() >= ACTIVE_REQUEST_DIAGNOSTIC_LIMIT {
+        let oldest_key = log
+            .active_requests
+            .iter()
+            .min_by_key(|(_, active)| active.started_at)
+            .map(|(key, _)| key.clone());
+        if let Some(evicted) = oldest_key.and_then(|key| log.active_requests.remove(&key)) {
+            push_request_end(
+                &mut log,
+                evicted,
+                "lost",
+                Some(ErrorDiagnostic::new(
+                    DiagnosticErrorCode::Unknown,
+                    DiagnosticPhase::Mcp,
+                    "request_tracking_evicted",
+                )),
+            );
+        }
+    }
     push_request_event(
         &mut log,
         RequestDiagnosticEvent {
@@ -484,8 +564,7 @@ pub fn record_mcp_request_start(request_key: &str, connection_id: &str, tool: &s
             duration_ms: None,
         },
     );
-    log.active_requests
-        .insert(mcp_active_key(request_key, &connection_id), active);
+    log.active_requests.insert(active_key, active);
 }
 
 pub fn record_mcp_request_result(request_key: &str, connection_id: &str, result: &Value) {
@@ -637,6 +716,27 @@ pub(crate) fn reset_request_diagnostics_for_test() {
     *request_diagnostic_log()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = RequestDiagnosticState::default();
+}
+
+#[cfg(test)]
+pub(crate) fn active_request_diagnostics_for_test() -> usize {
+    request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .active_requests
+        .len()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_recent_user_events_for_test() {
+    recent_event_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
+    *RECENT_USER_OBSERVATIONS
+        .get_or_init(|| Mutex::new(RecentUserObservationState::default()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = RecentUserObservationState::default();
 }
 
 fn request_tool(component: RuntimeComponent) -> &'static str {
@@ -818,6 +918,17 @@ pub fn export_snapshot(
     file.write_all(b"\n")?;
     file.sync_all()?;
     Ok(path)
+}
+
+pub fn materialize_log_directory(
+    app_data_dir: &Path,
+    snapshot: &DiagnosticsSnapshot,
+) -> std::io::Result<PathBuf> {
+    let artifact = export_snapshot(app_data_dir, snapshot)?;
+    artifact
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| std::io::Error::other("diagnostics artifact has no parent directory"))
 }
 
 #[cfg(test)]

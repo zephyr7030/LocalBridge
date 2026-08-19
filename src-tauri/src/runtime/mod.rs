@@ -14,8 +14,8 @@ pub use orchestrator::{
 };
 pub use recovery::{
     AutoRecoveryRuntime, RECONNECT_BACKOFF_SECONDS, RecoveryClock, RecoveryController,
-    RecoveryDisposition, RecoveryOutcome, RuntimeOutage, STABILITY_RESET_SECONDS,
-    SystemRecoveryClock,
+    RecoveryAttemptEvent, RecoveryAttemptResult, RecoveryDisposition, RecoveryOutcome,
+    RuntimeOutage, STABILITY_RESET_SECONDS, SystemRecoveryClock,
 };
 
 #[cfg(windows)]

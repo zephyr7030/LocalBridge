@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::OutageTracker;
 use crate::state::{GenerationId, PrivilegeFault, RuntimeFault};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -143,10 +144,7 @@ fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverab
 
 #[test]
 fn recent_user_events_are_backend_typed_bounded_timestamped_and_redacted() {
-    recent_event_log()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clear();
+    reset_recent_user_events_for_test();
     for index in 0..12 {
         let state = if index % 3 == 0 {
             RuntimeState::Ready
@@ -206,66 +204,51 @@ fn user_triggered_export_contains_allowlisted_projection_only() {
 
 #[test]
 fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fields() {
-    *request_diagnostic_log()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = RequestDiagnosticState::default();
+    reset_request_diagnostics_for_test();
     let root = TempDir::new("request-correlation");
     complete_runtime(root.path());
-    let outage = DiagnosticsOutageInput {
-        generation: 42,
-        request_id: "req-recovery-authoritative".to_string(),
+    let mut tracker = OutageTracker::default();
+    let generation = tracker.begin(RuntimeComponent::Tunnel, RuntimeFault::TunnelExited);
+    let request_id = tracker.active().unwrap().request_id.clone();
+    record_recovery_attempt_event(&RecoveryAttemptEvent::Started {
+        generation,
+        request_id: request_id.clone(),
         component: RuntimeComponent::Tunnel,
         fault: RuntimeFault::TunnelExited,
-        user_attention_required: false,
-    };
-
-    record_runtime_user_events(
-        &RuntimeState::Recovering {
-            component: RuntimeComponent::Tunnel,
-            attempt: 1,
-        },
-        Some(&outage),
-        &PrivilegeState::Disabled,
-    );
+        attempt: 1,
+    });
     let first = build_snapshot(
         root.path(),
-        &runtime(
-            RuntimeState::Recovering {
-                component: RuntimeComponent::Tunnel,
-                attempt: 1,
-            },
-            Some(outage.clone()),
-        ),
+        &runtime(RuntimeState::Ready, None),
         &PrivilegeState::Disabled,
         true,
     );
     assert_eq!(first.request_diagnostics.len(), 1);
     assert_eq!(first.request_diagnostics[0].kind, RequestDiagnosticKind::Start);
     assert_eq!(first.request_diagnostics[0].attempt, 1);
-    assert_eq!(first.request_diagnostics[0].request_id, "req-recovery-authoritative");
+    assert_eq!(first.request_diagnostics[0].request_id, request_id);
     let serialized_start = serde_json::to_value(&first.request_diagnostics[0]).unwrap();
     assert!(serialized_start.get("timestamp").is_some());
     assert!(serialized_start.get("timestampMs").is_none());
-    let request_id = first.request_diagnostics[0].request_id.clone();
     let first_connection = first.request_diagnostics[0].connection_id.clone();
 
-    record_runtime_user_events(
-        &RuntimeState::Recovering {
-            component: RuntimeComponent::Tunnel,
-            attempt: 2,
-        },
-        Some(&outage),
-        &PrivilegeState::Disabled,
-    );
+    record_recovery_attempt_event(&RecoveryAttemptEvent::Finished {
+        generation,
+        request_id: request_id.clone(),
+        component: RuntimeComponent::Tunnel,
+        attempt: 1,
+        result: RecoveryAttemptResult::Failed(RuntimeFault::TunnelExited),
+    });
+    record_recovery_attempt_event(&RecoveryAttemptEvent::Started {
+        generation,
+        request_id: request_id.clone(),
+        component: RuntimeComponent::Tunnel,
+        fault: RuntimeFault::TunnelExited,
+        attempt: 2,
+    });
     let retry = build_snapshot(
         root.path(),
-        &runtime(
-            RuntimeState::Recovering {
-                component: RuntimeComponent::Tunnel,
-                attempt: 2,
-            },
-            Some(outage.clone()),
-        ),
+        &runtime(RuntimeState::Ready, None),
         &PrivilegeState::Disabled,
         true,
     );
@@ -289,10 +272,16 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     assert_eq!(first_end.cause.as_deref(), Some("tunnel_exited"));
     assert!(first_end.duration_ms.is_some());
 
-    record_runtime_user_events(&RuntimeState::Ready, Some(&outage), &PrivilegeState::Disabled);
+    record_recovery_attempt_event(&RecoveryAttemptEvent::Finished {
+        generation,
+        request_id: request_id.clone(),
+        component: RuntimeComponent::Tunnel,
+        attempt: 2,
+        result: RecoveryAttemptResult::Recovered,
+    });
     let recovered = build_snapshot(
         root.path(),
-        &runtime(RuntimeState::Ready, Some(outage.clone())),
+        &runtime(RuntimeState::Ready, None),
         &PrivilegeState::Disabled,
         true,
     );
@@ -312,7 +301,7 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     let event_count = recovered.request_diagnostics.len();
     let reread = build_snapshot(
         root.path(),
-        &runtime(RuntimeState::Ready, Some(outage)),
+        &runtime(RuntimeState::Ready, None),
         &PrivilegeState::Disabled,
         true,
     );
@@ -335,5 +324,72 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     }
     for forbidden in ["Runtime API Key", "Authorization", "synthetic-secret"] {
         assert!(!export.contains(forbidden));
+    }
+}
+
+#[test]
+fn stable_runtime_and_broker_observations_do_not_flood_recent_events() {
+    reset_recent_user_events_for_test();
+    for _ in 0..20 {
+        record_runtime_user_events(
+            &RuntimeState::Ready,
+            None,
+            &PrivilegeState::Requested,
+        );
+    }
+    let stable = recent_user_events();
+    assert_eq!(stable.len(), 2, "stable runtime/broker observations were duplicated");
+    assert!(stable.iter().any(|event| event.message == "本地运行服务：已就绪"));
+    assert!(stable.iter().any(|event| event.message.contains("管理员权限：")));
+
+    record_runtime_user_events(
+        &RuntimeState::Faulted(RuntimeFault::TunnelExited),
+        None,
+        &PrivilegeState::Requested,
+    );
+    assert_eq!(recent_user_events().len(), 3, "real runtime transition was not recorded");
+}
+
+#[test]
+fn mcp_active_request_tracking_is_bounded_and_eviction_is_terminal() {
+    reset_request_diagnostics_for_test();
+    for index in 0..40 {
+        record_mcp_request_start(
+            &format!("request-{index}"),
+            "session-bounded",
+            "workspace_context",
+        );
+    }
+    assert_eq!(active_request_diagnostics_for_test(), ACTIVE_REQUEST_DIAGNOSTIC_LIMIT);
+    let events = request_diagnostics_for_test();
+    assert!(events.iter().any(|event| {
+        event.kind == RequestDiagnosticKind::End
+            && event.outcome.as_deref() == Some("lost")
+            && event.cause.as_deref() == Some("request_tracking_evicted")
+    }));
+}
+
+#[test]
+fn materialized_log_directory_contains_a_redacted_diagnostics_artifact() {
+    let root = TempDir::new("materialized-log");
+    complete_runtime(root.path());
+    let snapshot = build_snapshot(
+        root.path(),
+        &runtime(RuntimeState::Ready, None),
+        &PrivilegeState::Disabled,
+        true,
+    );
+    let directory = materialize_log_directory(root.path(), &snapshot).unwrap();
+    assert_eq!(directory, root.path().join("diagnostics"));
+    let artifacts = fs::read_dir(&directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(artifacts.len(), 1, "log materialization did not create one artifact");
+    let text = fs::read_to_string(&artifacts[0]).unwrap();
+    assert!(text.contains("schemaVersion"));
+    assert!(!text.contains(r"C:\project\redacted"));
+    for forbidden in ["Runtime API Key", "Authorization", "synthetic-secret", "nonce"] {
+        assert!(!text.contains(forbidden));
     }
 }

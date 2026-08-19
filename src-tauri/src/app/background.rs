@@ -7,7 +7,9 @@ use std::time::Duration;
 
 #[cfg(windows)]
 use crate::credentials::WindowsCredentialStore;
-use crate::diagnostics::{DiagnosticsOutageInput, record_runtime_user_events};
+use crate::diagnostics::{
+    DiagnosticsOutageInput, record_recovery_attempt_event, record_runtime_user_events,
+};
 #[cfg(windows)]
 use crate::mcp::{CurrentTaskWake, InternalBearer};
 use crate::privilege::PrivilegeController;
@@ -15,8 +17,8 @@ use crate::privilege::PrivilegeController;
 use crate::privilege::{SESSION_NONCE_BYTES, random_session_nonce};
 use crate::runtime::{
     AutoRecoveryRuntime, OrchestratorError, RecoveryCancellation, RecoveryClock,
-    RecoveryController, RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator, RuntimeOutage,
-    SystemRecoveryClock, WorkspaceSwitchError,
+    RecoveryAttemptEvent, RecoveryController, RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator,
+    RuntimeOutage, SystemRecoveryClock, WorkspaceSwitchError,
 };
 #[cfg(windows)]
 use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver};
@@ -141,6 +143,13 @@ pub trait ExitRuntime {
 
     fn monitor_recovery(&mut self) -> Option<RecoveryOutcome> {
         None
+    }
+
+    fn monitor_recovery_with_observer(
+        &mut self,
+        _observer: &mut dyn FnMut(RecoveryAttemptEvent),
+    ) -> Option<RecoveryOutcome> {
+        self.monitor_recovery()
     }
 }
 
@@ -385,6 +394,13 @@ where
     fn monitor_recovery(&mut self) -> Option<RecoveryOutcome> {
         self.monitor_once()
     }
+
+    fn monitor_recovery_with_observer(
+        &mut self,
+        observer: &mut dyn FnMut(RecoveryAttemptEvent),
+    ) -> Option<RecoveryOutcome> {
+        self.monitor_once_with_observer(observer)
+    }
 }
 
 pub trait PrivilegeExit {
@@ -571,7 +587,8 @@ impl DesktopLifecycle {
                     let Some(runtime) = owner.active.as_deref_mut() else {
                         continue;
                     };
-                    let _ = runtime.monitor_recovery();
+                    let mut recovery_observer = |event| record_recovery_attempt_event(&event);
+                    let _ = runtime.monitor_recovery_with_observer(&mut recovery_observer);
                     let snapshot = owner.snapshot();
                     drop(owner);
                     record_desktop_runtime_events(&snapshot, &monitor_privilege);

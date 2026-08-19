@@ -6,6 +6,7 @@ use crate::credentials::{CredentialStore, WindowsCredentialStore};
 use crate::diagnostics::{
     BrokerDiagnosticState, DiagnosticCheck, DiagnosticEvent, DiagnosticsOutageInput,
     DiagnosticsRuntimeInput, DiagnosticsSnapshot, build_snapshot, export_snapshot,
+    materialize_log_directory,
 };
 use crate::settings::SettingsStore;
 use crate::workspace::WorkspaceValidator;
@@ -101,14 +102,16 @@ fn active_workspace_path(app: &AppHandle) -> Result<Option<String>, String> {
 #[tauri::command]
 pub async fn open_logs(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<DesktopLifecycle>();
+        let snapshot = get_diagnostics_snapshot_blocking(&lifecycle)?;
         let root = app
             .path()
             .app_data_dir()
-            .map_err(|_| "无法定位日志目录".to_string())?
-            .join("logs");
-        std::fs::create_dir_all(&root).map_err(|_| "无法创建日志目录".to_string())?;
+            .map_err(|_| "无法定位日志目录".to_string())?;
+        let directory = materialize_log_directory(&root, &snapshot)
+            .map_err(|_| "无法生成诊断日志".to_string())?;
         std::process::Command::new("explorer.exe")
-            .arg(&root)
+            .arg(&directory)
             .spawn()
             .map_err(|_| "无法打开日志目录".to_string())?;
         Ok(())
