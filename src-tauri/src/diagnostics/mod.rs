@@ -5,10 +5,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::runtime::{RecoveryDisposition, RuntimeOutage};
 use crate::state::{PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState};
+use error::{DiagnosticErrorCode, DiagnosticPhase, ErrorDiagnostic, transport_unavailable};
 
 pub mod error;
 
@@ -16,6 +17,8 @@ pub const DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const RECENT_EVENT_LIMIT: usize = 8;
 static RECENT_USER_EVENTS: OnceLock<Mutex<VecDeque<DiagnosticEvent>>> = OnceLock::new();
+const REQUEST_DIAGNOSTIC_LIMIT: usize = 16;
+static REQUEST_DIAGNOSTICS: OnceLock<Mutex<RequestDiagnosticState>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticsOutageInput {
@@ -100,6 +103,7 @@ pub struct DiagnosticsSnapshot {
     pub runtime_key_present: bool,
     pub active_workspace_path: Option<String>,
     pub recent_events: Vec<DiagnosticEvent>,
+    pub request_diagnostics: Vec<RequestDiagnosticEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -108,6 +112,47 @@ pub struct DiagnosticEvent {
     pub level: DiagnosticLevel,
     pub message: String,
     pub timestamp_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestDiagnosticKind {
+    Start,
+    End,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestDiagnosticEvent {
+    pub kind: RequestDiagnosticKind,
+    pub timestamp_ms: u64,
+    pub request_id: String,
+    pub connection_id: String,
+    pub attempt: u32,
+    pub tool: String,
+    pub outcome: Option<String>,
+    pub error_code: Option<String>,
+    pub phase: Option<String>,
+    pub cause: Option<String>,
+    pub http_status: Option<u16>,
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveRequestDiagnostic {
+    generation: u64,
+    attempt: u32,
+    request_id: String,
+    connection_id: String,
+    tool: String,
+    started_at: Instant,
+    fault: RuntimeFault,
+}
+
+#[derive(Debug, Default)]
+struct RequestDiagnosticState {
+    active: Option<ActiveRequestDiagnostic>,
+    events: VecDeque<RequestDiagnosticEvent>,
 }
 
 pub fn build_snapshot(
@@ -191,15 +236,9 @@ pub fn build_snapshot(
     ];
 
     let privilege_check = broker_diagnostics(privilege);
-    record_runtime_user_events(
-        &runtime.state,
-        runtime
-            .outage
-            .as_ref()
-            .map(|outage| (outage.component, &outage.fault)),
-        privilege,
-    );
+    record_runtime_user_events(&runtime.state, runtime.outage.as_ref(), privilege);
     let recent_events = recent_user_events();
+    let request_diagnostics = recent_request_diagnostics();
 
     DiagnosticsSnapshot {
         schema_version: DIAGNOSTICS_SCHEMA_VERSION,
@@ -212,6 +251,7 @@ pub fn build_snapshot(
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned()),
         recent_events,
+        request_diagnostics,
     }
 }
 
@@ -247,16 +287,17 @@ fn record_recent_event(level: DiagnosticLevel, message: String) {
 
 pub fn record_runtime_user_events(
     state: &RuntimeState,
-    outage: Option<(RuntimeComponent, &RuntimeFault)>,
+    outage: Option<&DiagnosticsOutageInput>,
     privilege: &PrivilegeState,
 ) {
-    if let Some((component, fault)) = outage {
+    record_runtime_request_diagnostics(state, outage);
+    if let Some(outage) = outage {
         record_recent_event(
             DiagnosticLevel::Error,
             format!(
                 "{}：{}",
-                component_label(component),
-                runtime_fault_label(fault)
+                component_label(outage.component),
+                runtime_fault_label(&outage.fault)
             ),
         );
     } else {
@@ -302,6 +343,179 @@ pub fn record_runtime_user_events(
             record_recent_event(DiagnosticLevel::Error, "管理员权限：故障".to_string())
         }
         BrokerDiagnosticState::Off => {}
+    }
+}
+
+fn request_diagnostic_log() -> &'static Mutex<RequestDiagnosticState> {
+    REQUEST_DIAGNOSTICS.get_or_init(|| Mutex::new(RequestDiagnosticState::default()))
+}
+
+fn record_runtime_request_diagnostics(
+    state: &RuntimeState,
+    outage: Option<&DiagnosticsOutageInput>,
+) {
+    let mut log = request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let recovering = match (state, outage) {
+        (RuntimeState::Recovering { component, attempt }, Some(outage))
+            if *attempt > 0 && *component == outage.component =>
+        {
+            Some((outage, *attempt))
+        }
+        _ => None,
+    };
+
+    if let Some((outage, attempt)) = recovering {
+        if log.active.as_ref().is_some_and(|active| {
+            active.generation == outage.generation && active.attempt == attempt
+        }) {
+            return;
+        }
+        if let Some(active) = log.active.take() {
+            let diagnostic = if active.generation == outage.generation {
+                runtime_fault_diagnostic(&outage.fault)
+            } else {
+                runtime_fault_diagnostic(&active.fault)
+            };
+            push_request_end(&mut log, active, "failed", Some(diagnostic));
+        }
+        let request_id = format!("req-recovery-{}", outage.generation);
+        let connection_id = format!("conn-recovery-{}-{attempt}", outage.generation);
+        let tool = request_tool(outage.component).to_string();
+        push_request_event(
+            &mut log,
+            RequestDiagnosticEvent {
+                kind: RequestDiagnosticKind::Start,
+                timestamp_ms: timestamp_ms(),
+                request_id: request_id.clone(),
+                connection_id: connection_id.clone(),
+                attempt,
+                tool: tool.clone(),
+                outcome: None,
+                error_code: None,
+                phase: None,
+                cause: None,
+                http_status: None,
+                duration_ms: None,
+            },
+        );
+        log.active = Some(ActiveRequestDiagnostic {
+            generation: outage.generation,
+            attempt,
+            request_id,
+            connection_id,
+            tool,
+            started_at: Instant::now(),
+            fault: outage.fault.clone(),
+        });
+        return;
+    }
+
+    let Some(active) = log.active.take() else {
+        return;
+    };
+    match state {
+        RuntimeState::Ready => push_request_end(&mut log, active, "success", None),
+        RuntimeState::Faulted(fault) => push_request_end(
+            &mut log,
+            active,
+            "failed",
+            Some(runtime_fault_diagnostic(fault)),
+        ),
+        RuntimeState::Stopped => push_request_end(
+            &mut log,
+            active,
+            "cancelled",
+            Some(ErrorDiagnostic::new(
+                DiagnosticErrorCode::Cancelled,
+                DiagnosticPhase::Runtime,
+                "runtime_stopped",
+            )),
+        ),
+        _ => log.active = Some(active),
+    }
+}
+
+fn push_request_end(
+    log: &mut RequestDiagnosticState,
+    active: ActiveRequestDiagnostic,
+    outcome: &str,
+    diagnostic: Option<ErrorDiagnostic>,
+) {
+    let duration_ms = active
+        .started_at
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64;
+    push_request_event(
+        log,
+        RequestDiagnosticEvent {
+            kind: RequestDiagnosticKind::End,
+            timestamp_ms: timestamp_ms(),
+            request_id: active.request_id,
+            connection_id: active.connection_id,
+            attempt: active.attempt,
+            tool: active.tool,
+            outcome: Some(outcome.to_string()),
+            error_code: diagnostic
+                .as_ref()
+                .map(|value| value.error_code.as_str().to_string()),
+            phase: diagnostic
+                .as_ref()
+                .map(|value| value.phase.as_str().to_string()),
+            cause: diagnostic.as_ref().map(|value| value.cause.clone()),
+            http_status: diagnostic.as_ref().and_then(|value| value.http_status),
+            duration_ms: Some(duration_ms),
+        },
+    );
+}
+
+fn push_request_event(log: &mut RequestDiagnosticState, event: RequestDiagnosticEvent) {
+    log.events.push_front(event);
+    log.events.truncate(REQUEST_DIAGNOSTIC_LIMIT);
+}
+
+fn recent_request_diagnostics() -> Vec<RequestDiagnosticEvent> {
+    request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .events
+        .iter()
+        .cloned()
+        .collect()
+}
+
+fn request_tool(component: RuntimeComponent) -> &'static str {
+    match component {
+        RuntimeComponent::CodingRuntime => "coding_runtime",
+        RuntimeComponent::PolicyEnforcement => "policy_enforcement",
+        RuntimeComponent::Tunnel => "tunnel",
+    }
+}
+
+fn runtime_fault_diagnostic(fault: &RuntimeFault) -> ErrorDiagnostic {
+    match fault {
+        RuntimeFault::McpHealthTimeout => transport_unavailable("mcp_health_timeout", None),
+        RuntimeFault::McpExited => transport_unavailable("mcp_exited", None),
+        RuntimeFault::TunnelHealthTimeout => transport_unavailable("tunnel_health_timeout", None),
+        RuntimeFault::TunnelExited => transport_unavailable("tunnel_exited", None),
+        RuntimeFault::PortUnavailable => transport_unavailable("port_unavailable", None),
+        RuntimeFault::TunnelAuthFailed => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Denied,
+            DiagnosticPhase::Transport,
+            "tunnel_auth_failed",
+        ),
+        RuntimeFault::UserStopped => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Cancelled,
+            DiagnosticPhase::Runtime,
+            "user_stopped",
+        ),
+        _ => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Unavailable,
+            DiagnosticPhase::Runtime,
+            format!("runtime_fault_{fault:?}").to_ascii_lowercase(),
+        ),
     }
 }
 

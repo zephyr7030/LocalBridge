@@ -201,3 +201,106 @@ fn user_triggered_export_contains_allowlisted_projection_only() {
         assert!(!text.contains(forbidden));
     }
 }
+
+#[test]
+fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fields() {
+    *request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = RequestDiagnosticState::default();
+    let root = TempDir::new("request-correlation");
+    complete_runtime(root.path());
+    let outage = DiagnosticsOutageInput {
+        generation: 42,
+        component: RuntimeComponent::Tunnel,
+        fault: RuntimeFault::TunnelExited,
+        user_attention_required: false,
+    };
+
+    let first = build_snapshot(
+        root.path(),
+        &runtime(
+            RuntimeState::Recovering {
+                component: RuntimeComponent::Tunnel,
+                attempt: 1,
+            },
+            Some(outage.clone()),
+        ),
+        &PrivilegeState::Disabled,
+        true,
+    );
+    assert_eq!(first.request_diagnostics.len(), 1);
+    assert_eq!(first.request_diagnostics[0].kind, RequestDiagnosticKind::Start);
+    assert_eq!(first.request_diagnostics[0].attempt, 1);
+    let request_id = first.request_diagnostics[0].request_id.clone();
+    let first_connection = first.request_diagnostics[0].connection_id.clone();
+
+    let retry = build_snapshot(
+        root.path(),
+        &runtime(
+            RuntimeState::Recovering {
+                component: RuntimeComponent::Tunnel,
+                attempt: 2,
+            },
+            Some(outage.clone()),
+        ),
+        &PrivilegeState::Disabled,
+        true,
+    );
+    let retry_start = retry
+        .request_diagnostics
+        .iter()
+        .find(|event| event.kind == RequestDiagnosticKind::Start && event.attempt == 2)
+        .unwrap();
+    let first_end = retry
+        .request_diagnostics
+        .iter()
+        .find(|event| event.kind == RequestDiagnosticKind::End && event.attempt == 1)
+        .unwrap();
+    assert_eq!(retry_start.request_id, request_id);
+    assert_ne!(retry_start.connection_id, first_connection);
+    assert_eq!(first_end.request_id, request_id);
+    assert_eq!(first_end.connection_id, first_connection);
+    assert_eq!(first_end.outcome.as_deref(), Some("failed"));
+    assert_eq!(first_end.error_code.as_deref(), Some("Unavailable"));
+    assert_eq!(first_end.phase.as_deref(), Some("transport"));
+    assert_eq!(first_end.cause.as_deref(), Some("tunnel_exited"));
+    assert!(first_end.duration_ms.is_some());
+
+    let recovered = build_snapshot(
+        root.path(),
+        &runtime(RuntimeState::Ready, Some(outage)),
+        &PrivilegeState::Disabled,
+        true,
+    );
+    let retry_end = recovered
+        .request_diagnostics
+        .iter()
+        .find(|event| event.kind == RequestDiagnosticKind::End && event.attempt == 2)
+        .unwrap();
+    assert_eq!(retry_end.request_id, request_id);
+    assert_eq!(retry_end.connection_id, retry_start.connection_id);
+    assert_eq!(retry_end.outcome.as_deref(), Some("success"));
+    assert!(retry_end.error_code.is_none());
+    assert!(retry_end.phase.is_none());
+    assert!(retry_end.cause.is_none());
+    assert!(retry_end.duration_ms.is_some());
+
+    let path = export_snapshot(root.path(), &recovered).unwrap();
+    let export = fs::read_to_string(path).unwrap();
+    for field in [
+        "requestDiagnostics",
+        "requestId",
+        "connectionId",
+        "attempt",
+        "errorCode",
+        "phase",
+        "cause",
+        "httpStatus",
+        "durationMs",
+    ] {
+        assert!(export.contains(field), "diagnostic export lost {field}");
+    }
+    for forbidden in ["Runtime API Key", "Authorization", "synthetic-secret"] {
+        assert!(!export.contains(forbidden));
+    }
+}

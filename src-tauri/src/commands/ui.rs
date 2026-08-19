@@ -10,7 +10,7 @@ use crate::app::{
     StartupProfileStore, manual_stop_services,
 };
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
-use crate::diagnostics::record_runtime_user_events;
+use crate::diagnostics::{DiagnosticsOutageInput, record_runtime_user_events};
 use crate::runtime::ProductionRuntimeConfig;
 use crate::settings::{AppData, SettingsStore, StoredPermissionMode};
 use crate::state::{
@@ -247,14 +247,13 @@ fn get_main_projection_blocking(
     let (snapshot, projection_revision) = lifecycle.runtime_snapshot_with_revision();
     let task_aggregate = lifecycle.task_aggregate_snapshot();
     let privilege = lifecycle.privilege().refresh_broker_state();
-    record_runtime_user_events(
-        &snapshot.state,
-        snapshot
-            .outage
-            .as_ref()
-            .map(|outage| (outage.component, &outage.fault)),
-        &privilege,
-    );
+    let diagnostics_outage = snapshot.outage.as_ref().map(|outage| DiagnosticsOutageInput {
+        generation: outage.generation,
+        component: outage.component,
+        fault: outage.fault.clone(),
+        user_attention_required: outage.user_attention_required,
+    });
+    record_runtime_user_events(&snapshot.state, diagnostics_outage.as_ref(), &privilege);
     let metadata = WindowsCredentialStore::default()
         .runtime_api_key_metadata()
         .map_err(|_| "无法读取 Runtime API Key 状态".to_string())?;
