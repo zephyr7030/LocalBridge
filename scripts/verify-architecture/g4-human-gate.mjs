@@ -275,6 +275,23 @@ const G3_HUMAN_REVIEW_GENERATION_2_AMENDMENT_2026_08_13 = Object.freeze({
   },
 });
 
+const LB018_CLOUDFLARE_TEST_SCOPE_CORRECTION_2026_08_19 = Object.freeze({
+  path: "tests/integration/tunnel/lb008_contract.test.mjs",
+});
+
+export function hasExactLb018CloudflareTestScopeCorrection20260819(contractsDoc) {
+  return contractsDoc?.prs?.["LB-018"]?.writable_paths?.includes(LB018_CLOUDFLARE_TEST_SCOPE_CORRECTION_2026_08_19.path) === true;
+}
+
+export function normalizeLb018CloudflareTestScopeCorrection20260819(contractsDoc) {
+  const normalized = structuredClone(contractsDoc ?? null);
+  const paths = normalized?.prs?.["LB-018"]?.writable_paths;
+  if (Array.isArray(paths)) {
+    normalized.prs["LB-018"].writable_paths = removeItems(paths, [LB018_CLOUDFLARE_TEST_SCOPE_CORRECTION_2026_08_19.path]);
+  }
+  return normalized;
+}
+
 const G3_MANUAL_SUPPLEMENT_2026_08_14 = Object.freeze({
   schemaVersion: 21,
   baselineCommit: "e66a3b9a0d5a844fa35ed6f63b70acaeae4e4110",
@@ -3323,7 +3340,8 @@ export function normalizeG3HumanReviewAmendment(prs) {
 }
 
 function normalizeAuthorizedSemanticCorrections(prs) {
-  const normalized = normalizeG3HumanReviewAmendment(normalizeG3HumanReviewGeneration2Amendment(prs));
+  const correctionDoc = normalizeLb018CloudflareTestScopeCorrection20260819({ prs });
+  const normalized = normalizeG3HumanReviewAmendment(normalizeG3HumanReviewGeneration2Amendment(correctionDoc?.prs));
   const lb018pre = normalized?.["LB-018PRE"];
   if (lb018pre) {
     const expected = {
@@ -3450,6 +3468,12 @@ export function validatePreG4GateAuthorization(
     authorizationContracts = normalizeSchema42DashboardObservabilityAmendment20260818(authorizationContracts);
     if (!hasExactSchema42TaskCommandTruth20260818(authorizationContracts)) findings.push(`${expected.id}:schema42-task-command-truth-20260818-drift`);
     authorizationContracts = normalizeSchema42TaskCommandTruth20260818(authorizationContracts);
+  }
+  if ((contractsDoc?.schema_version ?? 0) >= 42) {
+    if (!hasExactLb018CloudflareTestScopeCorrection20260819(authorizationContracts)) {
+      findings.push(`${expected.id}:lb018-cloudflare-test-scope-correction-20260819-drift`);
+    }
+    authorizationContracts = normalizeLb018CloudflareTestScopeCorrection20260819(authorizationContracts);
   }
   if ((authorizationContracts?.schema_version ?? 0) >= SCHEMA41_CODING_AGENT_COMPATIBILITY_2026_08_17.schemaVersion) {
     if (!hasExactSchema41CodingAgentCompatibility20260817(authorizationContracts)) {
