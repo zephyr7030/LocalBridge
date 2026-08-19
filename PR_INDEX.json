@@ -281,7 +281,7 @@
         "LB-018"
       ],
       "gate": "G4",
-      "status": "READY"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-019",
@@ -348,13 +348,13 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "PASS",
-      "review_status": "PASS",
-      "review_generation": 37,
+      "status": "REWORK_REQUIRED",
+      "review_status": "FAIL",
+      "review_generation": 38,
       "review_provenance": {
-        "generation": 37,
+        "generation": 38,
         "kind": "independent_adversarial",
-        "commit": "302d6cd7c3a579a4ac1198dbed62fb6c14ff1a6f",
+        "commit": "48d763c5036d3b4180240a0e363ea16a2a3ce7e9",
         "invalidated_generations": [
           {
             "generation": 8,
@@ -420,10 +420,15 @@
             "generation": 32,
             "commit": "0c21acdeea09986d7a427a94a06b2c77144cecba",
             "cause": "schema42_dashboard_observability_amendment_2026_08_18"
+          },
+          {
+            "generation": 37,
+            "commit": "302d6cd7c3a579a4ac1198dbed62fb6c14ff1a6f",
+            "cause": "schema43_no_console_and_structured_filesystem_amendment_2026_08_19"
           }
         ]
       },
-      "reopen_from_pr": "LB-012"
+      "reopen_from_pr": "LB-019PRE"
     },
     {
       "id": "G3",

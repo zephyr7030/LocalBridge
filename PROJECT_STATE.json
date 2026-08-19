@@ -6296,7 +6296,7 @@
     "next_pr": "LB-019"
   },
   "schema43_v0_1_1_no_console_and_filesystem_amendment_2026_08_19": {
-    "status": "RATIFIED_IMPLEMENTATION_PENDING",
+    "status": "G2_REWORK_REQUIRED",
     "source": "explicit user instruction to merge the planned P0 no-console correction and structured filesystem feature into v0.1.1 and amend contracts before implementation",
     "target_release_version": "0.1.1",
     "current_pr": "LB-019PRE",
@@ -6337,6 +6337,55 @@
       "publish final GitHub v0.1.1 only after LB-019 PASS"
     ],
     "lb019_status": "BLOCKED",
-    "implementation_started": false
+    "implementation_started": true,
+    "g2_generation_38_consumed": true,
+    "next_required_g2_generation": 39,
+    "next_required_g3_generation": 24,
+    "fresh_g3_unlocked": false,
+    "release_candidate_unlocked": false
+  },
+  "g2_adversarial_review_generation_38_2026_08_19": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "generation": 38,
+    "kind": "independent_adversarial",
+    "reviewed_baseline_commit": "48d763c5036d3b4180240a0e363ea16a2a3ce7e9",
+    "reopen_from_pr": "LB-019PRE",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-019PRE",
+        "title": "Sensitive filesystem mutations are not bound to the final validated handle and retain a junction/reparse TOCTOU gap",
+        "evidence": [
+          "PathAuthority::revalidate_opened_path opens the path, obtains GetFinalPathNameByHandleW identity, closes the handle, and returns only a PathBuf.",
+          "FilesystemService write/copy/move/delete then perform MoveFileExW, File::open, fs::remove_file/remove_dir/remove_dir_all or related mutation by path after the validating handle has been dropped.",
+          "The final parent/target rechecks narrow the race but do not bind the checked object to the mutation; no adversarial junction/reparse swap test proves the check/use gap is closed."
+        ],
+        "required_fix": "Bind write/copy/move/delete to validated Windows filesystem object/parent handles through the mutation boundary, or an equivalently strong identity-preserving primitive, and add deterministic adversarial swap tests that fail on the current check-then-path implementation."
+      },
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-019PRE",
+        "title": "Public legacy elevated_exec filesystem route bypasses the schema43 shared FilesystemService and PathAuthority",
+        "evidence": [
+          "elevated_exec still publicly accepts operation=filesystem and parses PrivilegedFilesystemSpec before calling PrivilegedExecution::filesystem.",
+          "BrokerRequest::Filesystem dispatches to run_privileged_filesystem rather than run_administrator_filesystem/FilesystemService.",
+          "run_privileged_filesystem performs direct std::fs read, truncate-write, create_dir_all, rename and delete/remove_dir_all operations and therefore does not inherit the schema43 shared path authority, atomic write, reparse, bounded, or TOCTOU hardening."
+        ],
+        "required_fix": "Preserve the legacy five-action wire contract if compatibility is required, but adapt every action onto the same FilesystemService/PathAuthority implementation and administrator authorization boundary rather than maintaining a second direct std::fs mutation path."
+      }
+    ],
+    "verified_passes": [
+      "Primary WindowsProcessSupervisor managed spawn now uses CREATE_NO_WINDOW and the negative verifier cannot pass from a helper token elsewhere in the file.",
+      "Public filesystem surface is nine core tools plus elevated_exec with flat action-discoverable schema and strict server validation.",
+      "Full serial Rust regression, all-targets Clippy -D warnings, frontend tests/build, schema43 ARCH-030/031/032/034, architecture/runtime-manifest/UI-language and packaging contract gates passed on the reviewed baseline before adversarial review."
+    ],
+    "next_required_g2_generation": 39,
+    "next_required_g3_generation": 24,
+    "fresh_g3_unlocked": false,
+    "release_candidate_unlocked": false,
+    "lb019_unlocked": false,
+    "current_group": "G4",
+    "current_pr": "LB-019PRE"
   }
 }
