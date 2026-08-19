@@ -422,7 +422,7 @@
       "review_provenance": {
         "generation": 22,
         "kind": "independent_adversarial",
-        "commit": "81536babb93567f5b72e75585b798d7dae89fab1",
+        "commit": "24db8198baf46967b9d536ed45532cfa24f488a2",
         "invalidated_generations": [
           {
             "generation": 6,

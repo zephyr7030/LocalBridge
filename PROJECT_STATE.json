@@ -6141,6 +6141,7 @@
     "formal_group_release_gate_reason": "Current source-of-truth contract conflict is a blocking review failure; per project rules the review stops before claiming a full Group Release PASS.",
     "next_required_g3_generation": 23,
     "human_review_status": "BLOCKED",
-    "g4_unlocked": false
+    "g4_unlocked": false,
+    "review_decision_commit": "24db8198baf46967b9d536ed45532cfa24f488a2"
   }
 }
