@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-013",
+  "current_pr": "LB-014",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5953,5 +5953,17 @@
     "next_required_g3_generation": 22,
     "g4_unlocked": false,
     "review_decision_commit": "302d6cd7c3a579a4ac1198dbed62fb6c14ff1a6f"
+  },
+  "lb013_schema42_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-013",
+    "product_patch_required": false,
+    "evidence": [
+      "Fresh LB-013 static contract PASS.",
+      "Fresh background and tray Rust behavior filters PASS on current schema42 baseline.",
+      "git diff --check PASS; no LB-013 product modification required."
+    ],
+    "next_pr": "LB-014",
+    "g4_unlocked": false
   }
 }
