@@ -5665,5 +5665,18 @@
     "next_pr": "LB-011",
     "next_required_g2_generation": 35,
     "next_required_g3_generation": 22
+  },
+  "schema42_lb011_reacceptance_after_unified_diagnostics_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-011",
+    "product_commit": null,
+    "evidence": [
+      "Unified Error Diagnostics adds no LB-011 owner requirement; Broker IPC and trust boundary remain unchanged.",
+      "Fresh LB-011 security/UAC boundary tests PASS; privilege Rust set and actual separate Broker IPC target PASS with routine live-UAC case intentionally ignored.",
+      "Fresh cargo check --release --lib --bins PASS; G4 human-gate regression and git diff check PASS. Architecture is expected to remain fail-closed only on the active G2 review-transition until generation35."
+    ],
+    "next_pr": "LB-012",
+    "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22
   }
 }
