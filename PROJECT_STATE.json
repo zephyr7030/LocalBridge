@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-006",
+  "current_pr": "LB-007",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5843,5 +5843,19 @@
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
+  },
+  "schema42_lb006_generation36_output_schema_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-006",
+    "product_commit": "3d991490800d19c3e7f3ace7d762ab0634bab7d1",
+    "resolves_generation": 36,
+    "evidence": [
+      "elevated_exec failure outputSchema now reuses the canonical public error schema and describes the complete common failure structuredContent envelope.",
+      "Real served elevated_exec schema and real denied PrivilegedRouteUnavailable response are checked for top-level and nested diagnostic field compatibility, including Denied plus policy.",
+      "Focused elevated real-runtime regression and ARCH-030 PASS; full serial Rust suite, all-targets Clippy, schema42 execution-platform, frontend tests/build, runtime-manifest, G4 regression and diff check PASS."
+    ],
+    "next_pr": "LB-007",
+    "next_required_g2_generation": 37,
+    "next_required_g3_generation": 22
   }
 }
