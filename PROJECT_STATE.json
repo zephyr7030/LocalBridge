@@ -6248,6 +6248,7 @@
     "executor_pre_authorizations": [],
     "pre_authorization_inventory_complete": true,
     "g4_unlocked": true,
-    "next_pr": "LB-018PRE"
+    "next_pr": "LB-018PRE",
+    "human_review_decision_commit": "91b2b8fb5ba231588634a8151f2e18cd62f1fc7e"
   }
 }
