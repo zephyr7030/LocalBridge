@@ -5,7 +5,7 @@
   "identifier": "com.localbridge.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run toolbox:prepare && npm run build",
+    "beforeBuildCommand": "node scripts/prepare-lb018-resources.mjs && npm run build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../tests/artifacts/frontend-dist"
   },
@@ -19,10 +19,16 @@
     "active": true,
     "targets": ["nsis"],
     "icon": ["../assets/icons/localbridge.ico"],
-    "externalBin": ["binaries/dummy-sidecar"],
+    "externalBin": [],
     "resources": {
+      "../runtime/python/": "runtime/python/",
+      "../runtime/coding-tools-mcp/": "runtime/coding-tools-mcp/",
+      "../runtime/tunnel-client/": "runtime/tunnel-client/",
       "target/toolbox-stage/": "runtime/toolbox/",
+      "target/release-stage/localbridge-privileged-broker.exe": "localbridge-privileged-broker.exe",
       "../runtime-manifest.toml": "runtime-manifest.toml",
+      "../runtime-policy.toml": "runtime-policy.toml",
+      "../LICENSE": "LICENSE",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
     },
     "windows": {

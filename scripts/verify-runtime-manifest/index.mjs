@@ -23,9 +23,12 @@ const treeSha = (root, excludedName = "runtime-metadata.json") => {
 
 const text = readFileSync("runtime-manifest.toml", "utf8");
 const toolboxPrepare = readFileSync("scripts/prepare-toolbox.mjs", "utf8");
+const releasePrepare = readFileSync("scripts/prepare-lb018-resources.mjs", "utf8");
 const thirdPartyNotices = readFileSync("THIRD_PARTY_NOTICES.md", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 const tauri = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
+if (/cloudflared|cloudflare managed/i.test(text)) throw new Error("final runtime manifest must not contain Cloudflare runtime entries");
+if (existsSync("runtime/tunnel-client/cloudflared.exe") || existsSync("runtime/tunnel-client/cloudflared-manifest.json")) throw new Error("final runtime payload must not contain cloudflared");
 const required = [
   'target = "windows-x86_64"',
   'target_os = "windows"',
@@ -104,7 +107,7 @@ const toolboxExact = [
 ];
 for (const item of toolboxExact) if (!text.includes(item)) throw new Error(`schema42 toolbox manifest requirement missing: ${item}`);
 if (packageJson.scripts?.["toolbox:prepare"] !== "node scripts/prepare-toolbox.mjs") throw new Error("schema42 toolbox build preparation script missing");
-if (tauri.build?.beforeDevCommand !== "npm run dev" || !tauri.build?.beforeBuildCommand?.includes("npm run toolbox:prepare")) throw new Error("schema42 toolbox acquisition is not build-only");
+if (tauri.build?.beforeDevCommand !== "npm run dev" || !tauri.build?.beforeBuildCommand?.includes("prepare-lb018-resources.mjs") || !releasePrepare.includes("scripts/prepare-toolbox.mjs")) throw new Error("schema42 toolbox acquisition is not build-only");
 if (tauri.bundle?.resources?.["target/toolbox-stage/"] !== "runtime/toolbox/") throw new Error("schema42 toolbox release resource mapping missing");
 for (const marker of [
   "release-1.37.0/aria2-1.37.0-win-64bit-build1.zip",

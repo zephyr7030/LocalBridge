@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 fn main() {
     let args = localbridge_lib::privilege::parse_broker_args(std::env::args().skip(1))
         .and_then(localbridge_lib::privilege::run_broker_process);
