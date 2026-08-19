@@ -6174,7 +6174,10 @@
   "schema42_lb017_adversarial_repair_scope_2026_08_19": {
     "status": "RATIFIED",
     "owner_pr": "LB-017",
-    "exact_runtime_exception": "src-tauri/src/runtime/recovery.rs",
+    "exact_runtime_exception": [
+      "src-tauri/src/runtime/recovery.rs",
+      "src-tauri/src/runtime/mod.rs"
+    ],
     "findings": [
       "recovery diagnostics must observe actual retry attempt boundaries rather than post-attempt watchdog snapshots",
       "special MCP handlers must close request diagnostics on all terminal/early-return paths and active tracking is bounded at 32",

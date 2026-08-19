@@ -2315,6 +2315,7 @@ const SCHEMA42_UNIFIED_ERROR_DIAGNOSTICS_AMENDMENT_2026_08_19 = Object.freeze({
       "src-tauri/src/mcp/server.rs",
       "src-tauri/src/app/background.rs",
       "src-tauri/src/runtime/recovery.rs",
+      "src-tauri/src/runtime/mod.rs",
       "scripts/verify-architecture/g4-human-gate.mjs",
       "scripts/verify-architecture/g4-human-gate.test.mjs"
     ]
