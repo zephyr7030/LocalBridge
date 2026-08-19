@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": "LB-017",
+    "current_pr": "LB-015",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -223,7 +223,7 @@
         "LB-012"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "REWORK_REQUIRED"
     },
     {
       "id": "LB-016",
@@ -234,7 +234,7 @@
         "LB-015"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-017",
@@ -246,7 +246,7 @@
         "LB-015"
       ],
       "gate": "G3",
-      "status": "PASS"
+      "status": "BLOCKED"
     },
     {
       "id": "LB-018",
@@ -414,15 +414,15 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "REVIEW_REQUIRED",
-      "review_status": "REQUIRED",
-      "review_generation": 20,
+      "status": "REWORK_REQUIRED",
+      "review_status": "FAIL",
+      "review_generation": 22,
       "human_review_status": "BLOCKED",
       "human_review_generation": 3,
       "review_provenance": {
-        "generation": 20,
+        "generation": 22,
         "kind": "independent_adversarial",
-        "commit": "0ff0e7ea3e38ea4369806d687f98e22ed18a2857",
+        "commit": "81536babb93567f5b72e75585b798d7dae89fab1",
         "invalidated_generations": [
           {
             "generation": 6,
@@ -500,7 +500,8 @@
             "cause": "schema41_waiting_derived_settlement_amendment_2026_08_18"
           }
         ]
-      }
+      },
+      "reopen_from_pr": "LB-015"
     },
     {
       "id": "G4",
@@ -514,6 +515,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-017",
+  "current_pr": "LB-015",
   "current_group": "G3"
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-017",
+  "current_pr": "LB-015",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -6108,6 +6108,39 @@
     ],
     "next_required_g3_generation": 22,
     "review_executed": false,
+    "g4_unlocked": false
+  },
+  "g3_adversarial_review_generation_22_2026_08_19": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "generation": 22,
+    "kind": "independent_adversarial",
+    "reviewed_baseline_commit": "81536babb93567f5b72e75585b798d7dae89fab1",
+    "reopen_from_pr": "LB-015",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-015",
+        "title": "schema42 LB-015 current acceptance contract contains mutually exclusive Dashboard idle requirements",
+        "evidence": [
+          "PR_CONTRACTS.json top-level schema42 rule dashboard_idle_text is 空闲.",
+          "The same current LB-015 required_tests array still requires Dashboard no-task first row to be 等待命令 and never 空闲, while a later required test in that same array requires 空闲 when no current workflow and no current command exist.",
+          "Current production presentation and executable LB-015 tests follow 空闲, and the G4 fail-closed verifier regression still passes, so the machine verifier does not reject this internally contradictory current contract."
+        ],
+        "required_fix": "Correct the stale LB-015 required-test wording to the single schema42 idle authority and add a verifier regression that fails closed if superseded mutually exclusive acceptance text remains in the current contract. Reaccept LB-015 and dependent LB-016/LB-017 as required by governance, then run a fresh G3 generation23 review."
+      }
+    ],
+    "verified_passes": [
+      "Fresh LB-013 through LB-017 targeted contract scripts PASS.",
+      "Fresh diagnostics Rust targeted tests PASS: 10 diagnostics-related library tests plus policy diagnostic integration coverage.",
+      "Fresh native Tauri/WebView2 fixed-window E2E PASS at 150% DPI for onboarding and Dashboard 780x620 logical / 1170x930 physical.",
+      "Fresh real @测试 Full ordinary cmd allow path PASS; non-admin elevated_exec rejection preserved PrivilegedRouteUnavailable plus Denied/policy/privileged_route_unavailable; context-only diagnose returned context_ready with null task/workflow ids.",
+      "G4 human-gate fail-closed regression itself PASS, which is evidence of the verifier blind spot rather than acceptance of the contradictory contract."
+    ],
+    "formal_group_release_gate_executed": false,
+    "formal_group_release_gate_reason": "Current source-of-truth contract conflict is a blocking review failure; per project rules the review stops before claiming a full Group Release PASS.",
+    "next_required_g3_generation": 23,
+    "human_review_status": "BLOCKED",
     "g4_unlocked": false
   }
 }
