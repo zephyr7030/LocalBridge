@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-009",
+  "current_pr": "LB-010",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5879,6 +5879,18 @@
       "Tunnel HTTP400 Unified Diagnostics and runtime-manifest remain valid; diff check PASS."
     ],
     "next_pr": "LB-009",
+    "next_required_g2_generation": 37,
+    "next_required_g3_generation": 22
+  },
+  "schema42_lb009_generation36_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-009",
+    "product_commit": null,
+    "evidence": [
+      "Fresh orchestrator owner tests PASS after elevated_exec outputSchema repair.",
+      "No LB-009 product change required; diff check PASS."
+    ],
+    "next_pr": "LB-010",
     "next_required_g2_generation": 37,
     "next_required_g3_generation": 22
   }
