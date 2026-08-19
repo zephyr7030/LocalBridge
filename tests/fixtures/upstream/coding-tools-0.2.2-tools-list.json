@@ -1,0 +1,1737 @@
+{
+  "schema_version": 1,
+  "source": "live HTTP MCP tools/list",
+  "runtime": "coding-tools-mcp",
+  "runtime_version": "0.2.2",
+  "protocol_version": "2025-11-25",
+  "permission_mode": "safe",
+  "telemetry_forced_off": true,
+  "tools_sha256": "d187db7ad6729893f17fceb539f030eb0c6139528ab35cb3f9564d27383d3674",
+  "tool_count": 20,
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Server info"
+      },
+      "description": "Return server, workspace, project-context, auth, policy, and fixed-tool metadata.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "server_info",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Server info"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Check exec environment"
+      },
+      "description": "Return lightweight exec_command sandbox and environment status known to the server.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "check_exec_environment",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Check exec environment"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Get default cwd"
+      },
+      "description": "Return the current default cwd inside the workspace.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "get_default_cwd",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Get default cwd"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Set default cwd"
+      },
+      "description": "Set the default cwd for relative tool paths inside the workspace.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "default": ".",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "set_default_cwd",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Set default cwd"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read file"
+      },
+      "description": "Read a UTF-8 text file slice inside the configured workspace.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "encoding": {
+            "default": "utf-8",
+            "enum": [
+              "utf-8"
+            ],
+            "type": "string"
+          },
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_bytes": {
+            "default": 131072,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_lines": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "start_line": {
+            "default": 1,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "read_file",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Read file"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List directory"
+      },
+      "description": "List directory entries inside the configured workspace.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "include_hidden": {
+            "default": false,
+            "type": "boolean"
+          },
+          "include_ignored": {
+            "default": false,
+            "type": "boolean"
+          },
+          "max_depth": {
+            "default": 1,
+            "maximum": 20,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_entries": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "default": ".",
+            "type": "string"
+          },
+          "recursive": {
+            "default": false,
+            "type": "boolean"
+          },
+          "sort": {
+            "default": "name",
+            "enum": [
+              "name",
+              "type",
+              "modified"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_dir",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "List directory"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List files"
+      },
+      "description": "List workspace files using glob filters.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "exclude_patterns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "glob": {
+            "type": "string"
+          },
+          "include_hidden": {
+            "default": false,
+            "type": "boolean"
+          },
+          "include_ignored": {
+            "default": false,
+            "type": "boolean"
+          },
+          "max_results": {
+            "default": 5000,
+            "maximum": 50000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "default": ".",
+            "type": "string"
+          },
+          "patterns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sort": {
+            "default": "path",
+            "enum": [
+              "path",
+              "modified"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_files",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "List files"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Search text"
+      },
+      "description": "Search UTF-8 workspace files for text or regex matches.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "case_sensitive": {
+            "default": false,
+            "type": "boolean"
+          },
+          "context_lines": {
+            "default": 0,
+            "maximum": 5,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exclude_globs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "glob": {
+            "type": "string"
+          },
+          "include_globs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "max_preview_bytes": {
+            "default": 512,
+            "maximum": 4096,
+            "minimum": 80,
+            "type": "integer"
+          },
+          "max_results": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "default": ".",
+            "type": "string"
+          },
+          "query": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "regex": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "search_text",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Search text"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Apply patch"
+      },
+      "description": "Stage, validate, and atomically replace files from a patch envelope inside the workspace.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "dry_run": {
+            "default": false,
+            "type": "boolean"
+          },
+          "patch": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "patch"
+        ],
+        "type": "object"
+      },
+      "name": "apply_patch",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Apply patch"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Execute command"
+      },
+      "description": "Run a bounded command in the workspace under runtime policy.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cmd": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "type": "object"
+          },
+          "max_output_bytes": {
+            "default": 65536,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "preview_bytes": {
+            "default": 4096,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stdin": {
+            "default": "",
+            "type": "string"
+          },
+          "timeout_ms": {
+            "default": 30000,
+            "maximum": 600000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tty": {
+            "default": false,
+            "type": "boolean"
+          },
+          "verbosity": {
+            "enum": [
+              "summary",
+              "preview",
+              "full"
+            ],
+            "type": "string"
+          },
+          "workdir": {
+            "default": ".",
+            "type": "string"
+          },
+          "yield_time_ms": {
+            "default": 10000,
+            "maximum": 30000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cmd"
+        ],
+        "type": "object"
+      },
+      "name": "exec_command",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Execute command"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Write stdin"
+      },
+      "description": "Poll or interact with a running command session. Pass empty chars to wait for more output; pass non-empty chars to write to stdin.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "chars": {
+            "default": "",
+            "type": "string"
+          },
+          "max_output_bytes": {
+            "default": 65536,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "preview_bytes": {
+            "default": 4096,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "verbosity": {
+            "enum": [
+              "summary",
+              "preview",
+              "full"
+            ],
+            "type": "string"
+          },
+          "yield_time_ms": {
+            "default": 10000,
+            "maximum": 30000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "name": "write_stdin",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Write stdin"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Kill session"
+      },
+      "description": "Terminate a server-managed running command session.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "max_output_bytes": {
+            "default": 65536,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "preview_bytes": {
+            "default": 4096,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "signal": {
+            "default": "TERM",
+            "enum": [
+              "TERM",
+              "KILL",
+              "INT"
+            ],
+            "type": "string"
+          },
+          "verbosity": {
+            "enum": [
+              "summary",
+              "preview",
+              "full"
+            ],
+            "type": "string"
+          },
+          "wait_ms": {
+            "default": 5000,
+            "maximum": 30000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "name": "kill_session",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Kill session"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read output"
+      },
+      "description": "Read retained stdout or stderr by output_ref with per-stream byte offset pagination.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 4096,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "output_ref": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "stream": {
+            "enum": [
+              "stdout",
+              "stderr"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "output_ref"
+        ],
+        "type": "object"
+      },
+      "name": "read_output",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Read output"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Git status"
+      },
+      "description": "Return git working tree status for the workspace.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "include_untracked": {
+            "default": true,
+            "type": "boolean"
+          },
+          "max_entries": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "default": ".",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "git_status",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Git status"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Git diff"
+      },
+      "description": "Return unified git diff for workspace changes.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context_lines": {
+            "default": 3,
+            "maximum": 20,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_bytes": {
+            "default": 262144,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "staged": {
+            "default": false,
+            "type": "boolean"
+          },
+          "unstaged": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "git_diff",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Git diff"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Git log"
+      },
+      "description": "Return recent git commits with bounded structured metadata.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "max_count": {
+            "default": 20,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "default": ".",
+            "type": "string"
+          },
+          "ref": {
+            "default": "HEAD",
+            "type": "string"
+          },
+          "skip": {
+            "default": 0,
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "git_log",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Git log"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Git show"
+      },
+      "description": "Return bounded git show output for a revision.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "context_lines": {
+            "default": 3,
+            "maximum": 20,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "include_diff": {
+            "default": true,
+            "type": "boolean"
+          },
+          "max_bytes": {
+            "default": 262144,
+            "maximum": 1048576,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rev": {
+            "default": "HEAD",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "git_show",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Git show"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Git blame"
+      },
+      "description": "Return bounded git blame metadata for a workspace file.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_lines": {
+            "default": 200,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rev": {
+            "type": "string"
+          },
+          "start_line": {
+            "default": 1,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "git_blame",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Git blame"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Request permissions"
+      },
+      "description": "Report scoped permission-request status without silently granting operations.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "permission": {
+            "enum": [
+              "network",
+              "destructive_command",
+              "long_timeout",
+              "sensitive_env",
+              "shell_expansion",
+              "inline_script",
+              "privileged_executable",
+              "write_generated_or_ignored"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "scope": {
+            "default": "once",
+            "enum": [
+              "once",
+              "session"
+            ],
+            "type": "string"
+          },
+          "tool_name": {
+            "enum": [
+              "exec_command",
+              "apply_patch"
+            ],
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "default": 300,
+            "maximum": 3600,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tool_name",
+          "permission",
+          "reason",
+          "arguments"
+        ],
+        "type": "object"
+      },
+      "name": "request_permissions",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "Request permissions"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "View image"
+      },
+      "description": "Return a workspace image as MCP image content.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "auto_resize": {
+            "default": true,
+            "type": "boolean"
+          },
+          "max_bytes": {
+            "default": 5242880,
+            "maximum": 10485760,
+            "minimum": 1024,
+            "type": "integer"
+          },
+          "max_height": {
+            "default": 2000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_width": {
+            "default": 2000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "view_image",
+      "outputSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "properties": {
+              "category": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "category",
+              "retryable",
+              "details"
+            ],
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "title": "View image"
+    }
+  ]
+}

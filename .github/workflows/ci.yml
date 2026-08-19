@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+      - run: npm ci
+      - run: cargo fetch --manifest-path src-tauri/Cargo.toml --locked
+      - run: node scripts/public-release/preflight.mjs format-check
+      - run: node tests/integration/release-preflight/public_release.test.mjs
+      - run: node scripts/public-release/preflight.mjs verify-license
+      - run: npm test
+      - run: npm run build
+      - run: node scripts/prepare-lb018-resources.mjs
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - run: node node_modules/@tauri-apps/cli/tauri.js build --bundles nsis

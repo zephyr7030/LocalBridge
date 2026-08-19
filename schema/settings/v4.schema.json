@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "localbridge://schema/settings/v4",
+  "title": "LocalBridge App Data v4",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "settings", "workspace"],
+  "properties": {
+    "schema_version": { "const": 4 },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permission_mode", "auto_start_services", "close_window_continue_running", "onboarding_complete"],
+      "properties": {
+        "permission_mode": { "enum": ["Edit", "Full", "Elevated"] },
+        "auto_start_services": { "type": "boolean" },
+        "close_window_continue_running": { "type": "boolean" },
+        "onboarding_complete": { "type": "boolean" }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["registry", "active_workspace_id"],
+      "properties": {
+        "registry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entries"],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["workspace_id", "display_path", "validated_identity", "last_opened_at"],
+                "properties": {
+                  "workspace_id": { "type": "string", "minLength": 1 },
+                  "display_path": { "type": "string", "minLength": 1 },
+                  "validated_identity": { "type": "string", "minLength": 1 },
+                  "last_opened_at": { "type": "integer", "minimum": 0 }
+                }
+              }
+            }
+          }
+        },
+        "active_workspace_id": { "type": ["string", "null"] },
+        "pending_workspace_confirmation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["workspace_id", "display_path", "reason"],
+          "properties": {
+            "workspace_id": { "type": ["string", "null"] },
+            "display_path": { "type": "string", "minLength": 1 },
+            "reason": { "enum": ["validated_identity_missing", "workspace_id_missing"] }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 3,
+  "settings": {
+    "permission_mode": "Full",
+    "auto_start_services": false,
+    "onboarding_complete": true
+  },
+  "workspace": {
+    "registry": { "entries": [] },
+    "active_workspace_id": null
+  }
+}

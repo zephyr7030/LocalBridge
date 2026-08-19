@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LocalBridge",
+  "version": "0.1.0",
+  "identifier": "com.localbridge.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "node scripts/prepare-lb018-resources.mjs && npm run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../tests/artifacts/frontend-dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["../assets/icons/localbridge.ico"],
+    "externalBin": [],
+    "resources": {
+      "../runtime/python/": "runtime/python/",
+      "../runtime/coding-tools-mcp/": "runtime/coding-tools-mcp/",
+      "../runtime/tunnel-client/": "runtime/tunnel-client/",
+      "target/toolbox-stage/": "runtime/toolbox/",
+      "target/release-stage/localbridge-privileged-broker.exe": "localbridge-privileged-broker.exe",
+      "../runtime-manifest.toml": "runtime-manifest.toml",
+      "../runtime-policy.toml": "runtime-policy.toml",
+      "../LICENSE": "LICENSE",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
+  }
+}
