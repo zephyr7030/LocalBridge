@@ -2221,6 +2221,10 @@ const SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18 = Object.freeze({
     "backend-owned Dashboard currentActivity and lastActivity projections derived from TaskAggregate without a new persisted activity database",
     "peer two-row Dashboard observation layout with current activity and one latest terminal activity result"
   ]},
+  replacedTests:{"LB-015":[
+    {current:"Dashboard no-task first row is always visible as 空闲 and never 等待命令; relative age is not appended to this first row",baseline:"Dashboard no-task first row is always visible as 等待命令 and never 空闲; relative age is not appended to this first row"},
+    {current:"a second row displays 上次执行： followed by a secret-redacted user-facing tool label or safe summary and places the backend-grounded relative age at the far right",baseline:"a second row displays 上次执行工具： followed by a secret-redacted user-facing tool label or safe summary and places the backend-grounded relative age at the far right"}
+  ]},
   addedTests:{
     "LB-006":[
       "TaskAggregate merges CurrentTaskProjection plus WorkflowCheckpoint plus CommandTaskStateStore into one backend observation truth; workspace_context agent_workflow exec_command command_control task_control git_workflow document_workflow view_image and elevated_exec cannot be actively executing while Dashboard aggregate projects overall idle",
@@ -2247,6 +2251,7 @@ export function hasExactSchema42DashboardObservabilityAmendment20260818(doc){
   for(const [k,v] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v))return false;
   for(const [k,v] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current))return false;
   for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedArtifacts)) for(const item of items) if(!doc?.prs?.[id]?.required_artifacts?.includes(item))return false;
+  for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.replacedTests)) for(const item of items){ const tests=doc?.prs?.[id]?.required_tests??[]; if(!tests.includes(item.current)||tests.includes(item.baseline))return false; }
   for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedTests)) for(const item of items) if(!doc?.prs?.[id]?.required_tests?.includes(item))return false;
   return true;
 }
@@ -2255,6 +2260,7 @@ export function normalizeSchema42DashboardObservabilityAmendment20260818(doc){
   for(const k of Object.keys(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedRules)) delete n.rules[k];
   for(const [k,v] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.replacedRules)) n.rules[k]=structuredClone(v.baseline);
   for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedArtifacts)) if(n.prs?.[id]) n.prs[id].required_artifacts=(n.prs[id].required_artifacts??[]).filter(x=>!items.includes(x));
+  for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.replacedTests)) if(n.prs?.[id]) n.prs[id].required_tests=(n.prs[id].required_tests??[]).map(x=>{const hit=items.find(item=>item.current===x);return hit?hit.baseline:x;});
   for(const [id,items] of Object.entries(SCHEMA42_DASHBOARD_OBSERVABILITY_AMENDMENT_2026_08_18.addedTests)) if(n.prs?.[id]) n.prs[id].required_tests=(n.prs[id].required_tests??[]).filter(x=>!items.includes(x));
   return n;
 }

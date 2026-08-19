@@ -52,7 +52,7 @@
     "field_labels": false,
     "running_text": false,
     "reduced_motion_supported": true,
-    "idle_text": "等待命令",
+    "idle_text": "空闲",
     "idle_visible": true,
     "frontend_projection_only": true
   },

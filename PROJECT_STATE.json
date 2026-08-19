@@ -227,7 +227,7 @@
     "show_running_text": false,
     "active_indicator": "green_pulsing_dot",
     "reduced_motion": "static_green_dot",
-    "idle": "等待命令",
+    "idle": "空闲",
     "active_elapsed": true,
     "last_command_age_when_idle": true,
     "last_command_age_formats": [
@@ -246,7 +246,7 @@
     "minimum_visible_ms": 500,
     "minimum_visibility_delays_tool_response": false,
     "last_tool_row": true,
-    "last_tool_label": "上次执行工具：",
+    "last_tool_label": "上次执行：",
     "last_tool_age_alignment": "right",
     "idle_age_in_first_row": false,
     "last_tool_raw_mcp_identifier": false

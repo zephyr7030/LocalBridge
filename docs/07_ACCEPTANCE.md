@@ -120,13 +120,13 @@
 | A116 | stable release | artifact 可追溯到 exact source/runtime |
 | A117 | runtime adapter | domain 不直接依赖上游私有结构 |
 | A118 | release rollback | migration/install failure 不破坏旧配置 |
-| A119 | 主控界面无活动任务 | 第一行固定显示“等待命令”，不得在该行追加相对时间；无活动历史 |
+| A119 | 主控界面无活动任务 | 第一行固定显示“空闲”，不得在该行追加相对时间；无活动历史 |
 | A120 | LocalBridge 稳定读取类 public action/tool | 类型显示“读取文件”，任务显示安全路径摘要；不得依赖 raw upstream tool id 作为 UI/安全身份 |
 | A121 | LocalBridge 稳定搜索类 public action/tool | 类型显示“搜索代码”，显示安全搜索摘要；不得直接暴露 upstream private tool name |
 | A122 | `exec_command` / `agent_workflow` 等稳定执行类 public action | 类型显示“执行命令/运行测试/构建”等稳定分类，能力判定来自 LocalBridge action/capability contract |
 | A123 | policy deny | 当前任务显示“已阻止”，不得先显示“执行中” |
 | A124 | 管理员调用等待 UAC | 当前任务显示“管理员操作 / 等待授权” |
-| A125 | task terminal | 最终回到第一行“等待命令”，并保留唯一上一工具安全标签/摘要与完成时间元数据供第二行展示，不追加历史消息 |
+| A125 | task terminal | 最终回到第一行“空闲”，并保留唯一上一工具安全标签/摘要与完成时间元数据供第二行展示，不追加历史消息 |
 | A126 | 主控界面 | 无最近活动、消息流、时间线 |
 | A127 | raw tool id | 不直接显示 MCP tool identifier |
 | A128 | secret-bearing args | 任务摘要不泄漏密钥/token/nonce |
@@ -137,7 +137,7 @@
 | A133 | Running | 绿色活动点使用轻量脉冲动效 |
 | A134 | reduced-motion | 活动点静态，不执行脉冲 |
 | A135 | 动效 | 不推动布局、不造成文字位移 |
-| A136 | Idle | 第一行必须显示低存在感“○ 等待命令”，不得显示“空闲”、隐藏整行或在第一行追加年龄；上一工具年龄属于第二行 |
+| A136 | Idle | 第一行必须显示低存在感“○ 空闲”，不得显示“等待命令”、隐藏整行或在第一行追加年龄；上一工具年龄属于第二行 |
 | A137 | 保存 Runtime API Key | settings/JSON/TOML 中不存在明文 |
 | A138 | 保存 Runtime API Key | Windows secure credential backend 可恢复 |
 | A139 | 启动安全隧道 | process command line 不包含 Runtime API Key |
@@ -210,8 +210,8 @@
 | A206 | 离开管理员模式 | 在设置页或 onboarding 切换编辑/完整模式立即关闭 privileged call gate 并停止 Broker；Dashboard 无模式切换入口 |
 | A207 | 前台启动顺序 | onboarding 已完成且配置有效时，先创建/显示并达到可交互 UI；前端只发送一次 typed `UI-ready`，backend 收到后才异步启动原本停止的 selected project/runtime/MCP/OpenAI Tunnel，无额外“启动服务”动作；UI-ready 前不得提前启动服务 |
 | A208 | 前台慢启动 / ready 幂等 | backend 故意延迟时窗口仍可交互，Starting/Ready/Fault 从 typed projection 更新；重复 UI-ready 不产生第二 runtime owner；`--background` 不等待 UI-ready，唤醒已有健康后台 runtime 不仅因 ready gate 重启 |
-| A209 | CurrentTask idle | 左下状态固定显示“等待命令”，不得显示“空闲”或隐藏 |
-| A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus/timing 并通过唤醒式 delivery 反映到 UI；短 create/delete/modify/command 不依赖 polling；活动显示持续时间，terminal 回到第一行“等待命令”，第二行保留唯一上一工具+年龄；前端不伪造 |
+| A209 | CurrentTask idle | 左下状态固定显示“空闲”，不得显示“等待命令”或隐藏 |
+| A210 | CurrentTask 生产投影 | 真实 MCP/Broker 调用端到端改变 backend CurrentTaskStatus/timing 并通过唤醒式 delivery 反映到 UI；短 create/delete/modify/command 不依赖 polling；活动显示持续时间，terminal 回到第一行“空闲”，第二行保留唯一上一工具+年龄；前端不伪造 |
 | A211 | Dashboard 新项目 | “选择其他文件夹”打开原生 Windows 文件夹选择器，手填路径不是主流程 |
 | A212 | 设置结构 | 仅常规/连接/权限三组；常规仅“开机启动/关闭窗口后继续运行”；底部“打开欢迎页/完成” |
 | A213 | 设置连接固定态 | 字段严格为 `Tunnel ID` / `Runtime API Key`；密钥只显示“已保存/未保存”，两项各有最右“更换”；Key 已保存时另有“清除”紧邻位于 Key“更换”左侧；完整密钥永不回显 |
@@ -230,7 +230,7 @@
 | A226 | 临时操作提示 | `无法准备管理员权限`、一次性保存/选择失败等 one-shot 提示默认 3 秒自动清除；持续 runtime/reconnect Fault 不被临时规则隐藏 |
 | A227 | 短任务状态捕获 | 文件新建、删除、修改及普通命令等真实工具调用必须由 backend 唤醒式 delivery 捕获；不得把周期 polling 当作短任务主要传输 |
 | A228 | 执行持续时间 | 活动任务单行显示 backend-grounded elapsed duration；不得由前端伪造任务开始/结束状态 |
-| A229 | 上次工具时间 | 第一行 Idle 只显示 `等待命令`；第二行上一工具相对时间覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天` 并靠右；从未执行工具时无上一工具行 |
+| A229 | 上次工具时间 | 第一行 Idle 只显示 `空闲`；第二行上一工具相对时间覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天` 并靠右；从未执行工具时无上一工具行 |
 | A230 | workspace identity / execution / display path 边界 | `\\?\D:\project` 仅允许用于内部 filesystem identity 校验/去重/reparse/授权比较；UI 以及 MCP/Broker/sidecar/process/command/tool 的路径参数和 `cwd/workdir/current_dir` 必须使用与同一 freshly validated identity 绑定的普通 `D:\project`；execution/display 转换不得授权，identity 不一致 fail-closed |
 | A231 | 设置“更换”按钮对齐 | Tunnel ID 与 Runtime API Key 两个“更换”在 780×620 下保持同一最右动作列、几何差 ≤1 CSS px；Key“清除”位于 Key“更换”左侧且不得推移最右列 |
 | A232 | 同级按钮对齐 | 同一页面/分组 peer actions 复用统一动作列/左基线和同一视觉语法；各含文字按钮自身宽高仍必须由最大单行可见字数与实际渲染行数决定，不允许任意 offset/第二套对齐语言 |
@@ -240,7 +240,7 @@
 | A236 | verbatim workspace 命令回归 | 当内部 `GetFinalPathNameByHandleW` 得到 `\\?\D:\project` 时，coding-tools/`exec_command` 或等价普通命令实际收到 `D:\project` cwd/workdir 并成功执行；MCP/Broker/sidecar/ManagedProcessSpec/process/tool invocation 不得收到 `\\?\` cwd/workdir/current_dir/路径参数 |
 | A237 | 短工具调用唤醒 | 任意真实 MCP/Broker 工具调用开始/终止都通过 backend push/event 或等价唤醒路径使 Dashboard 更新；周期 polling 不得作为短任务的主要传输 |
 | A238 | 工具最低可见期 | 每个真实工具调用即使瞬时完成也至少有 500ms 可见 presentation interval；该停留只约束 UI，不得人为延迟真实工具返回/响应 |
-| A239 | 上次执行工具行 | 第一行 Idle 只显示“等待命令”；第二行固定前缀“上次执行工具：”+脱敏用户标签/安全摘要，禁止 raw MCP id；相对时间位于第二行最右并覆盖 nS前/n分钟前/大于1小时/大于n天；只保留一条上一工具元数据 |
+| A239 | 上次执行工具行 | 第一行 Idle 只显示“空闲”；第二行固定前缀“上次执行：”+脱敏用户标签/安全摘要，禁止 raw MCP id；相对时间位于第二行最右并覆盖 nS前/n分钟前/大于1小时/大于n天；只保留一条上一工具元数据 |
 | A240 | 2/5 已保存连接显示 | 已有 Tunnel ID 时输入框预填当前持久化值；已有 Runtime API Key 时固定显示“已安全保存至windows安全凭据”；安全提示严格为“Runtime API Key 仅保存在 Windows 安全凭据中。” |
 | A241 | 2/5 已保存 Key 掩码 | 聚焦已保存 Runtime API Key 输入框时，只根据 backend 长度元数据显示与已存 key 字符数相同的 `*`；plaintext 永不返回前端，未真正输入新 key 时掩码不得被提交/保存为替代 key |
 | A242 | 权限按钮真实几何 | Schema33 取代旧的固定 2× 高度验收：780×620 下每个含文字权限按钮的宽度由最大单行可见字数决定、高度由实际渲染行数决定，标题/说明 line box 均完整可见；仅有 `min-height/padding` 或固定 multiplier 不构成 PASS，必须重新人工视觉验收 |

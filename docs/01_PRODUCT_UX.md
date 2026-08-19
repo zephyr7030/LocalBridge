@@ -107,18 +107,18 @@ icon package
 无活动任务时第一行稳定显示：
 
 ```text
-○  等待命令
+○  空闲
 ```
 
 第一行不再追加“xx前”。若至少执行过一条真实工具调用，下面显示第二行：
 
 ```text
-上次执行工具：修改文件                                      59S前
+上次执行：修改文件                                      59S前
 ```
 
-`上次执行工具：` 为固定前缀；中部只能显示脱敏后的用户可理解工具标签或安全摘要，禁止 raw MCP tool id；相对时间固定靠该行最右侧，格式覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天`。只保留一个上一工具元数据，不增加 feed、timeline 或 recent activity。
+`上次执行：` 为固定前缀；中部只能显示脱敏后的用户可理解工具标签或安全摘要，禁止 raw MCP tool id；相对时间固定靠该行最右侧，格式覆盖 `59S前`、`59分钟前`、`大于1小时`、`大于n天`。只保留一个上一工具元数据，不增加 feed、timeline 或 recent activity。
 
-该行不得隐藏，也不得由前端本地状态伪造；真实 MCP/Broker 调用的 Running/Waiting/Blocked/Failed/Cancelled 必须由 backend `CurrentTaskStatus` typed projection 驱动，terminal 后回到 `等待命令` 并保留上一条完成时间元数据。
+该行不得隐藏，也不得由前端本地状态伪造；真实 MCP/Broker 调用的 Running/Waiting/Blocked/Failed/Cancelled 必须由 backend `CurrentTaskStatus` typed projection 驱动，terminal 后回到 `空闲` 并保留上一条完成时间元数据。
 
 ## 自动重连 UI
 
