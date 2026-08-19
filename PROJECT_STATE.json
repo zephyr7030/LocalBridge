@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -6056,6 +6056,18 @@
       "LB015 contract ARCH-010 ARCH-013 frontend test/build UI-language backend tests and all-targets Clippy PASS"
     ],
     "next_pr": "LB-016",
+    "g4_unlocked": false
+  },
+  "schema42_lb016_reacceptance_after_ui_repair_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "product_patch_required": false,
+    "evidence": [
+      "LB016 five-screen contract PASS",
+      "Onboarding Rust behavior PASS",
+      "Frontend tests/build PASS after LB015 activity UI repair"
+    ],
+    "next_pr": "LB-017",
     "g4_unlocked": false
   }
 }
