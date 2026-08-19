@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 const ui=readFileSync("src/features/diagnostics/Diagnostics.tsx","utf8");
 const api=readFileSync("src/features/diagnostics/api.ts","utf8");
 const commands=readFileSync("src-tauri/src/commands/diagnostics.rs","utf8");
+const dashboard=readFileSync("src-tauri/src/commands/ui.rs","utf8");
+const background=readFileSync("src-tauri/src/app/background.rs","utf8");
+const server=readFileSync("src-tauri/src/mcp/server.rs","utf8");
 const model=readFileSync("src-tauri/src/diagnostics/mod.rs","utf8");
 const lib=readFileSync("src-tauri/src/lib.rs","utf8");
 const auth=JSON.parse(readFileSync("scripts/authorization-records/LB-017.json","utf8"));
@@ -14,7 +17,12 @@ for(const required of ["RECENT_EVENT_LIMIT: usize = 8","VecDeque","DiagnosticEve
 for(const required of ["pub async fn open_logs","tauri::async_runtime::spawn_blocking","app_data_dir()",'.join("logs")','Command::new("explorer.exe")']) if(!commands.includes(required)) throw new Error(`LB-017 fixed log directory action missing: ${required}`);
 for(const command of ["get_diagnostics","open_logs","export_diagnostics"]) { const start=commands.indexOf("pub async fn "+command); if(start<0) throw new Error(`LB-017 blocking command remains: ${command}`); const next=commands.indexOf("pub async fn ",start+12); const body=commands.slice(start,next<0?commands.length:next); if(!body.includes("spawn_blocking")) throw new Error(`LB-017 command lacks worker boundary: ${command}`); }
 for(const required of ['object.remove("activeWorkspacePath")','object.remove("runtimeKeyPresent")','Some("runtime_key")']) if(!model.includes(required)) throw new Error(`LB-017 export redaction missing: ${required}`);
-for(const required of ["REQUEST_DIAGNOSTIC_LIMIT", "RequestDiagnosticEvent", "request_id", "connection_id", "duration_ms", "record_runtime_request_diagnostics", 'format!("req-recovery-{}", outage.generation)', 'format!("conn-recovery-{}-{attempt}", outage.generation)']) if(!model.includes(required)) throw new Error(`LB-017 schema42 request diagnostics missing: ${required}`);
+for(const required of ["REQUEST_DIAGNOSTIC_LIMIT", "RequestDiagnosticEvent", "request_id", "connection_id", "duration_ms", "record_runtime_request_diagnostics", "recovery_active", "active_requests", '#[serde(rename = "timestamp")]']) if(!model.includes(required)) throw new Error(`LB-017 schema42 request diagnostics missing: ${required}`);
+for(const required of ["request_id: outage.request_id.clone()", "record_desktop_runtime_events(&snapshot, &monitor_privilege)", "record_runtime_user_events("]) if(!background.includes(required)) throw new Error(`LB-017 event-driven recovery diagnostics missing: ${required}`);
+for(const required of ["record_mcp_request_start", "record_mcp_request_result", "record_mcp_request_error", "request_diagnostic_key"]) if(!server.includes(required)) throw new Error(`LB-017 event-driven MCP request diagnostics missing: ${required}`);
+if(model.includes('format!("req-recovery-{}", outage.generation)')) throw new Error("LB-017 still synthesizes a second recovery request_id");
+if(dashboard.includes("record_runtime_user_events") || dashboard.includes("record_runtime_request_diagnostics")) throw new Error("LB-017 Dashboard read still mutates request diagnostics");
+const buildStart=model.indexOf("pub fn build_snapshot("); const buildEnd=model.indexOf("fn recent_event_log",buildStart); if(model.slice(buildStart,buildEnd).includes("record_runtime_user_events") || model.slice(buildStart,buildEnd).includes("record_runtime_request_diagnostics")) throw new Error("LB-017 Diagnostics snapshot read still mutates request diagnostics");
 for(const forbidden of ["requestDiagnostics", "requestId", "connectionId", "errorCode", "httpStatus", "durationMs"]) if(api.includes(forbidden) || ui.includes(forbidden)) throw new Error(`LB-017 normal WebView API leaked request engineering field: ${forbidden}`);
 for(const forbidden of ["runtimeKeyPresent", "ReconnectDiagnostics", "ReconnectAttempt", "generation: number | null", "schemaVersion: number"]) if(api.includes(forbidden)) throw new Error(`LB-017 normal WebView API still exposes engineering/internal field: ${forbidden}`);
 for(const required of ["pub struct DiagnosticsViewProjection", "privilege: BrokerDiagnosticState", "project_diagnostics_view", '.filter(|check| check.code != "runtime_key")', "SettingsStore::new", "settings.workspace.active_entry()", "WorkspaceValidator", "entry.validated_identity.as_str() != validated.identity().as_str()", "validated.execution_path().to_string_lossy().into_owned()"])

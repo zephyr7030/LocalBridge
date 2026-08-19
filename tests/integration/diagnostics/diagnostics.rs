@@ -96,6 +96,7 @@ fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverab
             RuntimeState::Faulted(RuntimeFault::TunnelExited),
             Some(DiagnosticsOutageInput {
                 generation: 11,
+                request_id: "req-test-11".to_string(),
                 component: RuntimeComponent::Tunnel,
                 fault: RuntimeFault::TunnelExited,
                 user_attention_required: true,
@@ -128,6 +129,7 @@ fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverab
             RuntimeState::Faulted(RuntimeFault::TunnelAuthFailed),
             Some(DiagnosticsOutageInput {
                 generation: 12,
+                request_id: "req-test-12".to_string(),
                 component: RuntimeComponent::Tunnel,
                 fault: RuntimeFault::TunnelAuthFailed,
                 user_attention_required: true,
@@ -211,11 +213,20 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     complete_runtime(root.path());
     let outage = DiagnosticsOutageInput {
         generation: 42,
+        request_id: "req-recovery-authoritative".to_string(),
         component: RuntimeComponent::Tunnel,
         fault: RuntimeFault::TunnelExited,
         user_attention_required: false,
     };
 
+    record_runtime_user_events(
+        &RuntimeState::Recovering {
+            component: RuntimeComponent::Tunnel,
+            attempt: 1,
+        },
+        Some(&outage),
+        &PrivilegeState::Disabled,
+    );
     let first = build_snapshot(
         root.path(),
         &runtime(
@@ -231,9 +242,21 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     assert_eq!(first.request_diagnostics.len(), 1);
     assert_eq!(first.request_diagnostics[0].kind, RequestDiagnosticKind::Start);
     assert_eq!(first.request_diagnostics[0].attempt, 1);
+    assert_eq!(first.request_diagnostics[0].request_id, "req-recovery-authoritative");
+    let serialized_start = serde_json::to_value(&first.request_diagnostics[0]).unwrap();
+    assert!(serialized_start.get("timestamp").is_some());
+    assert!(serialized_start.get("timestampMs").is_none());
     let request_id = first.request_diagnostics[0].request_id.clone();
     let first_connection = first.request_diagnostics[0].connection_id.clone();
 
+    record_runtime_user_events(
+        &RuntimeState::Recovering {
+            component: RuntimeComponent::Tunnel,
+            attempt: 2,
+        },
+        Some(&outage),
+        &PrivilegeState::Disabled,
+    );
     let retry = build_snapshot(
         root.path(),
         &runtime(
@@ -266,9 +289,10 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     assert_eq!(first_end.cause.as_deref(), Some("tunnel_exited"));
     assert!(first_end.duration_ms.is_some());
 
+    record_runtime_user_events(&RuntimeState::Ready, Some(&outage), &PrivilegeState::Disabled);
     let recovered = build_snapshot(
         root.path(),
-        &runtime(RuntimeState::Ready, Some(outage)),
+        &runtime(RuntimeState::Ready, Some(outage.clone())),
         &PrivilegeState::Disabled,
         true,
     );
@@ -284,6 +308,15 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     assert!(retry_end.phase.is_none());
     assert!(retry_end.cause.is_none());
     assert!(retry_end.duration_ms.is_some());
+
+    let event_count = recovered.request_diagnostics.len();
+    let reread = build_snapshot(
+        root.path(),
+        &runtime(RuntimeState::Ready, Some(outage)),
+        &PrivilegeState::Disabled,
+        true,
+    );
+    assert_eq!(reread.request_diagnostics.len(), event_count, "snapshot read mutated request diagnostics");
 
     let path = export_snapshot(root.path(), &recovered).unwrap();
     let export = fs::read_to_string(path).unwrap();

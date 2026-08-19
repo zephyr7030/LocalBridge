@@ -45,6 +45,7 @@ fn get_diagnostics_snapshot_blocking(
         active_workspace: runtime.configured_workspace,
         outage: runtime.outage.map(|outage| DiagnosticsOutageInput {
             generation: outage.generation,
+            request_id: outage.request_id,
             component: outage.component,
             fault: outage.fault,
             user_attention_required: outage.user_attention_required,

@@ -1,5 +1,6 @@
 use serde::Serialize;
-use std::collections::VecDeque;
+use serde_json::Value;
+use std::collections::{HashMap, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -19,10 +20,12 @@ const RECENT_EVENT_LIMIT: usize = 8;
 static RECENT_USER_EVENTS: OnceLock<Mutex<VecDeque<DiagnosticEvent>>> = OnceLock::new();
 const REQUEST_DIAGNOSTIC_LIMIT: usize = 16;
 static REQUEST_DIAGNOSTICS: OnceLock<Mutex<RequestDiagnosticState>> = OnceLock::new();
+static MCP_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticsOutageInput {
     pub generation: u64,
+    pub request_id: String,
     pub component: RuntimeComponent,
     pub fault: RuntimeFault,
     pub user_attention_required: bool,
@@ -125,6 +128,7 @@ pub enum RequestDiagnosticKind {
 #[serde(rename_all = "camelCase")]
 pub struct RequestDiagnosticEvent {
     pub kind: RequestDiagnosticKind,
+    #[serde(rename = "timestamp")]
     pub timestamp_ms: u64,
     pub request_id: String,
     pub connection_id: String,
@@ -140,18 +144,24 @@ pub struct RequestDiagnosticEvent {
 
 #[derive(Debug, Clone)]
 struct ActiveRequestDiagnostic {
-    generation: u64,
     attempt: u32,
     request_id: String,
     connection_id: String,
     tool: String,
     started_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveRecoveryDiagnostic {
+    generation: u64,
+    request: ActiveRequestDiagnostic,
     fault: RuntimeFault,
 }
 
 #[derive(Debug, Default)]
 struct RequestDiagnosticState {
-    active: Option<ActiveRequestDiagnostic>,
+    recovery_active: Option<ActiveRecoveryDiagnostic>,
+    active_requests: HashMap<String, ActiveRequestDiagnostic>,
     events: VecDeque<RequestDiagnosticEvent>,
 }
 
@@ -236,7 +246,6 @@ pub fn build_snapshot(
     ];
 
     let privilege_check = broker_diagnostics(privilege);
-    record_runtime_user_events(&runtime.state, runtime.outage.as_ref(), privilege);
     let recent_events = recent_user_events();
     let request_diagnostics = recent_request_diagnostics();
 
@@ -367,21 +376,21 @@ fn record_runtime_request_diagnostics(
     };
 
     if let Some((outage, attempt)) = recovering {
-        if log.active.as_ref().is_some_and(|active| {
-            active.generation == outage.generation && active.attempt == attempt
+        if log.recovery_active.as_ref().is_some_and(|active| {
+            active.generation == outage.generation && active.request.attempt == attempt
         }) {
             return;
         }
-        if let Some(active) = log.active.take() {
+        if let Some(active) = log.recovery_active.take() {
             let diagnostic = if active.generation == outage.generation {
                 runtime_fault_diagnostic(&outage.fault)
             } else {
                 runtime_fault_diagnostic(&active.fault)
             };
-            push_request_end(&mut log, active, "failed", Some(diagnostic));
+            push_request_end(&mut log, active.request, "failed", Some(diagnostic));
         }
-        let request_id = format!("req-recovery-{}", outage.generation);
-        let connection_id = format!("conn-recovery-{}-{attempt}", outage.generation);
+        let request_id = outage.request_id.clone();
+        let connection_id = format!("conn-{}-{attempt}", outage.request_id);
         let tool = request_tool(outage.component).to_string();
         push_request_event(
             &mut log,
@@ -400,32 +409,34 @@ fn record_runtime_request_diagnostics(
                 duration_ms: None,
             },
         );
-        log.active = Some(ActiveRequestDiagnostic {
+        log.recovery_active = Some(ActiveRecoveryDiagnostic {
             generation: outage.generation,
-            attempt,
-            request_id,
-            connection_id,
-            tool,
-            started_at: Instant::now(),
+            request: ActiveRequestDiagnostic {
+                attempt,
+                request_id,
+                connection_id,
+                tool,
+                started_at: Instant::now(),
+            },
             fault: outage.fault.clone(),
         });
         return;
     }
 
-    let Some(active) = log.active.take() else {
+    let Some(active) = log.recovery_active.take() else {
         return;
     };
     match state {
-        RuntimeState::Ready => push_request_end(&mut log, active, "success", None),
+        RuntimeState::Ready => push_request_end(&mut log, active.request, "success", None),
         RuntimeState::Faulted(fault) => push_request_end(
             &mut log,
-            active,
+            active.request,
             "failed",
             Some(runtime_fault_diagnostic(fault)),
         ),
         RuntimeState::Stopped => push_request_end(
             &mut log,
-            active,
+            active.request,
             "cancelled",
             Some(ErrorDiagnostic::new(
                 DiagnosticErrorCode::Cancelled,
@@ -433,8 +444,118 @@ fn record_runtime_request_diagnostics(
                 "runtime_stopped",
             )),
         ),
-        _ => log.active = Some(active),
+        _ => log.recovery_active = Some(active),
     }
+}
+
+fn mcp_active_key(request_key: &str, connection_id: &str) -> String {
+    format!("{connection_id}\u{0}{request_key}")
+}
+
+pub fn record_mcp_request_start(request_key: &str, connection_id: &str, tool: &str) {
+    let sequence = MCP_REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let request_id = format!("req-mcp-{}-{sequence}", std::process::id());
+    let connection_id = connection_id.to_string();
+    let tool = tool.to_string();
+    let active = ActiveRequestDiagnostic {
+        attempt: 1,
+        request_id: request_id.clone(),
+        connection_id: connection_id.clone(),
+        tool: tool.clone(),
+        started_at: Instant::now(),
+    };
+    let mut log = request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    push_request_event(
+        &mut log,
+        RequestDiagnosticEvent {
+            kind: RequestDiagnosticKind::Start,
+            timestamp_ms: timestamp_ms(),
+            request_id,
+            connection_id: connection_id.clone(),
+            attempt: 1,
+            tool,
+            outcome: None,
+            error_code: None,
+            phase: None,
+            cause: None,
+            http_status: None,
+            duration_ms: None,
+        },
+    );
+    log.active_requests
+        .insert(mcp_active_key(request_key, &connection_id), active);
+}
+
+pub fn record_mcp_request_result(request_key: &str, connection_id: &str, result: &Value) {
+    let mut log = request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(active) = log
+        .active_requests
+        .remove(&mcp_active_key(request_key, connection_id))
+    else {
+        return;
+    };
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let diagnostic = result
+        .pointer("/structuredContent/error")
+        .unwrap_or(&Value::Null);
+    let top = result
+        .pointer("/structuredContent")
+        .unwrap_or(&Value::Null);
+    let field = |name: &str| diagnostic.get(name).or_else(|| top.get(name));
+    let error_code = field("error_code")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let phase = field("phase")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let cause = field("cause")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let http_status = field("http_status")
+        .and_then(Value::as_u64)
+        .and_then(|value| u16::try_from(value).ok());
+    let outcome = if !is_error {
+        "success"
+    } else {
+        match error_code.as_deref() {
+            Some("Timeout") => "timed_out",
+            Some("Cancelled") => "cancelled",
+            _ => "failed",
+        }
+    };
+    push_request_end_fields(
+        &mut log,
+        active,
+        outcome,
+        error_code,
+        phase,
+        cause,
+        http_status,
+    );
+}
+
+pub fn record_mcp_request_error(
+    request_key: &str,
+    connection_id: &str,
+    diagnostic: ErrorDiagnostic,
+) {
+    let mut log = request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(active) = log
+        .active_requests
+        .remove(&mcp_active_key(request_key, connection_id))
+    else {
+        return;
+    };
+    push_request_end(&mut log, active, "failed", Some(diagnostic));
 }
 
 fn push_request_end(
@@ -442,6 +563,30 @@ fn push_request_end(
     active: ActiveRequestDiagnostic,
     outcome: &str,
     diagnostic: Option<ErrorDiagnostic>,
+) {
+    push_request_end_fields(
+        log,
+        active,
+        outcome,
+        diagnostic
+            .as_ref()
+            .map(|value| value.error_code.as_str().to_string()),
+        diagnostic
+            .as_ref()
+            .map(|value| value.phase.as_str().to_string()),
+        diagnostic.as_ref().map(|value| value.cause.clone()),
+        diagnostic.as_ref().and_then(|value| value.http_status),
+    );
+}
+
+fn push_request_end_fields(
+    log: &mut RequestDiagnosticState,
+    active: ActiveRequestDiagnostic,
+    outcome: &str,
+    error_code: Option<String>,
+    phase: Option<String>,
+    cause: Option<String>,
+    http_status: Option<u16>,
 ) {
     let duration_ms = active
         .started_at
@@ -458,14 +603,10 @@ fn push_request_end(
             attempt: active.attempt,
             tool: active.tool,
             outcome: Some(outcome.to_string()),
-            error_code: diagnostic
-                .as_ref()
-                .map(|value| value.error_code.as_str().to_string()),
-            phase: diagnostic
-                .as_ref()
-                .map(|value| value.phase.as_str().to_string()),
-            cause: diagnostic.as_ref().map(|value| value.cause.clone()),
-            http_status: diagnostic.as_ref().and_then(|value| value.http_status),
+            error_code,
+            phase,
+            cause,
+            http_status,
             duration_ms: Some(duration_ms),
         },
     );
@@ -484,6 +625,18 @@ fn recent_request_diagnostics() -> Vec<RequestDiagnosticEvent> {
         .iter()
         .cloned()
         .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn request_diagnostics_for_test() -> Vec<RequestDiagnosticEvent> {
+    recent_request_diagnostics()
+}
+
+#[cfg(test)]
+pub(crate) fn reset_request_diagnostics_for_test() {
+    *request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = RequestDiagnosticState::default();
 }
 
 fn request_tool(component: RuntimeComponent) -> &'static str {

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 #[cfg(windows)]
 use crate::credentials::WindowsCredentialStore;
+use crate::diagnostics::{DiagnosticsOutageInput, record_runtime_user_events};
 #[cfg(windows)]
 use crate::mcp::{CurrentTaskWake, InternalBearer};
 use crate::privilege::PrivilegeController;
@@ -146,6 +147,7 @@ pub trait ExitRuntime {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopOutageSnapshot {
     pub generation: u64,
+    pub request_id: String,
     pub component: RuntimeComponent,
     pub fault: RuntimeFault,
     pub user_attention_required: bool,
@@ -270,6 +272,7 @@ where
             configured_workspace: self.configured_workspace().map(Path::to_path_buf),
             outage: self.active_outage().map(|outage| DesktopOutageSnapshot {
                 generation: outage.id.get(),
+                request_id: outage.request_id.clone(),
                 component: outage.component,
                 fault: outage.fault.clone(),
                 user_attention_required: outage.user_attention_emitted(),
@@ -343,6 +346,7 @@ where
             configured_workspace: runtime.configured_workspace().map(Path::to_path_buf),
             outage: runtime.active_outage().map(|outage| DesktopOutageSnapshot {
                 generation: outage.id.get(),
+                request_id: outage.request_id.clone(),
                 component: outage.component,
                 fault: outage.fault.clone(),
                 user_attention_required: outage.user_attention_emitted(),
@@ -546,6 +550,7 @@ impl DesktopLifecycle {
         let monitor_runtime = Arc::clone(&runtime);
         let monitor_snapshot = Arc::clone(&runtime_snapshot_cache);
         let monitor_wake = projection_wake.clone();
+        let monitor_privilege = privilege.clone();
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
         let watchdog_thread = thread::Builder::new()
             .name("localbridge-runtime-watchdog".into())
@@ -569,6 +574,7 @@ impl DesktopLifecycle {
                     let _ = runtime.monitor_recovery();
                     let snapshot = owner.snapshot();
                     drop(owner);
+                    record_desktop_runtime_events(&snapshot, &monitor_privilege);
                     let mut cached = monitor_snapshot
                         .write()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -930,6 +936,7 @@ impl DesktopLifecycle {
     }
 
     fn write_snapshot_cache(&self, snapshot: DesktopRuntimeSnapshot) {
+        record_desktop_runtime_events(&snapshot, &self.privilege);
         let mut cached = self
             .runtime_snapshot_cache
             .write()
@@ -941,6 +948,21 @@ impl DesktopLifecycle {
             self.projection_wake.notify();
         }
     }
+}
+
+fn record_desktop_runtime_events(snapshot: &DesktopRuntimeSnapshot, privilege: &PrivilegeController) {
+    let outage = snapshot.outage.as_ref().map(|outage| DiagnosticsOutageInput {
+        generation: outage.generation,
+        request_id: outage.request_id.clone(),
+        component: outage.component,
+        fault: outage.fault.clone(),
+        user_attention_required: outage.user_attention_required,
+    });
+    record_runtime_user_events(
+        &snapshot.state,
+        outage.as_ref(),
+        &privilege.refresh_broker_state(),
+    );
 }
 
 #[derive(Clone)]

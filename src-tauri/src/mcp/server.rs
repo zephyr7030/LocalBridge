@@ -13,6 +13,9 @@ use serde_json::{Map, Value, json};
 use crate::diagnostics::error::{
     ErrorDiagnostic, mcp_invalid, mcp_unavailable, mcp_unknown, transport_unavailable,
 };
+use crate::diagnostics::{
+    record_mcp_request_error, record_mcp_request_result, record_mcp_request_start,
+};
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
@@ -1294,6 +1297,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if name == "elevated_exec" {
+                record_mcp_request_start(&request_diagnostic_key(&id), session, name);
                 return handle_elevated_exec(
                     &mut stream,
                     id,
@@ -1311,6 +1315,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 );
             }
             if name == "task_control" {
+                record_mcp_request_start(&request_diagnostic_key(&id), session, name);
                 return handle_task_control(
                     &mut stream,
                     id,
@@ -1345,6 +1350,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     Some(session),
                 );
             }
+            record_mcp_request_start(&request_diagnostic_key(&id), session, name);
             let result = guard.call_tool(mode, name, arguments, Some(&id), |status| {
                 current_task.project(status);
             });
@@ -2430,6 +2436,9 @@ fn write_rpc_result(
     result: Value,
     session: Option<&str>,
 ) -> Result<(), ()> {
+    if let Some(session) = session {
+        record_mcp_request_result(&request_diagnostic_key(&id), session, &result);
+    }
     write_json(
         stream,
         200,
@@ -2452,12 +2461,19 @@ fn write_rpc_error(
         -32602 => mcp_invalid("invalid_params"),
         _ => mcp_unknown("internal_error"),
     };
+    if let Some(session) = session {
+        record_mcp_request_error(&request_diagnostic_key(&id), session, diagnostic.clone());
+    }
     write_json(
         stream,
         200,
         &json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message,"data":diagnostic.to_value()}}),
         session,
     )
+}
+
+fn request_diagnostic_key(id: &Value) -> String {
+    serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
 }
 
 fn write_http_diagnostic_error(stream: &mut TcpStream, error: HttpReadError) -> Result<(), ()> {
@@ -3255,7 +3271,29 @@ mod tests {
             202
         );
 
+        crate::diagnostics::reset_request_diagnostics_for_test();
         let context = public_tool_call(pep.port(), &session, 601, "workspace_context", json!({}));
+        let request_events = crate::diagnostics::request_diagnostics_for_test();
+        let request_start = request_events
+            .iter()
+            .find(|event| {
+                event.kind == crate::diagnostics::RequestDiagnosticKind::Start
+                    && event.tool == "workspace_context"
+            })
+            .expect("real tools/call request start diagnostic");
+        let request_end = request_events
+            .iter()
+            .find(|event| {
+                event.kind == crate::diagnostics::RequestDiagnosticKind::End
+                    && event.tool == "workspace_context"
+            })
+            .expect("real tools/call request end diagnostic");
+        assert_eq!(request_start.request_id, request_end.request_id);
+        assert_eq!(request_start.connection_id, session);
+        assert_eq!(request_end.connection_id, session);
+        assert_eq!(request_start.attempt, 1);
+        assert_eq!(request_end.attempt, 1);
+        assert_eq!(request_end.outcome.as_deref(), Some("success"));
         let projected_workspace = context.body["result"]["structuredContent"]["data"]["workspace"]
             .as_str()
             .expect("workspace projection");
