@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": "LB-013",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -274,7 +274,7 @@
     "edit_full_authorized_roots_at_once": 1,
     "elevated_os_access_uses_active_workspace_as_authority": false
   },
-  "current_group": "G2",
+  "current_group": "G3",
   "g3_human_review": {
     "status": "FAIL",
     "generation": 2,
@@ -5931,6 +5931,26 @@
     "next_required_g2_generation": 37,
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_37_2026_08_19": {
+    "status": "PASS",
+    "decision": "PASS",
+    "generation": 37,
+    "kind": "independent_adversarial",
+    "reviewed_baseline_commit": "60afc5d20683f7608e6342025e389c0552d9c35b",
+    "finding": "No blocking G2 defect found after fresh adversarial review of schema42 Unified Error Diagnostics, Windows execution policy, Toolbox, recovery correlation, Broker and Elevated boundaries.",
+    "evidence": [
+      "All non-success public MCP HTTP paths use Unified Error Diagnostics; remaining write_empty paths are successful 202/204 only and transport-vs-MCP phase separation is preserved.",
+      "elevated_exec failure outputSchema now matches the real common denied/ElevationRequired structuredContent including canonical code plus error_code phase cause and optional http_status.",
+      "Tunnel HTTP400, policy denial mapping, recovery request correlation, Broker trust/authorization, bounded elevated output continuation and Toolbox pinned/quoted-literal semantics were independently rechecked with no concrete bypass found.",
+      "Fresh Group Release full serial cargo test PASS, all-targets Clippy -D warnings PASS, frontend tests/build PASS, runtime-manifest PASS, UI-language PASS, schema42 execution-platform PASS, G4 human-gate regression PASS, architecture verifier PASS and git diff check PASS."
+    ],
+    "g2_generation_37_consumed": true,
+    "g3_unlocked": true,
+    "current_group": "G3",
+    "current_pr": "LB-013",
+    "next_required_g3_generation": 22,
     "g4_unlocked": false
   }
 }
