@@ -6090,5 +6090,24 @@
     ],
     "review_executed": false,
     "g4_unlocked": false
+  },
+  "schema42_ui_and_event_diagnostics_repair_complete_2026_08_19": {
+    "status": "REVIEW_REQUIRED",
+    "decision": "REPAIR_COMPLETE_NO_REVIEW_EXECUTED",
+    "ui_product_commit": "6cf94e3",
+    "diagnostics_product_commit": "70502a3e2ad7ef6801a6f8e11b938510516fb5ee",
+    "contract_correction_commit": "ee31c6d",
+    "verifier_authorization_commit": "4d612dd",
+    "verifier_sync_commit": "0bc5d2b",
+    "evidence": [
+      "Dashboard now renders backend TaskAggregate currentActivity/lastActivity rather than synthesizing from legacy workflow/command/history fields",
+      "Unified request diagnostics are event-driven from real MCP tools/call and backend recovery lifecycle events",
+      "Recovery diagnostics reuse the exact existing OutageGeneration.request_id; Dashboard and Diagnostics reads are side-effect free",
+      "request start serializes exact timestamp and connection_id semantics are frozen",
+      "full serial Rust, all-targets Clippy, frontend tests/build, runtime manifest, UI language, architecture verifier, G4 fail-closed regression and diff checks PASS"
+    ],
+    "next_required_g3_generation": 22,
+    "review_executed": false,
+    "g4_unlocked": false
   }
 }
