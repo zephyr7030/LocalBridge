@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-018",
+  "current_pr": "LB-019",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -6270,5 +6270,25 @@
     ],
     "public_repository_created": false,
     "next_pr": "LB-018"
+  },
+  "lb018_runtime_packaging_2026_08_19": {
+    "status": "PASS",
+    "product_commit": "bb387437d630f41849843327f4874e784d757f68",
+    "evidence_commit": "55056ae1008a09afcf1a093f09a91c86e14e76fa",
+    "installer": {
+      "file": "LocalBridge_0.1.0_x64-setup.exe",
+      "bytes": 20821027,
+      "sha256": "f188627fdf272a10715518a5eca7cac007d733c7e9aaaeb829fbf27aca6dec56"
+    },
+    "evidence": [
+      "real Tauri NSIS release build PASS with bundled Python, coding runtime, standalone tunnel-client, pinned Toolbox, Broker, runtime manifest/policy and legal notices rooted at the install directory",
+      "final executable Tunnel runtime is tunnel-client.exe plus LICENSE; cloudflared.exe and cloudflared-manifest.json are absent from runtime, manifest and packaging while historical compatibility evidence remains non-executable",
+      "main GUI and privileged Broker are Windows-subsystem binaries; release evidence verifies GUI/no-console PE subsystem and system WebView2 rather than bundled WebView2",
+      "release package inventory records bytes and SHA256 for all LocalBridge-owned install-root payloads plus installer; SBOM, size report and provenance verify against the product commit",
+      "frontend tests/build, runtime-manifest verifier, packaging contract, release evidence verifier, architecture verifier, G4 fail-closed regression, all-target Clippy, touched Rust rustfmt and git diff checks PASS",
+      "complete serial Rust regression PASS after standalone Tunnel migration; one earlier schema27 loopback ConnectionReset 10054 was followed by exact test PASS and a fresh complete serial suite PASS"
+    ],
+    "g4_complete": false,
+    "next_pr": "LB-019"
   }
 }
