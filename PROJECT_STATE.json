@@ -6187,5 +6187,32 @@
     ],
     "review_executed": false,
     "g4_unlocked": false
+  },
+  "schema42_g3_generation22_repair_closure_2026_08_19": {
+    "status": "REVIEW_REQUIRED",
+    "decision": "REPAIR_COMPLETE_NO_REVIEW_EXECUTED",
+    "failed_review_generation": 22,
+    "next_required_g3_generation": 23,
+    "product_commit": "2cbd9b8",
+    "contract_commits": [
+      "cc78d83",
+      "4b6fb9f",
+      "7e50119"
+    ],
+    "governance_reaccept_commits": {
+      "lb015": "8b0430a",
+      "lb016": "dd406a6"
+    },
+    "evidence": [
+      "LB-015 current contract and governing documents now use one schema42 authority: 空闲 and exact prefix 上次执行：; verifier rejects stale contradictory clauses",
+      "automatic recovery request diagnostics now emit Start/End at the real recover_minimal_cancellable attempt boundary and reuse the authoritative OutageGeneration request_id even when post-attempt snapshot is already Ready or Faulted",
+      "task_control/elevated special-handler diagnostics close on early abort and active MCP request tracking is bounded at 32 with terminal lost eviction",
+      "recent user diagnostics deduplicate per Runtime/Broker source transition so 500ms watchdog observations cannot flood the 8-event ring",
+      "打开日志 materializes a redacted diagnostics artifact in the directory it opens",
+      "LB-017 static contract now rejects sampled-recovery, unbounded tracker, orphan-prone task_control and empty-log-directory implementations",
+      "complete serial Rust suite, all-target Clippy, frontend test/build, runtime manifest, UI language, LB-017 contract, architecture verifier, G4 fail-closed regression and git diff check PASS"
+    ],
+    "review_executed": false,
+    "g4_unlocked": false
   }
 }

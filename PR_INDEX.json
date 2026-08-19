@@ -246,7 +246,7 @@
         "LB-015"
       ],
       "gate": "G3",
-      "status": "READY"
+      "status": "PASS"
     },
     {
       "id": "LB-018",
@@ -414,8 +414,8 @@
         "LB-016",
         "LB-017"
       ],
-      "status": "REWORK_REQUIRED",
-      "review_status": "FAIL",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 22,
       "human_review_status": "BLOCKED",
       "human_review_generation": 3,
@@ -500,8 +500,7 @@
             "cause": "schema41_waiting_derived_settlement_amendment_2026_08_18"
           }
         ]
-      },
-      "reopen_from_pr": "LB-015"
+      }
     },
     {
       "id": "G4",
