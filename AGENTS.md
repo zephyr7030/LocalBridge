@@ -1,10 +1,38 @@
 # LocalBridge Agent Rules
 
-1. **事实源**：先读 `START_HERE.md`；实时状态只认 `PR_INDEX.json + PROJECT_STATE.json`；实现只认当前磁盘代码、当前合同和真实测试。发生冲突立即停止并报告。
-2. **执行边界**：单 Agent 串行，只做 `current_pr`；只写该 PR `writable_paths`/明确例外；只 stage 自己的文件，不清理未知 untracked；产品与治理分 commit；任何命令/会话返回 `status=running` 时，必须对同一 session 持续 `command_control poll` 到终态后，才可开始无关工作、将 task 标终态或报告结果；连续最多轮询 10 分钟，若期间无任何状态/输出进展则主动终止该 session 并把终止原因写入 task；PR 验收后推进状态并立即停止，不自动做下一 PR。
-3. **Ponytail（内置常驻，默认 full）**：所有 coding / bugfix / refactor / review / design / dependency-selection 任务始终启用，无需再次读取 skill。先理解真实调用链和根因，再按 `不需要就不做 → 复用现有 → stdlib → 原生平台能力 → 已装依赖 → 能一行就一行 → 最小完整实现` 停在第一个可行层；优先删除、少文件、少依赖、无投机抽象/脚手架，Bug 修共享根因而非单一路径症状。不得简化显式需求、安全/信任边界、防数据丢失、可访问性、必要测试和长期可维护性。仅用户明确说 `stop ponytail` / `normal mode` 才停用，可切换 `lite/full/ultra`。完整参考：`skills/ponytail/SKILL.md`。
-4. **安全/架构硬边界**：Public API 与 policy fail-closed；Edit 只允许 active-workspace 内 LocalBridge 结构化文件/Git/编辑等操作并禁止普通 Shell/进程；Full 的 LocalBridge 结构化路径、workdir、Git/document/image/file/edit/directory 输入仍不得越过 active root，但允许 cmd/PowerShell/开发进程以当前 Windows 普通用户 Token 运行，且不承诺这些子进程具备 OS 级 workspace 文件隔离；Elevated 的 ordinary route 仍是普通用户 Token，管理员 Token 只允许通过既定 Broker/UAC 授权真相进入显式管理员路由：`elevated_exec` 负责通用管理员进程/命令/系统维护，schema43 `filesystem` 的 workspace 外结构化文件操作复用同一 Active Broker 授权边界；LocalBridge control-plane 永久 deny；secret 不得明文泄漏；Rust/backend 持有 lifecycle/readiness/retry/权限/CurrentTask truth，前端只做 typed projection + typed intent。
-5. **按需读取与验收**：任务需要时再读 `PR_CONTRACTS.json`、`START_HERE.md` 指向的 authority docs、`ARCHITECTURE_RULES.json`、runtime manifest/policy、相关 `skills/**`、测试与 Git 历史。当前 `PR_CONTRACTS.json` schema43 为现行合同；schema34 权限执行模型继续覆盖旧 narrative docs 中任何“Full 子进程必须受 OS 级 active-workspace 文件隔离”的历史表述，schema35 追加三档字号、绿色化存储布局与默认非管理员发布验收，schema36 追加 runtime observability / Windows Shell fidelity / stable typed diagnostics / backend administrator-consent truth，schema37 清理路径、Dashboard 与 public error 的合同互斥，schema38 追加 detached task cancellation、Unicode-safe Git metadata、真实客户端可投影的 command_control/elevated_exec schema、rebuild 约束可发现性、Windows timeout 终止收敛与 cmd rmdir 误判修复；schema39 的 8 core + elevated_exec 是历史基线且仍明确不新增 `file_workflow`/pause/history/snapshot/rollback；schema40 追加 backend-owned live runtime health truth；schema41 冻结 `coding-agent-v1` 语义兼容层；schema42 冻结 Task/Command truth、Dashboard observation、Windows system-management operation classification、Toolbox 与 Unified Error Diagnostics；schema43 显式 supersede 旧“禁止第九 core”约束，公共面升级为 9 core + `elevated_exec`，唯一新增 core 为薄 `filesystem(list/stat/read/write/search/copy/move/delete/hash)`，并同时冻结 v0.1.1 P0 packaged managed-child no-console 修复、共享 path authority、reparse/TOCTOU 防护与 Broker 权限边界。历史 FAIL/PASS/provenance 不改写；LB-019PRE 必须先完成并通过 fresh G2 generation38 → fresh G3 generation24，LB-019 才能解锁。旧报告/旧 PASS/聊天只作线索；静态 marker 不能替代真实行为；先 targeted tests，再按合同运行 PR/Group Gate。
+This is the root agent instruction file. Keep it small and stable; do not duplicate evolving schema/history here.
 
-6. **Schema42 Toolbox**：`aria2c 1.37.0`、逻辑 `7z`（7za 26.02 x64）与 `jq 1.8.2` 只允许构建阶段按冻结来源/SHA-256准备并随包发布；运行时禁止下载/更新。`curl` 只认 `%SystemRoot%/System32/curl.exe` 并做 existence/capability probe。ToolboxResolver 不持久修改系统/用户 PATH、不新增 MCP tool、不改变 Edit/Full/Elevated 权限边界，ambient PATH 上同名 aria2c/7z/jq 不具权威。
-7. **Schema42 Unified Diagnostics**：保留现有细粒度 `error.code`，所有公共失败额外统一投影 `error_code + phase + cause`；重试共享既有 `request_id` 且只递增 `attempt`。Tunnel/MCP transport 故障属于 `transport`，HTTP 400 不得冒充 runtime unavailable；request start/end 必须由真实 MCP request / backend recovery 事件驱动，Dashboard/Diagnostics 读取不得制造日志；request correlation 只进 bounded 脱敏日志/导出，不扩张普通诊断 UI。
+## 1. Start from live facts
+
+- Load `AGENTS.md` first.
+- Read `PR_INDEX.json` and `PROJECT_STATE.json` to resolve the live `current_group`, `current_pr`, status, and gate state. `START_HERE.md` is an authority index/bootstrap document, not live state.
+- For the current task, read only the relevant current-PR contract in `PR_CONTRACTS.json` and the authority documents referenced by `START_HERE.md`; inspect source, tests, Git history, runtime policy, and skills only as needed.
+- Current disk code and real tests define implementation reality. `PR_CONTRACTS.json` defines current machine requirements. `PR_INDEX.json` + `PROJECT_STATE.json` define live governance state. Historical reports, old PASS/FAIL, and chat are clues only.
+- If current authoritative sources contradict each other, stop and report the conflict instead of guessing.
+
+## 2. Execute narrowly
+
+- Single agent, serial execution. Work only on `current_pr` and its `writable_paths` or explicit exceptions.
+- Do not start the next PR automatically. Do not modify unrelated files, clean unknown untracked files, or stage other work.
+- Keep product changes and governance/provenance changes separate. Never fabricate review, PASS, authorization, provenance, or human approval.
+- Any command/session/operation that returns a non-terminal state must be followed to a durable terminal state before declaring completion. If it makes no bounded progress, terminate it and record the reason.
+
+## 3. Prefer the smallest complete implementation
+
+Use this order: no change if unnecessary → reuse existing code → standard library → native platform capability → already-installed dependency → minimal new implementation.
+
+Fix shared root causes rather than isolated symptoms. Avoid speculative abstractions, scaffolding, duplicate services, and unnecessary dependencies. Do not simplify explicit requirements, trust boundaries, security, data-loss protection, accessibility, required tests, or maintainability. Read `skills/ponytail/SKILL.md` only when deeper guidance is needed.
+
+## 4. Preserve hard boundaries
+
+- Public API and policy fail closed.
+- Edit: structured workspace operations only; no ordinary process/Shell execution.
+- Full: structured LocalBridge path/workdir operations remain active-workspace-bound; ordinary development processes run with the current non-admin Windows token and do not imply OS-level child-process filesystem confinement.
+- Elevated: administrator capability is available only through the explicit reviewed Broker/UAC privileged route; ordinary routes remain non-admin. LocalBridge control-plane mutation remains denied.
+- Never expose secrets in plaintext. Backend owns lifecycle, permission, runtime-health, task, retry, and readiness truth; frontend is typed projection/intent only.
+
+## 5. Verify and stop
+
+Run targeted tests first, then the current contract's required PR/Group gates. Static markers and historical evidence never replace real behavior tests. Update governance only when the current contract authorizes it. Once the current PR/review step reaches its required terminal state, report the result and stop.
+
+The current schema/revision must always be read from `PR_CONTRACTS.json`; do not hard-code changing schema details into this file.
