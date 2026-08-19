@@ -6069,5 +6069,22 @@
     ],
     "next_pr": "LB-017",
     "g4_unlocked": false
+  },
+  "schema42_request_diagnostics_event_contract_correction_2026_08_19": {
+    "status": "RATIFIED_REWORK_REQUIRED",
+    "source": "explicit user instruction after disk audit",
+    "owner_pr": "LB-017",
+    "corrections": [
+      "request diagnostics are produced by real MCP request and backend recovery events rather than UI snapshot reads",
+      "recovery diagnostics reuse the exact existing OutageGeneration.request_id",
+      "connection_id is a logical connection or retry-attempt correlation identity",
+      "stale schema42 transport deferral metadata no longer overrides current Unified Diagnostics"
+    ],
+    "exact_hook_paths": [
+      "src-tauri/src/mcp/server.rs",
+      "src-tauri/src/app/background.rs"
+    ],
+    "review_executed": false,
+    "g4_unlocked": false
   }
 }
