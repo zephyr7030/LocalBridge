@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-016",
+  "current_pr": "LB-017",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -6156,6 +6156,19 @@
       "LB015 contract and architecture verification PASS"
     ],
     "next_pr": "LB-016",
+    "g4_unlocked": false
+  },
+  "schema42_lb016_revalidation_after_contract_repair_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-016",
+    "evidence": [
+      "LB016 contract PASS",
+      "onboarding Rust tests PASS",
+      "frontend test/build PASS",
+      "UI language PASS",
+      "architecture verification PASS"
+    ],
+    "next_pr": "LB-017",
     "g4_unlocked": false
   }
 }
