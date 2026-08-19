@@ -1,10 +1,11 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-019",
-  "architecture_frozen_candidate": true,
+  "current_pr": "LB-019PRE",
+  "architecture_frozen_candidate": false,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
+  "target_release_version": "0.1.1",
   "ux_hard_requirements": [
     "No embedded ChatGPT",
     "Wizard screen 4 exposes only fixed Rust-allowlisted ChatGPT plugin settings and custom-plugin management destinations in the system default browser",
@@ -31,7 +32,10 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [],
+  "known_blockers": [
+    "P0 packaged/background managed runtime command windows can become visible because the primary WindowsProcessSupervisor spawn path does not yet enforce CREATE_NO_WINDOW",
+    "schema43 filesystem public tool and its path/Broker/TOCTOU acceptance are contracted but not yet implemented"
+  ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -65,8 +69,8 @@
     "G4 remains blocked after G3 adversarial PASS until a separate human manual/detail review is accepted as PASS",
     "Human review treats user/executor factual claims as untrusted evidence and requires user-audited concrete executor pre-authorizations"
   ],
-  "execution_plan_version": 22,
-  "total_prs": 21,
+  "execution_plan_version": 23,
+  "total_prs": 22,
   "architecture_decisions_pending_lb000": [
     "Policy Enforcement implementation: upstream / adapter / Rust Guard",
     "Windows process ownership: Job Object exact design",
@@ -6290,5 +6294,49 @@
     ],
     "g4_complete": false,
     "next_pr": "LB-019"
+  },
+  "schema43_v0_1_1_no_console_and_filesystem_amendment_2026_08_19": {
+    "status": "RATIFIED_IMPLEMENTATION_PENDING",
+    "source": "explicit user instruction to merge the planned P0 no-console correction and structured filesystem feature into v0.1.1 and amend contracts before implementation",
+    "target_release_version": "0.1.1",
+    "current_pr": "LB-019PRE",
+    "next_pr_after_pass": "LB-019",
+    "historical_lb018_pass_preserved": true,
+    "public_surface": {
+      "core_tools": 9,
+      "privileged_extensions": 1,
+      "added_core_tool": "filesystem",
+      "filesystem_actions": ["list", "stat", "read", "write", "search", "copy", "move", "delete", "hash"],
+      "file_workflow": false
+    },
+    "p0": {
+      "finding": "primary WindowsProcessSupervisor long-lived managed spawn lacks CREATE_NO_WINDOW while bounded helper and privileged execution paths already use it",
+      "release_verifier_false_positive": "LB-018 evidence could pass by finding CREATE_NO_WINDOW elsewhere in windows_supervisor.rs rather than proving the primary managed spawn used it",
+      "required_fix": "actual primary managed spawn uses CREATE_NO_WINDOW and release acceptance is behavioral rather than source-token-only"
+    },
+    "permission_model": {
+      "edit_filesystem": "active_workspace_only",
+      "full_filesystem": "active_workspace_only",
+      "full_shell_descendants": "current_windows_user_token_existing_semantics",
+      "elevated_filesystem": "outside_workspace_only_through_existing_active_broker_authorization_truth",
+      "control_plane": "deny_always"
+    },
+    "security_requirements": [
+      "one shared path authority for every filesystem action",
+      "junction symlink and reparse escape fail closed",
+      "write copy move delete final-handle identity revalidation closes sensitive TOCTOU gaps",
+      "bounded list search stat-size and read prevent unbounded MCP responses or traversal",
+      "atomic write and verify-before-source-delete move semantics protect data integrity"
+    ],
+    "review_sequence": [
+      "LB-019PRE implementation and targeted/runtime gates",
+      "fresh G2 adversarial generation38",
+      "fresh G3 adversarial generation24",
+      "v0.1.1 release-candidate packaging refresh",
+      "LB-019 clean-machine/reboot E2E",
+      "publish final GitHub v0.1.1 only after LB-019 PASS"
+    ],
+    "lb019_status": "BLOCKED",
+    "implementation_started": false
   }
 }

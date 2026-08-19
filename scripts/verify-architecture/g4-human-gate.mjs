@@ -2565,6 +2565,93 @@ export function normalizeSchema42WindowsExecutionPolicyAmendment20260818(doc){
   return n;
 }
 
+const SCHEMA43_V011_NO_CONSOLE_FILESYSTEM_AMENDMENT_2026_08_19 = Object.freeze({
+  addedRules: {
+    schema43_contract_ratified:true,
+    schema43_release_target_version:"0.1.1",
+    schema43_revision_scope:["packaged-managed-child-no-console-p0","public-filesystem-tool","filesystem-path-authority-and-toctou","v0.1.1-release-refresh"],
+    schema43_owner_pr:"LB-019PRE",
+    schema43_next_g2_review_generation:38,
+    schema43_next_g3_review_generation:24,
+    schema43_lb019_blocked_until_lb019pre_pass:true,
+    schema43_prior_g2_g3_pass_provenance_remains_historical:true,
+    schema43_preacceptance_runtime_revision_may_be_42_or_43:true,
+    schema43_pass_requires_agent_api_revision_43:true,
+    schema43_public_core_tool_count:9,
+    schema43_public_privileged_extension_count:1,
+    schema43_public_surface:"nine_core_plus_elevated_exec",
+    filesystem_public_tool_required:true,
+    filesystem_actions:["list","stat","read","write","search","copy","move","delete","hash"],
+    filesystem_mkdir_public_action_forbidden:true,
+    filesystem_shell_implementation_forbidden:true,
+    filesystem_shared_service_required:true,
+    filesystem_shared_path_authority_required:true,
+    filesystem_top_level_discoverable_schema_required:true,
+    filesystem_top_level_oneof_forbidden:true,
+    filesystem_server_action_specific_validation_required:true,
+    filesystem_action_specific_required_fields:{list:["action","path"],stat:["action","path"],read:["action","path"],write:["action","path","content"],search:["action","path","pattern"],copy:["action","source","destination"],move:["action","source","destination"],delete:["action","path"],hash:["action","path"]},
+    filesystem_list_default_recursive:false,
+    filesystem_recursive_hard_bounds_required:["max_depth","max_entries"],
+    filesystem_search_hard_bounds_required:["max_depth","max_entries","max_results"],
+    filesystem_stat_directory_size_opt_in_required:true,
+    filesystem_read_bounded_required:true,
+    filesystem_binary_read_transport:"bounded_base64",
+    filesystem_content_ref_v0_1_1_required:false,
+    filesystem_write_atomic_replace_required:true,
+    filesystem_cross_volume_move_semantics:"copy_verify_delete_source",
+    filesystem_hash_algorithm:"sha256",
+    filesystem_large_operation_reuses_existing_task_control:true,
+    filesystem_new_task_api_forbidden:true,
+    filesystem_edit_scope:"active_workspace",
+    filesystem_full_scope:"active_workspace",
+    filesystem_full_token:"current_windows_user_token",
+    filesystem_elevated_workspace_scope:"administrator_token_accessible_filesystem",
+    filesystem_elevated_outside_workspace_requires_active_broker:true,
+    filesystem_elevated_privileged_route_reuses_existing_broker_authorization_truth:true,
+    filesystem_control_plane_mutation_forbidden:true,
+    filesystem_reparse_junction_symlink_escape_forbidden:true,
+    filesystem_mutation_final_handle_revalidation_required:true,
+    filesystem_toctou_sensitive_actions:["write","copy","move","delete"],
+    filesystem_verbatim_path_authority_only_not_execution_required:true,
+    filesystem_error_normalization_reuses_public_typed_errors:true,
+    windows_process_supervisor_primary_spawn_create_no_window_required:true,
+    packaged_no_console_static_marker_only_acceptance_forbidden:true,
+    packaged_no_console_behavioral_release_verification_required:true,
+    packaged_no_console_required_scenarios:["configured_foreground_runtime_start","background_launch","runtime_restart_or_recovery","tunnel_reconnect","login_autostart","managed_shell_or_direct_command_child"],
+    v0_1_1_single_release_contains_p0_and_filesystem:true,
+  },
+  replacedRules: {
+    localbridge_agent_api_revision:{current:43,baseline:42},
+    localbridge_agent_api_v1_core_tools:{current:["workspace_context","agent_workflow","filesystem","exec_command","command_control","task_control","git_workflow","document_workflow","view_image"],baseline:["workspace_context","agent_workflow","exec_command","command_control","task_control","git_workflow","document_workflow","view_image"]},
+    task_aggregate_observable_public_actions:{current:["workspace_context","agent_workflow","filesystem","exec_command","command_control","task_control","git_workflow","document_workflow","view_image","elevated_exec"],baseline:["workspace_context","agent_workflow","exec_command","command_control","task_control","git_workflow","document_workflow","view_image","elevated_exec"]},
+    workspace_context_public_core_tool_extension_only:{current:false,baseline:true},
+    public_ninth_core_tool_for_schema36_forbidden:{current:false,baseline:true},
+    existing_eight_core_tool_surface_preserved:{current:false,baseline:true},
+    toolbox_preserves_existing_eight_core_plus_elevated_exec_surface:{current:false,baseline:true},
+  },
+});
+
+export function hasExactSchema43V011NoConsoleFilesystemAmendment20260819(doc){
+  if(doc?.schema_version!==43)return false;
+  for(const [k,v] of Object.entries(SCHEMA43_V011_NO_CONSOLE_FILESYSTEM_AMENDMENT_2026_08_19.addedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v))return false;
+  for(const [k,v] of Object.entries(SCHEMA43_V011_NO_CONSOLE_FILESYSTEM_AMENDMENT_2026_08_19.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current))return false;
+  const pr=doc?.prs?.["LB-019PRE"];
+  if(!pr)return false;
+  if(!(pr.required_tests??[]).some(x=>x.includes("generation38"))||!(pr.required_tests??[]).some(x=>x.includes("generation24")))return false;
+  return true;
+}
+
+export function normalizeSchema43V011NoConsoleFilesystemAmendment20260819(doc){
+  const n=structuredClone(doc??null); if(!n)return n;
+  n.schema_version=42;
+  for(const k of Object.keys(SCHEMA43_V011_NO_CONSOLE_FILESYSTEM_AMENDMENT_2026_08_19.addedRules)) delete n.rules[k];
+  for(const [k,v] of Object.entries(SCHEMA43_V011_NO_CONSOLE_FILESYSTEM_AMENDMENT_2026_08_19.replacedRules)) n.rules[k]=structuredClone(v.baseline);
+  if(n.prs) delete n.prs["LB-019PRE"];
+  if(n.rules?.live_external_tests_only) n.rules.live_external_tests_only=n.rules.live_external_tests_only.filter(x=>x!=="LB-019PRE");
+  if(n.prs?.["LB-019"]) n.prs["LB-019"].required_tests=(n.prs["LB-019"].required_tests??[]).filter(x=>!x.startsWith("release candidate under test is exactly LocalBridge v0.1.1")&&!x.startsWith("clean-machine real ChatGPT/MCP filesystem smoke")&&!x.startsWith("after all LB-019 acceptance evidence passes, the published GitHub Release is v0.1.1"));
+  return n;
+}
+
 const SCHEMA41_DERIVED_WAIT_TEST = "durable coding task projects waiting only when no command session is running and next_step is present; no session plus no next_step settles completed";
 const SCHEMA41_DURABILITY_CONTROL_AMENDMENT_2026_08_18 = Object.freeze({
   rules: {
@@ -3457,6 +3544,10 @@ export function validatePreG4GateAuthorization(
 ) {
   const findings = [];
   let authorizationContracts = normalizeExactLb018PrePlanAmendment(contractsDoc);
+  if ((authorizationContracts?.schema_version ?? 0) >= 43) {
+    if (!hasExactSchema43V011NoConsoleFilesystemAmendment20260819(authorizationContracts)) findings.push(`${expected.id}:schema43-v011-no-console-filesystem-20260819-drift`);
+    authorizationContracts = normalizeSchema43V011NoConsoleFilesystemAmendment20260819(authorizationContracts);
+  }
   if ((authorizationContracts?.schema_version ?? 0) >= 42) {
     if (!hasExactSchema42UnifiedErrorDiagnosticsAmendment20260819(authorizationContracts)) findings.push(`${expected.id}:schema42-unified-error-diagnostics-20260819-drift`);
     authorizationContracts = normalizeSchema42UnifiedErrorDiagnosticsAmendment20260819(authorizationContracts);

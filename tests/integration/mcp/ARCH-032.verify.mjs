@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 const ruleId = process.env.LOCALBRIDGE_ARCH_RULE_ID;
 if (ruleId && ruleId !== "ARCH-032") throw new Error(`ARCH-032 invoked as ${ruleId}`);
 const contracts = JSON.parse(readFileSync("PR_CONTRACTS.json", "utf8"));
+const progress = JSON.parse(readFileSync("PR_INDEX.json", "utf8"));
+const schema43Status = progress.prs?.find((item) => item.id === "LB-019PRE")?.status;
+const acceptedRevisionRequired = contracts.schema_version < 43 || schema43Status === "PASS";
+const allowedApiRevisions = acceptedRevisionRequired ? [contracts.rules?.localbridge_agent_api_revision] : [42, 43];
 for (const key of [
   "active_workspace_absolute_input_equivalence_required",
   "elevated_exec_top_level_input_schema_required",
@@ -17,7 +21,8 @@ const authority = readFileSync("src-tauri/src/mcp/path_authority.rs", "utf8");
 const facade = readFileSync("src-tauri/src/mcp/facade.rs", "utf8");
 const shell = readFileSync("src-tauri/src/mcp/shell.rs", "utf8");
 const server = readFileSync("src-tauri/src/mcp/server.rs", "utf8");
-for (const marker of [`pub const AGENT_API_REVISION: u32 = ${contracts.rules?.localbridge_agent_api_revision}`, "workspace_input_path_valid", "normalized_workspace_path", "absolute_and_relative_active_workspace_paths_are_equivalent"]) if (!(facade + server).includes(marker)) throw new Error(`ARCH-032 facade/runtime marker missing: ${marker}`);
+if (!allowedApiRevisions.some((revision) => (facade + server).includes(`pub const AGENT_API_REVISION: u32 = ${revision}`))) throw new Error(`ARCH-032 facade revision must be one of ${allowedApiRevisions.join(",")}`);
+for (const marker of ["workspace_input_path_valid", "normalized_workspace_path", "absolute_and_relative_active_workspace_paths_are_equivalent"]) if (!(facade + server).includes(marker)) throw new Error(`ARCH-032 facade/runtime marker missing: ${marker}`);
 if (!/"yield[-_]time_ms":\{"type":"integer","minimum":0,"maximum":30000,"default":10000\}/.test(facade)) throw new Error("ARCH-032 yield-time_ms zero-minimum schema missing");
 for (const marker of ["workspace_absolute_path_valid", "allows_canonical", "PathAuthorityError::OutsideAuthority"]) if (!authority.includes(marker)) throw new Error(`ARCH-032 path authority marker missing: ${marker}`);
 for (const marker of ["ShellSelector::Powershell", "ShellSelector::Pwsh", "ShellSelector::WindowsPowershell"]) if (!shell.includes(marker)) throw new Error(`ARCH-032 shell selector marker missing: ${marker}`);

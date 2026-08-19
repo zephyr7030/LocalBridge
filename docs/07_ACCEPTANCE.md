@@ -355,3 +355,12 @@
 | A349 | schema39 public process state set | public session 状态限定 `running/completed/failed/cancelled/timed_out/lost`；除 running 外均为 durable terminal truth，不依赖客户端 poll，private handle 丢失/runtime error 不得使 Task 消失或永久 running |
 | A350 | schema39 recovery without surface expansion | `agent_workflow resume` 可从 durable checkpoint 恢复缺失步骤，retained output 可按 output_ref/offset 延续读取；v0.1 不要求 generic pause/history/snapshot/rollback，也不新增 file_workflow |
 | A351 | schema39 public surface conservation | 非特权 core 仍严格 8 个，`elevated_exec` 仍为 privileged extension；任何第九 core、新成熟度 Gate 体系或新通用文件工具均需未来显式合同，不得由实现自行扩张 |
+| A352 | schema43 explicit public-surface revision | schema43 作为后续显式合同 supersede A351 的 8-core 限制：当前 public surface 必须严格为 9 core + `elevated_exec`，唯一新增 core 为 `filesystem`；历史 schema39 provenance 不改写 |
+| A353 | filesystem exact action surface | `filesystem` action 严格为 `list/stat/read/write/search/copy/move/delete/hash`；不新增 mkdir/file_workflow/zip/unzip/download/JSON/PDF/Git/grep/patch/process 语义 |
+| A354 | filesystem real-client schema | 真实 downstream MCP `tools/list` 可直接发现 flat top-level properties；禁止把顶层 oneOf 作为发现前提，server 仍严格执行 action-specific required fields 与非法字段组合校验 |
+| A355 | filesystem permission boundary | Edit/Full structured filesystem 只限 active workspace；Full ordinary child 仍仅按当前普通用户 Token 的既有 OS 语义；Elevated workspace 外 filesystem 仅可复用 Active Broker/UAC 管理员授权真相，control-plane 永久 deny |
+| A356 | filesystem path/reparse/TOCTOU | 全部 action 共用单一 path authority；junction/symlink/reparse escape fail-closed；`write/copy/move/delete` 在 mutation 前按最终打开 handle 再验证 filesystem identity，不能用 check/use 间替换 reparse point 越权 |
+| A357 | filesystem bounded/data-integrity behavior | list 默认非递归；递归/search/stat-size/read 均有硬 bounds；binary read 仅 bounded base64；write 原子替换；move 跨卷必须 copy→verify→delete source；delete 无 force；hash 仅 SHA256 |
+| A358 | filesystem task integration | 大型结构化文件操作复用现有 TaskAggregate/task_control；不得新增 filesystem session、第二套 task API、task history、pause/snapshot/rollback |
+| A359 | P0 packaged no-console | primary WindowsProcessSupervisor 真实 managed spawn 使用 `CREATE_NO_WINDOW`；configured foreground/background/recovery/Tunnel reconnect/autostart/managed command child 的 release-style 行为无意外 console；只检查源码 token 不得作为 PASS |
+| A360 | v0.1.1 release sequence | LB-019PRE 完成实现与 targeted/runtime Gate 后必须 fresh G2 generation38 PASS，再 fresh G3 generation24 PASS，再生成 v0.1.1 RC；LB-019 clean-machine/reboot E2E PASS 后才允许发布最终 GitHub v0.1.1 |

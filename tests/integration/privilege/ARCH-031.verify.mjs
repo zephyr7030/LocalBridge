@@ -4,6 +4,10 @@ const ruleId = process.env.LOCALBRIDGE_ARCH_RULE_ID;
 if (ruleId && ruleId !== "ARCH-031") throw new Error(`ARCH-031 invoked as ${ruleId}`);
 
 const contracts = JSON.parse(readFileSync("PR_CONTRACTS.json", "utf8"));
+const progress = JSON.parse(readFileSync("PR_INDEX.json", "utf8"));
+const schema43Status = progress.prs?.find((item) => item.id === "LB-019PRE")?.status;
+const acceptedRevisionRequired = contracts.schema_version < 43 || schema43Status === "PASS";
+const allowedApiRevisions = acceptedRevisionRequired ? [contracts.rules?.localbridge_agent_api_revision] : [42, 43];
 if (contracts.rules?.dynamic_privileged_tool_catalog_refresh_required !== false) throw new Error("ARCH-031 dynamic privileged catalog refresh must be disabled");
 for (const key of [
   "privileged_tool_stable_advertisement_required",
@@ -23,7 +27,7 @@ const facade = readFileSync("src-tauri/src/mcp/facade.rs", "utf8");
 const policy = readFileSync("src-tauri/src/mcp/policy.rs", "utf8");
 const server = readFileSync("src-tauri/src/mcp/server.rs", "utf8");
 const runtimePolicy = readFileSync("runtime-policy.toml", "utf8");
-if (!facade.includes(`pub const AGENT_API_REVISION: u32 = ${contracts.rules?.localbridge_agent_api_revision}`)) throw new Error("ARCH-031 current facade revision missing");
+if (!allowedApiRevisions.some((revision) => facade.includes(`pub const AGENT_API_REVISION: u32 = ${revision}`))) throw new Error(`ARCH-031 facade revision must be one of ${allowedApiRevisions.join(",")}`);
 if (!policy.includes("pub fn privileged_tool_visible(&self, _mode: PermissionMode, tool_name: &str) -> bool")) throw new Error("ARCH-031 privileged visibility is still mode-dependent");
 const catalogStart = server.indexOf("fn effective_tool_catalog(");
 const signatureStart = server.indexOf("fn effective_tool_catalog_signature(");

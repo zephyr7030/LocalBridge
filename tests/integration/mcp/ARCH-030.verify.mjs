@@ -4,6 +4,10 @@ const ruleId = process.env.LOCALBRIDGE_ARCH_RULE_ID;
 if (ruleId && ruleId !== "ARCH-030") throw new Error(`ARCH-030 invoked as ${ruleId}`);
 
 const contracts = JSON.parse(readFileSync("PR_CONTRACTS.json", "utf8"));
+const progress = JSON.parse(readFileSync("PR_INDEX.json", "utf8"));
+const schema43Status = progress.prs?.find((item) => item.id === "LB-019PRE")?.status;
+const acceptedRevisionRequired = contracts.schema_version < 43 || schema43Status === "PASS";
+const allowedApiRevisions = acceptedRevisionRequired ? [contracts.rules?.localbridge_agent_api_revision] : [42, 43];
 const lb006 = contracts.prs?.["LB-006"];
 const artifact = "LocalBridge-owned MCP output schemas for every advertised public tool, matching the stable public structuredContent contract without exposing upstream private output schemas";
 const proof = "every advertised LocalBridge public tool including privileged extensions declares a non-empty LocalBridge-owned outputSchema matching its actual structuredContent; agent_workflow describes the stable ok/data/error envelope and action/state/workspace/project/commands result fields, elevated_exec describes its existing privileged result variants, and upstream private outputSchema is never exposed directly";
@@ -12,8 +16,8 @@ if (!lb006?.required_tests?.includes(proof)) throw new Error("ARCH-030 LB-006 ou
 
 const facade = readFileSync("src-tauri/src/mcp/facade.rs", "utf8");
 const server = readFileSync("src-tauri/src/mcp/server.rs", "utf8");
+if (!allowedApiRevisions.some((revision) => facade.includes(`pub const AGENT_API_REVISION: u32 = ${revision}`))) throw new Error(`ARCH-030 facade revision must be one of ${allowedApiRevisions.join(",")}`);
 for (const marker of [
-  `pub const AGENT_API_REVISION: u32 = ${contracts.rules?.localbridge_agent_api_revision}`,
   '"outputSchema": public_tool_output_schema(name)',
   "fn public_tool_output_schema(name: &str) -> Value",
   '"agent_workflow" => json!({',
@@ -28,4 +32,4 @@ for (const marker of [
   'elevated_tool["outputSchema"]["oneOf"]',
 ]) if (!server.includes(marker)) throw new Error(`ARCH-030 served/elevated outputSchema marker missing: ${marker}`);
 if (/public_tool_schema[\s\S]{0,1200}get\("outputSchema"\)/.test(facade)) throw new Error("ARCH-030 public facade appears to forward an upstream private outputSchema");
-console.log("ARCH-030_VERIFY=PASS core_tools=8 localbridge_owned_output_schema=true agent_workflow_typed=true elevated_exec_typed=true upstream_private_schema_hidden=true");
+console.log(`ARCH-030_VERIFY=PASS contract_core_tools=${contracts.rules?.localbridge_agent_api_v1_core_tools?.length ?? 0} schema43_status=${schema43Status ?? "n/a"} localbridge_owned_output_schema=true agent_workflow_typed=true elevated_exec_typed=true upstream_private_schema_hidden=true`);

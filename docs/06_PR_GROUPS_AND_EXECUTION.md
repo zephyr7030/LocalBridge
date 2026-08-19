@@ -1,6 +1,6 @@
 # 06 — PR Groups & Execution
 
-21 个 PR，严格按执行顺序串行推进，并增加组级对抗审查 Gate。G4 在 LB-018 前新增一次性 `LB-018PRE` 发布前仓库卫生/公开源码准备 Gate。
+22 个 PR，严格按执行顺序串行推进，并增加组级对抗审查 Gate。G4 在 LB-018 前保留一次性 `LB-018PRE` 发布前仓库卫生/公开源码准备 Gate，并在最终 LB-019 前新增 `LB-019PRE` 承担 v0.1.1 P0 no-console 与结构化 filesystem 修复。
 
 ```text
 组内 PR 全部 PASS
@@ -188,6 +188,7 @@ LB-016：
 ```text
 LB-018PRE Pre-release Repository Hygiene + Public Source Prep
 LB-018 Runtime Packaging
+LB-019PRE v0.1.1 P0 No-console + Structured Filesystem
 LB-019 Release / Clean-machine / Reboot E2E
 ```
 
@@ -356,6 +357,14 @@ G4/LB-018 在新的 G3 human Gate PASS 前继续 BLOCKED；智能体不能代替
 ### Schema39 — Agent execution platform maturity reacceptance（current）
 
 schema39 不增加新的 public tool family，而是把现有 Agent API 的生命周期、schema 可消费性、error normalization、orchestration 与恢复能力提升为 G2/G3 的新验收基线。最早责任仍为 **LB-006**：Workflow 拥有 Task，process-backed Task 才拥有 optional Execution/public Session/process tree；`task_control` 继续只有 `get/cancel`；真实 downstream MCP client 最终投影必须能直接构造合法调用；现有 canonical typed errors 跨 direct tool/`agent_workflow` 归一；`agent_workflow` 只编排并复用共享 filesystem/Git/process/document/image/privilege、Session Manager、path authority、capability classifier 与 terminal truth；`workspace_context` 提供 compact cached first-turn discovery；workflow resume/retained output 提供 durable recovery；public surface 继续 8 core + `elevated_exec`，不新增 `file_workflow`、generic pause/history/snapshot/rollback。
+
+### Schema43 — v0.1.1 P0 no-console + Structured Filesystem（current）
+
+schema43 是用户明确授权的后续显式合同，因此 supersede schema39/schema36 的“不得新增第九 core”历史约束，但不改写其历史 provenance。公共面变为 **9 core + `elevated_exec`**，唯一新增 core 为 `filesystem`，action 严格为 `list/stat/read/write/search/copy/move/delete/hash`；继续禁止 `file_workflow`，`mkdir` 继续由 `agent_workflow.directory_changes` 承担。`filesystem` 不调用 Shell，只负责文件系统事实、原子操作与权限边界。
+
+权限保持原模型：Edit/Full 的结构化 filesystem 均只允许 active workspace；Full 的普通 Shell 子进程仍只是当前普通用户 Token，不因此获得新的结构化全盘能力；Elevated 的 workspace 外结构化 filesystem 必须复用既有 Active Broker/UAC 管理员授权真相。所有 action 共用一个 path authority，junction/symlink/reparse escape fail-closed；`write/copy/move/delete` 在敏感 mutation 前必须以最终打开 handle 对 filesystem identity 再验证，关闭明显 TOCTOU 窗口。
+
+同一 LB-019PRE 修复 P0：primary `WindowsProcessSupervisor` 的真实长期 managed spawn 必须使用 `CREATE_NO_WINDOW`；release Gate 必须验证真实 packaged 行为，不允许仅因同一源码其他 helper 出现 `CREATE_NO_WINDOW` 字符串而假 PASS。目标发行版统一为 **v0.1.1**。严格顺序：`LB-019PRE implementation/tests → fresh G2 adversarial generation38 → fresh G3 adversarial generation24 → v0.1.1 RC package → LB-019 clean-machine/reboot E2E → final GitHub v0.1.1`。
 
 LB-007 只重新消费 policy/path/capability classifier 交叉项；其后 LB-008→LB-012 按严格编号 reaccept。schema38 的 G2 generation26 / G3 generation16 保留历史 provenance，但不能证明 schema39 新增合同。新顺序为 `LB-006 → LB-007 → ... → LB-012 → fresh G2 adversarial generation27 → LB-013 → ... → LB-017 → fresh G3 adversarial generation17 → G3 human_review_status=REQUIRED`。
 

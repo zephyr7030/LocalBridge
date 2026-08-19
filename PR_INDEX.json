@@ -6,7 +6,7 @@
     "single_executor": true,
     "single_pr_at_a_time": true,
     "stop_after_acceptance": true,
-    "current_pr": "LB-019",
+    "current_pr": "LB-019PRE",
     "contract_file": "PR_CONTRACTS.json",
     "strict_sequence": true,
     "execution_order": [
@@ -30,6 +30,7 @@
       "LB-017",
       "LB-018PRE",
       "LB-018",
+      "LB-019PRE",
       "LB-019"
     ],
     "allowed_statuses": [
@@ -274,13 +275,22 @@
       "status": "PASS"
     },
     {
-      "id": "LB-019",
-      "title": "Release / Clean-machine / Reboot E2E",
+      "id": "LB-019PRE",
+      "title": "v0.1.1 P0 No-console + Structured Filesystem",
       "depends_on": [
         "LB-018"
       ],
       "gate": "G4",
       "status": "READY"
+    },
+    {
+      "id": "LB-019",
+      "title": "Release / Clean-machine / Reboot E2E",
+      "depends_on": [
+        "LB-019PRE"
+      ],
+      "gate": "G4",
+      "status": "BLOCKED"
     }
   ],
   "groups": [
@@ -536,6 +546,7 @@
       "prs": [
         "LB-018PRE",
         "LB-018",
+        "LB-019PRE",
         "LB-019"
       ],
       "status": "READY",
@@ -543,6 +554,6 @@
       "review_generation": 0
     }
   ],
-  "current_pr": "LB-019",
+  "current_pr": "LB-019PRE",
   "current_group": "G4"
 }
