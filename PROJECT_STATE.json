@@ -5917,5 +5917,20 @@
     "next_pr": "LB-012",
     "next_required_g2_generation": 37,
     "next_required_g3_generation": 22
+  },
+  "schema42_lb012_generation36_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "product_commit": null,
+    "evidence": [
+      "Fresh LB-012 contract, ARCH-031, elevated_exec and Toolbox behavior tests PASS after outputSchema repair.",
+      "Real elevated denial now matches served error outputSchema while authorization, output continuation, retained-output bound and Toolbox semantics remain unchanged.",
+      "runtime-manifest and diff checks PASS."
+    ],
+    "group_transition": "G2_REVIEW_REQUIRED",
+    "next_required_g2_generation": 37,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
