@@ -26,8 +26,8 @@ use crate::state::{
 
 use super::facade::{
     AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter, FacadeCallError, FacadeDenied,
-    FacadeError, FacadeErrorCode, AGENT_API_REVISION, public_tools_for_policy, stable_success,
-    validate_workspace_context_probe,
+    FacadeError, FacadeErrorCode, AGENT_API_REVISION, public_error_output_schema,
+    public_tools_for_policy, stable_success, validate_workspace_context_probe,
 };
 use super::http::{McpCancellationClient, McpHealthClient};
 use super::policy::CapabilityPolicy;
@@ -1904,25 +1904,27 @@ fn elevated_exec_output_schema() -> Value {
                 "required":["outcome","exit_code","error_code","phase","cause","http_status","stdout","stderr","stdout_truncated","stderr_truncated","truncated","output_refs"],
                 "additionalProperties":false
             },
-            {
-                "type":"object",
-                "properties":{
-                    "ok":{"const":false},
-                    "error":{
-                        "type":"object",
-                        "properties":{
-                            "code":{"type":"string"},
-                            "message":{"type":"string"},
-                            "retryable":{"type":"boolean"}
-                        },
-                        "required":["code","message","retryable"],
-                        "additionalProperties":false
-                    }
-                },
-                "required":["ok","error"],
-                "additionalProperties":false
-            }
+            elevated_exec_error_output_schema()
         ]
+    })
+}
+
+fn elevated_exec_error_output_schema() -> Value {
+    json!({
+        "type":"object",
+        "properties":{
+            "ok":{"const":false},
+            "state":{"const":"failed"},
+            "summary":{"type":"string"},
+            "task_id":{"type":"null"},
+            "warnings":{"type":"array","items":{"type":"string"}},
+            "next_step":{"type":"null"},
+            "output_refs":{"type":"array","items":{"type":"string"}},
+            "data":{"type":"null"},
+            "error":public_error_output_schema()
+        },
+        "required":["ok","state","summary","task_id","warnings","next_step","output_refs","data","error"],
+        "additionalProperties":false
     })
 }
 
@@ -5649,6 +5651,32 @@ mod tests {
         assert!(elevated_tool["inputSchema"]["properties"]["action"].is_object());
         assert!(elevated_tool["inputSchema"]["properties"]["program"].is_object());
         assert!(elevated_tool["outputSchema"]["oneOf"].is_array());
+        let elevated_error_schema = elevated_tool["outputSchema"]["oneOf"]
+            .as_array()
+            .and_then(|branches| {
+                branches.iter().find(|branch| {
+                    branch["properties"]["ok"]["const"] == Value::Bool(false)
+                })
+            })
+            .expect("elevated_exec exposes common error envelope branch");
+        for field in [
+            "ok", "state", "summary", "task_id", "warnings", "next_step", "output_refs",
+            "data", "error",
+        ] {
+            assert!(
+                elevated_error_schema["properties"][field].is_object(),
+                "elevated_exec error output schema lost {field}"
+            );
+        }
+        for field in [
+            "code", "error_code", "phase", "cause", "http_status", "message", "retryable",
+            "rule_category", "remediation",
+        ] {
+            assert!(
+                elevated_error_schema["properties"]["error"]["properties"][field].is_object(),
+                "elevated_exec error diagnostics schema lost {field}"
+            );
+        }
 
         fake.set_state(PrivilegeState::AwaitingUac);
         let awaiting_tools = post(
@@ -5696,6 +5724,28 @@ mod tests {
                 }),
             );
             assert_tool_error(&denied, "PrivilegedRouteUnavailable");
+            let structured = denied.body["result"]["structuredContent"]
+                .as_object()
+                .expect("elevated denial has structuredContent");
+            let allowed = elevated_error_schema["properties"]
+                .as_object()
+                .expect("elevated error schema properties");
+            assert!(
+                structured.keys().all(|field| allowed.contains_key(field)),
+                "elevated denial contains a top-level field rejected by outputSchema: {structured:?}"
+            );
+            let error = structured["error"]
+                .as_object()
+                .expect("elevated denial has typed error");
+            let allowed_error = elevated_error_schema["properties"]["error"]["properties"]
+                .as_object()
+                .expect("elevated diagnostic schema properties");
+            assert!(
+                error.keys().all(|field| allowed_error.contains_key(field)),
+                "elevated denial diagnostic contains a field rejected by outputSchema: {error:?}"
+            );
+            assert_eq!(error["error_code"], "Denied");
+            assert_eq!(error["phase"], "policy");
             assert!(!denied.body.to_string().contains(secret));
             assert_eq!(fake.start_count(), 0, "unreviewed elevated request reached Broker");
         }

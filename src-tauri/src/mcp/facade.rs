@@ -656,7 +656,7 @@ fn command_output_data_schema() -> Value {
     })
 }
 
-fn public_error_output_schema() -> Value {
+pub(crate) fn public_error_output_schema() -> Value {
     json!({
         "type":"object",
         "properties":{
