@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-010",
+  "current_pr": "LB-011",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5891,6 +5891,18 @@
       "No LB-009 product change required; diff check PASS."
     ],
     "next_pr": "LB-010",
+    "next_required_g2_generation": 37,
+    "next_required_g3_generation": 22
+  },
+  "schema42_lb010_generation36_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-010",
+    "product_commit": null,
+    "evidence": [
+      "Fresh recovery correlation regression and production watchdog contract PASS after elevated_exec outputSchema repair.",
+      "Automatic retries retain request_id; manual retry creates a new generation identity; diff check PASS."
+    ],
+    "next_pr": "LB-011",
     "next_required_g2_generation": 37,
     "next_required_g3_generation": 22
   }
