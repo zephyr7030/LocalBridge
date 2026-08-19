@@ -5799,5 +5799,20 @@
     "next_pr": "LB-012",
     "next_required_g2_generation": 36,
     "next_required_g3_generation": 22
+  },
+  "schema42_lb012_generation35_reacceptance_2026_08_19": {
+    "status": "PASS",
+    "owner_pr": "LB-012",
+    "product_commit": null,
+    "evidence": [
+      "Fresh LB-012 contract and ARCH-031 PASS after LB-006 HTTP diagnostics repair.",
+      "Fresh elevated_exec and Toolbox Rust behavior filters PASS; runtime-manifest and diff checks PASS.",
+      "No LB-012 product change required; Elevated three-route authorization, bounded retained output, output continuation and Toolbox quote semantics remain intact."
+    ],
+    "group_transition": "G2_REVIEW_REQUIRED",
+    "next_required_g2_generation": 36,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
   }
 }
