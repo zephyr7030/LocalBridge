@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
   "phase": "PRE_CODE",
-  "current_pr": "LB-012",
+  "current_pr": "LB-006",
   "architecture_frozen_candidate": true,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -5690,6 +5690,37 @@
     ],
     "group_transition": "G2_REVIEW_REQUIRED",
     "next_required_g2_generation": 35,
+    "next_required_g3_generation": 22,
+    "g3_unlocked": false,
+    "g4_unlocked": false
+  },
+  "g2_adversarial_review_generation_35_2026_08_19": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "generation": 35,
+    "kind": "independent_adversarial",
+    "reviewed_baseline_commit": "8dbf724606755863b4c558d20563ff153c9be275",
+    "reopen_from_pr": "LB-006",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-006",
+        "title": "MCP HTTP failure responses bypass Unified Error Diagnostics",
+        "evidence": [
+          "src-tauri/src/mcp/server.rs write_empty emits an empty response body for every status.",
+          "Public MCP failure paths use write_empty for missing/invalid session 400/404, unsupported method 405, and worker saturation/stopping/cancellation backend failure 503.",
+          "These responses therefore contain neither error_code nor phase and do not pass through the shared diagnostics mapper, while JSON-RPC and HTTP parser failures do."
+        ],
+        "required_fix": "Route every non-success public MCP HTTP response through one diagnostic response helper that preserves HTTP/MCP protocol semantics and emits error_code phase cause plus http_status; keep success 202/204 responses empty."
+      }
+    ],
+    "verified_passes": [
+      "JSON-RPC write_rpc_error already maps parse/invalid/method/params failures through mcp diagnostics.",
+      "MCP request parser distinguishes malformed_request socket_read_failure early_eof unsupported_transfer_encoding header_too_large and body_too_large.",
+      "Tunnel HTTP 400 diagnostic remains Unavailable plus transport plus cause http_400 with status 400.",
+      "LB-011 and LB-012 fresh owner gates passed on the reviewed baseline."
+    ],
+    "next_required_g2_generation": 36,
     "next_required_g3_generation": 22,
     "g3_unlocked": false,
     "g4_unlocked": false
