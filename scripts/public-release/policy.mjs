@@ -86,6 +86,17 @@ export function isPublicPath(value) {
 
 export function sanitizePublicText(value, text) {
   const path = slash(value);
+  if (path === ".gitattributes") {
+    const pinnedRuntimeRules = [
+      "runtime/python/** -text -eol",
+      "runtime/coding-tools-mcp/** -text -eol",
+      "runtime/tunnel-client/** -text -eol",
+    ];
+    const lines = String(text).split(/\r?\n/);
+    const missing = pinnedRuntimeRules.filter((rule) => !lines.includes(rule));
+    if (missing.length === 0) return text;
+    return `${String(text).trimEnd()}\n\n# Byte-pinned bundled runtimes must survive Git add/checkout unchanged.\n${missing.join("\n")}\n`;
+  }
   if (path === "package.json") {
     const manifest = JSON.parse(text);
     const publicScripts = new Set(["dev", "build", "toolbox:prepare", "test"]);

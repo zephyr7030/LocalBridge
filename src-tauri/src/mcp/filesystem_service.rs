@@ -1377,7 +1377,7 @@ impl FilesystemService {
             let mut pending_delete = Vec::new();
             self.preflight_directory_delete_exact(
                 &stable_source,
-                &stable_source,
+                Path::new(""),
                 0,
                 max_depth,
                 &mut scanned,
@@ -1733,8 +1733,8 @@ impl FilesystemService {
     #[allow(clippy::too_many_arguments)]
     fn preflight_directory_delete_exact(
         &self,
-        root: &Path,
         directory: &Path,
+        relative_directory: &Path,
         depth: u32,
         max_depth: u32,
         scanned: &mut usize,
@@ -1788,11 +1788,12 @@ impl FilesystemService {
             if metadata_is_reparse(&stable_metadata) {
                 return Err(FilesystemError::OutsideAuthority);
             }
-            let relative = stable
-                .strip_prefix(root)
-                .map_err(|_| FilesystemError::OutsideAuthority)?
-                .to_string_lossy()
-                .replace('\\', "/");
+            // Manifest identity comes from the already-pinned traversal position,
+            // not from the textual spelling returned by GetFinalPathNameByHandleW.
+            // The latter may legitimately change case or use an 8.3 ancestor alias
+            // (for example RUNNER~1 on hosted Windows runners) for the same object.
+            let relative_path = relative_directory.join(child.file_name());
+            let relative = relative_path.to_string_lossy().replace('\\', "/");
             let expected = expected_remaining
                 .remove(&relative)
                 .ok_or(FilesystemError::FileChanged)?;
@@ -1801,8 +1802,8 @@ impl FilesystemService {
                     return Err(FilesystemError::FileChanged);
                 }
                 self.preflight_directory_delete_exact(
-                    root,
                     &stable,
+                    &relative_path,
                     depth + 1,
                     max_depth,
                     scanned,
@@ -3250,7 +3251,7 @@ mod tests {
         assert_eq!(
             service.preflight_directory_delete_exact(
                 &tree,
-                &tree,
+                Path::new(""),
                 0,
                 8,
                 &mut scanned,

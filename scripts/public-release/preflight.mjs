@@ -9,6 +9,12 @@ import { isPrivatePath, isPublicPath, normalizeRepoPath, PUBLIC_FORBIDDEN_TEXT, 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const evidenceRoot = resolve(root, "release-artifacts", "preflight");
 const MAX_TEXT_BYTES = 16 * 1024 * 1024;
+const PINNED_RUNTIME_PREFIXES = ["runtime/python/", "runtime/coding-tools-mcp/", "runtime/tunnel-client/"];
+const PINNED_RUNTIME_ATTRIBUTE_PROBES = [
+  "runtime/python/LICENSE.txt",
+  "runtime/coding-tools-mcp/coding_tools_mcp/server.py",
+  "runtime/tunnel-client/LICENSE",
+];
 const PRIVATE_MARKERS = /(?:PR_CONTRACTS\.json|PROJECT_STATE\.json|PR_INDEX\.json|FINAL_REVIEW\.json|governance\/G4_)/i;
 const PLACEHOLDER = /(?:test|fake|dummy|example|synthetic|redacted|placeholder|your[_ -]|<[^>]+>|env:|\$\{|sha256)/i;
 const MACHINE_PATH = /(?:[A-Za-z]:\\Users\\[^\\\s"']+|\/Users\/[^\/\s"']+|\/home\/[^\/\s"']+|S-1-5-21-(?:\d+-){2,}\d+)/gi;
@@ -237,6 +243,24 @@ async function verifyPublicTree(base) {
   return violations;
 }
 
+function verifyPinnedRuntimeCommitBytes(output, tracked) {
+  const runtimePaths = tracked
+    .map(normalizeRepoPath)
+    .filter((path) => PINNED_RUNTIME_PREFIXES.some((prefix) => path.startsWith(prefix)));
+  for (const path of runtimePaths) {
+    const sourceBlob = git(["hash-object", "--no-filters", resolve(root, path)]).trim();
+    const publicBlob = git(["rev-parse", `HEAD:${path}`], { cwd: output }).trim();
+    if (sourceBlob !== publicBlob) throw new Error(`public runtime blob changed during Git add: ${path}`);
+  }
+  const attributes = git(["check-attr", "text", "eol", "--", ...PINNED_RUNTIME_ATTRIBUTE_PROBES], { cwd: output });
+  for (const path of PINNED_RUNTIME_ATTRIBUTE_PROBES) {
+    if (!attributes.includes(`${path}: text: unset`) || !attributes.includes(`${path}: eol: unset`)) {
+      throw new Error(`public runtime checkout attributes are not byte-stable: ${path}`);
+    }
+  }
+  return runtimePaths.length;
+}
+
 async function exportPublicSource() {
   const output = resolve(evidenceRoot, "public-source");
   await rm(output, { recursive: true, force: true });
@@ -267,10 +291,11 @@ async function exportPublicSource() {
   git(["config", "user.email", "release@local.invalid"], { cwd: output });
   git(["add", "."], { cwd: output });
   git(["commit", "-m", "Initial public source snapshot"], { cwd: output });
+  const pinnedRuntimeFiles = verifyPinnedRuntimeCommitBytes(output, tracked);
   const commits = Number(git(["rev-list", "--count", "HEAD"], { cwd: output }).trim());
   const remotes = git(["remote"], { cwd: output }).trim();
   if (commits !== 1 || remotes) throw new Error(`fresh-history invariant failed commits=${commits} remotes=${JSON.stringify(remotes)}`);
-  const report = { schema: 1, private_source_head: git(["rev-parse", "HEAD"]).trim(), public_source_head: git(["rev-parse", "HEAD"], { cwd: output }).trim(), copied_files: copied, transformed_public_metadata_files: transformed, public_commit_count: commits, remotes: [] };
+  const report = { schema: 1, private_source_head: git(["rev-parse", "HEAD"]).trim(), public_source_head: git(["rev-parse", "HEAD"], { cwd: output }).trim(), copied_files: copied, transformed_public_metadata_files: transformed, pinned_runtime_byte_identical_files: pinnedRuntimeFiles, public_commit_count: commits, remotes: [] };
   await writeReport("public-export.json", report);
   console.log(`PRE_RELEASE_PUBLIC_EXPORT=PASS files=${copied} commits=1 transformed=${transformed}`);
   return report;
