@@ -8075,6 +8075,25 @@ mod tests {
         assert_tool_error(&shell_path_denied, "PrivilegedRouteUnavailable");
         assert_eq!(fake.start_count(), 2);
 
+        let opaque_helper = std::env::current_exe().expect("test helper executable");
+        let opaque_helper_denied = post(
+            pep.port(),
+            Some(&session),
+            &json!({
+                "jsonrpc":"2.0","id":5041,"method":"tools/call",
+                "params":{"name":"elevated_exec","arguments":{
+                    "operation":"process","program":opaque_helper.to_string_lossy(),
+                    "args":[],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096
+                }}
+            }),
+        );
+        assert_tool_error(&opaque_helper_denied, "PrivilegedRouteUnavailable");
+        assert_eq!(
+            fake.start_count(),
+            2,
+            "opaque administrator helper must be denied before Broker dispatch"
+        );
+
         let filesystem = post(
             pep.port(),
             Some(&session),

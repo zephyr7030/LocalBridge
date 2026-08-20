@@ -4438,12 +4438,27 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         if let Some(checkpoint) = checkpoint.as_ref() {
             persist_agent_checkpoint(&self.adapter, checkpoint)?;
         }
-        let workspace = self.adapter.workspace_context(request_id)?;
-        let git_before = self.adapter.git_workflow(
+        macro_rules! legacy_checkpoint_try {
+            ($expression:expr) => {
+                match $expression {
+                    Ok(value) => value,
+                    Err(error) => {
+                        terminalize_legacy_checkpoint_failure(
+                            &self.adapter,
+                            &mut checkpoint,
+                            error.code.as_str(),
+                        )?;
+                        return Err(error);
+                    }
+                }
+            };
+        }
+        let workspace = legacy_checkpoint_try!(self.adapter.workspace_context(request_id));
+        let git_before = legacy_checkpoint_try!(self.adapter.git_workflow(
             GitWorkflowAction::Status,
             json!({"path":selected_path}),
             request_id,
-        )?;
+        ));
         if let Some(project_object) = project.as_object_mut() {
             let git_data = stable_data(&git_before);
             project_object.insert(
@@ -4482,9 +4497,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.directory_inflight = true;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
-            let result = self
-                .adapter
-                .apply_directory_change(directory_action, directory_path)?;
+            let result = legacy_checkpoint_try!(
+                self.adapter
+                    .apply_directory_change(directory_action, directory_path)
+            );
             directory_results.push(result.clone());
             if let Some(checkpoint) = checkpoint.as_mut() {
                 checkpoint.directory_inflight = false;
@@ -4497,11 +4513,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let mut applied_patch = false;
         if let Some(patch) = patch {
             if !public_patch_targets_valid(patch) {
-                return Err(FacadeError::new(
+                let error = FacadeError::new(
                     FacadeErrorCode::WorkspaceDenied,
                     "补丁目标不在当前工作区内",
                     false,
-                ));
+                );
+                terminalize_legacy_checkpoint_failure(
+                    &self.adapter,
+                    &mut checkpoint,
+                    error.code.as_str(),
+                )?;
+                return Err(error);
             }
             if let Some(checkpoint) = checkpoint.as_mut() {
                 checkpoint.current_step = Some("patch".into());
@@ -4516,8 +4538,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.patch_inflight = true;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
-            self.adapter
-                .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
+            legacy_checkpoint_try!(
+                self.adapter
+                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)
+            );
             applied_patch = true;
             if let Some(checkpoint) = checkpoint.as_mut() {
                 checkpoint.patch_inflight = false;
@@ -4528,27 +4552,36 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
 
         let mut command_results = Vec::new();
         for (index, command) in commands.into_iter().enumerate() {
-            let command = command.as_object().ok_or_else(invalid_argument)?;
-            let text = required_string(command, "command")?;
-            let shell: ShellSelector = serde_json::from_value(
-                command
-                    .get("shell")
-                    .cloned()
-                    .unwrap_or_else(|| Value::String("auto".into())),
-            )
-            .map_err(|_| invalid_argument())?;
+            let command = legacy_checkpoint_try!(command.as_object().ok_or_else(invalid_argument));
+            let text = legacy_checkpoint_try!(required_string(command, "command"));
+            let shell: ShellSelector = legacy_checkpoint_try!(
+                serde_json::from_value(
+                    command
+                        .get("shell")
+                        .cloned()
+                        .unwrap_or_else(|| Value::String("auto".into())),
+                )
+                .map_err(|_| invalid_argument())
+            );
             let workdir = command
                 .get("workdir")
                 .and_then(Value::as_str)
                 .unwrap_or(".");
             if !workspace_input_path_valid(workdir) {
-                return Err(FacadeError::new(
+                let error = FacadeError::new(
                     FacadeErrorCode::WorkspaceDenied,
                     "工作区路径参数无效",
                     false,
-                ));
+                );
+                terminalize_legacy_checkpoint_failure(
+                    &self.adapter,
+                    &mut checkpoint,
+                    error.code.as_str(),
+                )?;
+                return Err(error);
             }
-            let effective_workdir = join_project_workdir(&selected_path, workdir)?;
+            let effective_workdir =
+                legacy_checkpoint_try!(join_project_workdir(&selected_path, workdir));
             if let Some(checkpoint) = checkpoint.as_mut() {
                 checkpoint.current_step = Some(format!("command {}/{}", index + 1, command_count));
                 checkpoint.next_step = Some(
@@ -4563,47 +4596,55 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.current_session_id = None;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
-            let result = self.adapter.execute_shell(
-                ShellCommandRequest {
-                    execution: ShellExecutionSpec {
-                        shell,
-                        command: text.to_string(),
-                        cwd: effective_workdir,
-                        timeout_ms: command
-                            .get("timeout_ms")
+            let result = legacy_checkpoint_try!(
+                self.adapter.execute_shell(
+                    ShellCommandRequest {
+                        execution: ShellExecutionSpec {
+                            shell,
+                            command: text.to_string(),
+                            cwd: effective_workdir,
+                            timeout_ms: command
+                                .get("timeout_ms")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(30_000),
+                            max_output_bytes: command
+                                .get("max_output_bytes")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(65_536)
+                                as usize,
+                        },
+                        yield_time_ms: command
+                            .get("yield_time_ms")
                             .and_then(Value::as_u64)
-                            .unwrap_or(30_000),
-                        max_output_bytes: command
-                            .get("max_output_bytes")
-                            .and_then(Value::as_u64)
-                            .unwrap_or(65_536) as usize,
+                            .unwrap_or(10_000),
+                        stdin: command
+                            .get("stdin")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        owner_task_id: checkpoint
+                            .as_ref()
+                            .map(|checkpoint| checkpoint.workflow_id.clone()),
                     },
-                    yield_time_ms: command
-                        .get("yield_time_ms")
-                        .and_then(Value::as_u64)
-                        .unwrap_or(10_000),
-                    stdin: command
-                        .get("stdin")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                    owner_task_id: checkpoint
-                        .as_ref()
-                        .map(|checkpoint| checkpoint.workflow_id.clone()),
-                },
-                request_id,
-            )?;
+                    request_id,
+                )
+            );
             if result.get("isError").and_then(Value::as_bool) == Some(true) {
-                self.adapter.clear_workflow_checkpoint()?;
+                let code = result
+                    .pointer("/structuredContent/error/code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("ProcessFailed");
+                terminalize_legacy_checkpoint_failure(&self.adapter, &mut checkpoint, code)?;
                 return Ok(result);
             }
             let data = stable_data(&result);
             let running = data.get("status").and_then(Value::as_str) == Some("running");
             command_results.push(data.clone());
             if running {
-                let session_id = data
-                    .get("session_id")
-                    .and_then(Value::as_str)
-                    .ok_or_else(command_state_internal_error)?;
+                let session_id = legacy_checkpoint_try!(
+                    data.get("session_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(command_state_internal_error)
+                );
                 if let Some(checkpoint) = checkpoint.as_mut() {
                     checkpoint.current_session_id = Some(session_id.to_string());
                     persist_agent_checkpoint(&self.adapter, checkpoint)?;
@@ -4633,11 +4674,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             }
         }
 
-        let git_after = self.adapter.git_workflow(
+        let git_after = legacy_checkpoint_try!(self.adapter.git_workflow(
             GitWorkflowAction::Status,
             json!({"path":selected_path}),
             request_id,
-        )?;
+        ));
         let state = if applied_patch || !directory_results.is_empty() || !command_results.is_empty()
         {
             "completed"
@@ -6179,6 +6220,25 @@ fn persist_agent_checkpoint<A: WorkspaceRuntimeAdapter>(
 ) -> Result<(), FacadeError> {
     let value = serde_json::to_value(checkpoint).map_err(workflow_checkpoint_error)?;
     adapter.save_workflow_checkpoint(&value)
+}
+
+fn terminalize_legacy_checkpoint_failure<A: WorkspaceRuntimeAdapter>(
+    adapter: &A,
+    checkpoint: &mut Option<WorkflowCheckpoint>,
+    code: &str,
+) -> Result<(), FacadeError> {
+    let Some(checkpoint) = checkpoint.as_mut() else {
+        return Ok(());
+    };
+    checkpoint.current_step = Some("failed".into());
+    checkpoint.next_step = None;
+    checkpoint.completed = true;
+    checkpoint.directory_inflight = false;
+    checkpoint.patch_inflight = false;
+    checkpoint.command_inflight = false;
+    checkpoint.current_session_id = None;
+    checkpoint.failure = Some(json!({"code":code,"status":"failed"}));
+    persist_agent_checkpoint(adapter, checkpoint)
 }
 
 fn expected_files_from_checkpoint(checkpoint: &WorkflowCheckpoint) -> Map<String, Value> {
@@ -7888,6 +7948,7 @@ mod tests {
         last_stdin: std::sync::Arc<std::sync::Mutex<Option<String>>>,
         git_head: std::sync::Arc<std::sync::Mutex<String>>,
         terminal_status: std::sync::Arc<std::sync::Mutex<String>>,
+        failure_stage: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     }
 
     impl ResumeFixtureState {
@@ -7900,7 +7961,16 @@ mod tests {
                 last_stdin: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 git_head: std::sync::Arc::new(std::sync::Mutex::new("HEAD-STABLE".into())),
                 terminal_status: std::sync::Arc::new(std::sync::Mutex::new("completed".into())),
+                failure_stage: std::sync::Arc::new(std::sync::Mutex::new(None)),
             }
+        }
+
+        fn fails_at(&self, stage: &str) -> bool {
+            self.failure_stage
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_deref()
+                == Some(stage)
         }
     }
 
@@ -7916,6 +7986,13 @@ mod tests {
         }
 
         fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {
+            if self.state.fails_at("workspace") {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::RuntimeUnavailable,
+                    "fixture failure",
+                    false,
+                ));
+            }
             Ok(stable_success(json!({}), "ok"))
         }
 
@@ -7936,6 +8013,13 @@ mod tests {
             action: &str,
             path: &str,
         ) -> Result<Value, FacadeError> {
+            if self.state.fails_at("directory") {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::RuntimeUnavailable,
+                    "fixture failure",
+                    false,
+                ));
+            }
             self.state
                 .directory_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -7947,6 +8031,13 @@ mod tests {
             request: ShellCommandRequest,
             _request_id: Option<&Value>,
         ) -> Result<Value, FacadeError> {
+            if self.state.fails_at("command") {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::RuntimeUnavailable,
+                    "fixture failure",
+                    false,
+                ));
+            }
             *self
                 .state
                 .last_stdin
@@ -7987,6 +8078,13 @@ mod tests {
             _arguments: Value,
             _request_id: Option<&Value>,
         ) -> Result<Value, FacadeError> {
+            if self.state.fails_at("git") {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::RuntimeUnavailable,
+                    "fixture failure",
+                    false,
+                ));
+            }
             let head = self
                 .state
                 .git_head
@@ -8012,6 +8110,13 @@ mod tests {
             _arguments: Value,
             _request_id: Option<&Value>,
         ) -> Result<Value, FacadeError> {
+            if self.state.fails_at("patch") {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::RuntimeUnavailable,
+                    "fixture failure",
+                    false,
+                ));
+            }
             self.state
                 .patch_calls
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -8197,6 +8302,61 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn legacy_agent_workflow_failures_after_checkpoint_creation_are_terminal() {
+        for stage in ["workspace", "git", "directory", "patch", "command"] {
+            let state = ResumeFixtureState::new();
+            *state
+                .failure_stage
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(stage.into());
+            let adapter = ResumeAdapter {
+                catalog: compatible_catalog(),
+                state: state.clone(),
+                first_execution_runs: false,
+            };
+            let mut facade = AgentFacade::with_adapter(adapter, policy()).unwrap();
+            let error = facade
+                .dispatch(
+                    PermissionMode::Full,
+                    "agent_workflow",
+                    json!({
+                        "action":"bugfix",
+                        "objective":"legacy terminal regression",
+                        "path":".",
+                        "directory_changes":[{"action":"create_directory","path":"probe-dir"}],
+                        "patch":"*** Begin Patch\n*** Update File: safe/doc.txt\n@@\n-old\n+new\n*** End Patch",
+                        "commands":[{"command":"echo probe","shell":"cmd","yield_time_ms":1000}]
+                    }),
+                    None,
+                )
+                .expect_err(stage);
+            assert_eq!(error.code, FacadeErrorCode::RuntimeUnavailable, "{stage}");
+            let stored: WorkflowCheckpoint = serde_json::from_value(
+                state
+                    .checkpoint
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+                    .expect("terminal checkpoint"),
+            )
+            .unwrap();
+            assert!(stored.completed, "{stage}");
+            assert_eq!(stored.current_step.as_deref(), Some("failed"), "{stage}");
+            assert!(stored.next_step.is_none(), "{stage}");
+            assert!(stored.current_session_id.is_none(), "{stage}");
+            assert!(!stored.directory_inflight, "{stage}");
+            assert!(!stored.patch_inflight, "{stage}");
+            assert!(!stored.command_inflight, "{stage}");
+            assert_eq!(
+                stored.failure.as_ref().unwrap()["status"],
+                "failed",
+                "{stage}"
+            );
+            assert_eq!(facade.task_aggregate_snapshot()["state"], "idle", "{stage}");
+        }
     }
 
     #[test]

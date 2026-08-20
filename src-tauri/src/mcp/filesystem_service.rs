@@ -205,11 +205,23 @@ impl FilesystemService {
         &self,
         handle: &ValidatedPathHandle,
     ) -> Result<(), FilesystemError> {
-        if self.authority.scope() == PathAuthorityScope::BrokerAdministrator
-            && handle
+        if self.authority.scope() == PathAuthorityScope::BrokerAdministrator {
+            self.reject_broker_control_plane_final_path(handle.final_path())?;
+            if handle
                 .regular_file_link_count()
                 .map_err(map_path_error)?
                 .is_some_and(|links| links > 1)
+            {
+                return Err(FilesystemError::OutsideAuthority);
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn reject_broker_control_plane_final_path(&self, path: &Path) -> Result<(), FilesystemError> {
+        if self.authority.scope() == PathAuthorityScope::BrokerAdministrator
+            && final_path_targets_localbridge_control_plane(path)
         {
             return Err(FilesystemError::OutsideAuthority);
         }
@@ -283,7 +295,9 @@ impl FilesystemService {
         target: &Path,
     ) -> Result<ValidatedDirectoryChain, FilesystemError> {
         let parent = target.parent().ok_or(FilesystemError::InvalidArgument)?;
-        self.open_directory_chain(parent)
+        let chain = self.open_directory_chain(parent)?;
+        self.reject_broker_control_plane_final_path(chain.final_path())?;
+        Ok(chain)
     }
 
     #[cfg(windows)]
@@ -2229,6 +2243,64 @@ fn metadata_is_reparse(metadata: &Metadata) -> bool {
 fn windows_path_eq(left: &Path, right: &Path) -> bool {
     left.to_string_lossy()
         .eq_ignore_ascii_case(right.to_string_lossy().as_ref())
+}
+
+#[cfg(windows)]
+fn final_path_targets_localbridge_control_plane(path: &Path) -> bool {
+    let protected_leaf = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "runtime-policy.toml" | "runtime-manifest.toml" | "startup-profile.json"
+            )
+        });
+    if protected_leaf {
+        return true;
+    }
+    if std::env::current_exe()
+        .ok()
+        .and_then(|value| value.canonicalize().ok())
+        .and_then(|value| value.parent().map(Path::to_path_buf))
+        .is_some_and(|root| windows_path_is_within(path, &root))
+    {
+        return true;
+    }
+    for variable in ["LOCALAPPDATA", "PROGRAMDATA"] {
+        let Some(root) = std::env::var_os(variable) else {
+            continue;
+        };
+        let root = PathBuf::from(root).join("LocalBridge");
+        let root = root.canonicalize().unwrap_or(root);
+        if windows_path_is_within(path, &root) {
+            return true;
+        }
+    }
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("com.localbridge.desktop")
+    })
+}
+
+#[cfg(windows)]
+fn windows_path_is_within(path: &Path, root: &Path) -> bool {
+    let mut path = path.components();
+    for expected in root.components() {
+        let Some(actual) = path.next() else {
+            return false;
+        };
+        if !actual
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(expected.as_os_str().to_string_lossy().as_ref())
+        {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(not(windows))]

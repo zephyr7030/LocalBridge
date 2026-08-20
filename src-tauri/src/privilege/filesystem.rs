@@ -436,6 +436,21 @@ mod tests {
         root
     }
 
+    fn create_junction(link: &std::path::Path, target: &std::path::Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "mklink /J failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn administrator_spec(action: AdministratorFilesystemAction) -> AdministratorFilesystemSpec {
         AdministratorFilesystemSpec {
             action,
@@ -463,6 +478,61 @@ mod tests {
             overwrite: false,
             calculate_size: false,
         }
+    }
+
+    #[test]
+    fn administrator_filesystem_rejects_junction_alias_to_localbridge_control_plane() {
+        let root = temp_root();
+        let protected = root.join("LocalBridge");
+        let alias = root.join("innocent-admin-data");
+        fs::create_dir(&protected).unwrap();
+        let policy = protected.join("runtime-policy.toml");
+        fs::write(&policy, b"protected-sentinel").unwrap();
+        create_junction(&alias, &protected);
+
+        let alias_policy = alias.join("runtime-policy.toml");
+        let mut write = administrator_spec(AdministratorFilesystemAction::Write);
+        write.path = Some(alias_policy.to_string_lossy().into_owned());
+        write.content_base64 = Some(STANDARD.encode(b"mutated"));
+        write.overwrite = true;
+        assert_eq!(
+            run_administrator_filesystem(write),
+            Err(AdministratorFilesystemErrorCode::OutsideAuthority)
+        );
+
+        let mut delete = administrator_spec(AdministratorFilesystemAction::Delete);
+        delete.path = Some(alias_policy.to_string_lossy().into_owned());
+        assert_eq!(
+            run_administrator_filesystem(delete),
+            Err(AdministratorFilesystemErrorCode::OutsideAuthority)
+        );
+
+        let moved = root.join("moved-policy.toml");
+        let mut move_source = administrator_spec(AdministratorFilesystemAction::Move);
+        move_source.source = Some(alias_policy.to_string_lossy().into_owned());
+        move_source.destination = Some(moved.to_string_lossy().into_owned());
+        assert_eq!(
+            run_administrator_filesystem(move_source),
+            Err(AdministratorFilesystemErrorCode::OutsideAuthority)
+        );
+
+        let safe_source = root.join("safe-source.txt");
+        fs::write(&safe_source, b"safe").unwrap();
+        let mut move_destination = administrator_spec(AdministratorFilesystemAction::Move);
+        move_destination.source = Some(safe_source.to_string_lossy().into_owned());
+        move_destination.destination =
+            Some(alias.join("innocent.txt").to_string_lossy().into_owned());
+        assert_eq!(
+            run_administrator_filesystem(move_destination),
+            Err(AdministratorFilesystemErrorCode::OutsideAuthority)
+        );
+
+        assert_eq!(fs::read(&policy).unwrap(), b"protected-sentinel");
+        assert!(safe_source.is_file());
+        assert!(!moved.exists());
+        assert!(!protected.join("innocent.txt").exists());
+        fs::remove_dir(&alias).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -2584,18 +2584,33 @@ fn reviewed_administrator_process(arguments: &Value) -> bool {
     let Some(requested) = canonical_regular_file(Path::new(&spec.program)) else {
         return false;
     };
-    let Some(basename) = requested.file_name().and_then(|name| name.to_str()) else {
+    let Some(trusted_program) =
+        reviewed_elevated_program().and_then(|path| canonical_regular_file(&path))
+    else {
         return false;
     };
-    if administrator_shell_executable(basename) {
+    // An arbitrary Administrator-token executable is opaque to the PEP: it can
+    // locate LocalBridge state internally without placing that target in argv.
+    // Therefore direct process execution is intentionally limited to the one
+    // frozen read-only identity diagnostic. General administrator maintenance
+    // remains available through the statically reviewed shell route.
+    if !same_windows_path(&requested, &trusted_program) {
         return false;
     }
-    if windows_system_management_program_token(basename) {
-        return trusted_system_program(basename)
-            .and_then(|path| canonical_regular_file(&path))
-            .is_some_and(|trusted| same_windows_path(&requested, &trusted));
+    if let Some(workdir) = spec.workdir.as_deref() {
+        let workdir = Path::new(workdir);
+        if !workdir.is_absolute()
+            || !workdir.is_dir()
+            || explicit_control_plane_reference(workdir.to_string_lossy().as_ref())
+        {
+            return false;
+        }
     }
-    true
+    spec.args.is_empty()
+        || matches!(
+            spec.args.as_slice(),
+            [arg] if matches!(arg.as_str(), "/all" | "/groups" | "/priv" | "/user")
+        )
 }
 
 fn reviewed_administrator_shell(arguments: &Value) -> bool {
@@ -2708,20 +2723,6 @@ fn reviewed_administrator_filesystem(arguments: &Value) -> bool {
             .destination
             .as_deref()
             .is_some_and(explicit_control_plane_reference)
-}
-
-fn administrator_shell_executable(basename: &str) -> bool {
-    matches!(
-        basename.to_ascii_lowercase().as_str(),
-        "cmd.exe"
-            | "powershell.exe"
-            | "pwsh.exe"
-            | "wscript.exe"
-            | "cscript.exe"
-            | "mshta.exe"
-            | "rundll32.exe"
-            | "regsvr32.exe"
-    )
 }
 
 pub(crate) fn explicit_control_plane_reference(value: &str) -> bool {
@@ -2863,16 +2864,25 @@ mod administrator_gateway_tests {
     }
 
     #[test]
-    fn direct_process_rejects_shell_path_and_system_management_requires_system32_identity() {
+    fn direct_process_is_frozen_to_read_only_identity_diagnostic() {
         assert!(!reviewed_elevated_exec(&json!({
             "operation":"process","program":"C:\\Windows\\System32\\cmd.exe",
             "args":["/c","whoami"],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096
         })));
         let system_reg = trusted_system_program("reg.exe").unwrap();
-        assert!(reviewed_elevated_exec(&json!({
+        assert!(!reviewed_elevated_exec(&json!({
             "operation":"process","program":system_reg.to_string_lossy(),
             "args":["query","HKLM\\Software\\Microsoft"],"workdir":null,
             "timeout_ms":1000,"max_output_bytes":4096
+        })));
+        let opaque_helper = std::env::current_exe().unwrap();
+        assert!(!reviewed_elevated_exec(&json!({
+            "operation":"process","program":opaque_helper.to_string_lossy(),
+            "args":[],"workdir":null,"timeout_ms":1000,"max_output_bytes":4096
+        })));
+        assert!(reviewed_elevated_exec(&json!({
+            "operation":"shell","shell":"cmd","command":"reg.exe query HKLM\\Software\\Microsoft",
+            "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
         })));
     }
 }
