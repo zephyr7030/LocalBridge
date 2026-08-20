@@ -52,6 +52,7 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const ACCEPT_IDLE: Duration = Duration::from_millis(10);
 const MIN_TASK_PRESENTATION: Duration = Duration::from_millis(500);
 const MAX_CONNECTION_WORKERS: usize = 32;
+const MAX_DOWNSTREAM_MCP_SESSIONS: usize = 64;
 static SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -509,7 +510,6 @@ pub struct PolicyEnforcementRuntime {
     task_state: CommandTaskStateStore,
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
-    sessions: Arc<Mutex<HashMap<String, McpSession>>>,
     health_client: McpHealthClient,
     health_workspace: PathBuf,
     shutdown: Option<mpsc::Sender<()>>,
@@ -639,7 +639,6 @@ impl PolicyEnforcementRuntime {
             task_state: runtime_task_state,
             guard: Some(guard),
             public_policy,
-            sessions,
             health_client,
             health_workspace,
             shutdown: Some(shutdown_tx),
@@ -676,10 +675,6 @@ impl PolicyEnforcementRuntime {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .replace_policy(policy.clone());
         *public_policy = policy;
-        self.sessions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clear();
         Ok(())
     }
 
@@ -1167,7 +1162,14 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             let mut sessions = sessions
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            sessions.clear();
+            if sessions.len() >= MAX_DOWNSTREAM_MCP_SESSIONS {
+                return write_mcp_http_error(
+                    &mut stream,
+                    503,
+                    mcp_unavailable("session_capacity"),
+                    None,
+                );
+            }
             sessions.insert(
                 session.clone(),
                 McpSession {
@@ -4439,6 +4441,167 @@ mod tests {
     }
 
     #[test]
+    fn downstream_mcp_sessions_coexist_and_same_catalog_policy_replacement_preserves_them() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("multi-session PEP ready");
+
+        let session_a = initialize(pep.port(), 640)
+            .session
+            .expect("downstream MCP session A");
+        let session_b = initialize(pep.port(), 641)
+            .session
+            .expect("downstream MCP session B");
+        assert_ne!(session_a, session_b);
+
+        for (id, session) in [(642, &session_a), (643, &session_b)] {
+            assert_eq!(
+                post(
+                    pep.port(),
+                    Some(session),
+                    &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+                )
+                .status,
+                202
+            );
+            let response = public_tool_call(
+                pep.port(),
+                session,
+                id,
+                "workspace_context",
+                json!({"detail":"compact"}),
+            );
+            assert_eq!(response.status, 200, "session {session} must remain live");
+            assert_eq!(response.body["result"]["isError"], false);
+        }
+
+        pep.replace_policy(policy(&root))
+            .expect("same-catalog policy replacement");
+        for (id, session) in [(644, &session_a), (645, &session_b)] {
+            let response = public_tool_call(
+                pep.port(),
+                session,
+                id,
+                "workspace_context",
+                json!({"detail":"compact"}),
+            );
+            assert_eq!(
+                response.status, 200,
+                "same catalog replacement must not invalidate session {session}"
+            );
+            assert_eq!(response.body["result"]["isError"], false);
+        }
+
+        let _coding = pep.stop().unwrap();
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn full_cmd_rmdir_workspace_cleanup_executes_through_actual_bundled_runtime() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let probe = workspace.join("test").join("document_workflow_probe");
+        fs::create_dir_all(probe.join("nested")).unwrap();
+        fs::write(probe.join("nested").join("probe.txt"), b"cleanup").unwrap();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("rmdir PEP ready");
+        let session = initialize(pep.port(), 650)
+            .session
+            .expect("downstream MCP session");
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+
+        let response = public_tool_call(
+            pep.port(),
+            &session,
+            651,
+            "exec_command",
+            json!({
+                "shell":"cmd",
+                "command":r"rmdir /s /q test\document_workflow_probe",
+                "workdir":".",
+                "yield_time_ms":10_000,
+                "timeout_ms":30_000
+            }),
+        );
+        assert_eq!(response.status, 200, "{:#?}", response.body);
+        assert_eq!(
+            response.body["result"]["isError"], false,
+            "{:#?}",
+            response.body
+        );
+        assert_eq!(
+            response.body["result"]["structuredContent"]["data"]["status"], "completed",
+            "{:#?}",
+            response.body
+        );
+        assert!(
+            !probe.exists(),
+            "rmdir must remove the workspace probe tree"
+        );
+
+        let outside = workspace.with_extension("outside-rmdir-probe");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("keep.txt"), b"keep").unwrap();
+        let outside_response = public_tool_call(
+            pep.port(),
+            &session,
+            652,
+            "exec_command",
+            json!({
+                "shell":"cmd",
+                "command":format!(r#"rmdir /s /q "{}""#, outside.display()),
+                "workdir":".",
+                "yield_time_ms":10_000,
+                "timeout_ms":30_000
+            }),
+        );
+        assert_eq!(outside_response.status, 200, "{:#?}", outside_response.body);
+        assert_eq!(outside_response.body["result"]["isError"], true);
+        assert_eq!(
+            outside_response.body["result"]["structuredContent"]["error"]["code"],
+            "WorkspaceDenied",
+            "{:#?}",
+            outside_response.body
+        );
+        assert!(outside.join("keep.txt").is_file());
+        fs::remove_dir_all(&outside).unwrap();
+
+        let _coding = pep.stop().unwrap();
+        let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
     fn schema27_public_facade_runtime_semantics_are_real_end_to_end() {
         let root = repo_root();
         let workspace = temp_workspace();
@@ -6353,12 +6516,13 @@ mod tests {
         let reinitialized = initialize(pep.port(), 6);
         let new_session = reinitialized.session.unwrap();
         assert_ne!(new_session, narrowed_session);
-        let stale = post(
+        let still_live = post(
             pep.port(),
             Some(&narrowed_session),
             &json!({"jsonrpc":"2.0","id":7,"method":"ping","params":{}}),
         );
-        assert_eq!(stale.status, 404);
+        assert_eq!(still_live.status, 200);
+        assert_eq!(delete(pep.port(), &narrowed_session), 204);
         assert_eq!(delete(pep.port(), &new_session), 204);
 
         let pep_port = pep.port();

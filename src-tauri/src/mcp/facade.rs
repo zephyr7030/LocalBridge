@@ -1767,6 +1767,35 @@ impl CodingToolsRuntimeAdapter {
             .map_err(normalize_path_authority_error)
     }
 
+    fn private_runtime_cmd_compat_command(
+        &self,
+        command: &str,
+        cwd: &str,
+    ) -> Result<String, FacadeError> {
+        let Some(target) = direct_cmd_rmdir_target(command) else {
+            return Ok(command.to_string());
+        };
+        let candidate = join_project_workdir(cwd, &target)?;
+        let normalized =
+            self.normalized_workspace_path(candidate.to_string_lossy().as_ref(), false)?;
+        if normalized == "." {
+            return Err(FacadeError::new(
+                FacadeErrorCode::WorkspaceDenied,
+                "不能通过普通命令清理当前工作区根目录",
+                false,
+            ));
+        }
+        let resolved = self.resolve_existing_workspace_path(&normalized)?;
+        if !resolved.is_dir() {
+            return Err(FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "rmdir 目标必须是工作区内已存在的目录",
+                false,
+            ));
+        }
+        Ok(rewrite_direct_cmd_rmdir(command))
+    }
+
     fn normalized_workspace_path(
         &self,
         raw: &str,
@@ -2252,6 +2281,12 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             .toolbox
             .rewrite_command(kind, &request.execution.command)
             .map_err(normalize_toolbox_error)?;
+        if kind == ResolvedShellKind::Cmd {
+            request.execution.command = self.private_runtime_cmd_compat_command(
+                &request.execution.command,
+                request.execution.cwd.to_string_lossy().as_ref(),
+            )?;
+        }
         let public_session_id = self
             .public_commands
             .start_session(&self.task_state, request.owner_task_id.clone())?;
@@ -3183,6 +3218,60 @@ fn command_summary(status: &str) -> &'static str {
     }
 }
 
+fn rewrite_direct_cmd_rmdir(command: &str) -> String {
+    let trimmed = command.trim_start();
+    let leading = command.len().saturating_sub(trimmed.len());
+    let token_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    format!("{}rd{}", &command[..leading], &trimmed[token_end..])
+}
+
+fn direct_cmd_rmdir_target(command: &str) -> Option<String> {
+    let mut tokens = Vec::<String>::new();
+    let mut token = String::new();
+    let mut quoted = false;
+    for ch in command.chars() {
+        if matches!(ch, '\r' | '\n' | '%' | '!' | '^') {
+            return None;
+        }
+        if ch == '"' {
+            quoted = !quoted;
+            continue;
+        }
+        if !quoted && matches!(ch, '&' | '|' | '<' | '>' | '(' | ')') {
+            return None;
+        }
+        if !quoted && ch.is_whitespace() {
+            if !token.is_empty() {
+                tokens.push(std::mem::take(&mut token));
+            }
+            continue;
+        }
+        token.push(ch);
+    }
+    if quoted {
+        return None;
+    }
+    if !token.is_empty() {
+        tokens.push(token);
+    }
+    if !tokens
+        .first()
+        .is_some_and(|token| token.eq_ignore_ascii_case("rmdir"))
+    {
+        return None;
+    }
+    let mut target = None;
+    for argument in tokens.into_iter().skip(1) {
+        if matches!(argument.to_ascii_lowercase().as_str(), "/s" | "/q") {
+            continue;
+        }
+        if argument.starts_with('/') || target.replace(argument).is_some() {
+            return None;
+        }
+    }
+    target
+}
+
 fn command_public_status(
     private_status: &str,
     exit_code: Option<i64>,
@@ -3683,10 +3772,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let settled = checkpoint.completed
             || (checkpoint.current_session_id.is_none() && checkpoint.next_step.is_none());
         let state = if settled {
-            if checkpoint.current_step.as_deref() == Some("cancelled") {
-                "cancelled"
-            } else {
-                "completed"
+            match checkpoint.current_step.as_deref() {
+                Some("cancelled") => "cancelled",
+                Some("failed") => "failed",
+                _ => "completed",
             }
         } else if checkpoint.current_session_id.is_some() {
             "active"
@@ -3799,7 +3888,70 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
     }
 
     pub fn reap_command_sessions(&mut self) -> Result<(), FacadeError> {
-        self.adapter.reap_command_sessions()
+        self.adapter.reap_command_sessions()?;
+        self.reconcile_terminal_workflow_command()
+    }
+
+    fn reconcile_terminal_workflow_command(&mut self) -> Result<(), FacadeError> {
+        let Some(stored) = self.adapter.load_workflow_checkpoint()? else {
+            return Ok(());
+        };
+        let mut checkpoint: WorkflowCheckpoint =
+            serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
+        if checkpoint.completed {
+            return Ok(());
+        }
+        let Some(session_id) = checkpoint.current_session_id.clone() else {
+            return Ok(());
+        };
+        let Some(terminal) = self.adapter.durable_command_terminal(&session_id) else {
+            return Ok(());
+        };
+        let data = stable_data(&terminal);
+        let Some(status) = data.get("status").and_then(Value::as_str) else {
+            return Ok(());
+        };
+        if status == "running" {
+            return Ok(());
+        }
+
+        checkpoint.command_inflight = false;
+        checkpoint.current_session_id = None;
+        match status {
+            "completed" => {
+                checkpoint.command_index = checkpoint.command_index.saturating_add(1);
+                checkpoint.command_results.push(data);
+                checkpoint.failure = None;
+                if checkpoint.is_coding_task() {
+                    checkpoint.current_step = Some("verify".into());
+                    checkpoint.next_step = Some(
+                        if checkpoint.command_index < checkpoint.verification_plan.len() {
+                            "verify"
+                        } else {
+                            "persist"
+                        }
+                        .into(),
+                    );
+                }
+            }
+            "cancelled" => {
+                checkpoint.current_step = Some("cancelled".into());
+                checkpoint.next_step = None;
+                checkpoint.completed = true;
+                checkpoint.failure = Some(json!({"code":"cancelled","status":status}));
+            }
+            "failed" | "timed_out" | "lost" => {
+                checkpoint.current_step = Some("failed".into());
+                checkpoint.next_step = None;
+                checkpoint.completed = true;
+                checkpoint.failure = Some(json!({
+                    "code":if status == "lost" { "SessionUnavailable" } else { "command_terminal" },
+                    "status":status
+                }));
+            }
+            _ => return Ok(()),
+        }
+        persist_agent_checkpoint(&self.adapter, &checkpoint)
     }
 
     pub fn has_running_command_session(&self) -> bool {
@@ -4908,10 +5060,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             ));
         }
         if checkpoint.completed {
-            let state = if checkpoint.current_step.as_deref() == Some("cancelled") {
-                "cancelled"
-            } else {
-                "persisted"
+            let state = match checkpoint.current_step.as_deref() {
+                Some("cancelled") => "cancelled",
+                Some("failed") => "failed",
+                _ => "persisted",
             };
             return Ok(coding_checkpoint_result(
                 &checkpoint,
@@ -5078,6 +5230,23 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 }
             }
             return self.resume_coding_task(checkpoint, request_id);
+        }
+        if checkpoint.completed {
+            let state = match checkpoint.current_step.as_deref() {
+                Some("cancelled") => "cancelled",
+                Some("failed") => "failed",
+                _ => "completed",
+            };
+            return Ok(stable_success(
+                json!({
+                    "action":"resume",
+                    "workflow_id":checkpoint.workflow_id,
+                    "objective":original.get("objective").and_then(Value::as_str),
+                    "state":state,
+                    "failure":checkpoint.failure
+                }),
+                "Agent workflow is already terminal; no side effects were replayed",
+            ));
         }
         if checkpoint.directory_inflight || checkpoint.patch_inflight {
             return Err(FacadeError::new(
@@ -7718,6 +7887,7 @@ mod tests {
         execute_calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         last_stdin: std::sync::Arc<std::sync::Mutex<Option<String>>>,
         git_head: std::sync::Arc<std::sync::Mutex<String>>,
+        terminal_status: std::sync::Arc<std::sync::Mutex<String>>,
     }
 
     impl ResumeFixtureState {
@@ -7729,6 +7899,7 @@ mod tests {
                 execute_calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 last_stdin: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 git_head: std::sync::Arc::new(std::sync::Mutex::new("HEAD-STABLE".into())),
+                terminal_status: std::sync::Arc::new(std::sync::Mutex::new("completed".into())),
             }
         }
     }
@@ -7895,12 +8066,28 @@ mod tests {
         }
 
         fn durable_command_terminal(&self, session_id: &str) -> Option<Value> {
-            (session_id == "lb-session-resume-fixture").then(|| {
-                stable_success(
-                    json!({"status":"completed","session_id":session_id,"output":"first completed"}),
-                    "completed",
-                )
-            })
+            if session_id != "lb-session-resume-fixture" {
+                return None;
+            }
+            let status = self
+                .state
+                .terminal_status
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let data = Map::from_iter([
+                ("status".into(), Value::String(status.clone())),
+                ("session_id".into(), Value::String(session_id.to_string())),
+            ]);
+            if status == "completed" {
+                Some(stable_success(Value::Object(data), "completed"))
+            } else {
+                Some(stable_command_error(
+                    FacadeErrorCode::SessionUnavailable,
+                    "session lost",
+                    data,
+                ))
+            }
         }
     }
 
@@ -8010,6 +8197,55 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn background_reap_terminalizes_lost_durable_workflow_instead_of_waiting_forever() {
+        let state = ResumeFixtureState::new();
+        *state
+            .terminal_status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = "lost".into();
+        let mut checkpoint = WorkflowCheckpoint::new(
+            "workflow-lost-session".into(),
+            json!({"action":"bugfix","objective":"lost session regression","path":"."}),
+        );
+        checkpoint.current_step = Some("command 1/1".into());
+        checkpoint.next_step = Some("complete".into());
+        checkpoint.command_inflight = true;
+        checkpoint.current_session_id = Some("lb-session-resume-fixture".into());
+        *state
+            .checkpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(serde_json::to_value(checkpoint).unwrap());
+
+        let adapter = ResumeAdapter {
+            catalog: compatible_catalog(),
+            state: state.clone(),
+            first_execution_runs: false,
+        };
+        let mut facade = AgentFacade::with_adapter(adapter, policy()).unwrap();
+        facade.reap_command_sessions().unwrap();
+
+        let stored: WorkflowCheckpoint = serde_json::from_value(
+            state
+                .checkpoint
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+                .expect("terminal checkpoint retained"),
+        )
+        .unwrap();
+        assert!(stored.completed);
+        assert_eq!(stored.current_step.as_deref(), Some("failed"));
+        assert!(stored.next_step.is_none());
+        assert!(stored.current_session_id.is_none());
+        assert!(!stored.command_inflight);
+        assert_eq!(stored.failure.as_ref().unwrap()["status"], "lost");
+        let aggregate = facade.task_aggregate_snapshot();
+        assert_eq!(aggregate["state"], "idle");
+        assert!(aggregate["current_workflow"].is_null());
     }
 
     #[test]
@@ -9600,6 +9836,32 @@ mod tests {
     }
 
     #[test]
+    fn cmd_rmdir_compatibility_parser_accepts_only_one_static_direct_target() {
+        assert_eq!(
+            direct_cmd_rmdir_target(r"rmdir /s /q test\document_workflow_probe").as_deref(),
+            Some(r"test\document_workflow_probe")
+        );
+        assert_eq!(
+            direct_cmd_rmdir_target(r#"RMDIR /q "test\probe with spaces" /s"#).as_deref(),
+            Some(r"test\probe with spaces")
+        );
+        for denied in [
+            r"echo rmdir /s /q test\probe",
+            r"rmdir /s /q test\one test\two",
+            r"rmdir /s /q %TEMP%\probe",
+            r"rmdir /s /q test\probe & echo done",
+            r"rmdir /x test\probe",
+            r#"rmdir /s /q "unterminated"#,
+        ] {
+            assert!(direct_cmd_rmdir_target(denied).is_none(), "{denied}");
+        }
+        assert_eq!(
+            rewrite_direct_cmd_rmdir(r"  RMDIR /s /q test\probe"),
+            r"  rd /s /q test\probe"
+        );
+    }
+
+    #[test]
     fn session_handles_are_opaque_terminal_monotonic_and_runtime_loss_is_stable() {
         let task_state = test_task_state("terminal-monotonic");
         let mut sessions = PublicCommandSessions::default();
@@ -9626,6 +9888,7 @@ mod tests {
 
         let lost = bind_test_session(&mut sessions, &task_state, "PRIVATE_LOST");
         sessions.mark_all_running_lost(&task_state).unwrap();
+        assert!(task_state.current_owner().is_none());
         let terminal = sessions.terminal(&lost).expect("lost terminal snapshot");
         assert_eq!(terminal["isError"], true);
         assert_eq!(
