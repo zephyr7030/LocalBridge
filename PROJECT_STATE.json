@@ -1,7 +1,7 @@
 {
   "schema_version": 18,
-  "phase": "PRE_CODE",
-  "current_pr": "LB-019PRE",
+  "phase": "RELEASE_ACCEPTANCE",
+  "current_pr": "LB-019",
   "architecture_frozen_candidate": false,
   "product_name_finalized": false,
   "target_platform": "windows-x86_64",
@@ -33,8 +33,7 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "fresh schema43 runtime/security adversarial review generation40 PASS is required before LB-019PRE can PASS",
-    "fresh schema43 desktop/background adversarial review generation24 remains blocked until generation40 PASS"
+    "LB-019 clean-machine/reboot/live release acceptance remains to be executed"
   ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
@@ -6298,7 +6297,7 @@
     "next_pr": "LB-019"
   },
   "schema43_v0_1_1_no_console_and_filesystem_amendment_2026_08_19": {
-    "status": "G2_REVIEW_REQUIRED",
+    "status": "PASS_BY_EXPLICIT_HUMAN_REVIEW_OVERRIDE",
     "source": "explicit user instruction to merge the planned P0 no-console correction and structured filesystem feature into v0.1.1 and amend contracts before implementation",
     "target_release_version": "0.1.1",
     "current_pr": "LB-019PRE",
@@ -6308,7 +6307,17 @@
       "core_tools": 9,
       "privileged_extensions": 1,
       "added_core_tool": "filesystem",
-      "filesystem_actions": ["list", "stat", "read", "write", "search", "copy", "move", "delete", "hash"],
+      "filesystem_actions": [
+        "list",
+        "stat",
+        "read",
+        "write",
+        "search",
+        "copy",
+        "move",
+        "delete",
+        "hash"
+      ],
       "file_workflow": false
     },
     "p0": {
@@ -6338,14 +6347,14 @@
       "LB-019 clean-machine/reboot E2E",
       "publish final GitHub v0.1.1 only after LB-019 PASS"
     ],
-    "lb019_status": "BLOCKED",
+    "lb019_status": "IN_PROGRESS",
     "implementation_started": true,
     "g2_generation_38_consumed": true,
     "g2_generation_39_consumed": true,
     "next_required_g2_generation": 40,
     "next_required_g3_generation": 24,
-    "fresh_g3_unlocked": false,
-    "release_candidate_unlocked": false,
+    "fresh_g3_unlocked": true,
+    "release_candidate_unlocked": true,
     "g3_execution_preflight_2026_08_20": {
       "status": "SELF_CHECK_PASS_AWAITING_INDEPENDENT_REVIEW",
       "review_generation": 24,
@@ -6372,6 +6381,16 @@
       },
       "blocked_by": "fresh schema43 G2 adversarial generation40 PASS",
       "next_action": "After independent G2 generation40 PASS is recorded, perform or refresh the formal fresh G3 generation24 execution verification and leave the review PASS/FAIL decision to the independent review dialogue."
+    },
+    "manual_review_override": {
+      "g2_generation": 40,
+      "g3_generation": 24,
+      "status": "PASS",
+      "kind": "human_manual_review_override",
+      "evidence_ref": "conversation:2026-08-20:user-explicit-g2-g3-human-acceptance-and-ignore-missing-review-agent-progress",
+      "missing_review_agent_progress_ignored": true,
+      "independent_review_provenance_fabricated": false,
+      "accepted_product_head": "619439b4394800505981bab025552e938c936611"
     }
   },
   "g2_adversarial_review_generation_38_2026_08_19": {
@@ -6451,5 +6470,16 @@
     "lb019_unlocked": false,
     "current_group": "G4",
     "current_pr": "LB-019PRE"
+  },
+  "schema43_manual_review_override_2026_08_20": {
+    "status": "PASS",
+    "source": "explicit_user_instruction",
+    "g2_generation": 40,
+    "g3_generation": 24,
+    "evidence_ref": "conversation:2026-08-20:user-explicit-g2-g3-human-acceptance-and-ignore-missing-review-agent-progress",
+    "missing_review_agent_progress_ignored": true,
+    "independent_review_provenance_fabricated": false,
+    "accepted_product_head": "619439b4394800505981bab025552e938c936611",
+    "next_pr": "LB-019"
   }
 }
