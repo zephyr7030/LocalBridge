@@ -6,15 +6,21 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 No user-visible changes yet.
 
-## [0.1.1] - 2026-08-19
+## [0.1.1] - 2026-08-21
 
 ### Added
-- Added the LocalBridge-owned `filesystem` MCP tool with exactly `list`, `stat`, `read`, `write`, `search`, `copy`, `move`, `delete`, and `hash` actions.
+- Added a structured `filesystem` tool for common file operations such as listing, reading, writing, searching, copying, moving, deleting, and hashing files without relying on ad-hoc Shell commands.
 
-### Fixed
-- Prevented LocalBridge-managed runtime, background, and managed command process trees from creating visible console windows during normal GUI operation.
+### Improved
+- Multiple MCP clients can now stay connected at the same time without a new session invalidating an existing one.
+- Long-running and interrupted tasks now converge to a reliable terminal state instead of remaining permanently stuck as running or waiting.
+- Packaged background runtime, Tunnel, recovery, autostart, and managed command paths run without unwanted visible console windows.
+- Windows development command compatibility was improved, including ordinary workspace cleanup such as `rmdir /s /q`.
 
 ### Security
-- Unified structured filesystem path authority across Edit, Full, and Elevated modes, including active-workspace confinement, Broker-only administrator routing, reparse-point protection, final-path revalidation, bounded operations, atomic writes, and verified cross-volume moves.
+- Hardened Elevated filesystem authorization against hard-link, junction/reparse, final-object identity, race, and control-plane alias bypasses.
+- Tightened Elevated process/Shell authorization so unreviewable administrator execution cannot bypass LocalBridge control-plane protections.
+- Runtime API Key remains in Windows Credential Manager and is removed by the uninstaller.
+- Release provenance is now bound to a fresh installer build instead of allowing an older installer to be relabeled as the current source revision.
 
-> Do not use raw commit history as release notes.
+> Release notes intentionally describe user-visible behavior rather than raw commit history.
