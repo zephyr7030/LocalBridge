@@ -137,6 +137,7 @@ const PUBLIC_EDIT_MAX: &[&str] = &[
     "workspace_context",
     "agent_workflow",
     "filesystem",
+    "task_control",
     "git_workflow",
     "document_workflow",
     "view_image",
@@ -423,18 +424,38 @@ impl CapabilityPolicy {
         let document: PolicyDocument =
             toml::from_str(text).map_err(|_| PolicyError::InvalidToml)?;
         validate_document(&document)?;
+        let mut public_edit_allowed = document
+            .localbridge_public
+            .edit_tools
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let mut public_full_allowed = document
+            .localbridge_public
+            .full_tools
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let mut public_elevated_allowed = document
+            .localbridge_public
+            .elevated_tools
+            .into_iter()
+            .collect::<HashSet<_>>();
+        for allowed in [
+            &mut public_edit_allowed,
+            &mut public_full_allowed,
+            &mut public_elevated_allowed,
+        ] {
+            if allowed.contains("filesystem") {
+                allowed.insert("task_control".to_string());
+            }
+        }
         Ok(Self {
             edit_allowed: document.edit_allowed_tools.into_iter().collect(),
             full_allowed: document.full_allowed_tools.into_iter().collect(),
             elevated_allowed: document.elevated_allowed_tools.into_iter().collect(),
             blocked: document.blocked_tools.into_iter().collect(),
-            public_edit_allowed: document.localbridge_public.edit_tools.into_iter().collect(),
-            public_full_allowed: document.localbridge_public.full_tools.into_iter().collect(),
-            public_elevated_allowed: document
-                .localbridge_public
-                .elevated_tools
-                .into_iter()
-                .collect(),
+            public_edit_allowed,
+            public_full_allowed,
+            public_elevated_allowed,
         })
     }
 
@@ -660,9 +681,21 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                 _ => return None,
             };
             let (capability, task_kind, declaration) = match filesystem_action {
-                "search" => (Capability::Read, TaskKind::SearchCode, PublicCapabilityDeclaration::READ),
-                "list" | "stat" | "read" | "hash" => (Capability::Read, TaskKind::ReadFile, PublicCapabilityDeclaration::READ),
-                _ => (Capability::Write, TaskKind::ModifyFile, PublicCapabilityDeclaration::workflow(true, false, false, false, false)),
+                "search" => (
+                    Capability::Read,
+                    TaskKind::SearchCode,
+                    PublicCapabilityDeclaration::READ,
+                ),
+                "list" | "stat" | "read" | "hash" => (
+                    Capability::Read,
+                    TaskKind::ReadFile,
+                    PublicCapabilityDeclaration::READ,
+                ),
+                _ => (
+                    Capability::Write,
+                    TaskKind::ModifyFile,
+                    PublicCapabilityDeclaration::workflow(true, false, false, false, false),
+                ),
             };
             Some(public_descriptor(
                 "filesystem",
@@ -676,7 +709,11 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             "exec_command",
             if dry_run { "explain" } else { "execute" },
             Capability::ProcessExec,
-            if dry_run { TaskKind::Other } else { TaskKind::ExecuteCommand },
+            if dry_run {
+                TaskKind::Other
+            } else {
+                TaskKind::ExecuteCommand
+            },
             if dry_run {
                 PublicCapabilityDeclaration::READ
             } else {
@@ -730,7 +767,7 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                 "cancel",
                 Capability::Workflow,
                 TaskKind::ExecuteCommand,
-                PublicCapabilityDeclaration::PROCESS,
+                PublicCapabilityDeclaration::workflow(true, false, false, false, false),
             )),
             _ => None,
         },
@@ -820,10 +857,11 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             {
                 return None;
             }
-            let commands_present = phase == Some("verify") || match object.get("commands") {
-                None => false,
-                Some(commands) => !commands.as_array()?.is_empty(),
-            };
+            let commands_present = phase == Some("verify")
+                || match object.get("commands") {
+                    None => false,
+                    Some(commands) => !commands.as_array()?.is_empty(),
+                };
             let patch_present = match object.get("patch") {
                 None => false,
                 Some(value) => {
@@ -1206,33 +1244,60 @@ fn simple_static_command_words(command: &str) -> Option<Vec<String>> {
             Some(_) => word.push(ch),
             None if matches!(ch, '\'' | '"') => quote = Some(ch),
             None if ch.is_whitespace() => {
-                if !word.is_empty() { words.push(std::mem::take(&mut word)); }
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
             }
-            None if matches!(ch, '&' | '|' | ';' | '<' | '>' | '\r' | '\n' | '%' | '!' | '$' | '`' | '^') => return None,
+            None if matches!(
+                ch,
+                '&' | '|' | ';' | '<' | '>' | '\r' | '\n' | '%' | '!' | '$' | '`' | '^'
+            ) =>
+            {
+                return None;
+            }
             None => word.push(ch),
         }
     }
-    if quote.is_some() { return None; }
-    if !word.is_empty() { words.push(word); }
+    if quote.is_some() {
+        return None;
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
     (!words.is_empty()).then_some(words)
 }
 
 fn frozen_readonly_system_management_invocation(command: &str) -> bool {
-    let Some(words) = simple_static_command_words(command) else { return false; };
+    let Some(words) = simple_static_command_words(command) else {
+        return false;
+    };
     let program = words[0].rsplit(['\\', '/']).next().unwrap_or(&words[0]);
-    let program = program.strip_suffix(".exe").unwrap_or(program).to_ascii_lowercase();
+    let program = program
+        .strip_suffix(".exe")
+        .unwrap_or(program)
+        .to_ascii_lowercase();
     let args = &words[1..];
     match program.as_str() {
         "pnputil" => matches!(args, [op] if op.eq_ignore_ascii_case("/enum-drivers")),
-        "powercfg" => matches!(args, [op] if ["/query","/getactivescheme","/list","/a"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed))),
-        "wevtutil" => matches!(args, [op] if op.eq_ignore_ascii_case("el"))
-            || matches!(args, [op, _log] if op.eq_ignore_ascii_case("gl")),
+        "powercfg" => {
+            matches!(args, [op] if ["/query","/getactivescheme","/list","/a"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed)))
+        }
+        "wevtutil" => {
+            matches!(args, [op] if op.eq_ignore_ascii_case("el"))
+                || matches!(args, [op, _log] if op.eq_ignore_ascii_case("gl"))
+        }
         "reagentc" => matches!(args, [op] if op.eq_ignore_ascii_case("/info")),
         "manage-bde" => matches!(args, [op] | [op, _] if op.eq_ignore_ascii_case("-status")),
-        "fltmc" => args.is_empty()
-            || matches!(args, [op] if ["filters", "instances", "volumes"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed))),
-        "auditpol" => args.first().is_some_and(|op| op.eq_ignore_ascii_case("/get")),
-        "vssadmin" => args.first().is_some_and(|op| op.eq_ignore_ascii_case("list")),
+        "fltmc" => {
+            args.is_empty()
+                || matches!(args, [op] if ["filters", "instances", "volumes"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed)))
+        }
+        "auditpol" => args
+            .first()
+            .is_some_and(|op| op.eq_ignore_ascii_case("/get")),
+        "vssadmin" => args
+            .first()
+            .is_some_and(|op| op.eq_ignore_ascii_case("list")),
         _ => false,
     }
 }
@@ -1249,7 +1314,9 @@ fn windows_system_management_program_token(token: &str) -> bool {
 }
 
 fn powershell_static_system_management_target(command: &str) -> bool {
-    if frozen_readonly_system_management_invocation(command) { return false; }
+    if frozen_readonly_system_management_invocation(command) {
+        return false;
+    }
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Quote {
         None,
@@ -1350,7 +1417,9 @@ fn powershell_static_system_management_target(command: &str) -> bool {
 }
 
 fn cmd_static_system_management_target(command: &str) -> bool {
-    if frozen_readonly_system_management_invocation(command) { return false; }
+    if frozen_readonly_system_management_invocation(command) {
+        return false;
+    }
     fn finish_target(token: &mut String, is_target: &mut bool) -> bool {
         let requires_privilege = *is_target && windows_system_management_program_token(token);
         token.clear();
@@ -1817,7 +1886,10 @@ fn static_nested_cmd_inner(command: &str) -> Option<&str> {
     }
     let rest = rest.trim_start();
     let switch_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    if !matches!(rest[..switch_end].to_ascii_lowercase().as_str(), "/c" | "/k") {
+    if !matches!(
+        rest[..switch_end].to_ascii_lowercase().as_str(),
+        "/c" | "/k"
+    ) {
         return None;
     }
     let inner = rest[switch_end..].trim_start();
@@ -1845,8 +1917,18 @@ fn powershell_readonly_identity_diagnostic(command: &str) -> bool {
 fn powershell_provider_target(token: &str) -> bool {
     let lower = token.trim_matches(['\'', '"']).to_ascii_lowercase();
     [
-        "alias:", "function:", "variable:", "env:", "registry::", "hklm:", "hkcu:",
-        "hkcr:", "hku:", "hkcc:", "cert:", "wsman:",
+        "alias:",
+        "function:",
+        "variable:",
+        "env:",
+        "registry::",
+        "hklm:",
+        "hkcu:",
+        "hkcr:",
+        "hku:",
+        "hkcc:",
+        "cert:",
+        "wsman:",
     ]
     .iter()
     .any(|prefix| lower.starts_with(prefix))
@@ -1859,12 +1941,7 @@ fn powershell_ordinary_development_invocation(command: &str) -> bool {
     let verb = words[0].to_ascii_lowercase();
     if !matches!(
         verb.as_str(),
-        "set-variable"
-            | "set-content"
-            | "new-item"
-            | "copy-item"
-            | "move-item"
-            | "remove-item"
+        "set-variable" | "set-content" | "new-item" | "copy-item" | "move-item" | "remove-item"
     ) {
         return false;
     }
@@ -1977,8 +2054,8 @@ fn powershell_invocation_requires_review(command: &str) -> bool {
         let body = nested_cmd_body(inner);
         if (inner.trim().starts_with('"') && inner.trim().ends_with('"'))
             || !command
-            .chars()
-            .any(|ch| matches!(ch, ';' | '|' | '&' | '\r' | '\n' | '{' | '}'))
+                .chars()
+                .any(|ch| matches!(ch, ';' | '|' | '&' | '\r' | '\n' | '{' | '}'))
         {
             return cmd_invocation_requires_review(body);
         }
@@ -2675,7 +2752,6 @@ mod administrator_gateway_tests {
     }
 }
 
-
 #[cfg(test)]
 mod schema36_shell_classifier_tests {
     use super::*;
@@ -2683,7 +2759,10 @@ mod schema36_shell_classifier_tests {
     #[test]
     fn full_style_diagnostics_are_not_privileged_by_argument_tokens() {
         for command in ["where cmd", "where pwsh", "echo %PATH%", "echo %TEMP%"] {
-            assert!(!shell_invocation_requires_review("cmd", command), "{command}");
+            assert!(
+                !shell_invocation_requires_review("cmd", command),
+                "{command}"
+            );
         }
     }
 
@@ -2694,13 +2773,25 @@ mod schema36_shell_classifier_tests {
             "%COMSPEC% /c whoami",
             "if 1==1 %COMSPEC% /c whoami",
         ] {
-            assert!(shell_invocation_requires_review("cmd", command), "{command}");
+            assert!(
+                shell_invocation_requires_review("cmd", command),
+                "{command}"
+            );
         }
         for command in ["cmd /c echo nested", "echo ok && cmd /c whoami"] {
-            assert!(!shell_invocation_requires_review("cmd", command), "{command}");
+            assert!(
+                !shell_invocation_requires_review("cmd", command),
+                "{command}"
+            );
         }
-        for command in ["echo ok && cmd /c sc.exe query", "if 1==1 cmd /c net.exe user"] {
-            assert!(shell_invocation_requires_review("cmd", command), "{command}");
+        for command in [
+            "echo ok && cmd /c sc.exe query",
+            "if 1==1 cmd /c net.exe user",
+        ] {
+            assert!(
+                shell_invocation_requires_review("cmd", command),
+                "{command}"
+            );
         }
     }
 
@@ -2731,14 +2822,20 @@ mod schema36_shell_classifier_tests {
             "$PSVersionTable.PSVersion.ToString()",
             "  $psversiontable.psversion.tostring()  ",
         ] {
-            assert!(!shell_invocation_requires_review("pwsh", command), "{command}");
+            assert!(
+                !shell_invocation_requires_review("pwsh", command),
+                "{command}"
+            );
         }
         for command in [
             "$PSVersionTable.PSVersion.ToString(); Start-Process cmd",
             "$PSVersionTable.PSVersion.ToString() | ForEach-Object { & cmd }",
             "$env:COMSPEC.ToString()",
         ] {
-            assert!(shell_invocation_requires_review("pwsh", command), "{command}");
+            assert!(
+                shell_invocation_requires_review("pwsh", command),
+                "{command}"
+            );
         }
     }
 }

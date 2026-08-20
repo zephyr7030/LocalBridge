@@ -11,8 +11,11 @@ use crate::runtime::{
 use crate::state::RuntimeFault;
 
 use super::bundle::verify_bundle;
-use super::git_adapter::handle_git_tool;
-use super::http::{McpCancellationClient, McpHealthClient, McpSession, unauthenticated_initialize_status};
+use super::git_adapter::handle_git_tool_with_authority;
+use super::http::{
+    McpCancellationClient, McpHealthClient, McpSession, unauthenticated_initialize_status,
+};
+use super::path_authority::PathAuthority;
 
 const LOOPBACK_HOST: &str = "127.0.0.1";
 
@@ -37,6 +40,7 @@ pub struct CodingToolsRuntimeConfig {
     pub workspace: PathBuf,
     pub port: u16,
     pub permission_mode: CodingToolsPermissionMode,
+    workspace_identity: Option<String>,
 }
 
 impl CodingToolsRuntimeConfig {
@@ -46,12 +50,22 @@ impl CodingToolsRuntimeConfig {
         port: u16,
         permission_mode: CodingToolsPermissionMode,
     ) -> Self {
+        let workspace = workspace.into();
+        let workspace_identity = PathAuthority::active_workspace(&workspace)
+            .ok()
+            .and_then(|authority| authority.workspace_identity_token());
         Self {
             install_root: install_root.into(),
-            workspace: workspace.into(),
+            workspace,
             port,
             permission_mode,
+            workspace_identity,
         }
+    }
+
+    pub(crate) fn with_workspace_identity(mut self, identity: String) -> Self {
+        self.workspace_identity = Some(identity);
+        self
     }
 }
 
@@ -176,6 +190,7 @@ pub struct CodingToolsRuntime {
     session: McpSession,
     port: u16,
     workspace: PathBuf,
+    workspace_authority: PathAuthority,
     install_root: PathBuf,
 }
 
@@ -227,10 +242,7 @@ impl CodingToolsRuntime {
         config: CodingToolsRuntimeConfig,
         bearer: InternalBearer,
     ) -> Result<Self, CodingToolsRuntimeError> {
-        if is_verbatim_workspace_path(&config.workspace) {
-            return Err(CodingToolsRuntimeError::InvalidConfiguration);
-        }
-        validate_workspace(&config.workspace)?;
+        let workspace_authority = validated_workspace_authority(&config)?;
         if config.port == 0 {
             return Err(CodingToolsRuntimeError::InvalidConfiguration);
         }
@@ -281,6 +293,7 @@ impl CodingToolsRuntime {
             session,
             port: config.port,
             workspace: config.workspace,
+            workspace_authority,
             install_root: config.install_root,
         })
     }
@@ -295,6 +308,10 @@ impl CodingToolsRuntime {
 
     pub fn workspace(&self) -> &Path {
         &self.workspace
+    }
+
+    pub(crate) fn workspace_authority(&self) -> PathAuthority {
+        self.workspace_authority.clone()
     }
 
     pub fn install_root(&self) -> &Path {
@@ -322,7 +339,9 @@ impl CodingToolsRuntime {
         name: &str,
         arguments: Value,
     ) -> Result<Value, CodingToolsRuntimeError> {
-        if let Some(result) = handle_git_tool(&self.workspace, name, &arguments) {
+        if let Some(result) =
+            handle_git_tool_with_authority(&self.workspace_authority, name, &arguments)
+        {
             return Ok(result);
         }
         self.session.call_tool(name, arguments)
@@ -334,7 +353,9 @@ impl CodingToolsRuntime {
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, CodingToolsRuntimeError> {
-        if let Some(result) = handle_git_tool(&self.workspace, name, &arguments) {
+        if let Some(result) =
+            handle_git_tool_with_authority(&self.workspace_authority, name, &arguments)
+        {
             return Ok(result);
         }
         match request_id {
@@ -352,7 +373,9 @@ impl CodingToolsRuntime {
         request_id: Option<&Value>,
         transport_timeout: Duration,
     ) -> Result<Value, CodingToolsRuntimeError> {
-        if let Some(result) = handle_git_tool(&self.workspace, name, &arguments) {
+        if let Some(result) =
+            handle_git_tool_with_authority(&self.workspace_authority, name, &arguments)
+        {
             return Ok(result);
         }
         match request_id {
@@ -453,6 +476,25 @@ fn validate_workspace(workspace: &Path) -> Result<(), CodingToolsRuntimeError> {
     }
 }
 
+fn validated_workspace_authority(
+    config: &CodingToolsRuntimeConfig,
+) -> Result<PathAuthority, CodingToolsRuntimeError> {
+    if is_verbatim_workspace_path(&config.workspace) {
+        return Err(CodingToolsRuntimeError::InvalidConfiguration);
+    }
+    validate_workspace(&config.workspace)?;
+    let authority = PathAuthority::active_workspace(&config.workspace)
+        .map_err(|_| CodingToolsRuntimeError::InvalidConfiguration)?;
+    let expected_identity = config
+        .workspace_identity
+        .as_deref()
+        .ok_or(CodingToolsRuntimeError::InvalidConfiguration)?;
+    authority
+        .matches_workspace_identity_token(expected_identity)
+        .map_err(|_| CodingToolsRuntimeError::InvalidConfiguration)?;
+    Ok(authority)
+}
+
 #[cfg(windows)]
 fn is_verbatim_workspace_path(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
@@ -470,4 +512,49 @@ fn reserve_loopback_port(port: u16) -> Result<(), CodingToolsRuntimeError> {
         .map_err(|_| CodingToolsRuntimeError::PortUnavailable)?;
     drop(listener);
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn frozen_workspace_identity_rejects_same_path_replacement_before_spawn() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let container = std::env::temp_dir().join(format!(
+            "localbridge-runtime-workspace-id-{}-{nonce}",
+            std::process::id()
+        ));
+        let workspace = container.join("workspace");
+        let displaced = container.join("workspace-original");
+        fs::create_dir_all(&workspace).unwrap();
+        let config = CodingToolsRuntimeConfig::new(
+            &container,
+            &workspace,
+            12345,
+            CodingToolsPermissionMode::Trusted,
+        );
+        let original_identity = config.workspace_identity.clone().unwrap();
+
+        fs::rename(&workspace, &displaced).unwrap();
+        fs::create_dir(&workspace).unwrap();
+        let replacement_identity = PathAuthority::active_workspace(&workspace)
+            .unwrap()
+            .workspace_identity_token()
+            .unwrap();
+        assert_ne!(original_identity, replacement_identity);
+        assert!(matches!(
+            validated_workspace_authority(&config),
+            Err(CodingToolsRuntimeError::InvalidConfiguration)
+        ));
+
+        fs::remove_dir_all(&workspace).unwrap();
+        fs::rename(&displaced, &workspace).unwrap();
+        fs::remove_dir_all(container).unwrap();
+    }
 }

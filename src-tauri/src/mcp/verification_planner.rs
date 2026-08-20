@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::git_adapter::changed_paths;
+use super::git_adapter::changed_paths_with_authority;
 use super::path_authority::{PathAuthority, PathAuthorityError};
 
 const MAX_MANIFESTS: usize = 24;
@@ -30,8 +30,16 @@ pub(crate) struct VerificationPlanner {
 }
 
 impl VerificationPlanner {
+    #[cfg(test)]
     pub(crate) fn new(workspace: &Path, project_path: &str) -> Result<Self, PathAuthorityError> {
         let authority = PathAuthority::active_workspace(workspace)?;
+        Self::with_authority(authority, project_path)
+    }
+
+    pub(crate) fn with_authority(
+        authority: PathAuthority,
+        project_path: &str,
+    ) -> Result<Self, PathAuthorityError> {
         let project_root = authority.resolve_existing(project_path)?;
         if !project_root.is_dir() {
             return Err(PathAuthorityError::InvalidPath);
@@ -39,7 +47,11 @@ impl VerificationPlanner {
         let mut instruction_paths = Vec::new();
         let mut cursor = Some(project_root.as_path());
         while let Some(directory) = cursor {
-            for relative in ["AGENTS.md", ".github/copilot-instructions.md", "START_HERE.md"] {
+            for relative in [
+                "AGENTS.md",
+                ".github/copilot-instructions.md",
+                "START_HERE.md",
+            ] {
                 let candidate = directory.join(relative);
                 if candidate.is_file()
                     && fs::canonicalize(&candidate)
@@ -56,7 +68,8 @@ impl VerificationPlanner {
         }
         instruction_paths.sort();
         instruction_paths.dedup();
-        let changed_files = changed_paths(workspace, project_path).unwrap_or_default();
+        let changed_files =
+            changed_paths_with_authority(&authority, project_path).unwrap_or_default();
         Ok(Self {
             authority,
             project_root,
@@ -283,7 +296,12 @@ impl VerificationPlanner {
     }
 
     fn changed_evidence(&self) -> String {
-        let mut paths = self.changed_files.iter().take(8).cloned().collect::<Vec<_>>();
+        let mut paths = self
+            .changed_files
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>();
         if self.changed_files.len() > paths.len() {
             paths.push(format!("+{} more", self.changed_files.len() - paths.len()));
         }
@@ -316,13 +334,7 @@ fn quote_cmd_arg(value: &str) -> String {
     }
 }
 
-fn step(
-    priority: u8,
-    kind: &str,
-    command: &str,
-    source: &str,
-    evidence: &str,
-) -> VerificationStep {
+fn step(priority: u8, kind: &str, command: &str, source: &str, evidence: &str) -> VerificationStep {
     VerificationStep {
         priority,
         kind: kind.into(),
@@ -341,7 +353,10 @@ fn instruction_commands(text: &str) -> Vec<String> {
         if candidate.contains('\n') || candidate.contains('\r') || candidate.len() > 512 {
             continue;
         }
-        let prose = segments.get(index.saturating_sub(1)).copied().unwrap_or_default();
+        let prose = segments
+            .get(index.saturating_sub(1))
+            .copied()
+            .unwrap_or_default();
         if is_negated_instruction(prose) {
             continue;
         }
@@ -425,7 +440,11 @@ mod tests {
     }
 
     fn git(root: &Path, args: &[&str]) {
-        let status = Command::new("git").args(args).current_dir(root).status().unwrap();
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?}");
     }
 
@@ -446,12 +465,32 @@ mod tests {
         fs::write(root.join("src-tauri/Cargo.lock"), "").unwrap();
         let planner = VerificationPlanner::new(&root, ".").unwrap();
         let plan = planner.plan();
-        assert!(plan.iter().any(|step| step.command == "npm run lint" && step.priority == 30));
-        assert!(plan.iter().any(|step| step.command == "npm test" && step.priority == 40));
-        assert!(plan.iter().any(|step| step.command == "npm run build" && step.priority == 40));
-        assert!(plan.iter().any(|step| step.command.contains("cargo clippy --manifest-path src-tauri/Cargo.toml") && step.priority == 30));
-        assert!(plan.iter().any(|step| step.command.contains("cargo test --manifest-path src-tauri/Cargo.toml") && step.priority == 40));
-        assert!(plan.windows(2).all(|pair| pair[0].priority <= pair[1].priority));
+        assert!(
+            plan.iter()
+                .any(|step| step.command == "npm run lint" && step.priority == 30)
+        );
+        assert!(
+            plan.iter()
+                .any(|step| step.command == "npm test" && step.priority == 40)
+        );
+        assert!(
+            plan.iter()
+                .any(|step| step.command == "npm run build" && step.priority == 40)
+        );
+        assert!(plan.iter().any(|step| {
+            step.command
+                .contains("cargo clippy --manifest-path src-tauri/Cargo.toml")
+                && step.priority == 30
+        }));
+        assert!(plan.iter().any(|step| {
+            step.command
+                .contains("cargo test --manifest-path src-tauri/Cargo.toml")
+                && step.priority == 40
+        }));
+        assert!(
+            plan.windows(2)
+                .all(|pair| pair[0].priority <= pair[1].priority)
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -470,7 +509,11 @@ mod tests {
         git(&root, &["add", "."]);
         git(&root, &["commit", "-m", "baseline"]);
         let clean = VerificationPlanner::new(&root, ".").unwrap().plan();
-        assert!(!clean.iter().any(|step| step.kind == "changed_file_targeted"));
+        assert!(
+            !clean
+                .iter()
+                .any(|step| step.kind == "changed_file_targeted")
+        );
         fs::write(root.join("a.ts"), "export const value = 2;\n").unwrap();
         let changed = VerificationPlanner::new(&root, ".").unwrap().plan();
         assert!(changed.iter().any(|step| {
@@ -491,7 +534,10 @@ mod tests {
         .unwrap();
         let planner = VerificationPlanner::new(&root, ".").unwrap();
         let plan = planner.plan();
-        assert!(plan.iter().any(|step| step.command == "npm run lint" && step.priority == 10));
+        assert!(
+            plan.iter()
+                .any(|step| step.command == "npm run lint" && step.priority == 10)
+        );
         assert!(!plan.iter().any(|step| step.command == "npm test"));
         assert!(!plan.iter().any(|step| step.command == "cargo test"));
         let _ = fs::remove_dir_all(root);

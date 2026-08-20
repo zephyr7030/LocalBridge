@@ -96,7 +96,8 @@ for (const method of ["start_execute", "poll_execute", "cancel_execute", "filesy
 }
 
 const filesystem = read("src-tauri/src/privilege/filesystem.rs");
-if (/Command::new|std::process::Command|powershell\.exe|cmd\.exe/i.test(filesystem)) {
+const filesystemProduction = filesystem.split("#[cfg(all(test, windows))]")[0];
+if (/Command::new|std::process::Command|powershell\.exe|cmd\.exe/i.test(filesystemProduction)) {
   throw new Error("ARCH-026 privileged filesystem is shell/process-backed");
 }
 const brokerTests = read("tests/integration/privilege/broker_ipc.rs");

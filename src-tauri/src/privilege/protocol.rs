@@ -90,6 +90,16 @@ pub enum BrokerRequest {
     StructuredFilesystem {
         spec: AdministratorFilesystemSpec,
     },
+    StartStructuredFilesystem {
+        request_id: String,
+        spec: AdministratorFilesystemSpec,
+    },
+    PollStructuredFilesystem {
+        request_id: String,
+    },
+    CancelStructuredFilesystem {
+        request_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +144,8 @@ pub enum BrokerResponse {
     StructuredFilesystemFailed {
         code: AdministratorFilesystemErrorCode,
     },
+    StructuredFilesystemAccepted,
+    StructuredFilesystemPending,
     CancelAck,
     Rejected {
         code: BrokerRejectCode,
@@ -320,8 +332,17 @@ pub enum AdministratorFilesystemErrorCode {
     OutsideAuthority,
     AlreadyExists,
     LimitExceeded,
+    Cancelled,
     Unsupported,
     Io,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdministratorWorkspacePathField {
+    Path,
+    Source,
+    Destination,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -331,6 +352,12 @@ pub struct AdministratorFilesystemSpec {
     pub path: Option<String>,
     pub source: Option<String>,
     pub destination: Option<String>,
+    #[serde(default)]
+    pub workspace_root: Option<String>,
+    #[serde(default)]
+    pub workspace_identity: Option<String>,
+    #[serde(default)]
+    pub workspace_fields: Vec<AdministratorWorkspacePathField>,
     pub recursive: bool,
     pub max_depth: u32,
     pub max_entries: u32,
@@ -372,7 +399,10 @@ impl AdministratorFilesystemSpec {
             && self.max_results <= 10_000
             && self.max_bytes > 0
             && self.max_bytes <= 1024 * 1024
-            && self.min_size.zip(self.max_size).is_none_or(|(min, max)| min <= max)
+            && self
+                .min_size
+                .zip(self.max_size)
+                .is_none_or(|(min, max)| min <= max)
             && self
                 .modified_after_ms
                 .zip(self.modified_before_ms)
@@ -387,7 +417,42 @@ impl AdministratorFilesystemSpec {
                 && !value.as_bytes().contains(&0)
                 && !value.contains(['\n', '\r'])
         });
-        if !paths_valid || !bounds_valid || !content_valid || !pattern_valid {
+        let workspace_binding_valid = match (
+            self.workspace_root.as_deref(),
+            self.workspace_identity.as_deref(),
+        ) {
+            (None, None) => self.workspace_fields.is_empty(),
+            (Some(root), Some(identity)) => {
+                valid_privileged_absolute_path(root)
+                    && !identity.is_empty()
+                    && identity.len() <= 128
+                    && !identity.as_bytes().contains(&0)
+                    && !self.workspace_fields.is_empty()
+                    && self
+                        .workspace_fields
+                        .iter()
+                        .enumerate()
+                        .all(|(index, field)| {
+                            !self.workspace_fields[..index].contains(field)
+                                && match field {
+                                    AdministratorWorkspacePathField::Path => self.path.is_some(),
+                                    AdministratorWorkspacePathField::Source => {
+                                        self.source.is_some()
+                                    }
+                                    AdministratorWorkspacePathField::Destination => {
+                                        self.destination.is_some()
+                                    }
+                                }
+                        })
+            }
+            _ => false,
+        };
+        if !paths_valid
+            || !bounds_valid
+            || !content_valid
+            || !pattern_valid
+            || !workspace_binding_valid
+        {
             return Err(BrokerProtocolError::MalformedFrame);
         }
         let shape_valid = match self.action {

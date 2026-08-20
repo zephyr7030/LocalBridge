@@ -2,14 +2,15 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
 use crate::mcp::filesystem_service::{
-    FilesystemError, FilesystemMutationResult, FilesystemSearchOptions, FilesystemService,
+    FilesystemCancellation, FilesystemError, FilesystemMutationResult, FilesystemSearchOptions,
+    FilesystemService,
 };
 
 use super::{
     AdministratorFilesystemAction, AdministratorFilesystemEntry, AdministratorFilesystemErrorCode,
     AdministratorFilesystemKind, AdministratorFilesystemResult, AdministratorFilesystemSortBy,
-    AdministratorFilesystemSortOrder, AdministratorFilesystemSpec, PrivilegedFilesystemAction,
-    PrivilegedFilesystemResult, PrivilegedFilesystemSpec,
+    AdministratorFilesystemSortOrder, AdministratorFilesystemSpec, AdministratorWorkspacePathField,
+    PrivilegedFilesystemAction, PrivilegedFilesystemResult, PrivilegedFilesystemSpec,
 };
 
 pub(crate) fn run_privileged_filesystem(
@@ -132,9 +133,17 @@ fn create_legacy_directory_all(service: &FilesystemService, path: &str) -> Resul
 pub(crate) fn run_administrator_filesystem(
     spec: AdministratorFilesystemSpec,
 ) -> Result<AdministratorFilesystemResult, AdministratorFilesystemErrorCode> {
+    run_administrator_filesystem_with_cancellation(spec, FilesystemCancellation::default())
+}
+
+pub(crate) fn run_administrator_filesystem_with_cancellation(
+    spec: AdministratorFilesystemSpec,
+    cancellation: FilesystemCancellation,
+) -> Result<AdministratorFilesystemResult, AdministratorFilesystemErrorCode> {
     spec.validate()
         .map_err(|_| AdministratorFilesystemErrorCode::InvalidArgument)?;
-    let service = FilesystemService::broker_administrator();
+    let _workspace_guards = administrator_workspace_guards(&spec)?;
+    let service = FilesystemService::broker_administrator().with_cancellation(cancellation);
     match spec.action {
         AdministratorFilesystemAction::List => {
             let result = service
@@ -147,7 +156,11 @@ pub(crate) fn run_administrator_filesystem(
                 .map_err(administrator_filesystem_error)?;
             Ok(AdministratorFilesystemResult::Entries {
                 action: spec.action,
-                entries: result.entries.into_iter().map(administrator_entry).collect(),
+                entries: result
+                    .entries
+                    .into_iter()
+                    .map(administrator_entry)
+                    .collect(),
                 scanned_entries: u32::try_from(result.scanned_entries)
                     .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
                 truncated: result.truncated,
@@ -240,7 +253,11 @@ pub(crate) fn run_administrator_filesystem(
                 .map_err(administrator_filesystem_error)?;
             Ok(AdministratorFilesystemResult::Entries {
                 action: spec.action,
-                entries: result.entries.into_iter().map(administrator_entry).collect(),
+                entries: result
+                    .entries
+                    .into_iter()
+                    .map(administrator_entry)
+                    .collect(),
                 scanned_entries: u32::try_from(result.scanned_entries)
                     .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
                 truncated: result.truncated,
@@ -302,6 +319,58 @@ pub(crate) fn run_administrator_filesystem(
     }
 }
 
+fn administrator_workspace_guards(
+    spec: &AdministratorFilesystemSpec,
+) -> Result<Vec<crate::mcp::filesystem_service::WorkspacePathGuard>, AdministratorFilesystemErrorCode>
+{
+    let Some(root) = spec.workspace_root.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let identity = spec
+        .workspace_identity
+        .as_deref()
+        .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?;
+    let authority = crate::mcp::PathAuthority::active_workspace(std::path::Path::new(root))
+        .map_err(|_| AdministratorFilesystemErrorCode::OutsideAuthority)?;
+    authority
+        .matches_workspace_identity_token(identity)
+        .map_err(|_| AdministratorFilesystemErrorCode::OutsideAuthority)?;
+    let workspace =
+        FilesystemService::from_authority(authority).map_err(administrator_filesystem_error)?;
+    let mut guards = Vec::with_capacity(spec.workspace_fields.len());
+    for field in &spec.workspace_fields {
+        let (path, allow_missing_leaf, allow_target_delete) = match field {
+            AdministratorWorkspacePathField::Path => (
+                spec.path
+                    .as_deref()
+                    .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                spec.action == AdministratorFilesystemAction::Write,
+                spec.action == AdministratorFilesystemAction::Delete,
+            ),
+            AdministratorWorkspacePathField::Source => (
+                spec.source
+                    .as_deref()
+                    .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                false,
+                spec.action == AdministratorFilesystemAction::Move,
+            ),
+            AdministratorWorkspacePathField::Destination => (
+                spec.destination
+                    .as_deref()
+                    .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                true,
+                false,
+            ),
+        };
+        guards.push(
+            workspace
+                .pin_workspace_path(path, allow_missing_leaf, allow_target_delete)
+                .map_err(administrator_filesystem_error)?,
+        );
+    }
+    Ok(guards)
+}
+
 fn administrator_path(
     spec: &AdministratorFilesystemSpec,
 ) -> Result<&str, AdministratorFilesystemErrorCode> {
@@ -318,6 +387,7 @@ fn administrator_filesystem_error(error: FilesystemError) -> AdministratorFilesy
         FilesystemError::AlreadyExists => AdministratorFilesystemErrorCode::AlreadyExists,
         FilesystemError::FileChanged => AdministratorFilesystemErrorCode::AlreadyExists,
         FilesystemError::LimitExceeded => AdministratorFilesystemErrorCode::LimitExceeded,
+        FilesystemError::Cancelled => AdministratorFilesystemErrorCode::Cancelled,
         FilesystemError::Unsupported => AdministratorFilesystemErrorCode::Unsupported,
         FilesystemError::Io => AdministratorFilesystemErrorCode::Io,
     }
@@ -428,6 +498,68 @@ mod tests {
         })
         .unwrap();
         assert!(!dir.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn administrator_workspace_binding_rejects_pre_broker_ancestor_reparse_swap() {
+        use std::process::Command;
+
+        let root = temp_root();
+        let workspace = root.join("workspace");
+        let outside = root.join("outside");
+        let destination = root.join("copied.txt");
+        let safe = workspace.join("safe");
+        fs::create_dir_all(&safe).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(safe.join("source.txt"), b"inside").unwrap();
+        fs::write(outside.join("source.txt"), b"outside").unwrap();
+        let workspace_identity = crate::mcp::PathAuthority::active_workspace(&workspace)
+            .unwrap()
+            .workspace_identity_token()
+            .unwrap();
+        fs::remove_dir_all(&safe).unwrap();
+        let status = Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&safe)
+            .arg(&outside)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let result = run_administrator_filesystem(AdministratorFilesystemSpec {
+            action: AdministratorFilesystemAction::Copy,
+            path: None,
+            source: Some(safe.join("source.txt").to_string_lossy().into_owned()),
+            destination: Some(destination.to_string_lossy().into_owned()),
+            workspace_root: Some(workspace.to_string_lossy().into_owned()),
+            workspace_identity: Some(workspace_identity),
+            workspace_fields: vec![AdministratorWorkspacePathField::Source],
+            recursive: false,
+            max_depth: 16,
+            max_entries: 100,
+            max_results: 100,
+            offset: 0,
+            max_bytes: 65_536,
+            content_base64: None,
+            pattern: None,
+            kind: None,
+            min_size: None,
+            max_size: None,
+            modified_after_ms: None,
+            modified_before_ms: None,
+            sort_by: AdministratorFilesystemSortBy::Path,
+            sort_order: AdministratorFilesystemSortOrder::Asc,
+            overwrite: false,
+            calculate_size: false,
+        });
+        assert_eq!(
+            result,
+            Err(AdministratorFilesystemErrorCode::OutsideAuthority)
+        );
+        assert!(!destination.exists());
+
+        fs::remove_dir(&safe).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 }

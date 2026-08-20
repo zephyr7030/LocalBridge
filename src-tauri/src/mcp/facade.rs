@@ -20,9 +20,12 @@ use crate::state::{
 
 use super::context_service::ContextService;
 use super::edit_service::{CodingEditError, CodingEditService};
-use super::filesystem_service::{FilesystemError, FilesystemSearchOptions, FilesystemService};
+use super::filesystem_service::{
+    FilesystemCancellation, FilesystemError, FilesystemSearchOptions, FilesystemService,
+};
 use super::path_authority::{
-    PathAuthority, PathAuthorityError, workspace_input_path_valid, workspace_relative_path_valid,
+    PathAuthority, PathAuthorityError, WorkspaceLifetimePin, workspace_input_path_valid,
+    workspace_relative_path_valid,
 };
 use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision, static_workspace_script_target};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
@@ -34,8 +37,8 @@ use super::task_state::{
     TerminalCommandSnapshot,
 };
 use super::toolbox::{ToolboxError, ToolboxErrorKind, ToolboxResolver};
-use super::workflow_checkpoint::{WorkflowCheckpoint, WorkflowCheckpointStore};
 use super::verification_planner::VerificationPlanner;
+use super::workflow_checkpoint::{WorkflowCheckpoint, WorkflowCheckpointStore};
 
 pub const AGENT_API_VERSION: u32 = 1;
 pub const AGENT_API_REVISION: u32 = 43;
@@ -111,9 +114,15 @@ impl FacadeErrorCode {
             Self::PolicyDenied | Self::CapabilityDenied => "policy",
             Self::InvalidShellSyntax => "shell_syntax",
             Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => "privileged_route",
-            Self::RuntimeUnavailable | Self::CapabilityUnavailable | Self::RuntimeProtocolMismatch | Self::RuntimeCapabilityMismatch => "runtime",
+            Self::RuntimeUnavailable
+            | Self::CapabilityUnavailable
+            | Self::RuntimeProtocolMismatch
+            | Self::RuntimeCapabilityMismatch => "runtime",
             Self::ProcessTimedOut => "process_timeout",
-            Self::ProcessFailed | Self::ProcessCancelled | Self::SessionUnavailable | Self::OutputTruncated => "command_runtime",
+            Self::ProcessFailed
+            | Self::ProcessCancelled
+            | Self::SessionUnavailable
+            | Self::OutputTruncated => "command_runtime",
             Self::FileChanged | Self::PatchConflict | Self::AmbiguousMatch => "edit_conflict",
             Self::InvalidArgument | Self::NotFound | Self::Internal => "request",
         }
@@ -122,16 +131,32 @@ impl FacadeErrorCode {
     const fn safe_remediation(self) -> &'static str {
         match self {
             Self::WorkspaceDenied => "使用当前 active workspace 内的相对路径",
-            Self::PolicyDenied | Self::CapabilityDenied => "查看 workspace_context.capabilities 或使用 dry_run 获取允许路线",
+            Self::PolicyDenied | Self::CapabilityDenied => {
+                "查看 workspace_context.capabilities 或使用 dry_run 获取允许路线"
+            }
             Self::InvalidShellSyntax => "按所选 Windows Shell 的原生语法修正命令",
-            Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => "检查 workspace_context 中的权限模式与管理员路由状态",
-            Self::RuntimeUnavailable | Self::CapabilityUnavailable | Self::RuntimeProtocolMismatch | Self::RuntimeCapabilityMismatch => "查看 workspace_context.shell_discovery 与运行时诊断",
+            Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => {
+                "检查 workspace_context 中的权限模式与管理员路由状态"
+            }
+            Self::RuntimeUnavailable
+            | Self::CapabilityUnavailable
+            | Self::RuntimeProtocolMismatch
+            | Self::RuntimeCapabilityMismatch => {
+                "查看 workspace_context.shell_discovery 与运行时诊断"
+            }
             Self::ProcessTimedOut => "提高 timeout_ms 或缩小单次任务",
             Self::ProcessCancelled => "重新发起命令",
             Self::SessionUnavailable => "重新执行命令以创建新会话",
-            Self::OutputTruncated => "若返回 output_ref 则分页读取；否则提高 max_bytes 或 resize 后重试",
-            Self::FileChanged | Self::PatchConflict | Self::AmbiguousMatch
-            | Self::ProcessFailed | Self::InvalidArgument | Self::NotFound | Self::Internal => "检查参数与返回的稳定错误信息",
+            Self::OutputTruncated => {
+                "若返回 output_ref 则分页读取；否则提高 max_bytes 或 resize 后重试"
+            }
+            Self::FileChanged
+            | Self::PatchConflict
+            | Self::AmbiguousMatch
+            | Self::ProcessFailed
+            | Self::InvalidArgument
+            | Self::NotFound
+            | Self::Internal => "检查参数与返回的稳定错误信息",
         }
     }
 }
@@ -1199,6 +1224,9 @@ pub struct CodingRuntimeHealth {
 pub trait WorkspaceRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError>;
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError>;
+    fn validate_workspace_identity(&self) -> Result<(), FacadeError> {
+        Ok(())
+    }
     fn runtime_discovery(&self) -> Value {
         json!({
             "shells": {
@@ -1309,8 +1337,12 @@ pub trait WorkspaceRuntimeAdapter {
     fn durable_command_terminal(&self, _session_id: &str) -> Option<Value> {
         None
     }
-    fn current_command_snapshot(&self) -> Option<Value> { None }
-    fn latest_terminal_command_snapshot(&self) -> Option<Value> { None }
+    fn current_command_snapshot(&self) -> Option<Value> {
+        None
+    }
+    fn latest_terminal_command_snapshot(&self) -> Option<Value> {
+        None
+    }
 }
 
 static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -1352,9 +1384,16 @@ struct PublicCommandSessions {
 }
 
 impl PublicCommandSessions {
-    fn start_session(&mut self, task_state: &CommandTaskStateStore, owner_task_id: Option<String>) -> Result<String, FacadeError> {
+    fn start_session(
+        &mut self,
+        task_state: &CommandTaskStateStore,
+        owner_task_id: Option<String>,
+    ) -> Result<String, FacadeError> {
         let public = next_public_handle("lb-session");
-        let owner = CommandOwner::new(owner_task_id.unwrap_or_else(|| next_public_handle("lb-task")), public.clone());
+        let owner = CommandOwner::new(
+            owner_task_id.unwrap_or_else(|| next_public_handle("lb-task")),
+            public.clone(),
+        );
         task_state
             .begin(owner.clone())
             .map_err(normalize_task_state_error)?;
@@ -1444,7 +1483,11 @@ impl PublicCommandSessions {
         self.sessions.get(public_session_id).map(|session| {
             (
                 session.owner.task_id.clone(),
-                session.started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                session
+                    .started_at
+                    .elapsed()
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64,
             )
         })
     }
@@ -1469,10 +1512,7 @@ impl PublicCommandSessions {
 
     fn local_output(&self, public_output_ref: &str) -> Option<(String, String)> {
         let output = self.outputs.get(public_output_ref)?;
-        Some((
-            output.local_stream.clone()?,
-            output.local_content.clone()?,
-        ))
+        Some((output.local_stream.clone()?, output.local_content.clone()?))
     }
 
     fn mark_terminal(
@@ -1603,6 +1643,8 @@ impl PublicCommandSessions {
 pub struct CodingToolsRuntimeAdapter {
     runtime: CodingToolsRuntime,
     workspace: PathBuf,
+    workspace_authority: PathAuthority,
+    workspace_lifetime_pin: WorkspaceLifetimePin,
     shell_executor: ShellExecutor,
     toolbox: ToolboxResolver,
     public_commands: PublicCommandSessions,
@@ -1616,6 +1658,15 @@ pub struct CodingToolsRuntimeAdapter {
 impl CodingToolsRuntimeAdapter {
     fn new(runtime: CodingToolsRuntime) -> Result<Self, FacadeError> {
         let workspace = runtime.workspace().to_path_buf();
+        let workspace_authority = runtime.workspace_authority();
+        workspace_authority
+            .input_path(".")
+            .map_err(normalize_path_authority_error)?;
+        let workspace_lifetime_pin = PathAuthority::pin_active_workspace_lifetime(&workspace)
+            .map_err(normalize_path_authority_error)?;
+        workspace_authority
+            .input_path(".")
+            .map_err(normalize_path_authority_error)?;
         let toolbox = ToolboxResolver::probe(runtime.install_root());
         let task_state =
             CommandTaskStateStore::for_workspace(&workspace).map_err(normalize_task_state_error)?;
@@ -1624,6 +1675,8 @@ impl CodingToolsRuntimeAdapter {
         Ok(Self {
             runtime,
             workspace,
+            workspace_authority,
+            workspace_lifetime_pin,
             shell_executor: ShellExecutor::default(),
             toolbox,
             public_commands: PublicCommandSessions::default(),
@@ -1635,7 +1688,6 @@ impl CodingToolsRuntimeAdapter {
         })
     }
 
-
     pub(crate) fn command_task_state(&self) -> CommandTaskStateStore {
         self.task_state.clone()
     }
@@ -1645,8 +1697,7 @@ impl CodingToolsRuntimeAdapter {
     }
 
     fn stable_workspace_relative_path(&self, absolute: &Path) -> Result<String, FacadeError> {
-        PathAuthority::active_workspace(&self.workspace)
-            .map_err(normalize_path_authority_error)?
+        self.workspace_authority
             .display_path(absolute)
             .map_err(normalize_path_authority_error)
     }
@@ -1657,7 +1708,10 @@ impl CodingToolsRuntimeAdapter {
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
-        let raw = match self.runtime.call_tool_with_request_id(name, arguments, request_id) {
+        let raw = match self
+            .runtime
+            .call_tool_with_request_id(name, arguments, request_id)
+        {
             Ok(raw) => raw,
             Err(error) => {
                 self.pending_runtime_fault = Some(error.runtime_fault());
@@ -1708,8 +1762,7 @@ impl CodingToolsRuntimeAdapter {
     }
 
     fn resolve_existing_workspace_path(&self, relative: &str) -> Result<PathBuf, FacadeError> {
-        PathAuthority::active_workspace(&self.workspace)
-            .map_err(normalize_path_authority_error)?
+        self.workspace_authority
             .resolve_existing(relative)
             .map_err(normalize_path_authority_error)
     }
@@ -1719,8 +1772,7 @@ impl CodingToolsRuntimeAdapter {
         raw: &str,
         allow_missing_leaf: bool,
     ) -> Result<String, FacadeError> {
-        let authority = PathAuthority::active_workspace(&self.workspace)
-            .map_err(normalize_path_authority_error)?;
+        let authority = &self.workspace_authority;
         match authority.resolve_existing(raw) {
             Ok(resolved) => authority
                 .display_path(&resolved)
@@ -1796,8 +1848,8 @@ impl CodingToolsRuntimeAdapter {
                 false,
             ));
         }
-        let resolved = PathAuthority::active_workspace(&self.workspace)
-            .map_err(normalize_path_authority_error)?
+        let resolved = self
+            .workspace_authority
             .resolve_existing(&input)
             .map_err(normalize_path_authority_error)?;
         if !resolved.is_file() {
@@ -1883,6 +1935,7 @@ impl CodingToolsRuntimeAdapter {
 
 impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError> {
+        self.validate_workspace_identity()?;
         let catalog = self.runtime.list_tools().map_err(normalize_runtime_error)?;
         validate_runtime_capabilities(&catalog)?;
         let probe = self.private_call("get_default_cwd", json!({}), None)?;
@@ -1902,12 +1955,15 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             .ok();
         let mut project_discovery = compact_project_discovery(
             &self.workspace,
+            &self.workspace_authority,
             &default_cwd,
             git_status.as_ref(),
             &runtime_discovery,
         );
         if let Some(object) = project_discovery.as_object_mut() {
-            if let Ok(context) = ContextService::new(&self.workspace, &default_cwd) {
+            if let Ok(context) =
+                ContextService::with_authority(self.workspace_authority.clone(), &default_cwd)
+            {
                 let metadata = context.discovery_metadata();
                 object.insert(
                     "important_files".into(),
@@ -1936,6 +1992,15 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         self.probe_private_result_semantics()
     }
 
+    fn validate_workspace_identity(&self) -> Result<(), FacadeError> {
+        self.workspace_authority
+            .input_path(".")
+            .map_err(normalize_path_authority_error)?;
+        self.workspace_lifetime_pin
+            .validate_current()
+            .map_err(normalize_path_authority_error)
+    }
+
     fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {
         let default_cwd = self
             .cached_default_cwd
@@ -1957,7 +2022,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         });
         if let (Some(target), Some(discovery)) = (
             data.as_object_mut(),
-            self.cached_project_discovery.as_ref().and_then(Value::as_object),
+            self.cached_project_discovery
+                .as_ref()
+                .and_then(Value::as_object),
         ) {
             for (key, value) in discovery {
                 target.insert(key.clone(), value.clone());
@@ -2040,20 +2107,19 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     }
 
     fn coding_context(&self, project_path: &str, objective: &str) -> Result<Value, FacadeError> {
-        ContextService::new(&self.workspace, project_path)
+        ContextService::with_authority(self.workspace_authority.clone(), project_path)
             .map_err(normalize_path_authority_error)
             .map(|service| service.prepare(objective))
     }
 
     fn coding_verification_plan(&self, project_path: &str) -> Result<Vec<Value>, FacadeError> {
-        let planner = VerificationPlanner::new(&self.workspace, project_path)
-            .map_err(normalize_path_authority_error)?;
+        let planner =
+            VerificationPlanner::with_authority(self.workspace_authority.clone(), project_path)
+                .map_err(normalize_path_authority_error)?;
         planner
             .plan()
             .into_iter()
-            .map(|step| {
-                serde_json::to_value(step).map_err(|_| command_state_internal_error())
-            })
+            .map(|step| serde_json::to_value(step).map_err(|_| command_state_internal_error()))
             .collect()
     }
 
@@ -2061,7 +2127,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         &self,
         expected: &Map<String, Value>,
     ) -> Result<(), FacadeError> {
-        CodingEditService::new(&self.workspace)
+        CodingEditService::with_authority(self.workspace_authority.clone())
             .map_err(normalize_coding_edit_error)?
             .apply_patch_preconditions(expected)
             .map_err(normalize_coding_edit_error)
@@ -2072,7 +2138,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         patch: &str,
         expected: &Map<String, Value>,
     ) -> Result<Vec<String>, FacadeError> {
-        CodingEditService::new(&self.workspace)
+        CodingEditService::with_authority(self.workspace_authority.clone())
             .map_err(normalize_coding_edit_error)?
             .apply_patch(patch, expected)
             .map_err(normalize_coding_edit_error)
@@ -2081,7 +2147,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     fn runtime_discovery(&self) -> Value {
         let summary = self.shell_executor.discovery_summary();
         let core_version = summary.powershell_core_version.map(|version| {
-            format!("{}.{}.{}.{}", version.major, version.minor, version.patch, version.revision)
+            format!(
+                "{}.{}.{}.{}",
+                version.major, version.minor, version.patch, version.revision
+            )
         });
         let auto_resolved = summary.auto_resolved.map(|kind| match kind {
             ResolvedShellKind::PowerShellCore => "pwsh",
@@ -2123,7 +2192,11 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     }
 
     fn filesystem(&mut self, arguments: Value) -> Result<Value, FacadeError> {
-        run_workspace_filesystem(&self.workspace, arguments)
+        run_workspace_filesystem_with_authority(
+            self.workspace_authority.clone(),
+            arguments,
+            FilesystemCancellation::default(),
+        )
     }
 
     fn apply_directory_change(&mut self, action: &str, path: &str) -> Result<Value, FacadeError> {
@@ -2134,11 +2207,13 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 false,
             ));
         }
-        let service = FilesystemService::active_workspace(&self.workspace)
+        let service = FilesystemService::from_authority(self.workspace_authority.clone())
             .map_err(normalize_filesystem_error)?;
         match action {
             "create_directory" => {
-                let result = service.create_directory(path).map_err(normalize_filesystem_error)?;
+                let result = service
+                    .create_directory(path)
+                    .map_err(normalize_filesystem_error)?;
                 Ok(json!({"action":action,"path":result.path,"changed":result.changed}))
             }
             "remove_empty_directory" => {
@@ -2156,10 +2231,8 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         mut request: ShellCommandRequest,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
-        let normalized_cwd = self.normalized_workspace_path(
-            request.execution.cwd.to_string_lossy().as_ref(),
-            false,
-        )?;
+        let normalized_cwd = self
+            .normalized_workspace_path(request.execution.cwd.to_string_lossy().as_ref(), false)?;
         let resolved_cwd = self.resolve_existing_workspace_path(&normalized_cwd)?;
         if !resolved_cwd.is_dir() {
             return Err(FacadeError::new(
@@ -2179,7 +2252,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             .toolbox
             .rewrite_command(kind, &request.execution.command)
             .map_err(normalize_toolbox_error)?;
-        let public_session_id = self.public_commands.start_session(&self.task_state, request.owner_task_id.clone())?;
+        let public_session_id = self
+            .public_commands
+            .start_session(&self.task_state, request.owner_task_id.clone())?;
         let outcome = (|| {
             let invocation = self
                 .shell_executor
@@ -2241,7 +2316,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         let object = arguments.as_object().ok_or_else(invalid_argument)?;
         if action == CommandControlAction::Read {
             let public_output_ref = required_string(object, "output_ref")?;
-            let stream = object.get("stream").and_then(Value::as_str).unwrap_or("stdout");
+            let stream = object
+                .get("stream")
+                .and_then(Value::as_str)
+                .unwrap_or("stdout");
             if let Some((retained_stream, content)) =
                 self.public_commands.local_output(public_output_ref)
             {
@@ -2253,7 +2331,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                     stream,
                     &content,
                     object.get("offset").and_then(Value::as_u64).unwrap_or(0),
-                    object.get("limit").and_then(Value::as_u64).unwrap_or(65_536),
+                    object
+                        .get("limit")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(65_536),
                 );
             }
             let private_output_ref = self
@@ -2270,7 +2351,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                     &raw,
                     public_output_ref,
                     object.get("offset").and_then(Value::as_u64).unwrap_or(0),
-                    object.get("limit").and_then(Value::as_u64).unwrap_or(65_536),
+                    object
+                        .get("limit")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(65_536),
                 );
             }
             let mut private = Map::new();
@@ -2425,9 +2509,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     ) -> Result<Value, FacadeError> {
         let object = arguments.as_object().ok_or_else(invalid_argument)?;
         let relative = required_string(object, "path")?;
-        let raw = FilesystemService::active_workspace(&self.workspace)
+        let raw = FilesystemService::from_authority(self.workspace_authority.clone())
             .map_err(normalize_filesystem_error)?
-            .read_all_bytes(relative)
+            .read_bytes_bounded(relative, 16 * 1024 * 1024)
             .map_err(|error| match error {
                 FilesystemError::NotFound | FilesystemError::Io => {
                     FacadeError::new(FacadeErrorCode::NotFound, "文档不可读", false)
@@ -2472,7 +2556,8 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         } else {
             String::new()
         };
-        let mut truncated = document_range_was_truncated(start, requested_end, max_lines, total_lines);
+        let mut truncated =
+            document_range_was_truncated(start, requested_end, max_lines, total_lines);
         if text.len() > max_bytes {
             let mut boundary = max_bytes.min(text.len());
             while boundary > 0 && !text.is_char_boundary(boundary) {
@@ -2517,9 +2602,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     ) -> Result<Value, FacadeError> {
         let object = arguments.as_object().ok_or_else(invalid_argument)?;
         let relative = required_string(object, "path")?;
-        let bytes = FilesystemService::active_workspace(&self.workspace)
+        let bytes = FilesystemService::from_authority(self.workspace_authority.clone())
             .map_err(normalize_filesystem_error)?
-            .read_all_bytes(relative)
+            .read_bytes_bounded(relative, 10 * 1024 * 1024)
             .map_err(|error| match error {
                 FilesystemError::NotFound | FilesystemError::Io => {
                     FacadeError::new(FacadeErrorCode::NotFound, "图像不可读", false)
@@ -2678,13 +2763,20 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         if !terminal.output_refs.is_empty() {
             data.insert(
                 "output_refs".into(),
-                Value::Array(terminal.output_refs.into_iter().map(Value::String).collect()),
+                Value::Array(
+                    terminal
+                        .output_refs
+                        .into_iter()
+                        .map(Value::String)
+                        .collect(),
+                ),
             );
         }
         match terminal.status {
-            CommandTerminalStatus::Completed => {
-                Some(stable_success(Value::Object(data), command_summary("completed")))
-            }
+            CommandTerminalStatus::Completed => Some(stable_success(
+                Value::Object(data),
+                command_summary("completed"),
+            )),
             CommandTerminalStatus::Failed => Some(stable_command_error(
                 FacadeErrorCode::ProcessFailed,
                 command_summary("failed"),
@@ -2708,17 +2800,24 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         }
     }
 
-
     fn current_command_snapshot(&self) -> Option<Value> {
-        let owner=self.task_state.current_owner()?;
-        let elapsed_ms=self.public_commands.stable_metadata(&owner.session_id).map(|(_,elapsed_ms)|elapsed_ms);
-        Some(json!({"state":"running","task_id":owner.task_id,"session_id":owner.session_id,"elapsed_ms":elapsed_ms}))
+        let owner = self.task_state.current_owner()?;
+        let elapsed_ms = self
+            .public_commands
+            .stable_metadata(&owner.session_id)
+            .map(|(_, elapsed_ms)| elapsed_ms);
+        Some(
+            json!({"state":"running","task_id":owner.task_id,"session_id":owner.session_id,"elapsed_ms":elapsed_ms}),
+        )
     }
 
     fn latest_terminal_command_snapshot(&self) -> Option<Value> {
-        let terminal=self.task_state.latest_terminal()?;
-        Some(json!({"task_id":terminal.owner.task_id,"session_id":terminal.owner.session_id,"status":terminal.status.as_str(),"exit_code":terminal.exit_code,"signal":terminal.signal,"timed_out":terminal.timed_out,"cancelled":terminal.cancelled,"output_refs":terminal.output_refs,"error_code":terminal.error_code,"completed_at_ms":terminal.completed_at_ms}))
-    }}
+        let terminal = self.task_state.latest_terminal()?;
+        Some(
+            json!({"task_id":terminal.owner.task_id,"session_id":terminal.owner.session_id,"status":terminal.status.as_str(),"exit_code":terminal.exit_code,"signal":terminal.signal,"timed_out":terminal.timed_out,"cancelled":terminal.cancelled,"output_refs":terminal.output_refs,"error_code":terminal.error_code,"completed_at_ms":terminal.completed_at_ms}),
+        )
+    }
+}
 
 impl CodingToolsRuntimeAdapter {
     fn normalize_command_result(
@@ -2760,7 +2859,8 @@ impl CodingToolsRuntimeAdapter {
             "session_id".into(),
             Value::String(public_session_id.to_string()),
         );
-        if let Some((task_id, elapsed_ms)) = self.public_commands.stable_metadata(public_session_id) {
+        if let Some((task_id, elapsed_ms)) = self.public_commands.stable_metadata(public_session_id)
+        {
             data.insert("task_id".into(), Value::String(task_id));
             data.insert("elapsed_ms".into(), Value::from(elapsed_ms));
         }
@@ -2779,10 +2879,26 @@ impl CodingToolsRuntimeAdapter {
         let result = match public_status {
             "running" => stable_success(Value::Object(data), command_summary("running")),
             "completed" => stable_success(Value::Object(data), command_summary("completed")),
-            "failed" => stable_command_error(FacadeErrorCode::ProcessFailed, command_summary("failed"), data),
-            "timed_out" => stable_command_error(FacadeErrorCode::ProcessTimedOut, command_summary("timed_out"), data),
-            "cancelled" => stable_command_error(FacadeErrorCode::ProcessCancelled, command_summary("cancelled"), data),
-            _ => stable_command_error(FacadeErrorCode::SessionUnavailable, command_summary("lost"), data),
+            "failed" => stable_command_error(
+                FacadeErrorCode::ProcessFailed,
+                command_summary("failed"),
+                data,
+            ),
+            "timed_out" => stable_command_error(
+                FacadeErrorCode::ProcessTimedOut,
+                command_summary("timed_out"),
+                data,
+            ),
+            "cancelled" => stable_command_error(
+                FacadeErrorCode::ProcessCancelled,
+                command_summary("cancelled"),
+                data,
+            ),
+            _ => stable_command_error(
+                FacadeErrorCode::SessionUnavailable,
+                command_summary("lost"),
+                data,
+            ),
         };
         if public_status != "running" {
             self.public_commands.mark_terminal(
@@ -2793,16 +2909,27 @@ impl CodingToolsRuntimeAdapter {
         }
         if let Some(data) = successful_kill_data {
             self.mark_owner_workflow_waiting_after_kill(public_session_id)?;
-            return Ok(stable_success(Value::Object(data), command_summary("cancelled")));
+            return Ok(stable_success(
+                Value::Object(data),
+                command_summary("cancelled"),
+            ));
         }
         Ok(result)
     }
 
     fn mark_owner_workflow_waiting_after_kill(&self, session_id: &str) -> Result<(), FacadeError> {
-        let Some(stored)=self.workflow_checkpoint.load().map_err(workflow_checkpoint_error)? else { return Ok(()); };
-        let mut checkpoint=stored;
+        let Some(stored) = self
+            .workflow_checkpoint
+            .load()
+            .map_err(workflow_checkpoint_error)?
+        else {
+            return Ok(());
+        };
+        let mut checkpoint = stored;
         settle_checkpoint_after_command_kill(&mut checkpoint, session_id);
-        self.workflow_checkpoint.save(&checkpoint).map_err(workflow_checkpoint_error)
+        self.workflow_checkpoint
+            .save(&checkpoint)
+            .map_err(workflow_checkpoint_error)
     }
 
     fn safe_command_output_for_session(&mut self, raw: &Value, public_session_id: &str) -> String {
@@ -2867,7 +2994,11 @@ impl CodingToolsRuntimeAdapter {
             data.insert("returned_bytes".into(), Value::from(returned_bytes));
             data.insert("content".into(), Value::String(content));
             if let Some(total_bytes) = structured
-                .and_then(|object| object.get("total_stream_bytes").or_else(|| object.get("total_bytes")))
+                .and_then(|object| {
+                    object
+                        .get("total_stream_bytes")
+                        .or_else(|| object.get("total_bytes"))
+                })
                 .and_then(Value::as_u64)
             {
                 data.insert("total_bytes".into(), Value::from(total_bytes));
@@ -2875,7 +3006,11 @@ impl CodingToolsRuntimeAdapter {
         } else {
             data.insert("returned_bytes".into(), Value::from(0u64));
             if let Some(total_bytes) = structured
-                .and_then(|object| object.get("total_stream_bytes").or_else(|| object.get("total_bytes")))
+                .and_then(|object| {
+                    object
+                        .get("total_stream_bytes")
+                        .or_else(|| object.get("total_bytes"))
+                })
                 .and_then(Value::as_u64)
             {
                 data.insert("total_bytes".into(), Value::from(total_bytes));
@@ -2958,49 +3093,93 @@ fn public_local_output_page(
     ))
 }
 
-fn public_stderr_page(raw: &Value, public_output_ref: &str, requested_offset: u64, limit: u64) -> Result<Value, FacadeError> {
-    let raw_content = raw.pointer("/structuredContent/content").and_then(Value::as_str).unwrap_or_default();
+fn public_stderr_page(
+    raw: &Value,
+    public_output_ref: &str,
+    requested_offset: u64,
+    limit: u64,
+) -> Result<Value, FacadeError> {
+    let raw_content = raw
+        .pointer("/structuredContent/content")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let public = public_command_stderr(raw_content);
     let total = public.len() as u64;
     let start = requested_offset.min(total) as usize;
-    if !public.is_char_boundary(start) { return Err(invalid_argument()); }
-    let mut end = start.saturating_add(limit.min(1_048_576) as usize).min(public.len());
-    while end > start && !public.is_char_boundary(end) { end -= 1; }
+    if !public.is_char_boundary(start) {
+        return Err(invalid_argument());
+    }
+    let mut end = start
+        .saturating_add(limit.min(1_048_576) as usize)
+        .min(public.len());
+    while end > start && !public.is_char_boundary(end) {
+        end -= 1;
+    }
     if end == start && start < public.len() {
-        end = public[start..].char_indices().nth(1).map(|(index, _)| start + index).unwrap_or(public.len());
+        end = public[start..]
+            .char_indices()
+            .nth(1)
+            .map(|(index, _)| start + index)
+            .unwrap_or(public.len());
     }
     let content = &public[start..end];
     let next_offset = (end < public.len()).then_some(end as u64);
-    Ok(stable_success(json!({
-        "output_ref":public_output_ref,
-        "stream":"stderr",
-        "offset":start as u64,
-        "requested_offset":requested_offset,
-        "limit":limit,
-        "returned_bytes":content.len(),
-        "content":content,
-        "next_offset":next_offset,
-        "total_bytes":total,
-        "truncated":next_offset.is_some()
-    }), "Command output read"))
+    Ok(stable_success(
+        json!({
+            "output_ref":public_output_ref,
+            "stream":"stderr",
+            "offset":start as u64,
+            "requested_offset":requested_offset,
+            "limit":limit,
+            "returned_bytes":content.len(),
+            "content":content,
+            "next_offset":next_offset,
+            "total_bytes":total,
+            "truncated":next_offset.is_some()
+        }),
+        "Command output read",
+    ))
 }
 
-fn document_range_was_truncated(start: usize, requested_end: Option<usize>, max_lines: usize, total_lines: usize) -> bool {
-    let requested_actual_end=requested_end.unwrap_or(total_lines).min(total_lines);
-    let limited_end=start.saturating_add(max_lines.saturating_sub(1)).min(total_lines);
+fn document_range_was_truncated(
+    start: usize,
+    requested_end: Option<usize>,
+    max_lines: usize,
+    total_lines: usize,
+) -> bool {
+    let requested_actual_end = requested_end.unwrap_or(total_lines).min(total_lines);
+    let limited_end = start
+        .saturating_add(max_lines.saturating_sub(1))
+        .min(total_lines);
     limited_end < requested_actual_end
 }
 
 fn settle_checkpoint_after_command_kill(checkpoint: &mut WorkflowCheckpoint, session_id: &str) {
-    if checkpoint.completed || checkpoint.current_session_id.as_deref()!=Some(session_id) { return; }
-    checkpoint.current_session_id=None; checkpoint.command_inflight=false;
-    if checkpoint.next_step.is_none() { checkpoint.next_step=Some(if checkpoint.is_coding_task(){"verify"}else{"resume"}.into()); }
+    if checkpoint.completed || checkpoint.current_session_id.as_deref() != Some(session_id) {
+        return;
+    }
+    checkpoint.current_session_id = None;
+    checkpoint.command_inflight = false;
+    if checkpoint.next_step.is_none() {
+        checkpoint.next_step = Some(
+            if checkpoint.is_coding_task() {
+                "verify"
+            } else {
+                "resume"
+            }
+            .into(),
+        );
+    }
 }
 
 fn command_summary(status: &str) -> &'static str {
     match status {
-        "running" => "Command running", "completed" => "Command completed", "failed" => "Command failed",
-        "cancelled" => "Command cancelled", "timed_out" => "Command timed out", _ => "Command lost",
+        "running" => "Command running",
+        "completed" => "Command completed",
+        "failed" => "Command failed",
+        "cancelled" => "Command cancelled",
+        "timed_out" => "Command timed out",
+        _ => "Command lost",
     }
 }
 
@@ -3089,11 +3268,7 @@ fn normalize_task_state_error(_error: CommandTaskStateError) -> FacadeError {
 }
 
 fn workflow_checkpoint_error<E: std::fmt::Display>(_error: E) -> FacadeError {
-    FacadeError::new(
-        FacadeErrorCode::Internal,
-        "工作流恢复状态不可用",
-        false,
-    )
+    FacadeError::new(FacadeErrorCode::Internal, "工作流恢复状态不可用", false)
 }
 
 fn command_state_internal_error() -> FacadeError {
@@ -3241,16 +3416,17 @@ pub(crate) fn validate_workspace_context_probe(
 
 fn compact_project_discovery(
     workspace: &Path,
+    authority: &PathAuthority,
     default_cwd: &str,
     git_status: Option<&Value>,
     runtime: &Value,
 ) -> Value {
     const MAX_COMPACT_MANIFEST_BYTES: usize = 128 * 1024;
-    let project_root = PathAuthority::active_workspace(workspace)
+    let project_root = authority
+        .resolve_existing(default_cwd)
         .ok()
-        .and_then(|authority| authority.resolve_existing(default_cwd).ok())
         .unwrap_or_else(|| workspace.to_path_buf());
-    let filesystem = FilesystemService::active_workspace(workspace).ok();
+    let filesystem = FilesystemService::from_authority(authority.clone()).ok();
     let manifest_text = |name: &str| {
         let relative = Path::new(default_cwd)
             .join(name)
@@ -3262,12 +3438,11 @@ fn compact_project_discovery(
             .ok()
             .and_then(|bytes| String::from_utf8(bytes).ok())
     };
-    let package_json = manifest_text("package.json")
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-    let cargo_toml = manifest_text("Cargo.toml")
-        .and_then(|text| text.parse::<toml::Value>().ok());
-    let pyproject = manifest_text("pyproject.toml")
-        .and_then(|text| text.parse::<toml::Value>().ok());
+    let package_json =
+        manifest_text("package.json").and_then(|text| serde_json::from_str::<Value>(&text).ok());
+    let cargo_toml = manifest_text("Cargo.toml").and_then(|text| text.parse::<toml::Value>().ok());
+    let pyproject =
+        manifest_text("pyproject.toml").and_then(|text| text.parse::<toml::Value>().ok());
 
     let package_field = |name: &str| {
         package_json
@@ -3308,11 +3483,20 @@ fn compact_project_discovery(
         (false, true, true) => Some("rust_python"),
         (false, false, false) => None,
     };
+    let project_file_exists = |name: &str| {
+        let relative = Path::new(default_cwd)
+            .join(name)
+            .to_string_lossy()
+            .replace('\\', "/");
+        authority
+            .resolve_existing(&relative)
+            .is_ok_and(|path| path.is_file())
+    };
     let package_manager = package_field("packageManager")
         .and_then(|value| value.split('@').next().map(str::to_string))
-        .or_else(|| project_root.join("pnpm-lock.yaml").exists().then_some("pnpm".to_string()))
-        .or_else(|| project_root.join("yarn.lock").exists().then_some("yarn".to_string()))
-        .or_else(|| project_root.join("package-lock.json").exists().then_some("npm".to_string()))
+        .or_else(|| project_file_exists("pnpm-lock.yaml").then_some("pnpm".to_string()))
+        .or_else(|| project_file_exists("yarn.lock").then_some("yarn".to_string()))
+        .or_else(|| project_file_exists("package-lock.json").then_some("npm".to_string()))
         .or_else(|| has_rust.then_some("cargo".to_string()));
     let has_npm_build = package_json
         .as_ref()
@@ -3412,13 +3596,20 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
         Self::with_adapter(adapter, policy)
     }
 
-
     pub(crate) fn command_task_state(&self) -> CommandTaskStateStore {
         self.adapter.command_task_state()
     }
 
     pub(crate) fn workspace_path(&self) -> &Path {
         &self.adapter.workspace
+    }
+
+    pub(crate) fn workspace_authority(&self) -> PathAuthority {
+        self.adapter.workspace_authority.clone()
+    }
+
+    pub(crate) fn validate_workspace_identity(&self) -> Result<(), FacadeError> {
+        self.adapter.validate_workspace_identity()
     }
 
     pub(crate) fn cancel_public_command_session(
@@ -3433,7 +3624,9 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
     }
 
     pub(crate) fn retain_local_output(&mut self, stream: &str, content: String) -> String {
-        self.adapter.public_commands.retain_local_output(stream, content)
+        self.adapter
+            .public_commands
+            .retain_local_output(stream, content)
     }
 
     pub fn into_runtime(self) -> CodingToolsRuntime {
@@ -3514,8 +3707,18 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
     fn durable_workflow_current_snapshot(&self) -> Option<Value> {
         let stored = self.adapter.load_workflow_checkpoint().ok().flatten()?;
         let checkpoint: WorkflowCheckpoint = serde_json::from_value(stored).ok()?;
-        if checkpoint.completed { return None; }
-        let state = if checkpoint.current_session_id.is_some() || checkpoint.command_inflight || checkpoint.patch_inflight || checkpoint.directory_inflight { "running" } else { "waiting" };
+        if checkpoint.completed {
+            return None;
+        }
+        let state = if checkpoint.current_session_id.is_some()
+            || checkpoint.command_inflight
+            || checkpoint.patch_inflight
+            || checkpoint.directory_inflight
+        {
+            "running"
+        } else {
+            "waiting"
+        };
         Some(json!({
             "state":state, "task_id":checkpoint.workflow_id, "kind":if checkpoint.is_coding_task(){"coding_workflow"}else{"workflow"},
             "current_step":checkpoint.current_step, "next_step":checkpoint.next_step,
@@ -3528,14 +3731,39 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let current_workflow = self.durable_workflow_current_snapshot();
         let current_command = self.adapter.current_command_snapshot();
         let last_command = self.adapter.latest_terminal_command_snapshot();
-        let state = if current_command.is_some() || current_workflow.as_ref().and_then(|v|v.get("state")).and_then(Value::as_str)==Some("running") { "active" }
-            else if current_workflow.is_some() { "waiting" } else { "idle" };
-        let mut aggregate=json!({"state":state,"current_workflow":current_workflow,"current_command":current_command,"last_command":last_command,"last_terminal_command":last_command});
-        if let (Some(object),Some(workflow))=(aggregate.as_object_mut(),current_workflow.as_ref().and_then(Value::as_object)){
-            for key in ["task_id","kind","current_step","next_step"] { if let Some(value)=workflow.get(key){ object.insert(key.into(),value.clone()); } }
-        } else if let (Some(object),Some(command))=(aggregate.as_object_mut(),current_command.as_ref().and_then(Value::as_object)){
-            object.insert("kind".into(),Value::String("command".into()));
-            for key in ["task_id","session_id"] { if let Some(value)=command.get(key){ object.insert(key.into(),value.clone()); } }
+        let state = if current_command.is_some()
+            || current_workflow
+                .as_ref()
+                .and_then(|v| v.get("state"))
+                .and_then(Value::as_str)
+                == Some("running")
+        {
+            "active"
+        } else if current_workflow.is_some() {
+            "waiting"
+        } else {
+            "idle"
+        };
+        let mut aggregate = json!({"state":state,"current_workflow":current_workflow,"current_command":current_command,"last_command":last_command,"last_terminal_command":last_command});
+        if let (Some(object), Some(workflow)) = (
+            aggregate.as_object_mut(),
+            current_workflow.as_ref().and_then(Value::as_object),
+        ) {
+            for key in ["task_id", "kind", "current_step", "next_step"] {
+                if let Some(value) = workflow.get(key) {
+                    object.insert(key.into(), value.clone());
+                }
+            }
+        } else if let (Some(object), Some(command)) = (
+            aggregate.as_object_mut(),
+            current_command.as_ref().and_then(Value::as_object),
+        ) {
+            object.insert("kind".into(), Value::String("command".into()));
+            for key in ["task_id", "session_id"] {
+                if let Some(value) = command.get(key) {
+                    object.insert(key.into(), value.clone());
+                }
+            }
         }
         aggregate
     }
@@ -3546,7 +3774,9 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         };
         let mut checkpoint: WorkflowCheckpoint =
             serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
-        if checkpoint.completed { return Ok(false); }
+        if checkpoint.completed {
+            return Ok(false);
+        }
         if let Some(session_id) = checkpoint.current_session_id.clone() {
             let _ = self.adapter.control_command(
                 CommandControlAction::Kill,
@@ -3554,7 +3784,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 None,
             );
         }
-        if !checkpoint.is_coding_task() { self.adapter.clear_workflow_checkpoint()?; return Ok(true); }
+        if !checkpoint.is_coding_task() {
+            self.adapter.clear_workflow_checkpoint()?;
+            return Ok(true);
+        }
         checkpoint.command_inflight = false;
         checkpoint.current_session_id = None;
         checkpoint.current_step = Some("cancelled".into());
@@ -3619,6 +3852,16 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             );
             project(CurrentTaskStatus::Idle);
             return Err(FacadeCallError::Denied(denied));
+        }
+        if name != "task_control" {
+            if let Err(error) = self.adapter.validate_workspace_identity() {
+                project(
+                    CurrentTaskStatus::project(kind, summary, TaskExecutionState::Blocked)
+                        .expect("Blocked is valid"),
+                );
+                project(CurrentTaskStatus::Idle);
+                return Ok(error.to_mcp_result());
+            }
         }
         if !public_workspace_paths_valid(name, &arguments) {
             project(
@@ -3725,9 +3968,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let data = result
             .pointer_mut("/structuredContent/data")
             .and_then(Value::as_object_mut)
-            .ok_or_else(|| FacadeError::new(FacadeErrorCode::Internal, "工作区上下文投影无效", false))?;
-        data.insert("permission_mode".into(), Value::String(permission_mode.into()));
-        data.insert("workspace_scope".into(), Value::String("active_workspace".into()));
+            .ok_or_else(|| {
+                FacadeError::new(FacadeErrorCode::Internal, "工作区上下文投影无效", false)
+            })?;
+        data.insert(
+            "permission_mode".into(),
+            Value::String(permission_mode.into()),
+        );
+        data.insert(
+            "workspace_scope".into(),
+            Value::String("active_workspace".into()),
+        );
         data.insert(
             "ordinary_route_token".into(),
             Value::String("current_windows_user".into()),
@@ -3740,7 +3991,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         data.insert("selected_route".into(), Value::String("ordinary".into()));
         data.insert(
             "shell_discovery".into(),
-            discovery.get("shells").cloned().unwrap_or_else(|| json!({})),
+            discovery
+                .get("shells")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
         );
         data.insert(
             "capabilities".into(),
@@ -3762,27 +4016,46 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         );
         data.insert("current_task".into(), self.task_aggregate_snapshot());
         data.insert("detail".into(), Value::String(detail.into()));
-        data.insert("coding_profile".into(), Value::String("coding-agent-v1".into()));
+        data.insert(
+            "coding_profile".into(),
+            Value::String("coding-agent-v1".into()),
+        );
         if detail == "full" {
             data.insert(
                 "coding_capabilities".into(),
                 json!([
-                    "workspace_discovery","project_instructions","context_search","command_execution",
-                    "persistent_task","resume","patch_edit","test_build","git_status_diff",
-                    "cancellation","output_continuation","typed_errors"
+                    "workspace_discovery",
+                    "project_instructions",
+                    "context_search",
+                    "command_execution",
+                    "persistent_task",
+                    "resume",
+                    "patch_edit",
+                    "test_build",
+                    "git_status_diff",
+                    "cancellation",
+                    "output_continuation",
+                    "typed_errors"
                 ]),
             );
         }
         Ok(result)
     }
 
-    fn policy_explanation(&self, mode: PermissionMode, tool_name: &str, arguments: &Value) -> Value {
+    fn policy_explanation(
+        &self,
+        mode: PermissionMode,
+        tool_name: &str,
+        arguments: &Value,
+    ) -> Value {
         let decision = self.policy.decide_public(mode, tool_name, arguments);
         let (route, rule_category, remediation) = if decision.allowed {
             ("ordinary", "ordinary_allowed", "当前 ordinary route 可执行")
         } else {
             match decision.deny_reason {
-                Some(DenyReason::PrivilegedRouteNotAvailable | DenyReason::ElevatedExecNotReviewed) => (
+                Some(
+                    DenyReason::PrivilegedRouteNotAvailable | DenyReason::ElevatedExecNotReviewed,
+                ) => (
                     "elevated_required",
                     "privileged_route",
                     "需要用户显式管理员授权与可用 Broker route",
@@ -3853,7 +4126,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             return self.coding_agent_workflow_phase(mode, action, phase, object, request_id);
         }
 
-        let dry_run_requested = object.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+        let dry_run_requested = object
+            .get("dry_run")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let has_directory_changes = object
             .get("directory_changes")
             .and_then(Value::as_array)
@@ -3878,55 +4154,57 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         {
             let mut prepared = object.clone();
             prepared.insert("phase".into(), Value::String("prepare".into()));
-            return self.coding_agent_workflow_phase(
-                mode,
-                action,
-                "prepare",
-                &prepared,
-                request_id,
-            );
+            return self
+                .coding_agent_workflow_phase(mode, action, "prepare", &prepared, request_id);
         }
 
         if !dry_run_requested && !has_directory_changes && !has_commands {
             if let Some(patch) = patch {
                 if let Some(stored) = self.adapter.load_workflow_checkpoint()? {
-                let checkpoint: WorkflowCheckpoint =
-                    serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
-                if checkpoint.is_coding_task() && !checkpoint.completed && checkpoint.next_step.as_deref() == Some("edit") {
-                    let original = object_args(&checkpoint.arguments)?;
-                    let original_action = required_string(original, "action")?;
-                    let same_objective = object
-                        .get("objective")
-                        .and_then(Value::as_str)
-                        .map(|value| checkpoint.objective.as_deref() == Some(value))
-                        .unwrap_or(true);
-                    let requested_path = object.get("path").and_then(Value::as_str).unwrap_or(".");
-                    let original_path = original.get("path").and_then(Value::as_str).unwrap_or(".");
-                    if original_action != action || !same_objective || requested_path != original_path {
-                        return Err(FacadeError::new(
-                            FacadeErrorCode::SessionUnavailable,
-                            "存在未完成的 coding task；旧客户端请求与该 task 不匹配",
-                            false,
-                        ));
+                    let checkpoint: WorkflowCheckpoint =
+                        serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
+                    if checkpoint.is_coding_task()
+                        && !checkpoint.completed
+                        && checkpoint.next_step.as_deref() == Some("edit")
+                    {
+                        let original = object_args(&checkpoint.arguments)?;
+                        let original_action = required_string(original, "action")?;
+                        let same_objective = object
+                            .get("objective")
+                            .and_then(Value::as_str)
+                            .map(|value| checkpoint.objective.as_deref() == Some(value))
+                            .unwrap_or(true);
+                        let requested_path =
+                            object.get("path").and_then(Value::as_str).unwrap_or(".");
+                        let original_path =
+                            original.get("path").and_then(Value::as_str).unwrap_or(".");
+                        if original_action != action
+                            || !same_objective
+                            || requested_path != original_path
+                        {
+                            return Err(FacadeError::new(
+                                FacadeErrorCode::SessionUnavailable,
+                                "存在未完成的 coding task；旧客户端请求与该 task 不匹配",
+                                false,
+                            ));
+                        }
+                        let mut edited = Map::new();
+                        edited.insert("action".into(), Value::String(action.to_string()));
+                        edited.insert("phase".into(), Value::String("edit".into()));
+                        edited.insert(
+                            "task_id".into(),
+                            Value::String(checkpoint.workflow_id.clone()),
+                        );
+                        edited.insert("patch".into(), Value::String(patch.to_string()));
+                        edited.insert(
+                            "expected_files".into(),
+                            Value::Object(expected_files_from_checkpoint(&checkpoint)),
+                        );
+                        return self.coding_agent_workflow_phase(
+                            mode, action, "edit", &edited, request_id,
+                        );
                     }
-                    let mut edited = Map::new();
-                    edited.insert("action".into(), Value::String(action.to_string()));
-                    edited.insert("phase".into(), Value::String("edit".into()));
-                    edited.insert("task_id".into(), Value::String(checkpoint.workflow_id.clone()));
-                    edited.insert("patch".into(), Value::String(patch.to_string()));
-                    edited.insert(
-                        "expected_files".into(),
-                        Value::Object(expected_files_from_checkpoint(&checkpoint)),
-                    );
-                    return self.coding_agent_workflow_phase(
-                        mode,
-                        action,
-                        "edit",
-                        &edited,
-                        request_id,
-                    );
                 }
-            }
             }
         }
         let project_path = match object.get("path") {
@@ -3939,7 +4217,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             .and_then(Value::as_str)
             .ok_or_else(|| FacadeError::new(FacadeErrorCode::Internal, "项目上下文无效", false))?
             .to_string();
-        let dry_run = object.get("dry_run").and_then(Value::as_bool).unwrap_or(false);
+        let dry_run = object
+            .get("dry_run")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if dry_run {
             let mut actual = arguments.clone();
             if let Some(actual) = actual.as_object_mut() {
@@ -3997,10 +4278,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let has_work = !directory_changes.is_empty() || patch.is_some() || !commands.is_empty();
         let directory_count = directory_changes.len();
         let command_count = commands.len();
-        if has_work { ensure_checkpoint_slot_available(&self.adapter)?; }
-        let mut checkpoint = has_work.then(|| {
-            WorkflowCheckpoint::new(next_public_handle("lb-workflow"), arguments.clone())
-        });
+        if has_work {
+            ensure_checkpoint_slot_available(&self.adapter)?;
+        }
+        let mut checkpoint = has_work
+            .then(|| WorkflowCheckpoint::new(next_public_handle("lb-workflow"), arguments.clone()));
         if let Some(checkpoint) = checkpoint.as_ref() {
             persist_agent_checkpoint(&self.adapter, checkpoint)?;
         }
@@ -4031,16 +4313,20 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         let mut directory_results = Vec::with_capacity(directory_changes.len());
         for (index, (directory_action, directory_path)) in directory_changes.iter().enumerate() {
             if let Some(checkpoint) = checkpoint.as_mut() {
-                checkpoint.current_step = Some(format!("directory {}/{}", index + 1, directory_count));
-                checkpoint.next_step = Some(if index + 1 < directory_count {
-                    "directory"
-                } else if patch.is_some() {
-                    "patch"
-                } else if command_count > 0 {
-                    "command"
-                } else {
-                    "complete"
-                }.into());
+                checkpoint.current_step =
+                    Some(format!("directory {}/{}", index + 1, directory_count));
+                checkpoint.next_step = Some(
+                    if index + 1 < directory_count {
+                        "directory"
+                    } else if patch.is_some() {
+                        "patch"
+                    } else if command_count > 0 {
+                        "command"
+                    } else {
+                        "complete"
+                    }
+                    .into(),
+                );
                 checkpoint.directory_inflight = true;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
@@ -4067,7 +4353,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             }
             if let Some(checkpoint) = checkpoint.as_mut() {
                 checkpoint.current_step = Some("patch".into());
-                checkpoint.next_step = Some(if command_count > 0 { "command" } else { "complete" }.into());
+                checkpoint.next_step = Some(
+                    if command_count > 0 {
+                        "command"
+                    } else {
+                        "complete"
+                    }
+                    .into(),
+                );
                 checkpoint.patch_inflight = true;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
@@ -4106,7 +4399,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             let effective_workdir = join_project_workdir(&selected_path, workdir)?;
             if let Some(checkpoint) = checkpoint.as_mut() {
                 checkpoint.current_step = Some(format!("command {}/{}", index + 1, command_count));
-                checkpoint.next_step = Some(if index + 1 < command_count { "command" } else { "complete" }.into());
+                checkpoint.next_step = Some(
+                    if index + 1 < command_count {
+                        "command"
+                    } else {
+                        "complete"
+                    }
+                    .into(),
+                );
                 checkpoint.command_inflight = true;
                 checkpoint.current_session_id = None;
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
@@ -4134,7 +4434,9 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         .get("stdin")
                         .and_then(Value::as_str)
                         .map(str::to_string),
-                    owner_task_id: checkpoint.as_ref().map(|checkpoint| checkpoint.workflow_id.clone()),
+                    owner_task_id: checkpoint
+                        .as_ref()
+                        .map(|checkpoint| checkpoint.workflow_id.clone()),
                 },
                 request_id,
             )?;
@@ -4325,10 +4627,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 let modified_files = match self.adapter.apply_coding_patch(patch, expected) {
                     Ok(modified_files) => modified_files,
                     Err(error) => {
-                    checkpoint.patch_inflight = false;
-                    checkpoint.failure = Some(json!({"code":error.code.as_str()}));
-                    persist_agent_checkpoint(&self.adapter, &checkpoint)?;
-                    return Err(error);
+                        checkpoint.patch_inflight = false;
+                        checkpoint.failure = Some(json!({"code":error.code.as_str()}));
+                        persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+                        return Err(error);
                     }
                 };
                 checkpoint.patch_inflight = false;
@@ -4362,7 +4664,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 let task_id = required_string(object, "task_id")?;
                 let mut checkpoint = self.load_coding_checkpoint(task_id, action, request_id)?;
                 if checkpoint.completed {
-                    return Ok(coding_checkpoint_result(&checkpoint, "persisted", "Coding task already persisted"));
+                    return Ok(coding_checkpoint_result(
+                        &checkpoint,
+                        "persisted",
+                        "Coding task already persisted",
+                    ));
                 }
                 if checkpoint.current_session_id.is_some() {
                     return Ok(coding_checkpoint_result(
@@ -4396,7 +4702,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     .ok_or_else(command_state_internal_error)?
                     .to_string();
                 if entering_verify {
-                    checkpoint.verification_plan = self.adapter.coding_verification_plan(&selected_path)?;
+                    checkpoint.verification_plan =
+                        self.adapter.coding_verification_plan(&selected_path)?;
                     checkpoint.commands = checkpoint.verification_plan.clone();
                 }
                 checkpoint.current_step = Some("verify".into());
@@ -4453,14 +4760,19 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     };
                     if result.get("isError").and_then(Value::as_bool) == Some(true) {
                         checkpoint.command_inflight = false;
-                        checkpoint.failure = Some(json!({"code":"verification_failed","step":index}));
+                        checkpoint.failure =
+                            Some(json!({"code":"verification_failed","step":index}));
                         checkpoint.next_step = Some("verify".into());
                         persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                         return Ok(result);
                     }
                     let data = stable_data(&result);
                     if let Some(output_ref) = data.get("output_ref").and_then(Value::as_str) {
-                        if !checkpoint.output_refs.iter().any(|value| value == output_ref) {
+                        if !checkpoint
+                            .output_refs
+                            .iter()
+                            .any(|value| value == output_ref)
+                        {
                             checkpoint.output_refs.push(output_ref.to_string());
                         }
                     }
@@ -4655,16 +4967,22 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.command_index = checkpoint.command_index.saturating_add(1);
                 checkpoint.command_results.push(data.clone());
                 if let Some(output_ref) = data.get("output_ref").and_then(Value::as_str) {
-                    if !checkpoint.output_refs.iter().any(|value| value == output_ref) {
+                    if !checkpoint
+                        .output_refs
+                        .iter()
+                        .any(|value| value == output_ref)
+                    {
                         checkpoint.output_refs.push(output_ref.to_string());
                     }
                 }
                 checkpoint.current_step = Some("verify".into());
-                checkpoint.next_step = Some(if checkpoint.command_index < checkpoint.verification_plan.len() {
-                    "verify".into()
-                } else {
-                    "persist".into()
-                });
+                checkpoint.next_step = Some(
+                    if checkpoint.command_index < checkpoint.verification_plan.len() {
+                        "verify".into()
+                    } else {
+                        "persist".into()
+                    },
+                );
                 persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                 Ok(coding_checkpoint_result(
                     &checkpoint,
@@ -4673,7 +4991,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ))
             }
             Some("failed" | "cancelled" | "timed_out" | "lost") => {
-                let status = data.get("status").and_then(Value::as_str).unwrap_or("failed");
+                let status = data
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("failed");
                 checkpoint.command_inflight = false;
                 checkpoint.current_session_id = None;
                 checkpoint.failure = Some(json!({"code":"verification_terminal","status":status}));
@@ -4700,11 +5021,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
         let stored = self.adapter.load_workflow_checkpoint()?.ok_or_else(|| {
-            FacadeError::new(
-                FacadeErrorCode::NotFound,
-                "没有可恢复的工作流",
-                false,
-            )
+            FacadeError::new(FacadeErrorCode::NotFound, "没有可恢复的工作流", false)
         })?;
         let mut checkpoint: WorkflowCheckpoint =
             serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
@@ -4795,7 +5112,9 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         if checkpoint.directory_index > directory_changes.len()
             || checkpoint.command_index > commands.len()
         {
-            return Err(workflow_checkpoint_error("checkpoint progress out of range"));
+            return Err(workflow_checkpoint_error(
+                "checkpoint progress out of range",
+            ));
         }
 
         let workspace = self.adapter.workspace_context(request_id)?;
@@ -4880,16 +5199,23 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             .enumerate()
             .skip(checkpoint.directory_index)
         {
-            checkpoint.current_step = Some(format!("directory {}/{}", index + 1, directory_changes.len()));
-            checkpoint.next_step = Some(if index + 1 < directory_changes.len() {
-                "directory"
-            } else if patch.is_some_and(|_| !checkpoint.patch_applied) {
-                "patch"
-            } else if checkpoint.command_index < commands.len() {
-                "command"
-            } else {
-                "complete"
-            }.into());
+            checkpoint.current_step = Some(format!(
+                "directory {}/{}",
+                index + 1,
+                directory_changes.len()
+            ));
+            checkpoint.next_step = Some(
+                if index + 1 < directory_changes.len() {
+                    "directory"
+                } else if patch.is_some_and(|_| !checkpoint.patch_applied) {
+                    "patch"
+                } else if checkpoint.command_index < commands.len() {
+                    "command"
+                } else {
+                    "complete"
+                }
+                .into(),
+            );
             checkpoint.directory_inflight = true;
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
             let result = self
@@ -4910,7 +5236,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ));
             }
             checkpoint.current_step = Some("patch".into());
-            checkpoint.next_step = Some(if checkpoint.command_index < commands.len() { "command" } else { "complete" }.into());
+            checkpoint.next_step = Some(
+                if checkpoint.command_index < commands.len() {
+                    "command"
+                } else {
+                    "complete"
+                }
+                .into(),
+            );
             checkpoint.patch_inflight = true;
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
             self.adapter
@@ -4950,7 +5283,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             }
             let effective_workdir = join_project_workdir(&selected_path, workdir)?;
             checkpoint.current_step = Some(format!("command {}/{}", index + 1, commands.len()));
-            checkpoint.next_step = Some(if index + 1 < commands.len() { "command" } else { "complete" }.into());
+            checkpoint.next_step = Some(
+                if index + 1 < commands.len() {
+                    "command"
+                } else {
+                    "complete"
+                }
+                .into(),
+            );
             checkpoint.command_inflight = true;
             checkpoint.current_session_id = None;
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
@@ -5058,7 +5398,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         )
         .map_err(|_| invalid_argument())?;
         let workdir = object.get("workdir").and_then(Value::as_str).unwrap_or(".");
-        if object.get("dry_run").and_then(Value::as_bool).unwrap_or(false) {
+        if object
+            .get("dry_run")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             let mut actual = arguments.clone();
             if let Some(actual) = actual.as_object_mut() {
                 actual.remove("dry_run");
@@ -5067,7 +5411,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             if let Some(data) = explanation.as_object_mut() {
                 data.insert("status".into(), Value::String("completed".into()));
             }
-            return Ok(stable_success(explanation, "Command policy explained without execution"));
+            return Ok(stable_success(
+                explanation,
+                "Command policy explained without execution",
+            ));
         }
         let spec = ShellExecutionSpec {
             shell,
@@ -5115,7 +5462,9 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         };
         let allowed = match action {
             CommandControlAction::Poll => &["action", "session_id", "wait_ms"][..],
-            CommandControlAction::Read => &["action", "output_ref", "stream", "offset", "limit"][..],
+            CommandControlAction::Read => {
+                &["action", "output_ref", "stream", "offset", "limit"][..]
+            }
             CommandControlAction::Write => &["action", "session_id", "chars", "wait_ms"][..],
             CommandControlAction::Kill => &["action", "session_id", "signal", "wait_ms"][..],
         };
@@ -5153,11 +5502,36 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             _ => return Err(invalid_argument()),
         };
         let allowed = match action {
-            GitWorkflowAction::Status => &["action", "path", "include_untracked", "max_entries"][..],
-            GitWorkflowAction::Diff => &["action", "path", "paths", "staged", "unstaged", "context_lines", "max_bytes"][..],
+            GitWorkflowAction::Status => {
+                &["action", "path", "include_untracked", "max_entries"][..]
+            }
+            GitWorkflowAction::Diff => &[
+                "action",
+                "path",
+                "paths",
+                "staged",
+                "unstaged",
+                "context_lines",
+                "max_bytes",
+            ][..],
             GitWorkflowAction::Log => &["action", "path", "ref", "max_count", "skip"][..],
-            GitWorkflowAction::Show => &["action", "path", "paths", "rev", "context_lines", "max_bytes", "include_patch"][..],
-            GitWorkflowAction::Blame => &["action", "path", "rev", "start_line", "end_line", "max_lines"][..],
+            GitWorkflowAction::Show => &[
+                "action",
+                "path",
+                "paths",
+                "rev",
+                "context_lines",
+                "max_bytes",
+                "include_patch",
+            ][..],
+            GitWorkflowAction::Blame => &[
+                "action",
+                "path",
+                "rev",
+                "start_line",
+                "end_line",
+                "max_lines",
+            ][..],
         };
         ensure_only_keys(object, allowed)?;
         if action == GitWorkflowAction::Blame {
@@ -5179,7 +5553,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "inspect" => {
                 ensure_only_keys(
                     object,
-                    &["action", "path", "start_line", "end_line", "max_lines", "max_bytes"],
+                    &[
+                        "action",
+                        "path",
+                        "start_line",
+                        "end_line",
+                        "max_lines",
+                        "max_bytes",
+                    ],
                 )?;
                 let path = required_string(object, "path")?;
                 if let (Some(start), Some(end)) = (
@@ -5202,20 +5583,41 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ensure_only_keys(object, &["action", "path", "content"])?;
                 let requested = required_string(object, "path")?;
                 match self.adapter.normalize_workspace_path(requested, false) {
-                    Ok(_) => return Err(FacadeError::new(FacadeErrorCode::FileChanged, "document target already exists", false)),
-                    Err(error) if error.code == FacadeErrorCode::NotFound => {},
+                    Ok(_) => {
+                        return Err(FacadeError::new(
+                            FacadeErrorCode::FileChanged,
+                            "document target already exists",
+                            false,
+                        ));
+                    }
+                    Err(error) if error.code == FacadeErrorCode::NotFound => {}
                     Err(error) => return Err(error),
                 }
                 let path = self.adapter.normalize_workspace_path(requested, true)?;
-                let content = object.get("content").and_then(Value::as_str).ok_or_else(invalid_argument)?;
+                let content = object
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .ok_or_else(invalid_argument)?;
                 let patch = document_add_patch(&path, content);
-                if let Err(error) = self.adapter.apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id) {
-                    if error.code == FacadeErrorCode::ProcessFailed && self.adapter.normalize_workspace_path(&path, false).is_ok() {
-                        return Err(FacadeError::new(FacadeErrorCode::FileChanged, "document target was created concurrently", false));
+                if let Err(error) = self
+                    .adapter
+                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)
+                {
+                    if error.code == FacadeErrorCode::ProcessFailed
+                        && self.adapter.normalize_workspace_path(&path, false).is_ok()
+                    {
+                        return Err(FacadeError::new(
+                            FacadeErrorCode::FileChanged,
+                            "document target was created concurrently",
+                            false,
+                        ));
                     }
                     return Err(error);
                 }
-                Ok(stable_success(json!({"action":"create","path":path,"created":true}), "Document created"))
+                Ok(stable_success(
+                    json!({"action":"create","path":path,"created":true}),
+                    "Document created",
+                ))
             }
             "convert" => {
                 ensure_only_keys(object, &["action", "source", "path"])?;
@@ -5547,11 +5949,22 @@ fn object_args(value: &Value) -> Result<&Map<String, Value>, FacadeError> {
     value.as_object().ok_or_else(invalid_argument)
 }
 
-fn ensure_checkpoint_slot_available<A: WorkspaceRuntimeAdapter>(adapter: &A) -> Result<(), FacadeError> {
-    let Some(stored) = adapter.load_workflow_checkpoint()? else { return Ok(()); };
-    let checkpoint: WorkflowCheckpoint = serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
-    if checkpoint.completed { return Ok(()); }
-    Err(FacadeError::new(FacadeErrorCode::SessionUnavailable, "an incomplete durable workflow already exists; resume or cancel it before starting another side-effecting workflow", false))
+fn ensure_checkpoint_slot_available<A: WorkspaceRuntimeAdapter>(
+    adapter: &A,
+) -> Result<(), FacadeError> {
+    let Some(stored) = adapter.load_workflow_checkpoint()? else {
+        return Ok(());
+    };
+    let checkpoint: WorkflowCheckpoint =
+        serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
+    if checkpoint.completed {
+        return Ok(());
+    }
+    Err(FacadeError::new(
+        FacadeErrorCode::SessionUnavailable,
+        "an incomplete durable workflow already exists; resume or cancel it before starting another side-effecting workflow",
+        false,
+    ))
 }
 
 fn ensure_coding_git_baseline<A: WorkspaceRuntimeAdapter>(
@@ -5559,18 +5972,36 @@ fn ensure_coding_git_baseline<A: WorkspaceRuntimeAdapter>(
     checkpoint: &WorkflowCheckpoint,
     request_id: Option<&Value>,
 ) -> Result<(), FacadeError> {
-    let Some(saved) = checkpoint.git_before.as_ref().and_then(Value::as_object) else { return Ok(()); };
-    if saved.get("is_repo").and_then(Value::as_bool) != Some(true) { return Ok(()); }
+    let Some(saved) = checkpoint.git_before.as_ref().and_then(Value::as_object) else {
+        return Ok(());
+    };
+    if saved.get("is_repo").and_then(Value::as_bool) != Some(true) {
+        return Ok(());
+    }
     let original = object_args(&checkpoint.arguments)?;
     let project_path = original.get("path").and_then(Value::as_str).unwrap_or(".");
     let project = adapter.project_context(project_path)?;
-    let selected_path = project.get("selected_path").and_then(Value::as_str).ok_or_else(command_state_internal_error)?;
-    let current = adapter.git_workflow(GitWorkflowAction::Status, json!({"path":selected_path}), request_id)?;
+    let selected_path = project
+        .get("selected_path")
+        .and_then(Value::as_str)
+        .ok_or_else(command_state_internal_error)?;
+    let current = adapter.git_workflow(
+        GitWorkflowAction::Status,
+        json!({"path":selected_path}),
+        request_id,
+    )?;
     let current = stable_data(&current);
     let same_root = saved.get("repository_root") == current.get("repository_root");
-    let same_head = saved.get("head").and_then(Value::as_str) == current.get("head").and_then(Value::as_str);
-    if same_root && same_head { return Ok(()); }
-    Err(FacadeError::new(FacadeErrorCode::FileChanged, "coding task Git baseline changed; run prepare again before continuing", false))
+    let same_head =
+        saved.get("head").and_then(Value::as_str) == current.get("head").and_then(Value::as_str);
+    if same_root && same_head {
+        return Ok(());
+    }
+    Err(FacadeError::new(
+        FacadeErrorCode::FileChanged,
+        "coding task Git baseline changed; run prepare again before continuing",
+        false,
+    ))
 }
 
 fn persist_agent_checkpoint<A: WorkspaceRuntimeAdapter>(
@@ -5584,12 +6015,22 @@ fn persist_agent_checkpoint<A: WorkspaceRuntimeAdapter>(
 fn expected_files_from_checkpoint(checkpoint: &WorkflowCheckpoint) -> Map<String, Value> {
     let mut expected = Map::new();
     for entry in &checkpoint.files_read {
-        let Some(object) = entry.as_object() else { continue };
-        let Some(path) = object.get("path").and_then(Value::as_str).filter(|value| !value.is_empty()) else { continue };
+        let Some(object) = entry.as_object() else {
+            continue;
+        };
+        let Some(path) = object
+            .get("path")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
         let Some(identity) = object
             .get("content_sha256")
             .and_then(Value::as_str)
-            .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .filter(|value| {
+                value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
         else {
             continue;
         };
@@ -5624,21 +6065,14 @@ fn optional_bool(
     }
 }
 
-fn optional_u64(
-    object: &Map<String, Value>,
-    key: &str,
-    default: u64,
-) -> Result<u64, FacadeError> {
+fn optional_u64(object: &Map<String, Value>, key: &str, default: u64) -> Result<u64, FacadeError> {
     match object.get(key) {
         None => Ok(default),
         Some(value) => value.as_u64().ok_or_else(invalid_argument),
     }
 }
 
-fn optional_u64_value(
-    object: &Map<String, Value>,
-    key: &str,
-) -> Result<Option<u64>, FacadeError> {
+fn optional_u64_value(object: &Map<String, Value>, key: &str) -> Result<Option<u64>, FacadeError> {
     match object.get(key) {
         None => Ok(None),
         Some(value) => value.as_u64().map(Some).ok_or_else(invalid_argument),
@@ -5653,11 +6087,7 @@ fn optional_usize(
     usize::try_from(optional_u64(object, key, default as u64)?).map_err(|_| invalid_argument())
 }
 
-fn optional_u32(
-    object: &Map<String, Value>,
-    key: &str,
-    default: u32,
-) -> Result<u32, FacadeError> {
+fn optional_u32(object: &Map<String, Value>, key: &str, default: u32) -> Result<u32, FacadeError> {
     u32::try_from(optional_u64(object, key, u64::from(default))?).map_err(|_| invalid_argument())
 }
 
@@ -5725,11 +6155,15 @@ impl FilesystemRequest {
     }
 
     pub(crate) fn content_base64(&self) -> Option<String> {
-        self.content.as_ref().map(|content| STANDARD.encode(content))
+        self.content
+            .as_ref()
+            .map(|content| STANDARD.encode(content))
     }
 }
 
-pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRequest, FacadeError> {
+pub(crate) fn parse_filesystem_request(
+    arguments: &Value,
+) -> Result<FilesystemRequest, FacadeError> {
     let object = object_args(arguments)?;
     let action = required_string(object, "action")?;
     let mut request = FilesystemRequest {
@@ -5757,7 +6191,10 @@ pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRe
     };
     match action {
         "list" => {
-            ensure_only_keys(object, &["action", "path", "recursive", "max_depth", "max_entries"])?;
+            ensure_only_keys(
+                object,
+                &["action", "path", "recursive", "max_depth", "max_entries"],
+            )?;
             request.action = FilesystemAction::List;
             request.path = Some(required_string(object, "path")?.to_string());
             request.recursive = optional_bool(object, "recursive", false)?;
@@ -5765,7 +6202,16 @@ pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRe
             request.max_entries = optional_usize(object, "max_entries", 1_000)?;
         }
         "stat" => {
-            ensure_only_keys(object, &["action", "path", "calculate_size", "max_depth", "max_entries"])?;
+            ensure_only_keys(
+                object,
+                &[
+                    "action",
+                    "path",
+                    "calculate_size",
+                    "max_depth",
+                    "max_entries",
+                ],
+            )?;
             request.action = FilesystemAction::Stat;
             request.path = Some(required_string(object, "path")?.to_string());
             request.calculate_size = optional_bool(object, "calculate_size", false)?;
@@ -5780,7 +6226,10 @@ pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRe
             request.max_bytes = optional_usize(object, "max_bytes", 65_536)?;
         }
         "write" => {
-            ensure_only_keys(object, &["action", "path", "content", "encoding", "overwrite"])?;
+            ensure_only_keys(
+                object,
+                &["action", "path", "content", "encoding", "overwrite"],
+            )?;
             request.action = FilesystemAction::Write;
             request.path = Some(required_string(object, "path")?.to_string());
             let content = required_string(object, "content")?;
@@ -5797,9 +6246,20 @@ pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRe
             ensure_only_keys(
                 object,
                 &[
-                    "action", "path", "pattern", "recursive", "max_depth", "max_entries",
-                    "max_results", "type", "min_size", "max_size", "modified_after",
-                    "modified_before", "sort_by", "sort_order",
+                    "action",
+                    "path",
+                    "pattern",
+                    "recursive",
+                    "max_depth",
+                    "max_entries",
+                    "max_results",
+                    "type",
+                    "min_size",
+                    "max_size",
+                    "modified_after",
+                    "modified_before",
+                    "sort_by",
+                    "sort_order",
                 ],
             )?;
             request.action = FilesystemAction::Search;
@@ -5822,7 +6282,15 @@ pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRe
         "copy" | "move" => {
             ensure_only_keys(
                 object,
-                &["action", "source", "destination", "recursive", "overwrite", "max_depth", "max_entries"],
+                &[
+                    "action",
+                    "source",
+                    "destination",
+                    "recursive",
+                    "overwrite",
+                    "max_depth",
+                    "max_entries",
+                ],
             )?;
             request.action = if action == "copy" {
                 FilesystemAction::Copy
@@ -5837,7 +6305,10 @@ pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRe
             request.max_entries = optional_usize(object, "max_entries", 10_000)?;
         }
         "delete" => {
-            ensure_only_keys(object, &["action", "path", "recursive", "max_depth", "max_entries"])?;
+            ensure_only_keys(
+                object,
+                &["action", "path", "recursive", "max_depth", "max_entries"],
+            )?;
             request.action = FilesystemAction::Delete;
             request.path = Some(required_string(object, "path")?.to_string());
             request.recursive = optional_bool(object, "recursive", false)?;
@@ -5851,7 +6322,10 @@ pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRe
         }
         _ => return Err(invalid_argument()),
     }
-    if request.min_size.zip(request.max_size).is_some_and(|(min, max)| min > max)
+    if request
+        .min_size
+        .zip(request.max_size)
+        .is_some_and(|(min, max)| min > max)
         || request
             .modified_after_ms
             .zip(request.modified_before_ms)
@@ -5862,9 +6336,22 @@ pub(crate) fn parse_filesystem_request(arguments: &Value) -> Result<FilesystemRe
     Ok(request)
 }
 
+#[cfg(test)]
 fn run_workspace_filesystem(workspace: &Path, arguments: Value) -> Result<Value, FacadeError> {
+    let authority =
+        PathAuthority::active_workspace(workspace).map_err(normalize_path_authority_error)?;
+    run_workspace_filesystem_with_authority(authority, arguments, FilesystemCancellation::default())
+}
+
+pub(crate) fn run_workspace_filesystem_with_authority(
+    authority: PathAuthority,
+    arguments: Value,
+    cancellation: FilesystemCancellation,
+) -> Result<Value, FacadeError> {
     let request = parse_filesystem_request(&arguments)?;
-    let service = FilesystemService::active_workspace(workspace).map_err(normalize_filesystem_error)?;
+    let service = FilesystemService::from_authority(authority)
+        .map_err(normalize_filesystem_error)?
+        .with_cancellation(cancellation);
     let data = match request.action {
         FilesystemAction::List => {
             let result = service
@@ -5924,17 +6411,37 @@ fn run_workspace_filesystem(workspace: &Path, arguments: Value) -> Result<Value,
                 sort_order: request.sort_order.clone(),
             };
             let result = service
-                .search(request.path.as_deref().expect("search path parsed"), &options)
+                .search(
+                    request.path.as_deref().expect("search path parsed"),
+                    &options,
+                )
                 .map_err(normalize_filesystem_error)?;
             serde_json::to_value(result).map_err(|_| command_state_internal_error())?
         }
         FilesystemAction::Copy | FilesystemAction::Move => {
             let source = request.source.as_deref().expect("copy/move source parsed");
-            let destination = request.destination.as_deref().expect("copy/move destination parsed");
+            let destination = request
+                .destination
+                .as_deref()
+                .expect("copy/move destination parsed");
             let result = if request.action == FilesystemAction::Copy {
-                service.copy(source, destination, request.recursive, request.overwrite, request.max_depth, request.max_entries)
+                service.copy(
+                    source,
+                    destination,
+                    request.recursive,
+                    request.overwrite,
+                    request.max_depth,
+                    request.max_entries,
+                )
             } else {
-                service.move_path(source, destination, request.recursive, request.overwrite, request.max_depth, request.max_entries)
+                service.move_path(
+                    source,
+                    destination,
+                    request.recursive,
+                    request.overwrite,
+                    request.max_depth,
+                    request.max_entries,
+                )
             }
             .map_err(normalize_filesystem_error)?;
             serde_json::to_value(result).map_err(|_| command_state_internal_error())?
@@ -5991,15 +6498,38 @@ mod schema43_filesystem_facade_tests {
         assert_eq!(input["required"], json!(["action"]));
         assert_eq!(
             input["properties"]["action"]["enum"],
-            json!(["list","stat","read","write","search","copy","move","delete","hash"])
+            json!([
+                "list", "stat", "read", "write", "search", "copy", "move", "delete", "hash"
+            ])
         );
         for property in [
-            "action", "path", "source", "destination", "recursive", "max_depth",
-            "max_entries", "max_results", "offset", "max_bytes", "content", "encoding",
-            "pattern", "type", "min_size", "max_size", "modified_after", "modified_before",
-            "sort_by", "sort_order", "overwrite", "calculate_size",
+            "action",
+            "path",
+            "source",
+            "destination",
+            "recursive",
+            "max_depth",
+            "max_entries",
+            "max_results",
+            "offset",
+            "max_bytes",
+            "content",
+            "encoding",
+            "pattern",
+            "type",
+            "min_size",
+            "max_size",
+            "modified_after",
+            "modified_before",
+            "sort_by",
+            "sort_order",
+            "overwrite",
+            "calculate_size",
         ] {
-            assert!(input["properties"].get(property).is_some(), "missing {property}");
+            assert!(
+                input["properties"].get(property).is_some(),
+                "missing {property}"
+            );
         }
     }
 
@@ -6030,15 +6560,22 @@ mod schema43_filesystem_facade_tests {
             json!({"action":"search","path":".","pattern":"*.txt"}),
         )
         .unwrap();
-        assert_eq!(search["structuredContent"]["data"]["entries"][0]["path"], "note.txt");
+        assert_eq!(
+            search["structuredContent"]["data"]["entries"][0]["path"],
+            "note.txt"
+        );
 
-        let hash = run_workspace_filesystem(&root, json!({"action":"hash","path":"note.txt"})).unwrap();
+        let hash =
+            run_workspace_filesystem(&root, json!({"action":"hash","path":"note.txt"})).unwrap();
         assert_eq!(hash["structuredContent"]["data"]["algorithm"], "sha256");
 
         assert_eq!(
-            run_workspace_filesystem(&root, json!({"action":"hash","path":"note.txt","recursive":true}))
-                .unwrap_err()
-                .code,
+            run_workspace_filesystem(
+                &root,
+                json!({"action":"hash","path":"note.txt","recursive":true})
+            )
+            .unwrap_err()
+            .code,
             FacadeErrorCode::InvalidArgument
         );
         assert_eq!(
@@ -6083,15 +6620,18 @@ fn normalize_filesystem_error(error: FilesystemError) -> FacadeError {
             "文件系统路径越出当前授权范围",
             false,
         ),
-        FilesystemError::AlreadyExists => FacadeError::new(
-            FacadeErrorCode::FileChanged,
-            "文件系统目标已存在",
-            false,
-        ),
+        FilesystemError::AlreadyExists => {
+            FacadeError::new(FacadeErrorCode::FileChanged, "文件系统目标已存在", false)
+        }
         FilesystemError::FileChanged => FacadeError::new(
             FacadeErrorCode::FileChanged,
             "文件系统目标自读取后已发生变化",
             false,
+        ),
+        FilesystemError::Cancelled => FacadeError::new(
+            FacadeErrorCode::ProcessCancelled,
+            "文件系统操作已取消",
+            true,
         ),
         FilesystemError::Io => {
             FacadeError::new(FacadeErrorCode::Internal, "文件系统操作失败", false)
@@ -6101,10 +6641,16 @@ fn normalize_filesystem_error(error: FilesystemError) -> FacadeError {
 
 fn normalize_shell_error(_error: ShellResolveError, selector: ShellSelector) -> FacadeError {
     let message = match selector {
-        ShellSelector::Pwsh => "未发现可信 PowerShell Core；可查看 workspace_context.shell_discovery 并使用 windows_powershell 或 auto",
-        ShellSelector::WindowsPowershell => "未发现可信 Windows PowerShell；请查看 workspace_context.shell_discovery",
+        ShellSelector::Pwsh => {
+            "未发现可信 PowerShell Core；可查看 workspace_context.shell_discovery 并使用 windows_powershell 或 auto"
+        }
+        ShellSelector::WindowsPowershell => {
+            "未发现可信 Windows PowerShell；请查看 workspace_context.shell_discovery"
+        }
         ShellSelector::Cmd => "未发现可信 cmd.exe；请查看 workspace_context.shell_discovery",
-        ShellSelector::Powershell | ShellSelector::Auto => "没有可用的可信命令 Shell；请查看 workspace_context.shell_discovery",
+        ShellSelector::Powershell | ShellSelector::Auto => {
+            "没有可用的可信命令 Shell；请查看 workspace_context.shell_discovery"
+        }
     };
     FacadeError::new(FacadeErrorCode::RuntimeUnavailable, message, false)
 }
@@ -6145,16 +6691,14 @@ fn normalize_runtime_error(error: CodingToolsRuntimeError) -> FacadeError {
             true,
         )
         .with_diagnostic(transport_unavailable("health_timeout", None)),
-        CodingToolsRuntimeError::UpstreamRpcError => FacadeError::new(
-            FacadeErrorCode::Internal,
-            "编码运行时 MCP 调用失败",
-            false,
-        )
-        .with_diagnostic(ErrorDiagnostic::new(
-            DiagnosticErrorCode::ExecutionFailed,
-            DiagnosticPhase::Mcp,
-            "upstream_rpc_error",
-        )),
+        CodingToolsRuntimeError::UpstreamRpcError => {
+            FacadeError::new(FacadeErrorCode::Internal, "编码运行时 MCP 调用失败", false)
+                .with_diagnostic(ErrorDiagnostic::new(
+                    DiagnosticErrorCode::ExecutionFailed,
+                    DiagnosticPhase::Mcp,
+                    "upstream_rpc_error",
+                ))
+        }
         _ => FacadeError::new(
             FacadeErrorCode::RuntimeUnavailable,
             "编码运行时不可用",
@@ -6168,11 +6712,7 @@ fn normalize_toolbox_error(error: ToolboxError) -> FacadeError {
         ToolboxErrorKind::RuntimeUnavailable => FacadeErrorCode::RuntimeUnavailable,
         ToolboxErrorKind::CapabilityUnavailable => FacadeErrorCode::CapabilityUnavailable,
     };
-    FacadeError::new(
-        code,
-        "Toolbox executable unavailable",
-        false,
-    )
+    FacadeError::new(code, "Toolbox executable unavailable", false)
 }
 
 fn runtime_fault_name(fault: &RuntimeFault) -> &'static str {
@@ -6215,26 +6755,18 @@ fn normalize_coding_edit_error(error: CodingEditError) -> FacadeError {
             "编辑上下文与当前文件不匹配",
             false,
         ),
-        CodingEditError::AmbiguousMatch => FacadeError::new(
-            FacadeErrorCode::AmbiguousMatch,
-            "编辑匹配不唯一",
-            false,
-        ),
-        CodingEditError::NotFound => FacadeError::new(
-            FacadeErrorCode::NotFound,
-            "目标文件不存在",
-            false,
-        ),
+        CodingEditError::AmbiguousMatch => {
+            FacadeError::new(FacadeErrorCode::AmbiguousMatch, "编辑匹配不唯一", false)
+        }
+        CodingEditError::NotFound => {
+            FacadeError::new(FacadeErrorCode::NotFound, "目标文件不存在", false)
+        }
         CodingEditError::InvalidPath => FacadeError::new(
             FacadeErrorCode::WorkspaceDenied,
             "目标路径不在当前工作区权限范围内",
             false,
         ),
-        CodingEditError::Io => FacadeError::new(
-            FacadeErrorCode::Internal,
-            "编辑操作未完成",
-            true,
-        ),
+        CodingEditError::Io => FacadeError::new(FacadeErrorCode::Internal, "编辑操作未完成", true),
     }
 }
 
@@ -6271,7 +6803,10 @@ fn normalize_private_error(raw: &Value) -> FacadeError {
         FacadeErrorCode::FileChanged
     } else if code.contains("SESSION_NOT_FOUND") || code.contains("SESSION_CLOSED") {
         FacadeErrorCode::SessionUnavailable
-    } else if code.contains("SHELL_SYNTAX") || code.contains("INVALID_SHELL") || code.contains("PARSE_ERROR") {
+    } else if code.contains("SHELL_SYNTAX")
+        || code.contains("INVALID_SHELL")
+        || code.contains("PARSE_ERROR")
+    {
         FacadeErrorCode::InvalidShellSyntax
     } else if code.contains("INVALID") {
         FacadeErrorCode::InvalidArgument
@@ -6302,11 +6837,7 @@ fn session_unavailable() -> FacadeError {
     FacadeError::new(FacadeErrorCode::SessionUnavailable, "命令会话不可用", false)
 }
 
-fn coding_checkpoint_result(
-    checkpoint: &WorkflowCheckpoint,
-    state: &str,
-    text: &str,
-) -> Value {
+fn coding_checkpoint_result(checkpoint: &WorkflowCheckpoint, state: &str, text: &str) -> Value {
     stable_success(
         json!({
             "action":checkpoint.arguments.get("action").and_then(Value::as_str),
@@ -6341,10 +6872,7 @@ pub(crate) fn stable_success(data: Value, text: &str) -> Value {
         .or_else(|| data.get("workflow_id"))
         .cloned()
         .unwrap_or(Value::Null);
-    let warnings = data
-        .get("warnings")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
+    let warnings = data.get("warnings").cloned().unwrap_or_else(|| json!([]));
     let next_step = data.get("next_step").cloned().unwrap_or(Value::Null);
     let output_refs = data
         .get("output_refs")
@@ -6892,14 +7420,16 @@ mod tests {
 
     #[test]
     fn schema42_unified_error_diagnostics_preserve_detail_and_map_transport() {
-        let denied = FacadeError::new(FacadeErrorCode::PolicyDenied, "denied", false).to_mcp_result();
+        let denied =
+            FacadeError::new(FacadeErrorCode::PolicyDenied, "denied", false).to_mcp_result();
         let error = &denied["structuredContent"]["error"];
         assert_eq!(error["code"], "PolicyDenied");
         assert_eq!(error["error_code"], "Denied");
         assert_eq!(error["phase"], "policy");
         assert_eq!(error["cause"], "policy_denied");
 
-        let transport = normalize_runtime_error(CodingToolsRuntimeError::HttpStatus(400)).to_mcp_result();
+        let transport =
+            normalize_runtime_error(CodingToolsRuntimeError::HttpStatus(400)).to_mcp_result();
         let error = &transport["structuredContent"]["error"];
         assert_eq!(error["code"], "SessionUnavailable");
         assert_eq!(error["error_code"], "Unavailable");
@@ -6907,8 +7437,12 @@ mod tests {
         assert_eq!(error["cause"], "http_400");
         assert_eq!(error["http_status"], 400);
 
-        let unknown = FacadeError::new(FacadeErrorCode::Internal, "internal", false).to_mcp_result();
-        assert_eq!(unknown["structuredContent"]["error"]["error_code"], "Unknown");
+        let unknown =
+            FacadeError::new(FacadeErrorCode::Internal, "internal", false).to_mcp_result();
+        assert_eq!(
+            unknown["structuredContent"]["error"]["error_code"],
+            "Unknown"
+        );
         assert_eq!(unknown["structuredContent"]["error"]["phase"], "unknown");
     }
 
@@ -6926,7 +7460,11 @@ mod tests {
             assert_eq!(error["code"], code.as_str());
             assert_eq!(error["error_code"], "Denied");
             assert_eq!(error["phase"], "policy");
-            assert!(error["cause"].as_str().is_some_and(|cause| !cause.is_empty()));
+            assert!(
+                error["cause"]
+                    .as_str()
+                    .is_some_and(|cause| !cause.is_empty())
+            );
         }
     }
 
@@ -6986,7 +7524,10 @@ mod tests {
             .unwrap();
         let toolbox = &context["structuredContent"]["data"]["runtime_availability"]["toolbox"];
         for name in ["aria2c", "7z", "jq", "curl"] {
-            assert_eq!(toolbox[name]["status"], "ready", "{name} probe was not ready: {toolbox:#}");
+            assert_eq!(
+                toolbox[name]["status"], "ready",
+                "{name} probe was not ready: {toolbox:#}"
+            );
         }
 
         for (command, shell, expected) in [
@@ -7009,8 +7550,14 @@ mod tests {
             let output = result["structuredContent"]["data"]["output"]
                 .as_str()
                 .unwrap_or_default();
-            assert!(output.contains(expected), "{command} did not use expected Toolbox executable: {output}");
-            assert!(!output.contains("LB_TOOLBOX_FAKE_SHADOW"), "{command} resolved through workspace shadow: {output}");
+            assert!(
+                output.contains(expected),
+                "{command} did not use expected Toolbox executable: {output}"
+            );
+            assert!(
+                !output.contains("LB_TOOLBOX_FAKE_SHADOW"),
+                "{command} resolved through workspace shadow: {output}"
+            );
         }
 
         let mut runtime = facade.into_runtime();
@@ -7060,7 +7607,11 @@ mod tests {
             allow_missing_leaf: bool,
         ) -> Result<String, FacadeError> {
             if !allow_missing_leaf && path == "new.txt" {
-                return Err(FacadeError::new(FacadeErrorCode::NotFound, "missing", false));
+                return Err(FacadeError::new(
+                    FacadeErrorCode::NotFound,
+                    "missing",
+                    false,
+                ));
             }
             Ok(path.replace('\\', "/"))
         }
@@ -7069,7 +7620,11 @@ mod tests {
             Ok(json!({"selected_path":path}))
         }
 
-        fn coding_context(&self, _project_path: &str, _objective: &str) -> Result<Value, FacadeError> {
+        fn coding_context(
+            &self,
+            _project_path: &str,
+            _objective: &str,
+        ) -> Result<Value, FacadeError> {
             Ok(json!({
                 "instructions":[],
                 "important_files":["safe/doc.txt"],
@@ -7221,7 +7776,11 @@ mod tests {
             request: ShellCommandRequest,
             _request_id: Option<&Value>,
         ) -> Result<Value, FacadeError> {
-            *self.state.last_stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = request.stdin.clone();
+            *self
+                .state
+                .last_stdin
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = request.stdin.clone();
             let call = self
                 .state
                 .execute_calls
@@ -7257,8 +7816,16 @@ mod tests {
             _arguments: Value,
             _request_id: Option<&Value>,
         ) -> Result<Value, FacadeError> {
-            let head = self.state.git_head.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
-            Ok(stable_success(json!({"is_repo":true,"repository_root":".","branch":"main","head":head,"clean":true,"entries":[]}), "ok"))
+            let head = self
+                .state
+                .git_head
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            Ok(stable_success(
+                json!({"is_repo":true,"repository_root":".","branch":"main","head":head,"clean":true,"entries":[]}),
+                "ok",
+            ))
         }
 
         fn inspect_document(
@@ -7376,15 +7943,27 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stable_data(&started)["state"], "running", "{started:#?}");
-        assert!(stable_data(&started)["workflow_id"]
-            .as_str()
-            .is_some_and(|value| value.starts_with("lb-workflow-")));
+        assert!(
+            stable_data(&started)["workflow_id"]
+                .as_str()
+                .is_some_and(|value| value.starts_with("lb-workflow-"))
+        );
         assert_eq!(
-            state.directory_calls.load(std::sync::atomic::Ordering::SeqCst),
+            state
+                .directory_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
             1
         );
-        assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
-        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            state.patch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1
+        );
         drop(initial);
 
         let resumed_adapter = ResumeAdapter {
@@ -7405,7 +7984,9 @@ mod tests {
         assert_eq!(data["action"], "resume", "{completed:#?}");
         assert_eq!(data["state"], "completed", "{completed:#?}");
         assert_eq!(
-            state.directory_calls.load(std::sync::atomic::Ordering::SeqCst),
+            state
+                .directory_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
             1,
             "completed directory step was replayed"
         );
@@ -7415,16 +7996,20 @@ mod tests {
             "completed patch was replayed"
         );
         assert_eq!(
-            state.execute_calls.load(std::sync::atomic::Ordering::SeqCst),
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
             2,
             "resume did not execute exactly the one missing command"
         );
         assert_eq!(data["commands"].as_array().map(Vec::len), Some(2));
-        assert!(state
-            .checkpoint
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .is_none());
+        assert!(
+            state
+                .checkpoint
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+        );
     }
 
     #[test]
@@ -7436,30 +8021,48 @@ mod tests {
             first_execution_runs: true,
         };
         let mut facade = AgentFacade::with_adapter(adapter, policy()).unwrap();
-        let result = facade.dispatch(
-            PermissionMode::Full,
-            "agent_workflow",
-            json!({
-                "action":"bugfix",
-                "path":".",
-                "commands":[{
-                    "command":"echo stdin-probe",
-                    "shell":"cmd",
-                    "stdin":"SECRET_STDIN_SENTINEL",
-                    "yield_time_ms":0
-                }]
-            }),
-            None,
-        ).unwrap();
+        let result = facade
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({
+                    "action":"bugfix",
+                    "path":".",
+                    "commands":[{
+                        "command":"echo stdin-probe",
+                        "shell":"cmd",
+                        "stdin":"SECRET_STDIN_SENTINEL",
+                        "yield_time_ms":0
+                    }]
+                }),
+                None,
+            )
+            .unwrap();
         assert_eq!(stable_data(&result)["state"], "running");
         assert_eq!(
-            state.last_stdin.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_deref(),
+            state
+                .last_stdin
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_deref(),
             Some("SECRET_STDIN_SENTINEL")
         );
-        let stored = state.checkpoint.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().unwrap();
-        assert!(stored.pointer("/arguments/commands/0/stdin").is_none(), "{stored:#?}");
+        let stored = state
+            .checkpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap();
+        assert!(
+            stored.pointer("/arguments/commands/0/stdin").is_none(),
+            "{stored:#?}"
+        );
         assert_eq!(stored["redacted_stdin_command_indices"], json!([0]));
-        assert!(!serde_json::to_string(&stored).unwrap().contains("SECRET_STDIN_SENTINEL"));
+        assert!(
+            !serde_json::to_string(&stored)
+                .unwrap()
+                .contains("SECRET_STDIN_SENTINEL")
+        );
     }
 
     #[test]
@@ -7494,68 +8097,116 @@ mod tests {
             )
             .expect_err("uncertain file completion must never be blindly replayed");
         assert_eq!(error.code, FacadeErrorCode::SessionUnavailable);
-        assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            state.patch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
     }
 
     fn durable_task_snapshot(next_step: Option<&str>) -> Value {
         let state = ResumeFixtureState::new();
         let mut checkpoint = WorkflowCheckpoint::new_coding(
-            "lb-task-settlement".into(), json!({"action":"bugfix","path":"."}), "settlement invariant".into(),
+            "lb-task-settlement".into(),
+            json!({"action":"bugfix","path":"."}),
+            "settlement invariant".into(),
         );
         checkpoint.next_step = next_step.map(str::to_string);
-        *state.checkpoint.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(serde_json::to_value(checkpoint).unwrap());
+        *state
+            .checkpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(serde_json::to_value(checkpoint).unwrap());
         AgentFacade::with_adapter(
-            ResumeAdapter { catalog: compatible_catalog(), state, first_execution_runs: false }, policy(),
-        ).unwrap().durable_coding_task_snapshot().unwrap()
+            ResumeAdapter {
+                catalog: compatible_catalog(),
+                state,
+                first_execution_runs: false,
+            },
+            policy(),
+        )
+        .unwrap()
+        .durable_coding_task_snapshot()
+        .unwrap()
     }
 
     #[test]
     fn schema42_task_aggregate_waiting_is_not_idle() {
-        let state=ResumeFixtureState::new();
-        let mut checkpoint=WorkflowCheckpoint::new_coding("lb-schema42".into(),json!({"action":"bugfix","path":"."}),"schema42".into());
-        checkpoint.next_step=Some("edit".into());
-        *state.checkpoint.lock().unwrap()=Some(serde_json::to_value(checkpoint).unwrap());
-        let facade=AgentFacade::with_adapter(ResumeAdapter{catalog:compatible_catalog(),state,first_execution_runs:false},policy()).unwrap();
-        let aggregate=facade.task_aggregate_snapshot();
-        assert_eq!(aggregate["state"],"waiting");
-        assert_eq!(aggregate["current_workflow"]["state"],"waiting");
+        let state = ResumeFixtureState::new();
+        let mut checkpoint = WorkflowCheckpoint::new_coding(
+            "lb-schema42".into(),
+            json!({"action":"bugfix","path":"."}),
+            "schema42".into(),
+        );
+        checkpoint.next_step = Some("edit".into());
+        *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(checkpoint).unwrap());
+        let facade = AgentFacade::with_adapter(
+            ResumeAdapter {
+                catalog: compatible_catalog(),
+                state,
+                first_execution_runs: false,
+            },
+            policy(),
+        )
+        .unwrap();
+        let aggregate = facade.task_aggregate_snapshot();
+        assert_eq!(aggregate["state"], "waiting");
+        assert_eq!(aggregate["current_workflow"]["state"], "waiting");
         assert!(aggregate["current_command"].is_null());
     }
 
     #[test]
     fn schema42_command_summary_is_status_derived() {
-        assert_eq!(command_summary("running"),"Command running");
-        assert_eq!(command_summary("completed"),"Command completed");
-        assert_ne!(command_summary("running"),command_summary("completed"));
+        assert_eq!(command_summary("running"), "Command running");
+        assert_eq!(command_summary("completed"), "Command completed");
+        assert_ne!(command_summary("running"), command_summary("completed"));
     }
 
     #[test]
     fn schema42_document_eof_is_not_truncation() {
-        assert!(!document_range_was_truncated(1,Some(9999),10_000,100));
-        assert!(document_range_was_truncated(1,None,100,1000));
-        assert!(!document_range_was_truncated(20,Some(40),100,1000));
+        assert!(!document_range_was_truncated(1, Some(9999), 10_000, 100));
+        assert!(document_range_was_truncated(1, None, 100, 1000));
+        assert!(!document_range_was_truncated(20, Some(40), 100, 1000));
     }
 
     #[test]
     fn schema42_command_kill_leaves_workflow_waiting() {
-        let mut checkpoint=WorkflowCheckpoint::new_coding("lb-kill".into(),json!({"action":"bugfix"}),"kill".into());
-        checkpoint.current_session_id=Some("s1".into()); checkpoint.command_inflight=true; checkpoint.next_step=None;
-        settle_checkpoint_after_command_kill(&mut checkpoint,"s1");
-        assert!(checkpoint.current_session_id.is_none()); assert!(!checkpoint.command_inflight);
-        assert_eq!(checkpoint.next_step.as_deref(),Some("verify")); assert!(!checkpoint.completed);
+        let mut checkpoint = WorkflowCheckpoint::new_coding(
+            "lb-kill".into(),
+            json!({"action":"bugfix"}),
+            "kill".into(),
+        );
+        checkpoint.current_session_id = Some("s1".into());
+        checkpoint.command_inflight = true;
+        checkpoint.next_step = None;
+        settle_checkpoint_after_command_kill(&mut checkpoint, "s1");
+        assert!(checkpoint.current_session_id.is_none());
+        assert!(!checkpoint.command_inflight);
+        assert_eq!(checkpoint.next_step.as_deref(), Some("verify"));
+        assert!(!checkpoint.completed);
     }
 
     #[test]
     fn schema41_durable_task_waiting_requires_next_step() {
         let snapshot = durable_task_snapshot(Some("edit"));
-        assert_eq!((&snapshot["state"], &snapshot["completed"]), (&json!("waiting"), &json!(false)));
+        assert_eq!(
+            (&snapshot["state"], &snapshot["completed"]),
+            (&json!("waiting"), &json!(false))
+        );
     }
 
     #[test]
     fn schema41_durable_task_without_next_step_settles_completed() {
         let snapshot = durable_task_snapshot(None);
-        assert_eq!((&snapshot["state"], &snapshot["completed"]), (&json!("completed"), &json!(true)));
+        assert_eq!(
+            (&snapshot["state"], &snapshot["completed"]),
+            (&json!("completed"), &json!(true))
+        );
     }
 
     #[test]
@@ -7598,8 +8249,16 @@ mod tests {
             .unwrap();
         assert_eq!(stable_data(&resumed_prepare)["task_id"], task_id);
         assert_eq!(stable_data(&resumed_prepare)["state"], "prepared");
-        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            state.patch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
 
         let edited = facade
             .dispatch(
@@ -7628,7 +8287,12 @@ mod tests {
             .unwrap();
         assert_eq!(stable_data(&verified)["task_id"], task_id);
         assert_eq!(stable_data(&verified)["next_step"], "persist");
-        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
 
         let persisted = facade
             .dispatch(
@@ -7651,8 +8315,16 @@ mod tests {
             .unwrap();
         assert_eq!(stable_data(&resumed_terminal)["state"], "persisted");
         assert_eq!(stable_data(&resumed_terminal)["task_id"], task_id);
-        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            state.patch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
         let checkpoint = state
             .checkpoint
             .lock()
@@ -7678,14 +8350,19 @@ mod tests {
             json!({"action":"bugfix","phase":"prepare","objective":"strict phase order","path":"."}),
             None,
         ).unwrap();
-        let task_id = stable_data(&prepared)["task_id"].as_str().unwrap().to_string();
+        let task_id = stable_data(&prepared)["task_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
         for phase in ["verify", "persist"] {
-            let error = facade.dispatch(
-                PermissionMode::Full,
-                "agent_workflow",
-                json!({"action":"bugfix","phase":phase,"task_id":task_id}),
-                None,
-            ).unwrap_err();
+            let error = facade
+                .dispatch(
+                    PermissionMode::Full,
+                    "agent_workflow",
+                    json!({"action":"bugfix","phase":phase,"task_id":task_id}),
+                    None,
+                )
+                .unwrap_err();
             assert_eq!(error.code, FacadeErrorCode::SessionUnavailable);
         }
         facade.dispatch(
@@ -7698,12 +8375,14 @@ mod tests {
             }),
             None,
         ).unwrap();
-        let error = facade.dispatch(
-            PermissionMode::Full,
-            "agent_workflow",
-            json!({"action":"bugfix","phase":"persist","task_id":task_id}),
-            None,
-        ).unwrap_err();
+        let error = facade
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"bugfix","phase":"persist","task_id":task_id}),
+                None,
+            )
+            .unwrap_err();
         assert_eq!(error.code, FacadeErrorCode::SessionUnavailable);
     }
 
@@ -7744,7 +8423,11 @@ mod tests {
             .unwrap();
         assert_eq!(stable_data(&edited)["task_id"], task_id);
         assert_eq!(stable_data(&edited)["next_step"], "verify");
-        assert_eq!(state.patch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "coding edit uses internal adapter path rather than legacy patch counter");
+        assert_eq!(
+            state.patch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "coding edit uses internal adapter path rather than legacy patch counter"
+        );
 
         let verified = facade
             .dispatch(
@@ -7768,7 +8451,12 @@ mod tests {
         assert_eq!(stable_data(&persisted)["task_id"], task_id);
         assert_eq!(stable_data(&persisted)["state"], "persisted");
         assert_eq!(stable_data(&persisted)["completed"], true);
-        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
     }
 
     #[test]
@@ -7788,7 +8476,10 @@ mod tests {
                 None,
             )
             .unwrap();
-        let task_id = stable_data(&prepared)["task_id"].as_str().unwrap().to_string();
+        let task_id = stable_data(&prepared)["task_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let edited = facade
             .dispatch(
                 PermissionMode::Edit,
@@ -7810,27 +8501,117 @@ mod tests {
             )
             .expect_err("resume must not bypass verify ProcessExec policy in Edit mode");
         assert_eq!(error.code, FacadeErrorCode::CapabilityDenied);
-        assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
     }
 
     #[test]
     fn schema41_incomplete_checkpoint_cannot_be_overwritten_by_unrelated_workflow() {
-        let state=ResumeFixtureState::new(); let mut c=WorkflowCheckpoint::new_coding("lb-task-existing".into(),json!({"action":"bugfix","path":"."}),"existing".into()); c.git_before=Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"})); *state.checkpoint.lock().unwrap()=Some(serde_json::to_value(&c).unwrap());
-        let mut f=AgentFacade::with_adapter(ResumeAdapter{catalog:compatible_catalog(),state:state.clone(),first_execution_runs:false},policy()).unwrap();
-        let e=f.dispatch(PermissionMode::Full,"agent_workflow",json!({"action":"custom","commands":[{"command":"echo unrelated","shell":"cmd"}]}),None).unwrap_err(); assert_eq!(e.code,FacadeErrorCode::SessionUnavailable);
-        let stored:WorkflowCheckpoint=serde_json::from_value(state.checkpoint.lock().unwrap().clone().unwrap()).unwrap(); assert_eq!(stored.workflow_id,"lb-task-existing"); assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst),0);
+        let state = ResumeFixtureState::new();
+        let mut c = WorkflowCheckpoint::new_coding(
+            "lb-task-existing".into(),
+            json!({"action":"bugfix","path":"."}),
+            "existing".into(),
+        );
+        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}));
+        *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
+        let mut f = AgentFacade::with_adapter(
+            ResumeAdapter {
+                catalog: compatible_catalog(),
+                state: state.clone(),
+                first_execution_runs: false,
+            },
+            policy(),
+        )
+        .unwrap();
+        let e = f
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"custom","commands":[{"command":"echo unrelated","shell":"cmd"}]}),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(e.code, FacadeErrorCode::SessionUnavailable);
+        let stored: WorkflowCheckpoint =
+            serde_json::from_value(state.checkpoint.lock().unwrap().clone().unwrap()).unwrap();
+        assert_eq!(stored.workflow_id, "lb-task-existing");
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
     }
 
     #[test]
     fn schema41_resume_rejects_changed_git_head_before_side_effects() {
-        let state=ResumeFixtureState::new(); let mut c=WorkflowCheckpoint::new_coding("lb-task-stale".into(),json!({"action":"bugfix","path":"."}),"stale".into()); c.git_before=Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-OLD"})); *state.checkpoint.lock().unwrap()=Some(serde_json::to_value(&c).unwrap()); *state.git_head.lock().unwrap()="HEAD-NEW".into();
-        let mut f=AgentFacade::with_adapter(ResumeAdapter{catalog:compatible_catalog(),state:state.clone(),first_execution_runs:false},policy()).unwrap(); let e=f.dispatch(PermissionMode::Full,"agent_workflow",json!({"action":"resume"}),None).unwrap_err(); assert_eq!(e.code,FacadeErrorCode::FileChanged); assert_eq!(state.execute_calls.load(std::sync::atomic::Ordering::SeqCst),0);
+        let state = ResumeFixtureState::new();
+        let mut c = WorkflowCheckpoint::new_coding(
+            "lb-task-stale".into(),
+            json!({"action":"bugfix","path":"."}),
+            "stale".into(),
+        );
+        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-OLD"}));
+        *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
+        *state.git_head.lock().unwrap() = "HEAD-NEW".into();
+        let mut f = AgentFacade::with_adapter(
+            ResumeAdapter {
+                catalog: compatible_catalog(),
+                state: state.clone(),
+                first_execution_runs: false,
+            },
+            policy(),
+        )
+        .unwrap();
+        let e = f
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"resume"}),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(e.code, FacadeErrorCode::FileChanged);
+        assert_eq!(
+            state
+                .execute_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
     }
 
     #[test]
     fn schema41_workspace_context_projects_durable_task_truth() {
-        let state=ResumeFixtureState::new(); let mut c=WorkflowCheckpoint::new_coding("lb-task-context".into(),json!({"action":"bugfix","path":"."}),"context".into()); c.git_before=Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"})); *state.checkpoint.lock().unwrap()=Some(serde_json::to_value(&c).unwrap());
-        let mut f=AgentFacade::with_adapter(ResumeAdapter{catalog:compatible_catalog(),state,first_execution_runs:false},policy()).unwrap(); let r=f.dispatch(PermissionMode::Full,"workspace_context",json!({}),None).unwrap(); let d=stable_data(&r); let task=&d["current_task"]; assert_eq!(task["task_id"],"lb-task-context"); assert_eq!(task["state"],"waiting"); assert_eq!(task["next_step"],"edit");
+        let state = ResumeFixtureState::new();
+        let mut c = WorkflowCheckpoint::new_coding(
+            "lb-task-context".into(),
+            json!({"action":"bugfix","path":"."}),
+            "context".into(),
+        );
+        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}));
+        *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
+        let mut f = AgentFacade::with_adapter(
+            ResumeAdapter {
+                catalog: compatible_catalog(),
+                state,
+                first_execution_runs: false,
+            },
+            policy(),
+        )
+        .unwrap();
+        let r = f
+            .dispatch(PermissionMode::Full, "workspace_context", json!({}), None)
+            .unwrap();
+        let d = stable_data(&r);
+        let task = &d["current_task"];
+        assert_eq!(task["task_id"], "lb-task-context");
+        assert_eq!(task["state"], "waiting");
+        assert_eq!(task["next_step"], "edit");
     }
 
     #[test]
@@ -7841,7 +8622,10 @@ mod tests {
             .join("_x000D__x000A_");
         let raw = json!({"structuredContent":{"content":format!("#< CLIXML\r\n<Objs><S S=\"Error\">{body}</S></Objs>")}});
         let expected = public_command_stderr(
-            raw.pointer("/structuredContent/content").unwrap().as_str().unwrap()
+            raw.pointer("/structuredContent/content")
+                .unwrap()
+                .as_str()
+                .unwrap(),
         );
         let mut offset = 0u64;
         let mut rebuilt = String::new();
@@ -7862,28 +8646,98 @@ mod tests {
     }
 
     #[test]
-    fn schema41_private_patch_errors_keep_canonical_conflict_codes() { for (code,expected) in [("PATCH_CONTEXT_NOT_FOUND",FacadeErrorCode::PatchConflict),("PATCH_CONTEXT_AMBIGUOUS",FacadeErrorCode::AmbiguousMatch),("PATCH_CONFLICT",FacadeErrorCode::FileChanged)] { let raw=json!({"structuredContent":{"error":{"code":code}},"isError":true}); assert_eq!(normalize_private_error(&raw).code,expected); } }
+    fn schema41_private_patch_errors_keep_canonical_conflict_codes() {
+        for (code, expected) in [
+            ("PATCH_CONTEXT_NOT_FOUND", FacadeErrorCode::PatchConflict),
+            ("PATCH_CONTEXT_AMBIGUOUS", FacadeErrorCode::AmbiguousMatch),
+            ("PATCH_CONFLICT", FacadeErrorCode::FileChanged),
+        ] {
+            let raw = json!({"structuredContent":{"error":{"code":code}},"isError":true});
+            assert_eq!(normalize_private_error(&raw).code, expected);
+        }
+    }
 
     #[test]
-    fn schema41_document_create_existing_target_returns_file_changed() { let mut f=AgentFacade::with_adapter(FakeAdapter{catalog:compatible_catalog()},policy()).unwrap(); let e=f.dispatch(PermissionMode::Full,"document_workflow",json!({"action":"create","path":"doc.txt","content":"new"}),None).unwrap_err(); assert_eq!(e.code,FacadeErrorCode::FileChanged); }
+    fn schema41_document_create_existing_target_returns_file_changed() {
+        let mut f = AgentFacade::with_adapter(
+            FakeAdapter {
+                catalog: compatible_catalog(),
+            },
+            policy(),
+        )
+        .unwrap();
+        let e = f
+            .dispatch(
+                PermissionMode::Full,
+                "document_workflow",
+                json!({"action":"create","path":"doc.txt","content":"new"}),
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(e.code, FacadeErrorCode::FileChanged);
+    }
 
     #[test]
-    fn schema41_workflow_workdir_and_wait_budget_are_discoverable() { let workflow=public_tool_schema("agent_workflow"); let wd=workflow["inputSchema"]["properties"]["commands"]["items"]["properties"]["workdir"]["description"].as_str().unwrap_or_default(); assert!(wd.contains("agent_workflow.path")&&wd.contains("selected project")&&wd.contains("Do not repeat")); let control=public_tool_schema("command_control"); let wait=control["inputSchema"]["properties"]["wait_ms"]["description"].as_str().unwrap_or_default(); assert!(wait.contains("1000ms")&&wait.contains("end-to-end")); assert_eq!(command_control_transport_timeout(500),std::time::Duration::from_millis(1500)); }
+    fn schema41_workflow_workdir_and_wait_budget_are_discoverable() {
+        let workflow = public_tool_schema("agent_workflow");
+        let wd=workflow["inputSchema"]["properties"]["commands"]["items"]["properties"]["workdir"]["description"].as_str().unwrap_or_default();
+        assert!(
+            wd.contains("agent_workflow.path")
+                && wd.contains("selected project")
+                && wd.contains("Do not repeat")
+        );
+        let control = public_tool_schema("command_control");
+        let wait = control["inputSchema"]["properties"]["wait_ms"]["description"]
+            .as_str()
+            .unwrap_or_default();
+        assert!(wait.contains("1000ms") && wait.contains("end-to-end"));
+        assert_eq!(
+            command_control_transport_timeout(500),
+            std::time::Duration::from_millis(1500)
+        );
+    }
 
     #[test]
     fn schema41_common_result_envelope_is_stable_for_success_and_error() {
         let success = stable_success(json!({"state":"completed","task_id":"lb-task-1"}), "done");
         let structured = &success["structuredContent"];
-        for field in ["ok","state","summary","task_id","warnings","next_step","output_refs","data","error"] {
-            assert!(structured.get(field).is_some(), "missing success envelope field {field}");
+        for field in [
+            "ok",
+            "state",
+            "summary",
+            "task_id",
+            "warnings",
+            "next_step",
+            "output_refs",
+            "data",
+            "error",
+        ] {
+            assert!(
+                structured.get(field).is_some(),
+                "missing success envelope field {field}"
+            );
         }
         assert_eq!(structured["ok"], true);
         assert!(structured["error"].is_null());
 
-        let error = FacadeError::new(FacadeErrorCode::FileChanged, "changed", false).to_mcp_result();
+        let error =
+            FacadeError::new(FacadeErrorCode::FileChanged, "changed", false).to_mcp_result();
         let structured = &error["structuredContent"];
-        for field in ["ok","state","summary","task_id","warnings","next_step","output_refs","data","error"] {
-            assert!(structured.get(field).is_some(), "missing error envelope field {field}");
+        for field in [
+            "ok",
+            "state",
+            "summary",
+            "task_id",
+            "warnings",
+            "next_step",
+            "output_refs",
+            "data",
+            "error",
+        ] {
+            assert!(
+                structured.get(field).is_some(),
+                "missing error envelope field {field}"
+            );
         }
         assert_eq!(structured["ok"], false);
         assert!(structured["data"].is_null());
@@ -7917,9 +8771,24 @@ mod tests {
             assert!(schema["properties"]["ok"].is_object());
             assert!(schema["properties"]["data"].is_object());
             assert!(schema["properties"]["error"].is_object());
-            let required = schema["required"].as_array().expect("common required fields");
-            for field in ["ok","state","summary","task_id","warnings","next_step","output_refs","data","error"] {
-                assert!(required.iter().any(|item| item == field), "{field} missing from common envelope");
+            let required = schema["required"]
+                .as_array()
+                .expect("common required fields");
+            for field in [
+                "ok",
+                "state",
+                "summary",
+                "task_id",
+                "warnings",
+                "next_step",
+                "output_refs",
+                "data",
+                "error",
+            ] {
+                assert!(
+                    required.iter().any(|item| item == field),
+                    "{field} missing from common envelope"
+                );
             }
         }
     }
@@ -8204,20 +9073,33 @@ mod tests {
             json!(["poll", "read", "write", "kill"])
         );
         for property in [
-            "action", "session_id", "output_ref", "chars", "signal", "wait_ms", "stream",
-            "offset", "limit",
+            "action",
+            "session_id",
+            "output_ref",
+            "chars",
+            "signal",
+            "wait_ms",
+            "stream",
+            "offset",
+            "limit",
         ] {
             assert!(
                 schema["properties"][property].is_object(),
                 "command_control top-level property missing: {property}"
             );
         }
-        assert!(schema["properties"]["session_id"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("poll") && value.contains("write") && value.contains("kill")));
-        assert!(schema["properties"]["output_ref"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("read")));
+        assert!(
+            schema["properties"]["session_id"]["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("poll")
+                    && value.contains("write")
+                    && value.contains("kill"))
+        );
+        assert!(
+            schema["properties"]["output_ref"]["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("read"))
+        );
     }
 
     #[test]
@@ -8226,15 +9108,21 @@ mod tests {
         let schema = &tool["inputSchema"];
         assert_eq!(schema["type"], "object");
         assert!(schema.get("oneOf").is_none());
-        assert!(tool["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("rebuild requires an existing path+content")));
-        assert!(schema["properties"]["path"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("rebuild") && value.contains("already exist")));
-        assert!(schema["properties"]["content"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("rebuild")));
+        assert!(
+            tool["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("rebuild requires an existing path+content"))
+        );
+        assert!(
+            schema["properties"]["path"]["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("rebuild") && value.contains("already exist"))
+        );
+        assert!(
+            schema["properties"]["content"]["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("rebuild"))
+        );
     }
 
     #[test]
@@ -8276,11 +9164,20 @@ mod tests {
         }
 
         assert!(sessions.local_output(&first).is_none());
-        assert_eq!(sessions.local_outputs.len(), MAX_LOCAL_RETAINED_OUTPUT_HANDLES);
-        assert_eq!(sessions.private_output(&private).as_deref(), Some("PRIVATE_OUTPUT_SECRET"));
+        assert_eq!(
+            sessions.local_outputs.len(),
+            MAX_LOCAL_RETAINED_OUTPUT_HANDLES
+        );
+        assert_eq!(
+            sessions.private_output(&private).as_deref(),
+            Some("PRIVATE_OUTPUT_SECRET")
+        );
         assert_eq!(
             sessions.local_output(&latest),
-            Some(("stderr".into(), format!("retained-{MAX_LOCAL_RETAINED_OUTPUT_HANDLES}")))
+            Some((
+                "stderr".into(),
+                format!("retained-{MAX_LOCAL_RETAINED_OUTPUT_HANDLES}")
+            ))
         );
     }
 
@@ -8422,10 +9319,8 @@ mod tests {
                 "truncated":true
             }
         });
-        let normalized = CodingToolsRuntimeAdapter::normalize_read_output(
-            &raw,
-            "lb-output-schema36",
-        );
+        let normalized =
+            CodingToolsRuntimeAdapter::normalize_read_output(&raw, "lb-output-schema36");
         let data = &normalized["structuredContent"]["data"];
         assert_eq!(data["returned_bytes"], 5);
         assert_eq!(data["total_bytes"], 8192);
@@ -8532,7 +9427,9 @@ mod tests {
     #[test]
     fn schema36_workspace_context_reports_mode_scope_and_capability_snapshot() {
         let mut facade = AgentFacade::with_adapter(
-            FakeAdapter { catalog: compatible_catalog() },
+            FakeAdapter {
+                catalog: compatible_catalog(),
+            },
             policy(),
         )
         .unwrap();
@@ -8550,18 +9447,22 @@ mod tests {
         assert_eq!(data["workspace_scope"], "active_workspace");
         assert_eq!(data["ordinary_route_token"], "current_windows_user");
         assert_eq!(data["elevated_route_available"], false);
-        assert!(data["capabilities"]["public_tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|name| name == "exec_command"));
+        assert!(
+            data["capabilities"]["public_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|name| name == "exec_command")
+        );
         assert!(data["shell_discovery"].is_object());
     }
 
     #[test]
     fn schema39_exec_dry_run_completes_without_creating_public_session() {
         let mut facade = AgentFacade::with_adapter(
-            FakeAdapter { catalog: compatible_catalog() },
+            FakeAdapter {
+                catalog: compatible_catalog(),
+            },
             policy(),
         )
         .unwrap();
@@ -8584,7 +9485,9 @@ mod tests {
     #[test]
     fn schema36_agent_dry_run_can_explain_process_restriction_in_edit() {
         let mut facade = AgentFacade::with_adapter(
-            FakeAdapter { catalog: compatible_catalog() },
+            FakeAdapter {
+                catalog: compatible_catalog(),
+            },
             policy(),
         )
         .unwrap();
@@ -8636,7 +9539,12 @@ mod tests {
             "custom",
         ] {
             let result = facade
-                .dispatch(PermissionMode::Full, "agent_workflow", json!({"action":action}), None)
+                .dispatch(
+                    PermissionMode::Full,
+                    "agent_workflow",
+                    json!({"action":action}),
+                    None,
+                )
                 .unwrap();
             assert_eq!(result["isError"], false, "action={action}: {result:#?}");
             assert_eq!(
@@ -8645,7 +9553,12 @@ mod tests {
             );
         }
         let resume = facade
-            .dispatch(PermissionMode::Full, "agent_workflow", json!({"action":"resume"}), None)
+            .dispatch(
+                PermissionMode::Full,
+                "agent_workflow",
+                json!({"action":"resume"}),
+                None,
+            )
             .expect_err("resume without a durable checkpoint must not masquerade as context_ready");
         assert_eq!(resume.code, FacadeErrorCode::NotFound);
         let diagnose_command = facade

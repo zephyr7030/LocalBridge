@@ -33,7 +33,9 @@ for (const required of [
 
 const facade = read("src-tauri/src/mcp/facade.rs");
 for (const required of [
-  "PathAuthority::active_workspace(&self.workspace)",
+  "workspace_authority: PathAuthority",
+  "runtime.workspace_authority()",
+  "FilesystemService::from_authority(self.workspace_authority.clone())",
   "workspace_input_path_valid",
   "normalized_workspace_path",
 ]) if (!facade.includes(required)) throw new Error(`ARCH-027 ordinary facade authority missing: ${required}`);

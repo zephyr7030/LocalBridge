@@ -6,10 +6,10 @@ use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStrExt;
-#[cfg(debug_assertions)]
-use std::os::windows::fs::OpenOptionsExt;
 #[cfg(not(debug_assertions))]
 use std::os::windows::ffi::OsStringExt;
+#[cfg(debug_assertions)]
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::thread;
@@ -30,13 +30,13 @@ use windows_sys::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE
 use windows_sys::Win32::Security::Cryptography::{
     BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom,
 };
-use windows_sys::Win32::Security::{
-    GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
-};
 #[cfg(any(not(debug_assertions), test))]
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, INHERIT_ONLY_ACE,
     OWNER_SECURITY_INFORMATION,
+};
+use windows_sys::Win32::Security::{
+    GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_SHARE_READ,
@@ -1079,11 +1079,13 @@ mod tests {
         fs::write(&broker, b"development broker fixture").unwrap();
 
         let pin = pin_development_broker(&broker).unwrap();
-        assert!(OpenOptions::new()
-            .write(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-            .open(&broker)
-            .is_err());
+        assert!(
+            OpenOptions::new()
+                .write(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+                .open(&broker)
+                .is_err()
+        );
         assert!(fs::remove_file(&broker).is_err());
 
         drop(pin);

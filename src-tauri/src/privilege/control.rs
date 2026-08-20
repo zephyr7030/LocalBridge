@@ -9,10 +9,9 @@ use crate::state::{GenerationId, PrivilegeFault, PrivilegeState};
 
 use super::{
     AdministratorFilesystemErrorCode, AdministratorFilesystemResult, AdministratorFilesystemSpec,
-    BrokerClientSession,
-    BrokerRunError, ElevatedBrokerProcess, ElevatedExecResult, ElevatedExecSpec, NamedPipeServer,
-    PrivilegeIpcError, PrivilegedFilesystemResult, PrivilegedFilesystemSpec, UacLaunchError,
-    launch_broker_with_explicit_uac,
+    BrokerClientSession, BrokerRunError, ElevatedBrokerProcess, ElevatedExecResult,
+    ElevatedExecSpec, NamedPipeServer, PrivilegeIpcError, PrivilegedFilesystemResult,
+    PrivilegedFilesystemSpec, UacLaunchError, launch_broker_with_explicit_uac,
 };
 
 const BROKER_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -252,6 +251,25 @@ pub trait PrivilegedExecution: Send + Sync {
     ) -> Result<AdministratorFilesystemResult, PrivilegedExecError> {
         Err(PrivilegedExecError::GateClosed(self.state()))
     }
+    fn start_structured_filesystem(
+        &self,
+        _request_id: String,
+        _spec: AdministratorFilesystemSpec,
+    ) -> Result<(), PrivilegedExecError> {
+        Err(PrivilegedExecError::GateClosed(self.state()))
+    }
+    fn poll_structured_filesystem(
+        &self,
+        _request_id: String,
+    ) -> Result<
+        Option<Result<AdministratorFilesystemResult, AdministratorFilesystemErrorCode>>,
+        PrivilegedExecError,
+    > {
+        Err(PrivilegedExecError::GateClosed(self.state()))
+    }
+    fn cancel_structured_filesystem(&self, _request_id: String) -> Result<(), PrivilegedExecError> {
+        Err(PrivilegedExecError::GateClosed(self.state()))
+    }
 }
 
 #[derive(Clone)]
@@ -374,6 +392,31 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
         self.require_gate()?;
         self.with_session(|session| session.structured_filesystem(spec))?
             .map_err(PrivilegedExecError::Filesystem)
+    }
+
+    fn start_structured_filesystem(
+        &self,
+        request_id: String,
+        spec: AdministratorFilesystemSpec,
+    ) -> Result<(), PrivilegedExecError> {
+        self.require_gate()?;
+        self.with_session(|session| session.start_structured_filesystem(request_id, spec))
+    }
+
+    fn poll_structured_filesystem(
+        &self,
+        request_id: String,
+    ) -> Result<
+        Option<Result<AdministratorFilesystemResult, AdministratorFilesystemErrorCode>>,
+        PrivilegedExecError,
+    > {
+        self.require_gate()?;
+        self.with_session(|session| session.poll_structured_filesystem(request_id))
+    }
+
+    fn cancel_structured_filesystem(&self, request_id: String) -> Result<(), PrivilegedExecError> {
+        self.require_gate()?;
+        self.with_session(|session| session.cancel_structured_filesystem(request_id))
     }
 }
 

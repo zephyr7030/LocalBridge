@@ -14,9 +14,10 @@ use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FileAttributeTagInfo, GetFileInformationByHandleEx,
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FileAttributeTagInfo, GetFileInformationByHandle, GetFileInformationByHandleEx,
     GetFinalPathNameByHandleW, OPEN_EXISTING,
 };
 
@@ -33,11 +34,60 @@ pub enum PathAuthorityError {
     OutsideAuthority,
 }
 
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowsFileIdentity {
+    volume_serial: u32,
+    file_index: u64,
+}
+
+#[cfg(windows)]
+#[derive(Debug)]
+pub(crate) struct WorkspaceLifetimePin {
+    _file: File,
+    identity: WindowsFileIdentity,
+    execution_root: PathBuf,
+}
+
+#[cfg(windows)]
+impl WorkspaceLifetimePin {
+    pub(crate) fn validate_current(&self) -> Result<(), PathAuthorityError> {
+        let current = PathAuthority::active_workspace(&self.execution_root)?;
+        let canonical_root = current
+            .canonical_root
+            .as_ref()
+            .expect("active workspace authority has canonical root");
+        let handle = current.open_validated_handle_with_share(
+            canonical_root,
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        )?;
+        if file_identity(handle.raw_handle())? == self.identity {
+            Ok(())
+        } else {
+            Err(PathAuthorityError::OutsideAuthority)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+#[derive(Debug)]
+pub(crate) struct WorkspaceLifetimePin;
+
+#[cfg(not(windows))]
+impl WorkspaceLifetimePin {
+    pub(crate) fn validate_current(&self) -> Result<(), PathAuthorityError> {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PathAuthority {
     scope: PathAuthorityScope,
     execution_root: Option<PathBuf>,
     canonical_root: Option<PathBuf>,
+    #[cfg(windows)]
+    root_identity: Option<WindowsFileIdentity>,
 }
 
 #[cfg(windows)]
@@ -58,9 +108,8 @@ impl ValidatedPathHandle {
     }
 
     pub(crate) fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
-        let file = std::mem::ManuallyDrop::new(unsafe {
-            File::from_raw_handle(self.handle as RawHandle)
-        });
+        let file =
+            std::mem::ManuallyDrop::new(unsafe { File::from_raw_handle(self.handle as RawHandle) });
         file.metadata()
     }
 
@@ -87,11 +136,27 @@ impl PathAuthority {
             &std::fs::canonicalize(root).map_err(|_| PathAuthorityError::InvalidPath)?,
         )
         .ok_or(PathAuthorityError::InvalidPath)?;
-        Ok(Self {
+        let mut authority = Self {
             scope: PathAuthorityScope::ActiveWorkspace,
             execution_root: Some(root.to_path_buf()),
             canonical_root: Some(canonical_root),
-        })
+            #[cfg(windows)]
+            root_identity: None,
+        };
+        #[cfg(windows)]
+        {
+            let canonical_root = authority
+                .canonical_root
+                .as_ref()
+                .expect("active workspace authority has canonical root");
+            let handle = authority.open_validated_handle_with_share(
+                canonical_root,
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            )?;
+            authority.root_identity = Some(file_identity(handle.raw_handle())?);
+        }
+        Ok(authority)
     }
 
     pub fn broker_administrator() -> Self {
@@ -99,6 +164,68 @@ impl PathAuthority {
             scope: PathAuthorityScope::BrokerAdministrator,
             execution_root: None,
             canonical_root: None,
+            #[cfg(windows)]
+            root_identity: None,
+        }
+    }
+
+    pub(crate) fn workspace_identity_token(&self) -> Option<String> {
+        #[cfg(windows)]
+        {
+            self.root_identity.map(|identity| {
+                format!(
+                    "win32-file-id:{:08x}:{:016x}",
+                    identity.volume_serial, identity.file_index
+                )
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
+    pub(crate) fn matches_workspace_identity_token(
+        &self,
+        expected: &str,
+    ) -> Result<(), PathAuthorityError> {
+        self.validate_root_identity()?;
+        self.workspace_identity_token()
+            .filter(|current| current == expected)
+            .map(|_| ())
+            .ok_or(PathAuthorityError::OutsideAuthority)
+    }
+
+    pub(crate) fn pin_active_workspace_lifetime(
+        root: &Path,
+    ) -> Result<WorkspaceLifetimePin, PathAuthorityError> {
+        #[cfg(windows)]
+        {
+            let authority = Self::active_workspace(root)?;
+            let canonical_root = authority
+                .canonical_root
+                .as_ref()
+                .expect("active workspace authority has canonical root");
+            // Retain the original authorization-root object and its File-ID for
+            // the facade lifetime. Windows may allow a directory rename even
+            // while a handle is open, so this handle is identity evidence, not
+            // a rename lock; callers must revalidate the current textual root.
+            let handle = authority.open_validated_handle_with_share(
+                canonical_root,
+                0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            )?;
+            let identity = file_identity(handle.raw_handle())?;
+            Ok(WorkspaceLifetimePin {
+                _file: handle.into_file(),
+                identity,
+                execution_root: root.to_path_buf(),
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = root;
+            Ok(WorkspaceLifetimePin)
         }
     }
 
@@ -106,7 +233,71 @@ impl PathAuthority {
         self.scope
     }
 
+    fn validate_root_identity(&self) -> Result<(), PathAuthorityError> {
+        #[cfg(windows)]
+        {
+            if self.scope != PathAuthorityScope::ActiveWorkspace {
+                return Ok(());
+            }
+            let Some(expected) = self.root_identity else {
+                return Ok(());
+            };
+            let root = self
+                .execution_root
+                .as_ref()
+                .expect("active workspace authority has execution root");
+            let wide = root
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    null(),
+                    OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                    null_mut(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(PathAuthorityError::OutsideAuthority);
+            }
+            let checked = (|| {
+                let mut tag = FILE_ATTRIBUTE_TAG_INFO::default();
+                let tagged = unsafe {
+                    GetFileInformationByHandleEx(
+                        handle,
+                        FileAttributeTagInfo,
+                        (&mut tag as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+                        std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+                    )
+                };
+                if tagged == 0 || tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                    return Err(PathAuthorityError::OutsideAuthority);
+                }
+                let final_path = final_path_from_handle(handle)?;
+                if self.canonical_root.as_deref() != Some(final_path.as_path()) {
+                    return Err(PathAuthorityError::OutsideAuthority);
+                }
+                if file_identity(handle)? != expected {
+                    return Err(PathAuthorityError::OutsideAuthority);
+                }
+                Ok(())
+            })();
+            unsafe { CloseHandle(handle) };
+            checked
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(())
+        }
+    }
+
     pub fn input_path(&self, raw: &str) -> Result<PathBuf, PathAuthorityError> {
+        self.validate_root_identity()?;
         match self.scope {
             PathAuthorityScope::ActiveWorkspace => {
                 if !workspace_input_path_valid(raw) {
@@ -151,6 +342,7 @@ impl PathAuthority {
             &std::fs::canonicalize(candidate).map_err(|_| PathAuthorityError::NotFound)?,
         )
         .ok_or(PathAuthorityError::InvalidPath)?;
+        self.validate_root_identity()?;
         self.allows_canonical(&canonical)
             .then_some(canonical)
             .ok_or(PathAuthorityError::OutsideAuthority)
@@ -163,6 +355,7 @@ impl PathAuthority {
         }
         let parent = candidate.parent().ok_or(PathAuthorityError::InvalidPath)?;
         let final_parent = self.revalidate_opened_path(parent)?;
+        self.validate_root_identity()?;
         if !final_parent.is_dir() {
             return Err(PathAuthorityError::InvalidPath);
         }
@@ -179,7 +372,10 @@ impl PathAuthority {
     pub fn revalidate_opened_path(&self, path: &Path) -> Result<PathBuf, PathAuthorityError> {
         #[cfg(windows)]
         {
-            Ok(self.open_validated_handle(path, 0)?.final_path().to_path_buf())
+            Ok(self
+                .open_validated_handle(path, 0)?
+                .final_path()
+                .to_path_buf())
         }
         #[cfg(not(windows))]
         {
@@ -213,12 +409,35 @@ impl PathAuthority {
     }
 
     #[cfg(windows)]
+    pub(crate) fn open_move_root_validated_handle(
+        &self,
+        path: &Path,
+        desired_access: u32,
+    ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        self.open_validated_handle_with_share(path, desired_access, FILE_SHARE_READ)
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn open_write_locked_validated_handle(
+        &self,
+        path: &Path,
+        desired_access: u32,
+    ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        self.open_validated_handle_with_share(
+            path,
+            desired_access,
+            FILE_SHARE_READ | FILE_SHARE_DELETE,
+        )
+    }
+
+    #[cfg(windows)]
     fn open_validated_handle_with_share(
         &self,
         path: &Path,
         desired_access: u32,
         share_mode: u32,
     ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        self.validate_root_identity()?;
         let wide = path
             .as_os_str()
             .encode_wide()
@@ -255,6 +474,22 @@ impl PathAuthority {
                 PathAuthorityError::OutsideAuthority
             });
         }
+        if self.scope == PathAuthorityScope::ActiveWorkspace
+            && tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
+        {
+            let mut information = BY_HANDLE_FILE_INFORMATION::default();
+            if unsafe { GetFileInformationByHandle(handle, &mut information) } == 0 {
+                unsafe { CloseHandle(handle) };
+                return Err(PathAuthorityError::InvalidPath);
+            }
+            // GetFinalPathNameByHandleW reports only the opened alias. A regular
+            // file with multiple NTFS names therefore cannot be proven to be
+            // exclusively owned by the active-workspace object boundary.
+            if information.nNumberOfLinks > 1 {
+                unsafe { CloseHandle(handle) };
+                return Err(PathAuthorityError::OutsideAuthority);
+            }
+        }
         let final_path = match final_path_from_handle(handle) {
             Ok(path) if self.allows_canonical(&path) => path,
             Ok(_) => {
@@ -266,6 +501,10 @@ impl PathAuthority {
                 return Err(error);
             }
         };
+        if let Err(error) = self.validate_root_identity() {
+            unsafe { CloseHandle(handle) };
+            return Err(error);
+        }
         Ok(ValidatedPathHandle { handle, final_path })
     }
 
@@ -294,8 +533,11 @@ impl PathAuthority {
 
     pub fn discovery_stops_at(&self, canonical: &Path) -> bool {
         match self.scope {
-            PathAuthorityScope::ActiveWorkspace => ordinary_path(canonical)
-                .is_some_and(|canonical| self.canonical_root.as_deref() == Some(canonical.as_path())),
+            PathAuthorityScope::ActiveWorkspace => {
+                ordinary_path(canonical).is_some_and(|canonical| {
+                    self.canonical_root.as_deref() == Some(canonical.as_path())
+                })
+            }
             PathAuthorityScope::BrokerAdministrator => false,
         }
     }
@@ -316,9 +558,7 @@ impl PathAuthority {
                 if !canonical.is_absolute() {
                     return Err(PathAuthorityError::InvalidPath);
                 }
-                canonical
-                    .to_string_lossy()
-                    .replace('\\', "/")
+                canonical.to_string_lossy().replace('\\', "/")
             }
         };
         Ok(if display.is_empty() {
@@ -331,6 +571,18 @@ impl PathAuthority {
     pub fn canonical_root(&self) -> Option<&Path> {
         self.canonical_root.as_deref()
     }
+}
+
+#[cfg(windows)]
+fn file_identity(handle: HANDLE) -> Result<WindowsFileIdentity, PathAuthorityError> {
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    if unsafe { GetFileInformationByHandle(handle, &mut information) } == 0 {
+        return Err(PathAuthorityError::InvalidPath);
+    }
+    Ok(WindowsFileIdentity {
+        volume_serial: information.dwVolumeSerialNumber,
+        file_index: ((information.nFileIndexHigh as u64) << 32) | information.nFileIndexLow as u64,
+    })
 }
 
 pub fn workspace_relative_path_valid(value: &str) -> bool {
@@ -480,9 +732,8 @@ fn final_path_from_handle(handle: HANDLE) -> Result<PathBuf, PathAuthorityError>
         return Err(PathAuthorityError::InvalidPath);
     }
     let mut buffer = vec![0u16; needed as usize + 1];
-    let written = unsafe {
-        GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, 0)
-    };
+    let written =
+        unsafe { GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), buffer.len() as u32, 0) };
     if written == 0 || written as usize >= buffer.len() {
         return Err(PathAuthorityError::InvalidPath);
     }
@@ -529,7 +780,10 @@ mod tests {
         let canonical_outside = std::fs::canonicalize(outside.join("outside.txt")).unwrap();
         assert!(authority.allows_canonical(&canonical_workspace));
         assert!(authority.discovery_stops_at(&canonical_workspace));
-        assert_eq!(authority.display_path(&canonical_inside).unwrap(), "inside.txt");
+        assert_eq!(
+            authority.display_path(&canonical_inside).unwrap(),
+            "inside.txt"
+        );
         assert!(!authority.allows_canonical(&canonical_outside));
         let inside = authority.resolve_existing("inside.txt").unwrap();
         assert!(inside.starts_with(authority.canonical_root().unwrap()));
@@ -539,12 +793,13 @@ mod tests {
             .unwrap();
         assert_eq!(absolute_inside, inside);
         assert_eq!(
-            authority.display_path(
-                &authority
-                    .resolve_existing(workspace.to_string_lossy().as_ref())
-                    .unwrap()
-            )
-            .unwrap(),
+            authority
+                .display_path(
+                    &authority
+                        .resolve_existing(workspace.to_string_lossy().as_ref())
+                        .unwrap()
+                )
+                .unwrap(),
             "."
         );
         assert_eq!(
@@ -559,6 +814,57 @@ mod tests {
         assert!(!workspace_input_path_valid(r"\\?\C:\project\file.txt"));
         assert!(!workspace_input_path_valid(r"C:\project\file.txt:ads"));
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn active_workspace_rejects_regular_file_hard_link_aliases() {
+        use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
+
+        let root = temp_root();
+        let workspace = root.join("workspace");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let outside_file = outside.join("shared.txt");
+        let workspace_alias = workspace.join("alias.txt");
+        std::fs::write(&outside_file, b"outside").unwrap();
+        std::fs::hard_link(&outside_file, &workspace_alias).unwrap();
+
+        let authority = PathAuthority::active_workspace(&workspace).unwrap();
+        assert!(matches!(
+            authority.open_validated_handle(&workspace_alias, FILE_GENERIC_READ),
+            Err(PathAuthorityError::OutsideAuthority)
+        ));
+
+        let broker = PathAuthority::broker_administrator();
+        assert!(
+            broker
+                .open_validated_handle(&workspace_alias, FILE_GENERIC_READ)
+                .is_ok()
+        );
+        assert_eq!(std::fs::read(&outside_file).unwrap(), b"outside");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn active_workspace_lifetime_pin_binds_the_original_root_file_id() {
+        let root = temp_root();
+        let workspace = root.join("workspace");
+        let displaced = root.join("workspace-old");
+        std::fs::create_dir(&workspace).unwrap();
+        let pin = PathAuthority::pin_active_workspace_lifetime(&workspace).unwrap();
+        assert_eq!(pin.validate_current(), Ok(()));
+        std::fs::rename(&workspace, &displaced).unwrap();
+        std::fs::create_dir(&workspace).unwrap();
+        assert_eq!(
+            pin.validate_current(),
+            Err(PathAuthorityError::OutsideAuthority)
+        );
+        std::fs::remove_dir(&workspace).unwrap();
+        std::fs::rename(&displaced, &workspace).unwrap();
+        assert_eq!(pin.validate_current(), Ok(()));
+        drop(pin);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -581,10 +887,12 @@ mod tests {
             .resolve_existing(authorized.to_string_lossy().as_ref())
             .unwrap();
         assert!(resolved.is_absolute());
-        assert!(authority
-            .display_path(&resolved)
-            .unwrap()
-            .contains("outside.txt"));
+        assert!(
+            authority
+                .display_path(&resolved)
+                .unwrap()
+                .contains("outside.txt")
+        );
         assert_eq!(
             authority.input_path(r"\\?\C:\Windows\System32"),
             Err(PathAuthorityError::InvalidPath)

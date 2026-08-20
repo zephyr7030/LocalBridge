@@ -180,12 +180,10 @@ pub(crate) fn run_elevated_exec(
     let remaining = Arc::new(AtomicUsize::new(output_limit));
     let stdout_handle = stdout_read as usize;
     let stdout_budget = Arc::clone(&remaining);
-    let stdout_reader =
-        thread::spawn(move || drain_output(stdout_handle as HANDLE, stdout_budget));
+    let stdout_reader = thread::spawn(move || drain_output(stdout_handle as HANDLE, stdout_budget));
     let stderr_handle = stderr_read as usize;
     let stderr_budget = Arc::clone(&remaining);
-    let stderr_reader =
-        thread::spawn(move || drain_output(stderr_handle as HANDLE, stderr_budget));
+    let stderr_reader = thread::spawn(move || drain_output(stderr_handle as HANDLE, stderr_budget));
     let started = Instant::now();
     let timeout = Duration::from_millis(spec.timeout_ms as u64);
     let outcome = loop {
@@ -221,12 +219,10 @@ pub(crate) fn run_elevated_exec(
     close_handle(process_info.hProcess);
     close_handle(job);
 
-    let (stdout_bytes, stdout_truncated) = stdout_reader
-        .join()
-        .unwrap_or_else(|_| (Vec::new(), true));
-    let (stderr_bytes, stderr_truncated) = stderr_reader
-        .join()
-        .unwrap_or_else(|_| (Vec::new(), true));
+    let (stdout_bytes, stdout_truncated) =
+        stdout_reader.join().unwrap_or_else(|_| (Vec::new(), true));
+    let (stderr_bytes, stderr_truncated) =
+        stderr_reader.join().unwrap_or_else(|_| (Vec::new(), true));
     let stdout = redact_output(String::from_utf8_lossy(&stdout_bytes).into_owned(), &spec);
     let stderr = redact_output(String::from_utf8_lossy(&stderr_bytes).into_owned(), &spec);
     Ok(ElevatedExecResult {

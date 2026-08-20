@@ -1,9 +1,11 @@
+#[cfg(test)]
 use std::path::Path;
 
 use serde_json::{Map, Value};
 
 use super::context_service::sha256_hex;
 use super::filesystem_service::{FilesystemError, FilesystemService};
+use super::path_authority::PathAuthority;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CodingEditError {
@@ -27,35 +29,65 @@ enum PatchOperation {
         destination: Option<String>,
         hunks: Vec<(String, String)>,
     },
-    Add { path: String, content: Vec<u8> },
-    Delete { path: String },
+    Add {
+        path: String,
+        content: Vec<u8>,
+    },
+    Delete {
+        path: String,
+    },
 }
 
 impl CodingEditService {
+    #[cfg(test)]
     pub(crate) fn new(workspace: &Path) -> Result<Self, CodingEditError> {
+        let authority =
+            PathAuthority::active_workspace(workspace).map_err(|_| CodingEditError::InvalidPath)?;
+        Self::with_authority(authority)
+    }
+
+    pub(crate) fn with_authority(authority: PathAuthority) -> Result<Self, CodingEditError> {
         Ok(Self {
-            filesystem: FilesystemService::active_workspace(workspace)
+            filesystem: FilesystemService::from_authority(authority)
                 .map_err(map_filesystem_error)?,
         })
     }
 
-    pub(crate) fn verify_expected_files(&self, expected: &Map<String, Value>) -> Result<(), CodingEditError> {
+    pub(crate) fn verify_expected_files(
+        &self,
+        expected: &Map<String, Value>,
+    ) -> Result<(), CodingEditError> {
         for (path, identity) in expected {
-            let expected = identity.as_str().filter(|value| value.len() == 64).ok_or(CodingEditError::InvalidPath)?;
+            let expected = identity
+                .as_str()
+                .filter(|value| value.len() == 64)
+                .ok_or(CodingEditError::InvalidPath)?;
             let bytes = self.read_file(path)?;
-            if sha256_hex(&bytes) != expected { return Err(CodingEditError::FileChanged); }
+            if sha256_hex(&bytes) != expected {
+                return Err(CodingEditError::FileChanged);
+            }
         }
         Ok(())
     }
 
     #[allow(dead_code)] // schema41 internal semantic surface; retained for exact replacement callers.
-    pub(crate) fn replace_exact(&self, path: &str, expected_sha256: &str, old: &str, new: &str) -> Result<String, CodingEditError> {
+    pub(crate) fn replace_exact(
+        &self,
+        path: &str,
+        expected_sha256: &str,
+        old: &str,
+        new: &str,
+    ) -> Result<String, CodingEditError> {
         let bytes = self.read_file(path)?;
         self.require_identity(&bytes, expected_sha256)?;
         let text = std::str::from_utf8(&bytes).map_err(|_| CodingEditError::PatchConflict)?;
         let count = text.match_indices(old).count();
-        if count == 0 { return Err(CodingEditError::PatchConflict); }
-        if count > 1 { return Err(CodingEditError::AmbiguousMatch); }
+        if count == 0 {
+            return Err(CodingEditError::PatchConflict);
+        }
+        if count > 1 {
+            return Err(CodingEditError::AmbiguousMatch);
+        }
         let updated = text.replacen(old, new, 1).into_bytes();
         self.filesystem
             .replace_file_if_sha256(path, expected_sha256, &updated)
@@ -64,12 +96,22 @@ impl CodingEditService {
     }
 
     #[allow(dead_code)] // schema41 internal semantic surface; retained for search/replace callers.
-    pub(crate) fn search_replace(&self, path: &str, expected_sha256: &str, needle: &str, replacement: &str) -> Result<String, CodingEditError> {
+    pub(crate) fn search_replace(
+        &self,
+        path: &str,
+        expected_sha256: &str,
+        needle: &str,
+        replacement: &str,
+    ) -> Result<String, CodingEditError> {
         self.replace_exact(path, expected_sha256, needle, replacement)
     }
 
     #[allow(dead_code)] // schema41 internal semantic surface; retained for structured file creation.
-    pub(crate) fn create_file(&self, path: &str, content: &[u8]) -> Result<String, CodingEditError> {
+    pub(crate) fn create_file(
+        &self,
+        path: &str,
+        content: &[u8],
+    ) -> Result<String, CodingEditError> {
         self.filesystem
             .create_file_for_edit(path, content)
             .map_err(map_filesystem_error)?;
@@ -77,14 +119,23 @@ impl CodingEditService {
     }
 
     #[allow(dead_code)] // schema41 internal semantic surface; retained for identity-bound deletion.
-    pub(crate) fn delete_file(&self, path: &str, expected_sha256: &str) -> Result<(), CodingEditError> {
+    pub(crate) fn delete_file(
+        &self,
+        path: &str,
+        expected_sha256: &str,
+    ) -> Result<(), CodingEditError> {
         self.filesystem
             .delete_file_if_sha256(path, expected_sha256)
             .map_err(map_filesystem_error)
     }
 
     #[allow(dead_code)] // schema41 internal semantic surface; retained for identity-bound rename/move.
-    pub(crate) fn rename_file(&self, path: &str, destination: &str, expected_sha256: &str) -> Result<(), CodingEditError> {
+    pub(crate) fn rename_file(
+        &self,
+        path: &str,
+        destination: &str,
+        expected_sha256: &str,
+    ) -> Result<(), CodingEditError> {
         self.filesystem
             .move_file_if_sha256(path, destination, expected_sha256)
             .map_err(map_filesystem_error)
@@ -98,7 +149,10 @@ impl CodingEditService {
             .map_err(map_filesystem_error)
     }
 
-    pub(crate) fn apply_patch_preconditions(&self, expected: &Map<String, Value>) -> Result<(), CodingEditError> {
+    pub(crate) fn apply_patch_preconditions(
+        &self,
+        expected: &Map<String, Value>,
+    ) -> Result<(), CodingEditError> {
         self.verify_expected_files(expected)
     }
 
@@ -108,7 +162,9 @@ impl CodingEditService {
         expected: &Map<String, Value>,
     ) -> Result<Vec<String>, CodingEditError> {
         let operations = parse_patch(patch)?;
-        if operations.is_empty() { return Err(CodingEditError::PatchConflict); }
+        if operations.is_empty() {
+            return Err(CodingEditError::PatchConflict);
+        }
 
         let mut updates = Vec::<(String, Option<String>, Vec<u8>, String)>::new();
         let mut adds = Vec::<(String, Vec<u8>)>::new();
@@ -117,7 +173,11 @@ impl CodingEditService {
 
         for operation in operations {
             match operation {
-                PatchOperation::Update { path, destination, hunks } => {
+                PatchOperation::Update {
+                    path,
+                    destination,
+                    hunks,
+                } => {
                     let identity = expected
                         .get(&path)
                         .and_then(Value::as_str)
@@ -129,8 +189,12 @@ impl CodingEditService {
                         .to_string();
                     for (old, new) in &hunks {
                         let count = text.match_indices(old.as_str()).count();
-                        if count == 0 { return Err(CodingEditError::PatchConflict); }
-                        if count > 1 { return Err(CodingEditError::AmbiguousMatch); }
+                        if count == 0 {
+                            return Err(CodingEditError::PatchConflict);
+                        }
+                        if count > 1 {
+                            return Err(CodingEditError::AmbiguousMatch);
+                        }
                         text = text.replacen(old.as_str(), new.as_str(), 1);
                     }
                     let target = match destination.as_deref() {
@@ -193,13 +257,17 @@ impl CodingEditService {
 
     fn read_file(&self, path: &str) -> Result<Vec<u8>, CodingEditError> {
         self.filesystem
-            .read_all_bytes(path)
+            .read_bytes_bounded(path, super::filesystem_service::MAX_INTERNAL_FILE_BYTES)
             .map_err(map_filesystem_error)
     }
 
     fn require_identity(&self, bytes: &[u8], expected_sha256: &str) -> Result<(), CodingEditError> {
-        if expected_sha256.len() != 64 { return Err(CodingEditError::InvalidPath); }
-        if sha256_hex(bytes) != expected_sha256 { return Err(CodingEditError::FileChanged); }
+        if expected_sha256.len() != 64 {
+            return Err(CodingEditError::InvalidPath);
+        }
+        if sha256_hex(bytes) != expected_sha256 {
+            return Err(CodingEditError::FileChanged);
+        }
         Ok(())
     }
 }
@@ -207,9 +275,16 @@ impl CodingEditService {
 fn map_filesystem_error(error: FilesystemError) -> CodingEditError {
     match error {
         FilesystemError::NotFound => CodingEditError::NotFound,
-        FilesystemError::InvalidArgument | FilesystemError::OutsideAuthority => CodingEditError::InvalidPath,
-        FilesystemError::AlreadyExists | FilesystemError::FileChanged => CodingEditError::FileChanged,
-        FilesystemError::LimitExceeded | FilesystemError::Io | FilesystemError::Unsupported => CodingEditError::Io,
+        FilesystemError::InvalidArgument | FilesystemError::OutsideAuthority => {
+            CodingEditError::InvalidPath
+        }
+        FilesystemError::AlreadyExists | FilesystemError::FileChanged => {
+            CodingEditError::FileChanged
+        }
+        FilesystemError::LimitExceeded
+        | FilesystemError::Cancelled
+        | FilesystemError::Io
+        | FilesystemError::Unsupported => CodingEditError::Io,
     }
 }
 
@@ -243,7 +318,9 @@ fn parse_patch(patch: &str) -> Result<Vec<PatchOperation>, CodingEditError> {
             continue;
         }
         if let Some(path) = line.strip_prefix("*** Delete File: ") {
-            operations.push(PatchOperation::Delete { path: path.to_string() });
+            operations.push(PatchOperation::Delete {
+                path: path.to_string(),
+            });
             index += 1;
             continue;
         }
@@ -309,8 +386,14 @@ mod tests {
     use std::path::PathBuf;
 
     fn workspace(label: &str) -> PathBuf {
-        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
-        let root = std::env::temp_dir().join(format!("localbridge-edit-{label}-{}-{nonce}", std::process::id()));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-edit-{label}-{}-{nonce}",
+            std::process::id()
+        ));
         fs::create_dir_all(&root).unwrap();
         root
     }
@@ -322,13 +405,21 @@ mod tests {
         fs::write(&path, b"before\n").unwrap();
         let service = CodingEditService::new(&root).unwrap();
         let identity = sha256_hex(b"before\n");
-        let after = service.replace_exact("a.txt", &identity, "before", "after").unwrap();
+        let after = service
+            .replace_exact("a.txt", &identity, "before", "after")
+            .unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "after\n");
         assert_eq!(after, sha256_hex(b"after\n"));
-        assert_eq!(service.replace_exact("a.txt", &identity, "after", "again"), Err(CodingEditError::FileChanged));
+        assert_eq!(
+            service.replace_exact("a.txt", &identity, "after", "again"),
+            Err(CodingEditError::FileChanged)
+        );
         fs::write(&path, b"x x").unwrap();
         let identity = sha256_hex(b"x x");
-        assert_eq!(service.search_replace("a.txt", &identity, "x", "y"), Err(CodingEditError::AmbiguousMatch));
+        assert_eq!(
+            service.search_replace("a.txt", &identity, "x", "y"),
+            Err(CodingEditError::AmbiguousMatch)
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -362,7 +453,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(changed, vec!["a.txt"]);
-        assert_eq!(fs::read_to_string(root.join("a.txt")).unwrap(), "after\ncontext\n");
+        assert_eq!(
+            fs::read_to_string(root.join("a.txt")).unwrap(),
+            "after\ncontext\n"
+        );
         assert_eq!(
             service.apply_patch(
                 "*** Begin Patch\n*** Update File: a.txt\n@@\n-after\n+again\n*** End Patch",
@@ -376,7 +470,9 @@ mod tests {
     #[test]
     fn concurrent_existing_writer_handle_fails_closed_before_any_overwrite() {
         use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
         let root = workspace("writer-race");
         let path = root.join("a.txt");
         fs::write(&path, b"before\n").unwrap();
@@ -398,6 +494,26 @@ mod tests {
     }
 
     #[test]
+    fn workspace_hard_link_cannot_patch_an_outside_file_object() {
+        let container = workspace("hardlink-container");
+        let root = container.join("workspace");
+        let outside = container.join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let outside_file = outside.join("shared.txt");
+        fs::write(&outside_file, b"outside\n").unwrap();
+        fs::hard_link(&outside_file, root.join("alias.txt")).unwrap();
+
+        let service = CodingEditService::new(&root).unwrap();
+        assert_eq!(
+            service.replace_exact("alias.txt", &sha256_hex(b"outside\n"), "outside", "changed",),
+            Err(CodingEditError::InvalidPath)
+        );
+        assert_eq!(fs::read(&outside_file).unwrap(), b"outside\n");
+        let _ = fs::remove_dir_all(container);
+    }
+
+    #[test]
     fn concurrent_create_new_has_exactly_one_winner_and_never_overwrites() {
         use std::sync::{Arc, Barrier};
         let root = workspace("create-race");
@@ -414,9 +530,23 @@ mod tests {
             }));
         }
         barrier.wait();
-        let results = threads.into_iter().map(|thread| thread.join().unwrap()).collect::<Vec<_>>();
-        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1, "{results:?}");
-        assert_eq!(results.iter().filter(|result| **result == Err(CodingEditError::FileChanged)).count(), 1, "{results:?}");
+        let results = threads
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| **result == Err(CodingEditError::FileChanged))
+                .count(),
+            1,
+            "{results:?}"
+        );
         let final_bytes = fs::read(root.join("new.txt")).unwrap();
         assert!(final_bytes == b"first" || final_bytes == b"second");
         let _ = fs::remove_dir_all(root);
@@ -433,7 +563,11 @@ mod tests {
                 .arg(target)
                 .output()
                 .unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
 
         let root = workspace("ancestor-swap");
@@ -451,7 +585,10 @@ mod tests {
         let checked = authority.resolve_existing("safe/parent/a.txt").unwrap();
         fs::rename(&safe, &displaced).unwrap();
         create_junction(&safe, &outside);
-        assert_ne!(fs::canonicalize(safe.join("parent/a.txt")).unwrap(), checked);
+        assert_ne!(
+            fs::canonicalize(safe.join("parent/a.txt")).unwrap(),
+            checked
+        );
         fs::remove_dir(&safe).unwrap();
         fs::rename(&displaced, &safe).unwrap();
 
@@ -466,7 +603,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fs::read(parent.join("a.txt")).unwrap(), b"updated\n");
-        assert_eq!(fs::read(outside_parent.join("a.txt")).unwrap(), b"outside\n");
+        assert_eq!(
+            fs::read(outside_parent.join("a.txt")).unwrap(),
+            b"outside\n"
+        );
 
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();

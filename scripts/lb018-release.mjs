@@ -29,6 +29,22 @@ const peSubsystem = (path) => {
 const json = (name, value) => writeFileSync(resolve(artifacts, name), `${JSON.stringify(value, null, 2)}\n`, "utf8");
 const forbiddenPath = (value) => /(?:^|\/)(?:tests?|source-tree|governance|skills|templates|\.coding-tools)(?:\/|$)|cloudflared|PR_CONTRACTS|PROJECT_STATE|PR_INDEX|FINAL_REVIEW|\.dmp$|\.log$/i.test(value);
 
+function verifyUninstallCredentialCleanupInvariant() {
+  const tauri = JSON.parse(readFileSync(resolve(root, "src-tauri/tauri.conf.json"), "utf8"));
+  const hookPath = tauri.bundle?.windows?.nsis?.installerHooks;
+  if (hookPath !== "../scripts/public-release/nsis-hooks.nsh") throw new Error("NSIS uninstall credential hook is not wired");
+  const hook = readFileSync(resolve(root, "scripts/public-release/nsis-hooks.nsh"), "utf8");
+  const credentials = readFileSync(resolve(root, "src-tauri/src/credentials/mod.rs"), "utf8");
+  const windowsCredentials = readFileSync(resolve(root, "src-tauri/src/credentials/windows.rs"), "utf8");
+  if (!credentials.includes('RUNTIME_API_KEY_CREDENTIAL_ID: &str = "runtime-api-key"')) throw new Error("runtime API key credential id drifted");
+  if (!windowsCredentials.includes('TARGET_PREFIX: &str = "LocalBridge/RuntimeApiKey/"')) throw new Error("runtime API key credential prefix drifted");
+  for (const marker of ["NSIS_HOOK_PREUNINSTALL", "CredDeleteW", "LocalBridge/RuntimeApiKey/runtime-api-key", "i 1", "i 0"]) {
+    if (!hook.includes(marker)) throw new Error(`NSIS credential cleanup marker missing: ${marker}`);
+  }
+  if (/cmdkey|powershell|execwait/i.test(hook)) throw new Error("NSIS credential cleanup must not spawn a shell or helper process");
+  return true;
+}
+
 export function primaryManagedSpawnUsesNoWindow(source) {
   const start = source.indexOf("pub fn spawn(spec: &ManagedProcessSpec)");
   if (start < 0) return false;
@@ -98,6 +114,7 @@ function findInstaller() {
 
 function emitEvidence(codingRuntimeNoVisibleConsole) {
   verifyReleaseVersionSurfaces();
+  verifyUninstallCredentialCleanupInvariant();
   if (codingRuntimeNoVisibleConsole !== true) throw new Error("coding runtime no-visible-console behavior gate missing");
   mkdirSync(artifacts, { recursive: true });
   const installer = findInstaller();
@@ -126,7 +143,7 @@ function emitEvidence(codingRuntimeNoVisibleConsole) {
   json("release-provenance.json", {
     schema: 1, product: "LocalBridge", version: PRODUCT_VERSION, target: "windows-11-x86_64", source_commit: inventory.source_commit,
     installer: inventory.installer, runtime_manifest_sha256: sha(resolve(root, "runtime-manifest.toml")), sbom_sha256: sha(resolve(artifacts, "sbom.cdx.json")),
-    packaging: { per_machine: true, system_webview2: true, bundled_webview2: false, cloudflared: false, runtime_payload_location: "install-root/runtime", mutable_state_root: "%LOCALAPPDATA%\\LocalBridge", secret_store: "Windows Credential Manager" },
+    packaging: { per_machine: true, system_webview2: true, bundled_webview2: false, cloudflared: false, runtime_payload_location: "install-root/runtime", mutable_state_root: "%LOCALAPPDATA%\\LocalBridge", secret_store: "Windows Credential Manager", uninstall_deletes_runtime_api_key_credential: true },
     no_console_evidence: { localbridge_pe_subsystem: mainSubsystem, broker_pe_subsystem: brokerSubsystem, managed_runtime_supervisor_uses_CREATE_NO_WINDOW: primaryManagedSpawnUsesNoWindow(readFileSync(resolve(root, "src-tauri/src/runtime/windows_supervisor.rs"), "utf8")), privileged_execution_uses_CREATE_NO_WINDOW: readFileSync(resolve(root, "src-tauri/src/privilege/execution.rs"), "utf8").includes("CREATE_NO_WINDOW"), coding_runtime_managed_command_visible_window_behavior_gate: codingRuntimeNoVisibleConsole },
     ordinary_launch: { token: "current_windows_user", integrity: "medium", foreground_uac: false, background_uac: false, login_autostart_uac: false, high_integrity_route: "elevated_exec_broker_uac_only" }
   });
@@ -150,6 +167,7 @@ function refresh() {
 
 function verify() {
   verifyReleaseVersionSurfaces();
+  verifyUninstallCredentialCleanupInvariant();
   const codingRuntimeNoVisibleConsole = verifyNoVisibleConsoleBehavior();
   for (const path of ["sbom.cdx.json", "package-inventory.json", "release-provenance.json", "size-report.json"]) if (!existsSync(resolve(artifacts, path))) throw new Error(`release evidence missing: ${path}`);
   const inventory = JSON.parse(readFileSync(resolve(artifacts, "package-inventory.json"), "utf8"));
@@ -171,7 +189,7 @@ function verify() {
   if (!existsSync(installer) || statSync(installer).size !== inventory.installer.bytes || sha(installer) !== inventory.installer.sha256) throw new Error("installer hash mismatch");
   const provenance = JSON.parse(readFileSync(resolve(artifacts, "release-provenance.json"), "utf8"));
   if (provenance.source_commit !== inventory.source_commit) throw new Error("release provenance source commit mismatch");
-  if (provenance.packaging.cloudflared !== false || provenance.packaging.bundled_webview2 !== false) throw new Error("release provenance packaging invariant failed");
+  if (provenance.packaging.cloudflared !== false || provenance.packaging.bundled_webview2 !== false || provenance.packaging.uninstall_deletes_runtime_api_key_credential !== true) throw new Error("release provenance packaging invariant failed");
   if (!Object.values(provenance.no_console_evidence).every((value) => value === 2 || value === true)) throw new Error("no-console evidence incomplete");
   if (provenance.no_console_evidence.coding_runtime_managed_command_visible_window_behavior_gate !== codingRuntimeNoVisibleConsole) throw new Error("coding runtime no-visible-console behavior evidence mismatch");
   if (!primaryManagedSpawnUsesNoWindow(readFileSync(resolve(root, "src-tauri/src/runtime/windows_supervisor.rs"), "utf8"))) throw new Error("primary managed runtime spawn is missing CREATE_NO_WINDOW");

@@ -20,6 +20,7 @@ use crate::state::{
 use crate::tunnel::{
     ConnectorEndpoint, PreparedTunnelStart, TunnelId, TunnelRuntime, TunnelRuntimeConfig,
 };
+use crate::workspace::WorkspaceValidator;
 
 use super::RecoveryPermit;
 
@@ -105,8 +106,12 @@ pub trait RuntimeDriver {
 
     fn task_aggregate(&self, pep: &Self::Pep) -> Value {
         match self.current_task(pep) {
-            CurrentTaskStatus::Idle => json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null}),
-            CurrentTaskStatus::Active(_) => json!({"state":"active","current_workflow":null,"current_command":{"state":"running"},"last_command":null}),
+            CurrentTaskStatus::Idle => {
+                json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null})
+            }
+            CurrentTaskStatus::Active(_) => {
+                json!({"state":"active","current_workflow":null,"current_command":{"state":"running"},"last_command":null})
+            }
         }
     }
 
@@ -1201,6 +1206,7 @@ impl OutageTracker {
 pub struct ProductionRuntimeConfig {
     pub install_root: PathBuf,
     pub workspace: PathBuf,
+    workspace_identity: Option<String>,
     pub health_state_dir: PathBuf,
     pub tunnel_id: TunnelId,
     pub permission_mode: PermissionMode,
@@ -1216,15 +1222,25 @@ impl ProductionRuntimeConfig {
         tunnel_id: TunnelId,
         permission_mode: PermissionMode,
     ) -> Self {
+        let workspace = workspace.into();
+        let workspace_identity = WorkspaceValidator
+            .validate(&workspace)
+            .ok()
+            .map(|validated| validated.identity().as_str().to_owned());
         Self {
             install_root: install_root.into(),
-            workspace: workspace.into(),
+            workspace,
+            workspace_identity,
             health_state_dir: health_state_dir.into(),
             tunnel_id,
             permission_mode,
             mcp_readiness_timeout: Duration::from_secs(10),
             tunnel_readiness_timeout: Duration::from_secs(15),
         }
+    }
+
+    pub(crate) fn workspace_identity(&self) -> Option<&str> {
+        self.workspace_identity.as_deref()
     }
 }
 
@@ -1320,13 +1336,19 @@ where
     fn start_mcp(&mut self) -> Result<Self::Mcp, RuntimeFault> {
         let port = available_loopback_port()?;
         let bearer = (self.bearer_factory)()?;
+        let workspace_identity = self
+            .config
+            .workspace_identity()
+            .map(str::to_owned)
+            .ok_or(RuntimeFault::WorkspaceInvalid)?;
         CodingToolsRuntime::start(
             CodingToolsRuntimeConfig::new(
                 &self.config.install_root,
                 &self.config.workspace,
                 port,
                 CodingToolsPermissionMode::Trusted,
-            ),
+            )
+            .with_workspace_identity(workspace_identity),
             bearer,
             self.config.mcp_readiness_timeout,
         )
@@ -1352,13 +1374,19 @@ where
         }
         let port = available_loopback_port()?;
         let bearer = (self.bearer_factory)()?;
+        let workspace_identity = self
+            .config
+            .workspace_identity()
+            .map(str::to_owned)
+            .ok_or(RuntimeFault::WorkspaceInvalid)?;
         CodingToolsRuntime::start_for_recovery(
             CodingToolsRuntimeConfig::new(
                 &self.config.install_root,
                 &self.config.workspace,
                 port,
                 CodingToolsPermissionMode::Trusted,
-            ),
+            )
+            .with_workspace_identity(workspace_identity),
             bearer,
             self.config.mcp_readiness_timeout,
             Duration::from_millis(250),
@@ -1395,7 +1423,9 @@ where
                 self.config.permission_mode,
                 Arc::clone(wake),
             ),
-            (None, None) => PolicyEnforcementRuntime::start(mcp, policy, self.config.permission_mode),
+            (None, None) => {
+                PolicyEnforcementRuntime::start(mcp, policy, self.config.permission_mode)
+            }
         }
         .map_err(policy_runtime_fault)
     }
@@ -1541,6 +1571,10 @@ where
         if workspace.as_os_str().is_empty() {
             return Err(RuntimeFault::WorkspaceInvalid);
         }
+        let validated = WorkspaceValidator
+            .validate(&workspace)
+            .map_err(|_| RuntimeFault::WorkspaceInvalid)?;
+        self.config.workspace_identity = Some(validated.identity().as_str().to_owned());
         self.config.workspace = workspace;
         Ok(())
     }
@@ -1577,6 +1611,49 @@ fn policy_runtime_fault(error: PolicyEnforcementError) -> RuntimeFault {
         | PolicyEnforcementError::ThreadSpawnFailed
         | PolicyEnforcementError::ThreadTerminated => RuntimeFault::PolicyInvalid,
     }
+}
+
+#[cfg(all(test, windows))]
+#[test]
+fn production_runtime_config_keeps_workspace_identity_after_same_path_replacement() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!(
+        "localbridge-runtime-identity-{}-{nonce}",
+        std::process::id()
+    ));
+    let displaced = workspace.with_extension("original");
+    std::fs::create_dir(&workspace).unwrap();
+    let config = ProductionRuntimeConfig::new(
+        std::env::temp_dir(),
+        &workspace,
+        workspace.join("health"),
+        TunnelId::new("tunnel_0123456789abcdef0123456789abcdef").unwrap(),
+        PermissionMode::Edit,
+    );
+    let original_identity = config.workspace_identity().unwrap().to_owned();
+
+    std::fs::rename(&workspace, &displaced).unwrap();
+    std::fs::create_dir(&workspace).unwrap();
+    let replacement_identity = WorkspaceValidator
+        .validate(&workspace)
+        .unwrap()
+        .identity()
+        .as_str()
+        .to_owned();
+    assert_ne!(original_identity, replacement_identity);
+    assert_eq!(
+        config.workspace_identity(),
+        Some(original_identity.as_str())
+    );
+
+    std::fs::remove_dir_all(&workspace).unwrap();
+    std::fs::rename(&displaced, &workspace).unwrap();
+    std::fs::remove_dir_all(&workspace).unwrap();
 }
 
 #[cfg(test)]

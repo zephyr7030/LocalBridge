@@ -15,12 +15,12 @@ use localbridge_lib::mcp::{
 };
 use localbridge_lib::privilege::{
     AdministratorFilesystemAction, AdministratorFilesystemErrorCode, AdministratorFilesystemSortBy,
-    AdministratorFilesystemSortOrder,
-    AdministratorFilesystemSpec, BROKER_PROTOCOL_VERSION, BrokerClientSession, BrokerReady,
-    BrokerRejectCode, BrokerRequest, BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope,
-    ElevatedExecOutcome, ElevatedExecResult, ElevatedExecSpec, NamedPipeClient, NamedPipeServer,
-    PrivilegeController, PrivilegeIpcError, PrivilegedExecution, PrivilegedFilesystemAction,
-    PrivilegedFilesystemSpec, ServerHello, decode_frame, encode_frame, random_session_nonce,
+    AdministratorFilesystemSortOrder, AdministratorFilesystemSpec, BROKER_PROTOCOL_VERSION,
+    BrokerClientSession, BrokerReady, BrokerRejectCode, BrokerRequest, BrokerRequestEnvelope,
+    BrokerResponse, BrokerResponseEnvelope, ElevatedExecOutcome, ElevatedExecResult,
+    ElevatedExecSpec, NamedPipeClient, NamedPipeServer, PrivilegeController, PrivilegeIpcError,
+    PrivilegedExecution, PrivilegedFilesystemAction, PrivilegedFilesystemSpec, ServerHello,
+    decode_frame, encode_frame, random_session_nonce,
 };
 use localbridge_lib::state::{PermissionMode, PrivilegeState};
 use serde_json::{Value, json};
@@ -396,6 +396,9 @@ fn schema43_admin_fs_spec(action: AdministratorFilesystemAction) -> Administrato
         path: None,
         source: None,
         destination: None,
+        workspace_root: None,
+        workspace_identity: None,
+        workspace_fields: Vec::new(),
         recursive: false,
         max_depth: 16,
         max_entries: 10_000,
@@ -422,10 +425,7 @@ fn schema43_actual_broker_structured_filesystem_covers_all_nine_actions() {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!(
-        "lb43-broker-fs-{}-{nonce}",
-        std::process::id()
-    ));
+    let root = std::env::temp_dir().join(format!("lb43-broker-fs-{}-{nonce}", std::process::id()));
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.txt");
     let copied = root.join("copied.txt");
@@ -510,6 +510,54 @@ fn schema43_actual_broker_structured_filesystem_covers_all_nine_actions() {
     );
     session.ping().unwrap();
 
+    session.shutdown().unwrap();
+    assert!(child.wait().unwrap().success());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn schema43_actual_broker_structured_filesystem_cancel_reaches_worker() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "lb43-broker-fs-cancel-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let large = root.join("large.bin");
+    fs::File::create(&large)
+        .unwrap()
+        .set_len(8 * 1024 * 1024 * 1024)
+        .unwrap();
+
+    let (mut child, mut session) = authenticated_broker(44);
+    let mut hash = schema43_admin_fs_spec(AdministratorFilesystemAction::Hash);
+    hash.path = Some(large.to_string_lossy().into_owned());
+    session
+        .start_structured_filesystem("cancel-fs".into(), hash)
+        .unwrap();
+    session
+        .cancel_structured_filesystem("cancel-fs".into())
+        .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let terminal = loop {
+        if let Some(result) = session
+            .poll_structured_filesystem("cancel-fs".into())
+            .unwrap()
+        {
+            break result;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "filesystem cancellation did not converge"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(terminal, Err(AdministratorFilesystemErrorCode::Cancelled));
+    session.ping().unwrap();
     session.shutdown().unwrap();
     assert!(child.wait().unwrap().success());
     fs::remove_dir_all(root).unwrap();

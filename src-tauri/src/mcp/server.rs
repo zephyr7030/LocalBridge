@@ -20,10 +20,9 @@ use crate::diagnostics::{
 use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
     AdministratorFilesystemAction, AdministratorFilesystemErrorCode, AdministratorFilesystemKind,
-    AdministratorFilesystemResult,
-    AdministratorFilesystemSortBy, AdministratorFilesystemSortOrder, AdministratorFilesystemSpec,
-    ElevatedExecOutcome, ElevatedExecSpec, PrivilegedExecError, PrivilegedExecution,
-    PrivilegedFilesystemSpec,
+    AdministratorFilesystemResult, AdministratorFilesystemSortBy, AdministratorFilesystemSortOrder,
+    AdministratorFilesystemSpec, AdministratorWorkspacePathField, ElevatedExecOutcome,
+    ElevatedExecSpec, PrivilegedExecError, PrivilegedExecution, PrivilegedFilesystemSpec,
 };
 use crate::state::{
     Capability, CurrentTask, CurrentTaskStatus, CurrentTaskTiming, LastToolTiming, PermissionMode,
@@ -31,11 +30,13 @@ use crate::state::{
 };
 
 use super::facade::{
-    AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter, FacadeCallError, FacadeDenied,
-    FacadeError, FacadeErrorCode, FilesystemAction, FilesystemRequest, AGENT_API_REVISION,
-    normalize_path_authority_error, parse_filesystem_request, public_error_output_schema,
-    public_tools_for_policy, stable_success, validate_workspace_context_probe,
+    AGENT_API_REVISION, AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter,
+    FacadeCallError, FacadeDenied, FacadeError, FacadeErrorCode, FilesystemAction,
+    FilesystemRequest, normalize_path_authority_error, parse_filesystem_request,
+    public_error_output_schema, public_tools_for_policy, run_workspace_filesystem_with_authority,
+    stable_success, validate_workspace_context_probe,
 };
+use super::filesystem_service::FilesystemCancellation;
 use super::http::{McpCancellationClient, McpHealthClient};
 use super::path_authority::PathAuthority;
 use super::policy::{CapabilityPolicy, explicit_control_plane_reference};
@@ -70,8 +71,10 @@ struct ConnectionContext<'a> {
     task_state: &'a CommandTaskStateStore,
     sessions: &'a Mutex<HashMap<String, McpSession>>,
     active_requests: &'a Mutex<Vec<Value>>,
+    local_filesystem_requests: &'a Mutex<Vec<(Value, FilesystemCancellation)>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
     privileged_requests: &'a Mutex<Vec<(Value, String)>>,
+    privileged_filesystem_requests: &'a Mutex<Vec<(Value, String)>>,
     stopping: &'a AtomicBool,
 }
 
@@ -88,6 +91,17 @@ struct AdministratorFilesystemContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
     current_task: &'a CurrentTaskProjection,
+    active_requests: &'a Mutex<Vec<Value>>,
+    privileged_filesystem_requests: &'a Mutex<Vec<(Value, String)>>,
+    stopping: &'a AtomicBool,
+}
+
+struct WorkspaceFilesystemContext<'a> {
+    guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
+    current_task: &'a CurrentTaskProjection,
+    active_requests: &'a Mutex<Vec<Value>>,
+    local_filesystem_requests: &'a Mutex<Vec<(Value, FilesystemCancellation)>>,
+    stopping: &'a AtomicBool,
 }
 
 struct TaskControlContext<'a> {
@@ -97,8 +111,10 @@ struct TaskControlContext<'a> {
     current_task: &'a CurrentTaskProjection,
     task_state: &'a CommandTaskStateStore,
     active_requests: &'a Mutex<Vec<Value>>,
+    local_filesystem_requests: &'a Mutex<Vec<(Value, FilesystemCancellation)>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
     privileged_requests: &'a Mutex<Vec<(Value, String)>>,
+    privileged_filesystem_requests: &'a Mutex<Vec<(Value, String)>>,
 }
 
 struct ServeContext {
@@ -243,15 +259,29 @@ impl CurrentTaskProjection {
             .last_tool
             .as_ref()
             .map(|item| (item.task.clone(), item.completed_at));
-        if let Some(item) = state.current.as_ref().filter(|item| item.completed_at.is_some()) {
+        if let Some(item) = state
+            .current
+            .as_ref()
+            .filter(|item| item.completed_at.is_some())
+        {
             let completed_at = item.completed_at.expect("filtered completed task");
-            if latest.as_ref().is_none_or(|(_, previous)| completed_at > *previous) {
+            if latest
+                .as_ref()
+                .is_none_or(|(_, previous)| completed_at > *previous)
+            {
                 latest = Some((item.task.clone(), completed_at));
             }
         }
-        for item in state.queued.iter().filter(|item| item.completed_at.is_some()) {
+        for item in state
+            .queued
+            .iter()
+            .filter(|item| item.completed_at.is_some())
+        {
             let completed_at = item.completed_at.expect("filtered completed task");
-            if latest.as_ref().is_none_or(|(_, previous)| completed_at > *previous) {
+            if latest
+                .as_ref()
+                .is_none_or(|(_, previous)| completed_at > *previous)
+            {
                 latest = Some((item.task.clone(), completed_at));
             }
         }
@@ -659,11 +689,17 @@ impl PolicyEnforcementRuntime {
 
     pub fn task_aggregate_snapshot(&self) -> Value {
         let aggregate = match self.guard.as_ref() {
-            None => task_control_snapshot_with_terminal(&self.current_task.actual_snapshot(),&self.task_state),
+            None => task_control_snapshot_with_terminal(
+                &self.current_task.actual_snapshot(),
+                &self.task_state,
+            ),
             Some(guard) => match guard.try_lock() {
-            Ok(guard)=>guard.task_aggregate_snapshot(),
-            Err(TryLockError::WouldBlock)=>task_control_snapshot_with_terminal(&self.current_task.actual_snapshot(),&self.task_state),
-            Err(TryLockError::Poisoned(error))=>error.into_inner().task_aggregate_snapshot(),
+                Ok(guard) => guard.task_aggregate_snapshot(),
+                Err(TryLockError::WouldBlock) => task_control_snapshot_with_terminal(
+                    &self.current_task.actual_snapshot(),
+                    &self.task_state,
+                ),
+                Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
             },
         };
         merge_task_aggregate_activity(aggregate, &self.current_task)
@@ -689,7 +725,10 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn coding_runtime_health(&self) -> Result<Option<CodingRuntimeHealth>, FacadeError> {
-        match self.health_client.probe_default_cwd(Duration::from_millis(750)) {
+        match self
+            .health_client
+            .probe_default_cwd(Duration::from_millis(750))
+        {
             Ok(raw) if validate_workspace_context_probe(&raw, &self.health_workspace).is_ok() => {
                 Ok(Some(CodingRuntimeHealth {
                     state: super::facade::CodingRuntimeHealthState::Ready,
@@ -780,7 +819,10 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         shutdown,
     } = context;
     let active_requests = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let local_filesystem_requests =
+        Arc::new(Mutex::new(Vec::<(Value, FilesystemCancellation)>::new()));
     let privileged_requests = Arc::new(Mutex::new(Vec::<(Value, String)>::new()));
+    let privileged_filesystem_requests = Arc::new(Mutex::new(Vec::<(Value, String)>::new()));
     let stopping = Arc::new(AtomicBool::new(false));
     let mut workers = Vec::<JoinHandle<()>>::new();
     let mut next_session_reap = Instant::now();
@@ -829,12 +871,8 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         }
         match listener.accept() {
             Ok((mut stream, _)) if workers.len() >= MAX_CONNECTION_WORKERS => {
-                let _ = write_mcp_http_error(
-                    &mut stream,
-                    503,
-                    mcp_unavailable("server_busy"),
-                    None,
-                );
+                let _ =
+                    write_mcp_http_error(&mut stream, 503, mcp_unavailable("server_busy"), None);
             }
             Ok((stream, _)) => {
                 let worker_guard = Arc::clone(&guard);
@@ -844,8 +882,11 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                 let worker_task_state = task_state.clone();
                 let worker_sessions = Arc::clone(&sessions);
                 let worker_active = Arc::clone(&active_requests);
+                let worker_local_filesystem = Arc::clone(&local_filesystem_requests);
                 let worker_privileged = privileged.as_ref().map(Arc::clone);
                 let worker_privileged_requests = Arc::clone(&privileged_requests);
+                let worker_privileged_filesystem_requests =
+                    Arc::clone(&privileged_filesystem_requests);
                 let worker_stopping = Arc::clone(&stopping);
                 let worker_cancellation = cancellation.clone();
                 if let Ok(worker) = thread::Builder::new()
@@ -860,8 +901,10 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                             task_state: &worker_task_state,
                             sessions: &worker_sessions,
                             active_requests: &worker_active,
+                            local_filesystem_requests: &worker_local_filesystem,
                             privileged: worker_privileged.as_ref(),
                             privileged_requests: &worker_privileged_requests,
+                            privileged_filesystem_requests: &worker_privileged_filesystem_requests,
                             stopping: &worker_stopping,
                         };
                         let _ = handle_connection(stream, context);
@@ -885,6 +928,17 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
             break;
         }
         for request_id in &active {
+            if cancel_local_filesystem(&local_filesystem_requests, request_id) {
+                continue;
+            }
+            if let Some(broker_request_id) =
+                privileged_request_id(&privileged_filesystem_requests, request_id)
+            {
+                if let Some(privileged) = privileged.as_ref() {
+                    let _ = privileged.cancel_structured_filesystem(broker_request_id);
+                }
+                continue;
+            }
             if let Some(broker_request_id) = privileged_request_id(&privileged_requests, request_id)
             {
                 if let Some(privileged) = privileged.as_ref() {
@@ -897,6 +951,15 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         thread::sleep(Duration::from_millis(25));
     }
     if let Some(privileged) = privileged.as_ref() {
+        let filesystem_requests = privileged_filesystem_requests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|(_, broker_request_id)| broker_request_id.clone())
+            .collect::<Vec<_>>();
+        for broker_request_id in filesystem_requests {
+            let _ = privileged.cancel_structured_filesystem(broker_request_id);
+        }
         let requests = privileged_requests
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -927,8 +990,10 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         task_state,
         sessions,
         active_requests,
+        local_filesystem_requests,
         privileged,
         privileged_requests,
+        privileged_filesystem_requests,
         stopping,
     } = context;
     stream
@@ -943,12 +1008,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
     };
 
     if request.path != "/mcp" {
-        return write_mcp_http_error(
-            &mut stream,
-            404,
-            mcp_invalid("endpoint_not_found"),
-            None,
-        );
+        return write_mcp_http_error(&mut stream, 404, mcp_invalid("endpoint_not_found"), None);
     }
     if request.method == "DELETE" {
         let Some(session) = request.header("mcp-session-id") else {
@@ -967,12 +1027,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         {
             return write_empty(&mut stream, 204, None);
         }
-        return write_mcp_http_error(
-            &mut stream,
-            404,
-            mcp_unavailable("session_not_found"),
-            None,
-        );
+        return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_not_found"), None);
     }
     if request.method == "GET" {
         let Some(session) = request.header("mcp-session-id") else {
@@ -1033,12 +1088,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         return write_empty(&mut stream, 204, Some(session));
     }
     if request.method != "POST" {
-        return write_mcp_http_error(
-            &mut stream,
-            405,
-            mcp_invalid("method_not_allowed"),
-            None,
-        );
+        return write_mcp_http_error(&mut stream, 405, mcp_invalid("method_not_allowed"), None);
     }
 
     let payload: Value = match serde_json::from_slice(&request.body) {
@@ -1152,12 +1202,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         .get(session)
         .cloned();
     let Some(stored_session) = stored_session else {
-        return write_mcp_http_error(
-            &mut stream,
-            404,
-            mcp_unavailable("session_not_found"),
-            None,
-        );
+        return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_not_found"), None);
     };
     let mode = *permission_mode
         .read()
@@ -1173,12 +1218,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(session);
-        return write_mcp_http_error(
-            &mut stream,
-            404,
-            mcp_unavailable("session_stale"),
-            None,
-        );
+        return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_stale"), None);
     }
     if request
         .header("mcp-protocol-version")
@@ -1201,6 +1241,33 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 .and_then(|params| params.get("requestId"))
                 .filter(|request_id| valid_downstream_request_id(request_id))
             {
+                if cancel_local_filesystem(local_filesystem_requests, request_id) {
+                    return write_empty(&mut stream, 202, Some(session));
+                }
+                if let Some(broker_request_id) =
+                    privileged_request_id(privileged_filesystem_requests, request_id)
+                {
+                    let Some(privileged) = privileged else {
+                        return write_mcp_http_error(
+                            &mut stream,
+                            503,
+                            mcp_unavailable("privileged_cancellation_unavailable"),
+                            Some(session),
+                        );
+                    };
+                    if privileged
+                        .cancel_structured_filesystem(broker_request_id)
+                        .is_err()
+                    {
+                        return write_mcp_http_error(
+                            &mut stream,
+                            503,
+                            mcp_unavailable("privileged_cancellation_failed"),
+                            Some(session),
+                        );
+                    }
+                    return write_empty(&mut stream, 202, Some(session));
+                }
                 if let Some(broker_request_id) =
                     privileged_request_id(privileged_requests, request_id)
                 {
@@ -1338,10 +1405,27 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         guard,
                         privileged,
                         current_task,
+                        active_requests,
+                        privileged_filesystem_requests,
+                        stopping,
                     },
                 ) {
                     return result;
                 }
+                return handle_workspace_filesystem(
+                    &mut stream,
+                    id,
+                    session,
+                    mode,
+                    arguments,
+                    WorkspaceFilesystemContext {
+                        guard,
+                        current_task,
+                        active_requests,
+                        local_filesystem_requests,
+                        stopping,
+                    },
+                );
             }
             if name == "task_control" {
                 let request_key = request_diagnostic_key(&id);
@@ -1359,8 +1443,10 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         current_task,
                         task_state,
                         active_requests,
+                        local_filesystem_requests,
                         privileged,
                         privileged_requests,
+                        privileged_filesystem_requests,
                     },
                 );
                 return finalize_special_handler_request(&request_key, session, result);
@@ -1436,7 +1522,10 @@ fn enrich_workspace_context_privilege(
         "elevated_route_available".into(),
         Value::Bool(elevated_route_available),
     );
-    data.insert("privilege_state".into(), Value::String(privilege_state.into()));
+    data.insert(
+        "privilege_state".into(),
+        Value::String(privilege_state.into()),
+    );
     data.insert("broker_state".into(), Value::String(broker_state.into()));
     data.insert("uac_state".into(), Value::String(uac_state.into()));
     let aggregate = data
@@ -1452,10 +1541,7 @@ fn enrich_workspace_context_privilege(
         Value::Bool(administrator_token_available),
     );
     data.insert("selected_route".into(), Value::String("ordinary".into()));
-    if let Some(capabilities) = data
-        .get_mut("capabilities")
-        .and_then(Value::as_object_mut)
-    {
+    if let Some(capabilities) = data.get_mut("capabilities").and_then(Value::as_object_mut) {
         let reason = if elevated_route_available {
             Value::Null
         } else if mode != PermissionMode::Elevated {
@@ -1485,8 +1571,10 @@ fn handle_task_control(
         current_task,
         task_state,
         active_requests,
+        local_filesystem_requests,
         privileged,
         privileged_requests,
+        privileged_filesystem_requests,
     } = context;
     {
         let policy = public_policy
@@ -1526,9 +1614,11 @@ fn handle_task_control(
     let data = match action {
         "get" => match guard.try_lock() {
             Ok(guard) => guard.task_aggregate_snapshot(),
-            Err(TryLockError::WouldBlock) => task_control_snapshot_with_terminal(&before, task_state),
+            Err(TryLockError::WouldBlock) => {
+                task_control_snapshot_with_terminal(&before, task_state)
+            }
             Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
-        }
+        },
         "cancel" => {
             let active = active_requests
                 .lock()
@@ -1538,7 +1628,16 @@ fn handle_task_control(
             let cancelled = cancel_task_targets(
                 &active,
                 |request_id| {
-                    if let Some(broker_request_id) =
+                    if cancel_local_filesystem(local_filesystem_requests, request_id) {
+                        Ok(())
+                    } else if let Some(broker_request_id) =
+                        privileged_request_id(privileged_filesystem_requests, request_id)
+                    {
+                        privileged
+                            .ok_or(())?
+                            .cancel_structured_filesystem(broker_request_id)
+                            .map_err(|_| ())
+                    } else if let Some(broker_request_id) =
                         privileged_request_id(privileged_requests, request_id)
                     {
                         privileged
@@ -1577,12 +1676,17 @@ fn handle_task_control(
             }
             let mut data = match guard.try_lock() {
                 Ok(guard) => guard.task_aggregate_snapshot(),
-                Err(TryLockError::WouldBlock) => task_control_snapshot_with_terminal(&current_task.actual_snapshot(), task_state),
+                Err(TryLockError::WouldBlock) => {
+                    task_control_snapshot_with_terminal(&current_task.actual_snapshot(), task_state)
+                }
                 Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
             };
             if let Some(object) = data.as_object_mut() {
                 object.insert("cancelled_requests".into(), Value::from(cancelled));
-                object.insert("durable_task_cancelled".into(), Value::Bool(durable_cancelled));
+                object.insert(
+                    "durable_task_cancelled".into(),
+                    Value::Bool(durable_cancelled),
+                );
             }
             data
         }
@@ -1672,9 +1776,19 @@ fn task_control_snapshot_with_terminal(
 }
 
 #[cfg(test)]
-fn durable_task_snapshot_with_terminal(mut durable: Value, task_state: &CommandTaskStateStore) -> Value {
-    let terminal = durable.get("task_id").and_then(Value::as_str).and_then(|task_id| task_state.latest_terminal_for_task(task_id)).map(terminal_command_value).unwrap_or(Value::Null);
-    if let Some(object)=durable.as_object_mut(){ object.insert("last_terminal_command".into(),terminal); }
+fn durable_task_snapshot_with_terminal(
+    mut durable: Value,
+    task_state: &CommandTaskStateStore,
+) -> Value {
+    let terminal = durable
+        .get("task_id")
+        .and_then(Value::as_str)
+        .and_then(|task_id| task_state.latest_terminal_for_task(task_id))
+        .map(terminal_command_value)
+        .unwrap_or(Value::Null);
+    if let Some(object) = durable.as_object_mut() {
+        object.insert("last_terminal_command".into(), terminal);
+    }
     durable
 }
 
@@ -1781,10 +1895,7 @@ fn merge_task_aggregate_activity(
             "current_activity".into(),
             current_activity.clone().unwrap_or(Value::Null),
         );
-        object.insert(
-            "last_activity".into(),
-            last_activity.unwrap_or(Value::Null),
-        );
+        object.insert("last_activity".into(), last_activity.unwrap_or(Value::Null));
         let state = match current_activity
             .as_ref()
             .and_then(|value| value.get("state"))
@@ -1860,10 +1971,7 @@ const fn task_kind_name(kind: TaskKind) -> &'static str {
     }
 }
 
-fn effective_tool_catalog(
-    policy: &CapabilityPolicy,
-    mode: PermissionMode,
-) -> Value {
+fn effective_tool_catalog(policy: &CapabilityPolicy, mode: PermissionMode) -> Value {
     let mut result = public_tools_for_policy(policy, mode);
     if policy.privileged_tool_visible(mode, "elevated_exec") {
         append_elevated_exec_tool(&mut result);
@@ -1871,10 +1979,7 @@ fn effective_tool_catalog(
     result
 }
 
-fn effective_tool_catalog_signature(
-    policy: &CapabilityPolicy,
-    mode: PermissionMode,
-) -> String {
+fn effective_tool_catalog_signature(policy: &CapabilityPolicy, mode: PermissionMode) -> String {
     serde_json::to_string(&json!({
         "api_revision": AGENT_API_REVISION,
         "catalog": effective_tool_catalog(policy, mode)
@@ -1936,6 +2041,115 @@ fn finish_filesystem_task(
     current_task.project(CurrentTaskStatus::Idle);
 }
 
+fn handle_workspace_filesystem(
+    stream: &mut TcpStream,
+    id: Value,
+    session: &str,
+    mode: PermissionMode,
+    arguments: Value,
+    context: WorkspaceFilesystemContext<'_>,
+) -> Result<(), ()> {
+    let WorkspaceFilesystemContext {
+        guard,
+        current_task,
+        active_requests,
+        local_filesystem_requests,
+        stopping,
+    } = context;
+    let request_key = request_diagnostic_key(&id);
+    record_mcp_request_start(&request_key, session, "filesystem");
+    let request = match parse_filesystem_request(&arguments) {
+        Ok(request) => request,
+        Err(error) => {
+            project_filesystem_task(
+                current_task,
+                TaskKind::ReadFile,
+                TaskExecutionState::Blocked,
+            );
+            current_task.project(CurrentTaskStatus::Idle);
+            return finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, error.to_mcp_result(), Some(session)),
+            );
+        }
+    };
+    let kind = filesystem_task_kind(request.action);
+    let workspace_authority = {
+        let execution_guard = guard
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if stopping.load(Ordering::Acquire) {
+            return write_mcp_http_error(
+                stream,
+                503,
+                mcp_unavailable("server_stopping"),
+                Some(session),
+            );
+        }
+        if let Err(FacadeCallError::Denied(denied)) =
+            execution_guard.authorize_public_request(mode, "filesystem", &arguments)
+        {
+            project_filesystem_task(current_task, kind, TaskExecutionState::Blocked);
+            current_task.project(CurrentTaskStatus::Idle);
+            return finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, denied.to_mcp_result(), Some(session)),
+            );
+        }
+        if let Err(error) = execution_guard.validate_workspace_identity() {
+            project_filesystem_task(current_task, kind, TaskExecutionState::Blocked);
+            current_task.project(CurrentTaskStatus::Idle);
+            return finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, error.to_mcp_result(), Some(session)),
+            );
+        }
+        execution_guard.workspace_authority()
+    };
+
+    let cancellation = FilesystemCancellation::default();
+    active_requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(id.clone());
+    local_filesystem_requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((id.clone(), cancellation.clone()));
+    project_filesystem_task(current_task, kind, TaskExecutionState::Running);
+
+    let result =
+        run_workspace_filesystem_with_authority(workspace_authority, arguments, cancellation);
+    remove_local_filesystem_request(local_filesystem_requests, &id);
+    remove_active_request(active_requests, &id);
+    match result {
+        Ok(result) => {
+            finish_filesystem_task(current_task, kind, None);
+            finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, result, Some(session)),
+            )
+        }
+        Err(error) => {
+            let terminal = if error.code == FacadeErrorCode::ProcessCancelled {
+                TaskExecutionState::Cancelled
+            } else {
+                TaskExecutionState::Failed
+            };
+            finish_filesystem_task(current_task, kind, Some(terminal));
+            finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(stream, id, error.to_mcp_result(), Some(session)),
+            )
+        }
+    }
+}
+
 fn handle_administrator_filesystem_if_needed(
     stream: &mut TcpStream,
     id: Value,
@@ -1948,6 +2162,9 @@ fn handle_administrator_filesystem_if_needed(
         guard,
         privileged,
         current_task,
+        active_requests,
+        privileged_filesystem_requests,
+        stopping,
     } = context;
     if mode != PermissionMode::Elevated {
         return None;
@@ -1960,7 +2177,11 @@ fn handle_administrator_filesystem_if_needed(
         Err(error) => {
             let request_key = request_diagnostic_key(&id);
             record_mcp_request_start(&request_key, session, "filesystem");
-            project_filesystem_task(current_task, TaskKind::ModifyFile, TaskExecutionState::Blocked);
+            project_filesystem_task(
+                current_task,
+                TaskKind::ModifyFile,
+                TaskExecutionState::Blocked,
+            );
             current_task.project(CurrentTaskStatus::Idle);
             return Some(finalize_special_handler_request(
                 &request_key,
@@ -1983,7 +2204,23 @@ fn handle_administrator_filesystem_if_needed(
             write_rpc_result(stream, id, denied.to_mcp_result(), Some(session)),
         ));
     }
-    let spec = match administrator_filesystem_spec(execution_guard.workspace_path(), &request) {
+    if let Err(error) = execution_guard.validate_workspace_identity() {
+        let request_key = request_diagnostic_key(&id);
+        record_mcp_request_start(&request_key, session, "filesystem");
+        project_filesystem_task(current_task, kind, TaskExecutionState::Blocked);
+        current_task.project(CurrentTaskStatus::Idle);
+        return Some(finalize_special_handler_request(
+            &request_key,
+            session,
+            write_rpc_result(stream, id, error.to_mcp_result(), Some(session)),
+        ));
+    }
+    let workspace_authority = execution_guard.workspace_authority();
+    let spec = match administrator_filesystem_spec(
+        execution_guard.workspace_path(),
+        &workspace_authority,
+        &request,
+    ) {
         Ok(Some(spec)) => spec,
         Ok(None) => return None,
         Err(error) => {
@@ -2027,9 +2264,101 @@ fn handle_administrator_filesystem_if_needed(
         ));
     }
 
+    let generation = PRIVILEGED_REQUEST_GENERATION.fetch_add(1, Ordering::Relaxed);
+    let broker_request_id = format!("mcp-filesystem-{generation:x}");
+    active_requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(id.clone());
+    privileged_filesystem_requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((id.clone(), broker_request_id.clone()));
     project_filesystem_task(current_task, kind, TaskExecutionState::Running);
-    let filesystem = match privileged.structured_filesystem(spec) {
-        Ok(filesystem) => filesystem,
+
+    if let Err(error) = privileged.start_structured_filesystem(broker_request_id.clone(), spec) {
+        remove_active_request(active_requests, &id);
+        remove_privileged_request(privileged_filesystem_requests, &id);
+        return Some(match error {
+            PrivilegedExecError::GateClosed(_) => {
+                finish_filesystem_task(
+                    current_task,
+                    kind,
+                    Some(TaskExecutionState::AwaitingAuthorization),
+                );
+                finalize_special_handler_request(
+                    &request_key,
+                    session,
+                    write_rpc_result(stream, id, elevation_required_result(), Some(session)),
+                )
+            }
+            PrivilegedExecError::Broker(_) => {
+                finish_filesystem_task(current_task, kind, Some(TaskExecutionState::Failed));
+                finalize_special_handler_request(
+                    &request_key,
+                    session,
+                    write_rpc_result(
+                        stream,
+                        id,
+                        privileged_filesystem_unavailable_result(),
+                        Some(session),
+                    ),
+                )
+            }
+            PrivilegedExecError::Filesystem(code) => {
+                let terminal = if code == AdministratorFilesystemErrorCode::Cancelled {
+                    TaskExecutionState::Cancelled
+                } else {
+                    TaskExecutionState::Failed
+                };
+                finish_filesystem_task(current_task, kind, Some(terminal));
+                finalize_special_handler_request(
+                    &request_key,
+                    session,
+                    write_rpc_result(
+                        stream,
+                        id,
+                        administrator_filesystem_error_result(code),
+                        Some(session),
+                    ),
+                )
+            }
+        });
+    }
+
+    let filesystem = loop {
+        if stopping.load(Ordering::Acquire) {
+            let _ = privileged.cancel_structured_filesystem(broker_request_id.clone());
+        }
+        match privileged.poll_structured_filesystem(broker_request_id.clone()) {
+            Ok(Some(result)) => break Ok(result),
+            Ok(None) => thread::sleep(Duration::from_millis(25)),
+            Err(error) => break Err(error),
+        }
+    };
+    remove_active_request(active_requests, &id);
+    remove_privileged_request(privileged_filesystem_requests, &id);
+
+    let filesystem = match filesystem {
+        Ok(Ok(filesystem)) => filesystem,
+        Ok(Err(code)) => {
+            let terminal = if code == AdministratorFilesystemErrorCode::Cancelled {
+                TaskExecutionState::Cancelled
+            } else {
+                TaskExecutionState::Failed
+            };
+            finish_filesystem_task(current_task, kind, Some(terminal));
+            return Some(finalize_special_handler_request(
+                &request_key,
+                session,
+                write_rpc_result(
+                    stream,
+                    id,
+                    administrator_filesystem_error_result(code),
+                    Some(session),
+                ),
+            ));
+        }
         Err(PrivilegedExecError::GateClosed(_)) => {
             finish_filesystem_task(
                 current_task,
@@ -2056,7 +2385,12 @@ fn handle_administrator_filesystem_if_needed(
             ));
         }
         Err(PrivilegedExecError::Filesystem(code)) => {
-            finish_filesystem_task(current_task, kind, Some(TaskExecutionState::Failed));
+            let terminal = if code == AdministratorFilesystemErrorCode::Cancelled {
+                TaskExecutionState::Cancelled
+            } else {
+                TaskExecutionState::Failed
+            };
+            finish_filesystem_task(current_task, kind, Some(terminal));
             return Some(finalize_special_handler_request(
                 &request_key,
                 session,
@@ -2095,9 +2429,9 @@ fn handle_administrator_filesystem_if_needed(
 
 fn administrator_filesystem_spec(
     workspace: &Path,
+    authority: &PathAuthority,
     request: &FilesystemRequest,
 ) -> Result<Option<AdministratorFilesystemSpec>, FacadeError> {
-    let authority = PathAuthority::active_workspace(workspace).map_err(normalize_path_authority_error)?;
     let mut outside = false;
     for path in request.path_inputs().into_iter().flatten() {
         if !authority
@@ -2111,49 +2445,61 @@ fn administrator_filesystem_spec(
         return Ok(None);
     }
 
+    let mut workspace_fields = Vec::new();
     match request.action {
         FilesystemAction::Write => {
-            validate_workspace_side_path(
-                &authority,
+            if validate_workspace_side_path(
+                authority,
                 request.path.as_deref().expect("write path parsed"),
                 true,
-            )?;
+            )? {
+                workspace_fields.push(AdministratorWorkspacePathField::Path);
+            }
         }
         FilesystemAction::Copy | FilesystemAction::Move => {
-            validate_workspace_side_path(
-                &authority,
+            if validate_workspace_side_path(
+                authority,
                 request.source.as_deref().expect("copy/move source parsed"),
                 false,
-            )?;
-            validate_workspace_side_path(
-                &authority,
-                request.destination.as_deref().expect("copy/move destination parsed"),
+            )? {
+                workspace_fields.push(AdministratorWorkspacePathField::Source);
+            }
+            if validate_workspace_side_path(
+                authority,
+                request
+                    .destination
+                    .as_deref()
+                    .expect("copy/move destination parsed"),
                 true,
-            )?;
+            )? {
+                workspace_fields.push(AdministratorWorkspacePathField::Destination);
+            }
         }
         _ => {
-            validate_workspace_side_path(
-                &authority,
+            if validate_workspace_side_path(
+                authority,
                 request.path.as_deref().expect("filesystem path parsed"),
                 false,
-            )?;
+            )? {
+                workspace_fields.push(AdministratorWorkspacePathField::Path);
+            }
         }
     }
 
     let path = request
         .path
         .as_deref()
-        .map(|path| administrator_absolute_path(&authority, path))
+        .map(|path| administrator_absolute_path(authority, path))
         .transpose()?;
     let source = request
         .source
         .as_deref()
-        .map(|path| administrator_absolute_path(&authority, path))
+        .map(|path| administrator_absolute_path(authority, path))
         .transpose()?;
     let destination = request
         .destination
         .as_deref()
-        .map(|path| administrator_absolute_path(&authority, path))
+        .map(|path| administrator_absolute_path(authority, path))
         .transpose()?;
     for candidate in [&path, &source, &destination].into_iter().flatten() {
         if explicit_control_plane_reference(candidate) {
@@ -2174,6 +2520,13 @@ fn administrator_filesystem_spec(
     let max_bytes = u32::try_from(request.max_bytes).map_err(|_| {
         FacadeError::new(FacadeErrorCode::InvalidArgument, "文件系统参数无效", false)
     })?;
+    let workspace_identity = if workspace_fields.is_empty() {
+        None
+    } else {
+        Some(authority.workspace_identity_token().ok_or_else(|| {
+            FacadeError::new(FacadeErrorCode::Internal, "工作区对象身份不可用", false)
+        })?)
+    };
     let spec = AdministratorFilesystemSpec {
         action: match request.action {
             FilesystemAction::List => AdministratorFilesystemAction::List,
@@ -2189,6 +2542,10 @@ fn administrator_filesystem_spec(
         path,
         source,
         destination,
+        workspace_root: (!workspace_fields.is_empty())
+            .then(|| workspace.to_string_lossy().into_owned()),
+        workspace_identity,
+        workspace_fields,
         recursive: request.recursive,
         max_depth: request.max_depth,
         max_entries,
@@ -2230,12 +2587,12 @@ fn validate_workspace_side_path(
     authority: &PathAuthority,
     path: &str,
     allow_missing_leaf: bool,
-) -> Result<(), FacadeError> {
+) -> Result<bool, FacadeError> {
     if !authority
         .input_is_within_execution_root(path)
         .map_err(normalize_path_authority_error)?
     {
-        return Ok(());
+        return Ok(false);
     }
     if allow_missing_leaf {
         authority
@@ -2246,7 +2603,7 @@ fn validate_workspace_side_path(
             .resolve_existing(path)
             .map_err(normalize_path_authority_error)?;
     }
-    Ok(())
+    Ok(true)
 }
 
 fn administrator_absolute_path(
@@ -2256,7 +2613,9 @@ fn administrator_absolute_path(
     let absolute = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
-        authority.input_path(path).map_err(normalize_path_authority_error)?
+        authority
+            .input_path(path)
+            .map_err(normalize_path_authority_error)?
     };
     Ok(absolute.to_string_lossy().into_owned())
 }
@@ -2264,9 +2623,8 @@ fn administrator_absolute_path(
 fn administrator_filesystem_result_data(
     filesystem: AdministratorFilesystemResult,
 ) -> Result<Value, FacadeError> {
-    let mut data = serde_json::to_value(filesystem).map_err(|_| {
-        FacadeError::new(FacadeErrorCode::Internal, "文件系统结果投影失败", false)
-    })?;
+    let mut data = serde_json::to_value(filesystem)
+        .map_err(|_| FacadeError::new(FacadeErrorCode::Internal, "文件系统结果投影失败", false))?;
     let object = data.as_object_mut().ok_or_else(|| {
         FacadeError::new(FacadeErrorCode::Internal, "文件系统结果投影失败", false)
     })?;
@@ -2283,11 +2641,9 @@ fn administrator_filesystem_error_result(code: AdministratorFilesystemErrorCode)
             "文件系统参数无效或超过限制",
             false,
         ),
-        AdministratorFilesystemErrorCode::NotFound => (
-            FacadeErrorCode::NotFound,
-            "文件系统对象不存在",
-            false,
-        ),
+        AdministratorFilesystemErrorCode::NotFound => {
+            (FacadeErrorCode::NotFound, "文件系统对象不存在", false)
+        }
         AdministratorFilesystemErrorCode::OutsideAuthority => (
             FacadeErrorCode::WorkspaceDenied,
             "文件系统路径超出授权范围",
@@ -2298,16 +2654,19 @@ fn administrator_filesystem_error_result(code: AdministratorFilesystemErrorCode)
             "目标文件系统对象已存在",
             false,
         ),
+        AdministratorFilesystemErrorCode::Cancelled => (
+            FacadeErrorCode::ProcessCancelled,
+            "文件系统操作已取消",
+            true,
+        ),
         AdministratorFilesystemErrorCode::Unsupported => (
             FacadeErrorCode::CapabilityDenied,
             "该文件系统对象类型不受支持",
             false,
         ),
-        AdministratorFilesystemErrorCode::Io => (
-            FacadeErrorCode::Internal,
-            "文件系统操作未完成",
-            true,
-        ),
+        AdministratorFilesystemErrorCode::Io => {
+            (FacadeErrorCode::Internal, "文件系统操作未完成", true)
+        }
     };
     FacadeError::new(code, message, retryable).to_mcp_result()
 }
@@ -2731,8 +3090,12 @@ fn handle_elevated_exec(
     let is_error = !matches!(execution.outcome, ElevatedExecOutcome::Completed);
     let diagnostic = match execution.outcome {
         ElevatedExecOutcome::Completed => None,
-        ElevatedExecOutcome::TimedOut => Some(crate::diagnostics::error::from_canonical_code("ProcessTimedOut")),
-        ElevatedExecOutcome::Cancelled => Some(crate::diagnostics::error::from_canonical_code("ProcessCancelled")),
+        ElevatedExecOutcome::TimedOut => Some(crate::diagnostics::error::from_canonical_code(
+            "ProcessTimedOut",
+        )),
+        ElevatedExecOutcome::Cancelled => Some(crate::diagnostics::error::from_canonical_code(
+            "ProcessCancelled",
+        )),
     };
     const INLINE_OUTPUT_BYTES: usize = 8 * 1024;
     let (stdout, stdout_inline_truncated) = inline_output(&execution.stdout, INLINE_OUTPUT_BYTES);
@@ -2754,7 +3117,11 @@ fn handle_elevated_exec(
         .into_iter()
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
-        .join(if stdout.is_empty() || stderr.is_empty() { "" } else { "\n" });
+        .join(if stdout.is_empty() || stderr.is_empty() {
+            ""
+        } else {
+            "\n"
+        });
     let response = json!({
         "content": [{"type": "text", "text": text}],
         "structuredContent": {
@@ -2806,6 +3173,31 @@ fn remove_active_request(active_requests: &Mutex<Vec<Value>>, request_id: &Value
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .retain(|active| active != request_id);
+}
+
+fn cancel_local_filesystem(
+    requests: &Mutex<Vec<(Value, FilesystemCancellation)>>,
+    request_id: &Value,
+) -> bool {
+    let requests = requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, cancellation)) = requests.iter().find(|(active, _)| active == request_id) {
+        cancellation.cancel();
+        true
+    } else {
+        false
+    }
+}
+
+fn remove_local_filesystem_request(
+    requests: &Mutex<Vec<(Value, FilesystemCancellation)>>,
+    request_id: &Value,
+) {
+    requests
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .retain(|(active, _)| active != request_id);
 }
 
 fn active_request_exists(active_requests: &Mutex<Vec<Value>>, request_id: &Value) -> bool {
@@ -2947,12 +3339,11 @@ fn write_rpc_result(
         session,
     );
     match (session, request_key.as_deref()) {
-        (Some(session), Some(request_key)) => finalize_response_diagnostic(
-            request_key,
-            session,
-            write_result,
-            || record_mcp_request_result(request_key, session, &result),
-        ),
+        (Some(session), Some(request_key)) => {
+            finalize_response_diagnostic(request_key, session, write_result, || {
+                record_mcp_request_result(request_key, session, &result)
+            })
+        }
         _ => write_result,
     }
 }
@@ -2979,12 +3370,11 @@ fn write_rpc_error(
         session,
     );
     match (session, request_key.as_deref()) {
-        (Some(session), Some(request_key)) => finalize_response_diagnostic(
-            request_key,
-            session,
-            write_result,
-            || record_mcp_request_error(request_key, session, diagnostic),
-        ),
+        (Some(session), Some(request_key)) => {
+            finalize_response_diagnostic(request_key, session, write_result, || {
+                record_mcp_request_error(request_key, session, diagnostic)
+            })
+        }
         _ => write_result,
     }
 }
@@ -3134,7 +3524,10 @@ mod tests {
 
     #[test]
     fn schema42_mcp_http_failures_have_distinct_transport_causes() {
-        assert_eq!(http_read_error(b"BROKEN\r\n\r\n").cause, "malformed_request");
+        assert_eq!(
+            http_read_error(b"BROKEN\r\n\r\n").cause,
+            "malformed_request"
+        );
         assert_eq!(
             http_read_error(b"POST /mcp HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n").cause,
             "unsupported_transfer_encoding"
@@ -3143,8 +3536,14 @@ mod tests {
             http_read_error(b"POST /mcp HTTP/1.1\r\nContent-Length: 5\r\n\r\nab").cause,
             "early_eof"
         );
-        let oversized_body = format!("POST /mcp HTTP/1.1\r\nContent-Length: {}\r\n\r\n", MAX_BODY_BYTES + 1);
-        assert_eq!(http_read_error(oversized_body.as_bytes()).cause, "body_too_large");
+        let oversized_body = format!(
+            "POST /mcp HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY_BYTES + 1
+        );
+        assert_eq!(
+            http_read_error(oversized_body.as_bytes()).cause,
+            "body_too_large"
+        );
 
         let mut oversized_header = b"GET /mcp HTTP/1.1\r\nX-Test: ".to_vec();
         oversized_header.extend(std::iter::repeat_n(b'a', MAX_HEADER_BYTES + 1));
@@ -3155,7 +3554,10 @@ mod tests {
         let _client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
         let (mut server, _) = listener.accept().unwrap();
         server.set_nonblocking(true).unwrap();
-        assert_eq!(read_request(&mut server).unwrap_err().cause, "socket_read_failure");
+        assert_eq!(
+            read_request(&mut server).unwrap_err().cause,
+            "socket_read_failure"
+        );
     }
 
     #[test]
@@ -3174,7 +3576,10 @@ mod tests {
         assert_eq!(response.status, 400);
         assert_eq!(response.body["error"]["error_code"], "Unavailable");
         assert_eq!(response.body["error"]["phase"], "transport");
-        assert_eq!(response.body["error"]["cause"], "unsupported_transfer_encoding");
+        assert_eq!(
+            response.body["error"]["cause"],
+            "unsupported_transfer_encoding"
+        );
         assert_eq!(response.body["error"]["http_status"], 400);
         let _ = client.shutdown(std::net::Shutdown::Both);
     }
@@ -3182,9 +3587,24 @@ mod tests {
     #[test]
     fn schema42_public_mcp_http_failures_are_diagnostic_while_success_stays_empty() {
         for (status, diagnostic, error_code, cause) in [
-            (400, mcp_invalid("session_id_required"), "InvalidRequest", "session_id_required"),
-            (404, mcp_unavailable("session_not_found"), "Unavailable", "session_not_found"),
-            (503, mcp_unavailable("server_stopping"), "Unavailable", "server_stopping"),
+            (
+                400,
+                mcp_invalid("session_id_required"),
+                "InvalidRequest",
+                "session_id_required",
+            ),
+            (
+                404,
+                mcp_unavailable("session_not_found"),
+                "Unavailable",
+                "session_not_found",
+            ),
+            (
+                503,
+                mcp_unavailable("server_stopping"),
+                "Unavailable",
+                "server_stopping",
+            ),
         ] {
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
             let port = listener.local_addr().unwrap().port();
@@ -3264,9 +3684,15 @@ mod tests {
     impl SuspendedProcess {
         fn suspend(pid: u32) -> Self {
             let handle = unsafe { OpenProcess(PROCESS_SUSPEND_RESUME, 0, pid) };
-            assert!(!handle.is_null(), "OpenProcess(PROCESS_SUSPEND_RESUME) failed for {pid}");
+            assert!(
+                !handle.is_null(),
+                "OpenProcess(PROCESS_SUSPEND_RESUME) failed for {pid}"
+            );
             let status = unsafe { NtSuspendProcess(handle) };
-            assert_eq!(status, 0, "NtSuspendProcess failed with NTSTATUS {status:#x}");
+            assert_eq!(
+                status, 0,
+                "NtSuspendProcess failed with NTSTATUS {status:#x}"
+            );
             Self { handle }
         }
     }
@@ -3283,10 +3709,43 @@ mod tests {
 
     #[test]
     fn durable_task_terminal_ignores_newer_unrelated_command() {
-        let workspace=temp_workspace(); let store=CommandTaskStateStore::open_at(workspace.join("owned-terminal.json")).unwrap();
-        let a=CommandOwner::new("workflow-a","lb-session-a"); store.begin(a.clone()).unwrap(); store.finalize(TerminalCommandSnapshot::new(a.clone(),CommandTerminalStatus::Completed,Some(0),None,false,false,vec!["lb-output-a".into()],None)).unwrap();
-        let b=CommandOwner::new("direct-b","lb-session-b"); store.begin(b.clone()).unwrap(); store.finalize(TerminalCommandSnapshot::new(b,CommandTerminalStatus::TimedOut,None,None,true,false,vec!["lb-output-b".into()],Some("ProcessTimedOut".into()))).unwrap();
-        let data=durable_task_snapshot_with_terminal(json!({"task_id":"workflow-a","state":"waiting"}),&store); assert_eq!(data["last_terminal_command"]["task_id"],"workflow-a"); assert_eq!(data["last_terminal_command"]["session_id"],"lb-session-a"); cleanup_test_directory(&workspace);
+        let workspace = temp_workspace();
+        let store = CommandTaskStateStore::open_at(workspace.join("owned-terminal.json")).unwrap();
+        let a = CommandOwner::new("workflow-a", "lb-session-a");
+        store.begin(a.clone()).unwrap();
+        store
+            .finalize(TerminalCommandSnapshot::new(
+                a.clone(),
+                CommandTerminalStatus::Completed,
+                Some(0),
+                None,
+                false,
+                false,
+                vec!["lb-output-a".into()],
+                None,
+            ))
+            .unwrap();
+        let b = CommandOwner::new("direct-b", "lb-session-b");
+        store.begin(b.clone()).unwrap();
+        store
+            .finalize(TerminalCommandSnapshot::new(
+                b,
+                CommandTerminalStatus::TimedOut,
+                None,
+                None,
+                true,
+                false,
+                vec!["lb-output-b".into()],
+                Some("ProcessTimedOut".into()),
+            ))
+            .unwrap();
+        let data = durable_task_snapshot_with_terminal(
+            json!({"task_id":"workflow-a","state":"waiting"}),
+            &store,
+        );
+        assert_eq!(data["last_terminal_command"]["task_id"], "workflow-a");
+        assert_eq!(data["last_terminal_command"]["session_id"], "lb-session-a");
+        cleanup_test_directory(&workspace);
     }
 
     #[test]
@@ -3369,11 +3828,17 @@ mod tests {
         assert_eq!(waiting["current_activity"]["step"], "edit");
 
         let tool = CurrentTaskProjection::default();
-        tool.project(CurrentTaskStatus::start(TaskKind::SearchCode, "search schema42"));
+        tool.project(CurrentTaskStatus::start(
+            TaskKind::SearchCode,
+            "search schema42",
+        ));
         let tool_active = merge_task_aggregate_activity(workflow.clone(), &tool);
         assert_eq!(tool_active["state"], "active");
         assert_eq!(tool_active["current_activity"]["kind"], "search");
-        assert_eq!(tool_active["current_activity"]["summary"], "search schema42");
+        assert_eq!(
+            tool_active["current_activity"]["summary"],
+            "search schema42"
+        );
 
         let command = merge_task_aggregate_activity(
             json!({
@@ -3440,6 +3905,7 @@ mod tests {
         state: RwLock<PrivilegeState>,
         starts: Mutex<Vec<ElevatedExecSpec>>,
         structured_filesystems: Mutex<Vec<AdministratorFilesystemSpec>>,
+        structured_filesystem_results: Mutex<HashMap<String, AdministratorFilesystemResult>>,
         cancelled: AtomicBool,
         complete: AtomicBool,
     }
@@ -3452,6 +3918,7 @@ mod tests {
                 }),
                 starts: Mutex::new(Vec::new()),
                 structured_filesystems: Mutex::new(Vec::new()),
+                structured_filesystem_results: Mutex::new(HashMap::new()),
                 cancelled: AtomicBool::new(false),
                 complete: AtomicBool::new(false),
             }
@@ -3628,6 +4095,45 @@ mod tests {
                 },
             })
         }
+
+        fn start_structured_filesystem(
+            &self,
+            request_id: String,
+            spec: AdministratorFilesystemSpec,
+        ) -> Result<(), PrivilegedExecError> {
+            let result = self.structured_filesystem(spec)?;
+            self.structured_filesystem_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(request_id, result);
+            Ok(())
+        }
+
+        fn poll_structured_filesystem(
+            &self,
+            request_id: String,
+        ) -> Result<
+            Option<Result<AdministratorFilesystemResult, AdministratorFilesystemErrorCode>>,
+            PrivilegedExecError,
+        > {
+            Ok(self
+                .structured_filesystem_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&request_id)
+                .map(Ok))
+        }
+
+        fn cancel_structured_filesystem(
+            &self,
+            request_id: String,
+        ) -> Result<(), PrivilegedExecError> {
+            self.structured_filesystem_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&request_id);
+            Ok(())
+        }
     }
 
     struct ClientResponse {
@@ -3747,7 +4253,9 @@ mod tests {
 
     fn get_sse(port: u16, session: &str) -> RawHttpResponse {
         let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
         let request = format!(
             "GET /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: text/event-stream\r\nMCP-Protocol-Version: {CURRENT_PROTOCOL_VERSION}\r\nMcp-Session-Id: {session}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
         );
@@ -4150,11 +4658,20 @@ mod tests {
         );
         assert_eq!(task.body["result"]["structuredContent"]["ok"], true);
         for field in [
-            "ok", "state", "summary", "task_id", "warnings", "next_step", "output_refs",
-            "data", "error",
+            "ok",
+            "state",
+            "summary",
+            "task_id",
+            "warnings",
+            "next_step",
+            "output_refs",
+            "data",
+            "error",
         ] {
             assert!(
-                task.body["result"]["structuredContent"].get(field).is_some(),
+                task.body["result"]["structuredContent"]
+                    .get(field)
+                    .is_some(),
                 "task_control real MCP response lost schema41 envelope field {field}: {:#?}",
                 task.body
             );
@@ -4347,8 +4864,7 @@ mod tests {
             .expect("schema28 PEP ready after live private-result semantic probe");
         let initialized = initialize(pep.port(), 700);
         assert_eq!(
-            initialized.body["result"]["capabilities"]["tools"]["listChanged"],
-            true,
+            initialized.body["result"]["capabilities"]["tools"]["listChanged"], true,
             "schema39 must explicitly advertise tool-schema change capability: {:#?}",
             initialized.body
         );
@@ -4361,9 +4877,15 @@ mod tests {
         );
         let mut session = initialized.session.expect("schema28 downstream session");
         let first_refresh = get_sse(pep.port(), &session);
-        assert_eq!(first_refresh.status, 200, "schema39 first GET did not deliver refresh");
+        assert_eq!(
+            first_refresh.status, 200,
+            "schema39 first GET did not deliver refresh"
+        );
         assert_eq!(first_refresh.session.as_deref(), Some(session.as_str()));
-        assert_eq!(first_refresh.content_type.as_deref(), Some("text/event-stream"));
+        assert_eq!(
+            first_refresh.content_type.as_deref(),
+            Some("text/event-stream")
+        );
         let first_refresh_body = String::from_utf8(first_refresh.body).unwrap();
         assert!(
             first_refresh_body.contains("event: message")
@@ -4371,7 +4893,10 @@ mod tests {
             "schema39 refresh event missing: {first_refresh_body}"
         );
         let second_refresh = get_sse(pep.port(), &session);
-        assert_eq!(second_refresh.status, 204, "schema39 refresh was not one-shot");
+        assert_eq!(
+            second_refresh.status, 204,
+            "schema39 refresh was not one-shot"
+        );
         assert!(second_refresh.body.is_empty());
         assert_eq!(
             post(
@@ -4393,7 +4918,8 @@ mod tests {
         let provenance =
             public_tool_call(pep.port(), &session, 687, "workspace_context", json!({}));
         assert_eq!(
-            provenance.body["result"]["structuredContent"]["data"]["facade_revision"], AGENT_API_REVISION,
+            provenance.body["result"]["structuredContent"]["data"]["facade_revision"],
+            AGENT_API_REVISION,
             "fresh serving instance did not identify the current LocalBridge facade revision: {:#?}",
             provenance.body
         );
@@ -4427,19 +4953,21 @@ mod tests {
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "agent_workflow"))
             .expect("fresh serving instance exposes agent_workflow");
         assert!(served_agent["inputSchema"]["properties"]["path"].is_object());
-        assert!(served_agent["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("resume accepts only action")));
+        assert!(
+            served_agent["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("resume accepts only action"))
+        );
         assert_eq!(served_agent["outputSchema"]["type"], "object");
-        assert_eq!(served_agent["outputSchema"]["properties"]["ok"]["type"], "boolean");
+        assert_eq!(
+            served_agent["outputSchema"]["properties"]["ok"]["type"],
+            "boolean"
+        );
         let agent_data_schema = served_agent["outputSchema"]["properties"]["data"]["anyOf"]
             .as_array()
             .and_then(|branches| branches.iter().find(|branch| branch["type"] == "object"))
             .expect("agent_workflow nullable data keeps an object domain branch");
-        assert_eq!(
-            agent_data_schema["properties"]["state"]["type"],
-            "string"
-        );
+        assert_eq!(agent_data_schema["properties"]["state"]["type"], "string");
         assert!(
             served_agent["outputSchema"]["properties"]["error"]["anyOf"]
                 .as_array()
@@ -4457,7 +4985,14 @@ mod tests {
             json!(["poll", "read", "write", "kill"])
         );
         for property in [
-            "session_id", "output_ref", "chars", "signal", "wait_ms", "stream", "offset", "limit",
+            "session_id",
+            "output_ref",
+            "chars",
+            "signal",
+            "wait_ms",
+            "stream",
+            "offset",
+            "limit",
         ] {
             assert!(
                 served_command_control["inputSchema"]["properties"][property].is_object(),
@@ -4467,24 +5002,36 @@ mod tests {
 
         let served_document = served_tools.body["result"]["tools"]
             .as_array()
-            .and_then(|tools| tools.iter().find(|tool| tool["name"] == "document_workflow"))
+            .and_then(|tools| {
+                tools
+                    .iter()
+                    .find(|tool| tool["name"] == "document_workflow")
+            })
             .expect("fresh serving instance exposes document_workflow");
-        assert!(served_document["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("rebuild requires an existing path+content")));
-        assert!(served_document["inputSchema"]["properties"]["path"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("already exist")));
-        assert!(served_document["inputSchema"]["properties"]["content"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("rebuild")));
+        assert!(
+            served_document["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("rebuild requires an existing path+content"))
+        );
+        assert!(
+            served_document["inputSchema"]["properties"]["path"]["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("already exist"))
+        );
+        assert!(
+            served_document["inputSchema"]["properties"]["content"]["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("rebuild"))
+        );
         let served_git = served_tools.body["result"]["tools"]
             .as_array()
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "git_workflow"))
             .expect("fresh serving instance exposes git_workflow");
-        assert!(served_git["inputSchema"]["properties"]["path"]["description"]
-            .as_str()
-            .is_some_and(|value| value.contains("Required for blame")));
+        assert!(
+            served_git["inputSchema"]["properties"]["path"]["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("Required for blame"))
+        );
         assert!(served_git["inputSchema"]["properties"]["include_patch"].is_object());
 
         let served_elevated = served_tools.body["result"]["tools"]
@@ -4494,8 +5041,19 @@ mod tests {
         assert_eq!(served_elevated["inputSchema"]["type"], "object");
         assert!(served_elevated["inputSchema"].get("oneOf").is_none());
         for property in [
-            "operation", "program", "args", "shell", "command", "workdir", "action", "path",
-            "destination", "content_base64", "recursive", "timeout_ms", "max_output_bytes",
+            "operation",
+            "program",
+            "args",
+            "shell",
+            "command",
+            "workdir",
+            "action",
+            "path",
+            "destination",
+            "content_base64",
+            "recursive",
+            "timeout_ms",
+            "max_output_bytes",
         ] {
             assert!(
                 served_elevated["inputSchema"]["properties"][property].is_object(),
@@ -4510,8 +5068,7 @@ mod tests {
             json!({"action":"read","output_ref":"lb-output-missing","session_id":"lb-session-cross-action"}),
         );
         assert_eq!(
-            invalid_control.body["result"]["structuredContent"]["error"]["code"],
-            "InvalidArgument",
+            invalid_control.body["result"]["structuredContent"]["error"]["code"], "InvalidArgument",
             "cross-action command_control fields were not rejected: {:#?}",
             invalid_control.body
         );
@@ -4523,8 +5080,7 @@ mod tests {
             json!({"action":"status","rev":"HEAD"}),
         );
         assert_eq!(
-            invalid_git.body["result"]["structuredContent"]["error"]["code"],
-            "InvalidArgument",
+            invalid_git.body["result"]["structuredContent"]["error"]["code"], "InvalidArgument",
             "cross-action git_workflow fields were not rejected: {:#?}",
             invalid_git.body
         );
@@ -4549,8 +5105,7 @@ mod tests {
             json!({"action":"resume","path":"."}),
         );
         assert_eq!(
-            invalid_resume.body["result"]["structuredContent"]["error"]["code"],
-            "InvalidArgument",
+            invalid_resume.body["result"]["structuredContent"]["error"]["code"], "InvalidArgument",
             "resume accepted fields other than action: {:#?}",
             invalid_resume.body
         );
@@ -4706,7 +5261,12 @@ mod tests {
             "task_control",
             json!({"action":"cancel"}),
         );
-        assert_eq!(cancelled_failed_workflow.body["result"]["structuredContent"]["data"]["durable_task_cancelled"], true, "{:#?}", cancelled_failed_workflow.body);
+        assert_eq!(
+            cancelled_failed_workflow.body["result"]["structuredContent"]["data"]["durable_task_cancelled"],
+            true,
+            "{:#?}",
+            cancelled_failed_workflow.body
+        );
         let escaped_directory = public_tool_call(
             pep.port(),
             &session,
@@ -4731,7 +5291,10 @@ mod tests {
             &json!({"jsonrpc":"2.0","id":6975,"method":"ping","params":{}}),
         );
         assert_eq!(stale_full_session.status, 404);
-        assert_eq!(stale_full_session.body["error"]["error_code"], "Unavailable");
+        assert_eq!(
+            stale_full_session.body["error"]["error_code"],
+            "Unavailable"
+        );
         assert_eq!(stale_full_session.body["error"]["phase"], "mcp");
         assert_eq!(stale_full_session.body["error"]["cause"], "session_stale");
         assert_eq!(stale_full_session.body["error"]["http_status"], 404);
@@ -5076,9 +5639,22 @@ mod tests {
         );
 
         let wait_started = Instant::now();
-        let waited_poll = public_tool_call(pep.port(), &session, poll_id + 1, "command_control", json!({"action":"poll","session_id":public_session,"wait_ms":500}));
-        assert!(wait_started.elapsed() <= Duration::from_millis(1500), "poll wait_ms budget exceeded: {:?}", wait_started.elapsed());
-        assert_eq!(waited_poll.body["result"]["structuredContent"]["data"]["output"], "");
+        let waited_poll = public_tool_call(
+            pep.port(),
+            &session,
+            poll_id + 1,
+            "command_control",
+            json!({"action":"poll","session_id":public_session,"wait_ms":500}),
+        );
+        assert!(
+            wait_started.elapsed() <= Duration::from_millis(1500),
+            "poll wait_ms budget exceeded: {:?}",
+            wait_started.elapsed()
+        );
+        assert_eq!(
+            waited_poll.body["result"]["structuredContent"]["data"]["output"],
+            ""
+        );
 
         let write_started = Instant::now();
         let written = public_tool_call(
@@ -5093,7 +5669,11 @@ mod tests {
                 "wait_ms":500
             }),
         );
-        assert!(write_started.elapsed() <= Duration::from_millis(1500), "write wait_ms budget exceeded: {:?}", write_started.elapsed());
+        assert!(
+            write_started.elapsed() <= Duration::from_millis(1500),
+            "write wait_ms budget exceeded: {:?}",
+            write_started.elapsed()
+        );
         assert_eq!(
             written.body["result"]["isError"], false,
             "{:#?}",
@@ -5121,7 +5701,11 @@ mod tests {
             "healthy kill regressed: {:#?}",
             killed.body
         );
-        assert!(kill_started.elapsed() <= Duration::from_millis(2000), "kill wait_ms budget exceeded: {:?}", kill_started.elapsed());
+        assert!(
+            kill_started.elapsed() <= Duration::from_millis(2000),
+            "kill wait_ms budget exceeded: {:?}",
+            kill_started.elapsed()
+        );
         assert_eq!(killed.body["result"]["structuredContent"]["ok"], true);
         assert_eq!(
             killed.body["result"]["structuredContent"]["data"]["status"],
@@ -5294,7 +5878,13 @@ mod tests {
 
         for (id, path) in [
             (811, "absolute.txt".to_string()),
-            (812, workspace.join("absolute.txt").to_string_lossy().into_owned()),
+            (
+                812,
+                workspace
+                    .join("absolute.txt")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
         ] {
             let response = public_tool_call(
                 pep.port(),
@@ -5390,11 +5980,16 @@ mod tests {
             .expect("independent authenticated health probe")
             .expect("health is available");
         assert!(started.elapsed() < Duration::from_secs(2));
-        assert_eq!(health.state, super::super::facade::CodingRuntimeHealthState::Ready);
+        assert_eq!(
+            health.state,
+            super::super::facade::CodingRuntimeHealthState::Ready
+        );
         assert!(health.authenticated_mcp);
         drop(facade_guard);
         let mut coding = pep.stop().expect("PEP stop after independent health probe");
-        coding.stop().expect("MCP stop after independent health probe");
+        coding
+            .stop()
+            .expect("MCP stop after independent health probe");
         cleanup_test_directory(&workspace);
     }
 
@@ -5424,18 +6019,33 @@ mod tests {
             .coding_runtime_health()
             .expect("bounded health probe")
             .expect("health state");
-        assert!(started.elapsed() < Duration::from_secs(2), "health probe exceeded bound: {:?}", started.elapsed());
-        assert_ne!(health.state, super::super::facade::CodingRuntimeHealthState::Ready);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "health probe exceeded bound: {:?}",
+            started.elapsed()
+        );
+        assert_ne!(
+            health.state,
+            super::super::facade::CodingRuntimeHealthState::Ready
+        );
         assert!(!health.authenticated_mcp);
-        assert!(health.root_process_alive, "suspended MCP root must still be alive");
+        assert!(
+            health.root_process_alive,
+            "suspended MCP root must still be alive"
+        );
         drop(suspended);
         let ready_deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let health = pep.coding_runtime_health().unwrap().unwrap();
-            if health.state == super::super::facade::CodingRuntimeHealthState::Ready && health.authenticated_mcp {
+            if health.state == super::super::facade::CodingRuntimeHealthState::Ready
+                && health.authenticated_mcp
+            {
                 break;
             }
-            assert!(Instant::now() < ready_deadline, "MCP did not recover after resume: {health:?}");
+            assert!(
+                Instant::now() < ready_deadline,
+                "MCP did not recover after resume: {health:?}"
+            );
             thread::sleep(Duration::from_millis(50));
         }
         let mut coding = pep.stop().expect("PEP stop after suspended MCP test");
@@ -5598,10 +6208,11 @@ mod tests {
             .iter()
             .filter_map(|tool| tool["name"].as_str())
             .collect::<Vec<_>>();
-        assert_eq!(edit_tool_names.len(), 7);
+        assert_eq!(edit_tool_names.len(), 8);
         assert!(edit_tool_names.contains(&"agent_workflow"));
         assert!(edit_tool_names.contains(&"elevated_exec"));
-        for process_tool in ["exec_command", "command_control", "task_control"] {
+        assert!(edit_tool_names.contains(&"task_control"));
+        for process_tool in ["exec_command", "command_control"] {
             assert!(!edit_tool_names.contains(&process_tool));
         }
 
@@ -6149,6 +6760,117 @@ mod tests {
     }
 
     #[test]
+    fn edit_task_control_cancel_reaches_running_filesystem_hash() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let large = workspace.join("large-fs-cancel.bin");
+        fs::File::create(&large)
+            .unwrap()
+            .set_len(8 * 1024 * 1024 * 1024)
+            .unwrap();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Edit)
+            .expect("PEP listener ready");
+        let initialized = initialize(pep.port(), 330);
+        let session = initialized.session.expect("downstream MCP session");
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+
+        let port = pep.port();
+        let call_session = session.clone();
+        let call_started = Instant::now();
+        let call = thread::spawn(move || {
+            post_with_read_timeout(
+                port,
+                Some(&call_session),
+                &json!({
+                    "jsonrpc":"2.0",
+                    "id":"filesystem-cancel-me",
+                    "method":"tools/call",
+                    "params":{
+                        "name":"filesystem",
+                        "arguments":{"action":"hash","path":"large-fs-cancel.bin"}
+                    }
+                }),
+                Duration::from_secs(6),
+            )
+        });
+
+        let running_deadline = Instant::now() + Duration::from_secs(3);
+        while !matches!(
+            pep.current_task_projection().actual_snapshot(),
+            CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
+        ) {
+            assert!(
+                Instant::now() < running_deadline,
+                "filesystem hash never became actually Running"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let cancel_started = Instant::now();
+        let cancel = public_tool_call(
+            pep.port(),
+            &session,
+            331,
+            "task_control",
+            json!({"action":"cancel"}),
+        );
+        assert!(
+            cancel_started.elapsed() < Duration::from_secs(2),
+            "filesystem task_control cancel blocked"
+        );
+        assert_eq!(
+            cancel.body["result"]["structuredContent"]["data"]["state"], "idle",
+            "{:#?}",
+            cancel.body
+        );
+        assert!(
+            cancel.body["result"]["structuredContent"]["data"]["cancelled_requests"]
+                .as_u64()
+                .is_some_and(|count| count >= 1),
+            "{:#?}",
+            cancel.body
+        );
+
+        let result = call.join().expect("filesystem tools/call client thread");
+        assert!(
+            call_started.elapsed() < Duration::from_secs(5),
+            "filesystem cancellation did not interrupt the large hash"
+        );
+        assert_eq!(
+            result.body["result"]["structuredContent"]["error"]["code"], "ProcessCancelled",
+            "{:#?}",
+            result.body
+        );
+
+        let mut coding = pep.stop().expect("PEP stop after filesystem cancellation");
+        coding
+            .stop()
+            .expect("MCP Job stop after filesystem cancellation");
+        assert_eq!(coding.active_processes().unwrap(), 0);
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
     fn task_control_cancel_owns_detached_public_command_session() {
         let root = repo_root();
         let workspace = temp_workspace();
@@ -6192,8 +6914,7 @@ mod tests {
             }),
         );
         assert_eq!(
-            running.body["result"]["structuredContent"]["data"]["status"],
-            "running",
+            running.body["result"]["structuredContent"]["data"]["status"], "running",
             "{:#?}",
             running.body
         );
@@ -6215,8 +6936,7 @@ mod tests {
             "detached task cancellation blocked"
         );
         assert_eq!(
-            cancel.body["result"]["structuredContent"]["data"]["state"],
-            "idle",
+            cancel.body["result"]["structuredContent"]["data"]["state"], "idle",
             "{:#?}",
             cancel.body
         );
@@ -6236,8 +6956,7 @@ mod tests {
             json!({"action":"poll","session_id":public_session,"wait_ms":100}),
         );
         assert_eq!(
-            replay.body["result"]["structuredContent"]["error"]["code"],
-            "ProcessCancelled",
+            replay.body["result"]["structuredContent"]["error"]["code"], "ProcessCancelled",
             "{:#?}",
             replay.body
         );
@@ -6267,10 +6986,15 @@ mod tests {
             task.body["result"]["structuredContent"]["data"]["last_terminal_command"]["error_code"],
             "ProcessCancelled"
         );
-        assert_eq!(pep.current_task_projection().actual_snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(
+            pep.current_task_projection().actual_snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         let mut coding = pep.stop().expect("PEP stop after detached cancellation");
-        coding.stop().expect("MCP Job stop after detached cancellation");
+        coding
+            .stop()
+            .expect("MCP Job stop after detached cancellation");
         assert_eq!(coding.active_processes().unwrap(), 0);
         drop(coding);
         cleanup_test_directory(&workspace);
@@ -6325,16 +7049,18 @@ mod tests {
             "300ms timeout converged too slowly: {elapsed:?}; body={:#?}",
             timed_out.body
         );
-        assert_eq!(timed_out.body["result"]["isError"], true, "{:#?}", timed_out.body);
         assert_eq!(
-            timed_out.body["result"]["structuredContent"]["error"]["code"],
-            "ProcessTimedOut",
+            timed_out.body["result"]["isError"], true,
             "{:#?}",
             timed_out.body
         );
         assert_eq!(
-            timed_out.body["result"]["structuredContent"]["data"]["status"],
-            "timed_out",
+            timed_out.body["result"]["structuredContent"]["error"]["code"], "ProcessTimedOut",
+            "{:#?}",
+            timed_out.body
+        );
+        assert_eq!(
+            timed_out.body["result"]["structuredContent"]["data"]["status"], "timed_out",
             "{:#?}",
             timed_out.body
         );
@@ -6403,14 +7129,21 @@ mod tests {
         let elevated_error_schema = elevated_tool["outputSchema"]["oneOf"]
             .as_array()
             .and_then(|branches| {
-                branches.iter().find(|branch| {
-                    branch["properties"]["ok"]["const"] == Value::Bool(false)
-                })
+                branches
+                    .iter()
+                    .find(|branch| branch["properties"]["ok"]["const"] == Value::Bool(false))
             })
             .expect("elevated_exec exposes common error envelope branch");
         for field in [
-            "ok", "state", "summary", "task_id", "warnings", "next_step", "output_refs",
-            "data", "error",
+            "ok",
+            "state",
+            "summary",
+            "task_id",
+            "warnings",
+            "next_step",
+            "output_refs",
+            "data",
+            "error",
         ] {
             assert!(
                 elevated_error_schema["properties"][field].is_object(),
@@ -6418,8 +7151,15 @@ mod tests {
             );
         }
         for field in [
-            "code", "error_code", "phase", "cause", "http_status", "message", "retryable",
-            "rule_category", "remediation",
+            "code",
+            "error_code",
+            "phase",
+            "cause",
+            "http_status",
+            "message",
+            "retryable",
+            "rule_category",
+            "remediation",
         ] {
             assert!(
                 elevated_error_schema["properties"]["error"]["properties"][field].is_object(),
@@ -6449,8 +7189,13 @@ mod tests {
             &json!({"jsonrpc":"2.0","id":3063,"method":"tools/list","params":{}}),
         );
         assert_eq!(active_tools_same_session.status, 200);
-        assert!(active_tools_same_session.body["result"]["tools"]
-            .as_array().unwrap().iter().any(|tool| tool["name"] == "elevated_exec"));
+        assert!(
+            active_tools_same_session.body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "elevated_exec")
+        );
 
         let secret = "LB012_SYNTHETIC_PEP_SECRET";
         let reviewed_program = super::super::policy::reviewed_elevated_program()
@@ -6622,15 +7367,28 @@ mod tests {
             Some(&session),
             &json!({"jsonrpc":"2.0","id":3021,"method":"tools/list","params":{}}),
         );
-        assert_eq!(stale_full_for_edit.status, 404, "core Edit/Full catalog difference still invalidates stale sessions");
-        session = initialize(pep.port(), 3022).session.expect("Edit reinitialize");
+        assert_eq!(
+            stale_full_for_edit.status, 404,
+            "core Edit/Full catalog difference still invalidates stale sessions"
+        );
+        session = initialize(pep.port(), 3022)
+            .session
+            .expect("Edit reinitialize");
         let edit_tools = post(
-            pep.port(), Some(&session),
+            pep.port(),
+            Some(&session),
             &json!({"jsonrpc":"2.0","id":3023,"method":"tools/list","params":{}}),
         );
-        assert!(edit_tools.body["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "elevated_exec"));
+        assert!(
+            edit_tools.body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "elevated_exec")
+        );
         let edit_denied = post(
-            pep.port(), Some(&session),
+            pep.port(),
+            Some(&session),
             &json!({"jsonrpc":"2.0","id":3024,"method":"tools/call","params":{"name":"elevated_exec","arguments":{
                 "program":reviewed_program.clone(),"args":["/user"],"workdir":null,"timeout_ms":1000,"max_output_bytes":1024
             }}}),
@@ -6645,7 +7403,10 @@ mod tests {
             })
         ));
         thread::sleep(Duration::from_millis(540));
-        assert_eq!(pep.current_task_projection().snapshot(), CurrentTaskStatus::Idle);
+        assert_eq!(
+            pep.current_task_projection().snapshot(),
+            CurrentTaskStatus::Idle
+        );
 
         pep.set_permission_mode(PermissionMode::Elevated);
         fake.set_state(PrivilegeState::AwaitingUac);
@@ -6659,10 +7420,17 @@ mod tests {
             .session
             .expect("Elevated reinitialize after Edit core catalog change");
         let elevated_awaiting_tools = post(
-            pep.port(), Some(&session),
+            pep.port(),
+            Some(&session),
             &json!({"jsonrpc":"2.0","id":3032,"method":"tools/list","params":{}}),
         );
-        assert!(elevated_awaiting_tools.body["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "elevated_exec"));
+        assert!(
+            elevated_awaiting_tools.body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "elevated_exec")
+        );
         let awaiting = post(
             pep.port(),
             Some(&session),
@@ -6714,7 +7482,13 @@ mod tests {
             &json!({"jsonrpc":"2.0","id":3041,"method":"tools/list","params":{}}),
         );
         assert_eq!(active_tools.status, 200);
-        assert!(active_tools.body["result"]["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "elevated_exec"));
+        assert!(
+            active_tools.body["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "elevated_exec")
+        );
         fake.complete.store(true, Ordering::Release);
         let completed_started = Instant::now();
         let completed = post(
@@ -6877,7 +7651,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let outside = std::env::temp_dir().join(format!("lb43-fs-outside-{}-{nonce}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("lb43-fs-outside-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&outside).unwrap();
         let outside_file = outside.join("outside.txt");
         fs::write(&outside_file, b"outside").unwrap();
@@ -6937,7 +7712,11 @@ mod tests {
             "filesystem",
             json!({"action":"read","path":outside_file.to_string_lossy(),"max_bytes":4096}),
         );
-        assert_eq!(elevated.body["result"]["isError"], false, "{:#?}", elevated.body);
+        assert_eq!(
+            elevated.body["result"]["isError"], false,
+            "{:#?}",
+            elevated.body
+        );
         assert_eq!(
             elevated.body["result"]["structuredContent"]["data"]["content"],
             "LB43_FAKE_ADMIN"
@@ -6956,10 +7735,16 @@ mod tests {
             "filesystem",
             json!({"action":"read","path":"probe.txt"}),
         );
-        assert_eq!(inside.body["result"]["isError"], false, "{:#?}", inside.body);
-        assert!(inside.body["result"]["structuredContent"]["data"]["content"]
-            .as_str()
-            .is_some_and(|content| content.contains("LB009 PEP")));
+        assert_eq!(
+            inside.body["result"]["isError"], false,
+            "{:#?}",
+            inside.body
+        );
+        assert!(
+            inside.body["result"]["structuredContent"]["data"]["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("LB009 PEP"))
+        );
         assert_eq!(
             fake.structured_filesystem_count(),
             1,
@@ -6976,8 +7761,12 @@ mod tests {
         assert_tool_error(&control_plane, "PolicyDenied");
         assert_eq!(fake.structured_filesystem_count(), 1);
 
-        let mut coding = pep.stop().expect("PEP stop after schema43 filesystem routing");
-        coding.stop().expect("MCP stop after schema43 filesystem routing");
+        let mut coding = pep
+            .stop()
+            .expect("PEP stop after schema43 filesystem routing");
+        coding
+            .stop()
+            .expect("MCP stop after schema43 filesystem routing");
         drop(coding);
         cleanup_test_directory(&workspace);
         let _ = fs::remove_dir_all(outside);
@@ -7024,9 +7813,22 @@ mod tests {
             .unwrap()["inputSchema"];
         assert_eq!(schema["type"], "object");
         assert!(schema.get("oneOf").is_none());
-        assert_eq!(schema["properties"]["operation"]["enum"], json!(["process", "shell", "filesystem"]));
-        for property in ["program", "shell", "action", "path", "timeout_ms", "max_output_bytes"] {
-            assert!(schema["properties"][property].is_object(), "elevated_exec schema lost {property}");
+        assert_eq!(
+            schema["properties"]["operation"]["enum"],
+            json!(["process", "shell", "filesystem"])
+        );
+        for property in [
+            "program",
+            "shell",
+            "action",
+            "path",
+            "timeout_ms",
+            "max_output_bytes",
+        ] {
+            assert!(
+                schema["properties"][property].is_object(),
+                "elevated_exec schema lost {property}"
+            );
         }
         let output_schema = &tools.body["result"]["tools"]
             .as_array()
@@ -7035,8 +7837,17 @@ mod tests {
             .find(|tool| tool["name"] == "elevated_exec")
             .unwrap()["outputSchema"];
         let execution_schema = &output_schema["oneOf"][1]["properties"];
-        for property in ["stdout", "stderr", "stdout_truncated", "stderr_truncated", "output_refs"] {
-            assert!(execution_schema[property].is_object(), "elevated_exec output schema lost {property}");
+        for property in [
+            "stdout",
+            "stderr",
+            "stdout_truncated",
+            "stderr_truncated",
+            "output_refs",
+        ] {
+            assert!(
+                execution_schema[property].is_object(),
+                "elevated_exec output schema lost {property}"
+            );
         }
 
         let reviewed_program = super::super::policy::reviewed_elevated_program()

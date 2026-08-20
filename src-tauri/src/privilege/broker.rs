@@ -3,6 +3,8 @@ use std::fmt;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
+use crate::mcp::filesystem_service::FilesystemCancellation;
+
 use super::protocol::is_valid_broker_pipe_name;
 use super::{
     BROKER_PROTOCOL_VERSION, BrokerProtocolError, BrokerReady, BrokerRejectCode, BrokerRequest,
@@ -16,6 +18,13 @@ use super::{ExecutionCancel, run_elevated_exec};
 struct ActiveExecution {
     cancel: ExecutionCancel,
     result: mpsc::Receiver<Result<ElevatedExecResult, super::execution::ExecutionError>>,
+}
+
+struct ActiveStructuredFilesystem {
+    cancel: FilesystemCancellation,
+    result: mpsc::Receiver<
+        Result<super::AdministratorFilesystemResult, super::AdministratorFilesystemErrorCode>,
+    >,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +112,7 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
     pipe.write_frame(&encode_frame(&ready)?)?;
     let mut session = BrokerSession::new(args.generation, hello.session_nonce)?;
     let mut executions = HashMap::<String, ActiveExecution>::new();
+    let mut structured_filesystems = HashMap::<String, ActiveStructuredFilesystem>::new();
 
     loop {
         let payload = pipe.read_frame()?;
@@ -124,6 +134,9 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
             BrokerRequest::Shutdown => {
                 for execution in executions.values() {
                     execution.cancel.cancel();
+                }
+                for filesystem in structured_filesystems.values() {
+                    filesystem.cancel.cancel();
                 }
                 BrokerResponse::ShutdownAck
             }
@@ -221,6 +234,82 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                             BrokerResponse::StructuredFilesystemCompleted { filesystem }
                         }
                         Err(code) => BrokerResponse::StructuredFilesystemFailed { code },
+                    }
+                }
+            }
+            BrokerRequest::StartStructuredFilesystem { request_id, spec } => {
+                if !valid_elevated_request_id(&request_id) || spec.validate().is_err() {
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::Malformed,
+                    }
+                } else if executions.contains_key(&request_id)
+                    || structured_filesystems.contains_key(&request_id)
+                {
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::DuplicateRequest,
+                    }
+                } else {
+                    let cancel = FilesystemCancellation::default();
+                    let worker_cancel = cancel.clone();
+                    let (tx, rx) = mpsc::channel();
+                    thread::Builder::new()
+                        .name("localbridge-administrator-filesystem".into())
+                        .spawn(move || {
+                            let _ = tx.send(super::run_administrator_filesystem_with_cancellation(
+                                spec,
+                                worker_cancel,
+                            ));
+                        })
+                        .map_err(|_| BrokerRunError::UnexpectedResponse)?;
+                    structured_filesystems.insert(
+                        request_id,
+                        ActiveStructuredFilesystem { cancel, result: rx },
+                    );
+                    BrokerResponse::StructuredFilesystemAccepted
+                }
+            }
+            BrokerRequest::PollStructuredFilesystem { request_id } => {
+                if !valid_elevated_request_id(&request_id) {
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::Malformed,
+                    }
+                } else if let Some(filesystem) = structured_filesystems.get(&request_id) {
+                    match filesystem.result.try_recv() {
+                        Ok(Ok(filesystem_result)) => {
+                            structured_filesystems.remove(&request_id);
+                            BrokerResponse::StructuredFilesystemCompleted {
+                                filesystem: filesystem_result,
+                            }
+                        }
+                        Ok(Err(code)) => {
+                            structured_filesystems.remove(&request_id);
+                            BrokerResponse::StructuredFilesystemFailed { code }
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            structured_filesystems.remove(&request_id);
+                            BrokerResponse::Rejected {
+                                code: BrokerRejectCode::ExecutionFailed,
+                            }
+                        }
+                        Err(TryRecvError::Empty) => BrokerResponse::StructuredFilesystemPending,
+                    }
+                } else {
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::RequestNotFound,
+                    }
+                }
+            }
+            BrokerRequest::CancelStructuredFilesystem { request_id } => {
+                if !valid_elevated_request_id(&request_id) {
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::Malformed,
+                    }
+                } else if let Some(filesystem) = structured_filesystems.get(&request_id) {
+                    filesystem.cancel.cancel();
+                    BrokerResponse::CancelAck
+                } else {
+                    BrokerResponse::Rejected {
+                        code: BrokerRejectCode::RequestNotFound,
                     }
                 }
             }
@@ -364,6 +453,46 @@ impl BrokerClientSession {
         match self.request(BrokerRequest::StructuredFilesystem { spec })? {
             BrokerResponse::StructuredFilesystemCompleted { filesystem } => Ok(Ok(filesystem)),
             BrokerResponse::StructuredFilesystemFailed { code } => Ok(Err(code)),
+            _ => Err(BrokerRunError::UnexpectedResponse),
+        }
+    }
+
+    pub fn start_structured_filesystem(
+        &mut self,
+        request_id: String,
+        spec: super::AdministratorFilesystemSpec,
+    ) -> Result<(), BrokerRunError> {
+        match self.request(BrokerRequest::StartStructuredFilesystem { request_id, spec })? {
+            BrokerResponse::StructuredFilesystemAccepted => Ok(()),
+            _ => Err(BrokerRunError::UnexpectedResponse),
+        }
+    }
+
+    pub fn poll_structured_filesystem(
+        &mut self,
+        request_id: String,
+    ) -> Result<
+        Option<
+            Result<super::AdministratorFilesystemResult, super::AdministratorFilesystemErrorCode>,
+        >,
+        BrokerRunError,
+    > {
+        match self.request(BrokerRequest::PollStructuredFilesystem { request_id })? {
+            BrokerResponse::StructuredFilesystemPending => Ok(None),
+            BrokerResponse::StructuredFilesystemCompleted { filesystem } => {
+                Ok(Some(Ok(filesystem)))
+            }
+            BrokerResponse::StructuredFilesystemFailed { code } => Ok(Some(Err(code))),
+            _ => Err(BrokerRunError::UnexpectedResponse),
+        }
+    }
+
+    pub fn cancel_structured_filesystem(
+        &mut self,
+        request_id: String,
+    ) -> Result<(), BrokerRunError> {
+        match self.request(BrokerRequest::CancelStructuredFilesystem { request_id })? {
+            BrokerResponse::CancelAck => Ok(()),
             _ => Err(BrokerRunError::UnexpectedResponse),
         }
     }

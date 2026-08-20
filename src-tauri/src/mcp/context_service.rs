@@ -23,15 +23,27 @@ pub(crate) struct ContextService {
 }
 
 impl ContextService {
+    #[cfg(test)]
     pub(crate) fn new(workspace: &Path, project_path: &str) -> Result<Self, PathAuthorityError> {
         let authority = PathAuthority::active_workspace(workspace)?;
-        let filesystem = FilesystemService::active_workspace(workspace)
+        Self::with_authority(authority, project_path)
+    }
+
+    pub(crate) fn with_authority(
+        authority: PathAuthority,
+        project_path: &str,
+    ) -> Result<Self, PathAuthorityError> {
+        let filesystem = FilesystemService::from_authority(authority.clone())
             .map_err(|_| PathAuthorityError::InvalidPath)?;
         let project_root = authority.resolve_existing(project_path)?;
         if !project_root.is_dir() {
             return Err(PathAuthorityError::InvalidPath);
         }
-        Ok(Self { authority, filesystem, project_root })
+        Ok(Self {
+            authority,
+            filesystem,
+            project_root,
+        })
     }
 
     pub(crate) fn discovery_metadata(&self) -> Value {
@@ -92,9 +104,21 @@ impl ContextService {
 
     pub(crate) fn important_files(&self) -> Vec<String> {
         let names = [
-            "package.json", "Cargo.toml", "pyproject.toml", "go.mod", "pom.xml",
-            "build.gradle", "build.gradle.kts", "Makefile", "CMakeLists.txt", "tsconfig.json",
-            "vite.config.ts", "vite.config.js", "README.md", "AGENTS.md", "START_HERE.md",
+            "package.json",
+            "Cargo.toml",
+            "pyproject.toml",
+            "go.mod",
+            "pom.xml",
+            "build.gradle",
+            "build.gradle.kts",
+            "Makefile",
+            "CMakeLists.txt",
+            "tsconfig.json",
+            "vite.config.ts",
+            "vite.config.js",
+            "README.md",
+            "AGENTS.md",
+            "START_HERE.md",
         ];
         let mut result = Vec::new();
         for name in names {
@@ -119,14 +143,18 @@ impl ContextService {
         let tokens = objective_tokens(query);
         let mut scored = Vec::<(usize, String)>::new();
         for path in self.candidate_files() {
-            let Ok(workspace_path) = self.authority.display_path(&path) else { continue };
+            let Ok(workspace_path) = self.authority.display_path(&path) else {
+                continue;
+            };
             let Ok(bytes) = self
                 .filesystem
                 .read_bytes_bounded(&workspace_path, MAX_FILE_BYTES as usize)
             else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else { continue };
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
             let lower = text.to_lowercase();
             let relative = path
                 .strip_prefix(&self.project_root)
@@ -151,7 +179,9 @@ impl ContextService {
                     .count()
                     * 5;
             }
-            if score == 0 && !tokens.is_empty() { continue; }
+            if score == 0 && !tokens.is_empty() {
+                continue;
+            }
             if let Ok(display) = self.authority.display_path(&path) {
                 scored.push((score, display));
             }
@@ -177,16 +207,22 @@ impl ContextService {
         let mut ranges = Vec::new();
         let mut metadata = Vec::new();
         for relative in ordered {
-            if ranges.len() >= MAX_RELEVANT_RANGES { break; }
+            if ranges.len() >= MAX_RELEVANT_RANGES {
+                break;
+            }
             let Ok(bytes) = self
                 .filesystem
                 .read_bytes_bounded(&relative, MAX_FILE_BYTES as usize)
             else {
                 continue;
             };
-            let Ok(text) = std::str::from_utf8(&bytes) else { continue };
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
             let lines = text.lines().collect::<Vec<_>>();
-            if lines.is_empty() { continue; }
+            if lines.is_empty() {
+                continue;
+            }
             let hit = if instructions.contains(&relative) {
                 Some(0)
             } else {
@@ -222,32 +258,50 @@ impl ContextService {
         let mut seen_directories = BTreeSet::<PathBuf>::new();
         let mut stack = vec![(self.project_root.clone(), 0usize)];
         while let Some((directory, depth)) = stack.pop() {
-            if result.len() >= MAX_DISCOVERY_FILES { break; }
-            let Ok(canonical_directory) = fs::canonicalize(&directory) else { continue; };
+            if result.len() >= MAX_DISCOVERY_FILES {
+                break;
+            }
+            let Ok(canonical_directory) = fs::canonicalize(&directory) else {
+                continue;
+            };
             if !self.authority.allows_canonical(&canonical_directory)
                 || !seen_directories.insert(canonical_directory)
             {
                 continue;
             }
-            let Ok(entries) = fs::read_dir(&directory) else { continue; };
+            let Ok(entries) = fs::read_dir(&directory) else {
+                continue;
+            };
             let mut entries = entries.flatten().collect::<Vec<_>>();
             entries.sort_by_key(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase());
             let mut children = Vec::new();
             for entry in entries {
-                if result.len() >= MAX_DISCOVERY_FILES { break; }
+                if result.len() >= MAX_DISCOVERY_FILES {
+                    break;
+                }
                 let path = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
-                let Ok(kind) = entry.file_type() else { continue; };
-                if kind.is_symlink() { continue; }
-                let Ok(canonical) = fs::canonicalize(&path) else { continue; };
-                if !self.authority.allows_canonical(&canonical) { continue; }
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                if kind.is_symlink() {
+                    continue;
+                }
+                let Ok(canonical) = fs::canonicalize(&path) else {
+                    continue;
+                };
+                if !self.authority.allows_canonical(&canonical) {
+                    continue;
+                }
                 if canonical.is_dir() {
                     if depth < MAX_DISCOVERY_DEPTH && !excluded_directory(&name, depth) {
                         children.push(path);
                     }
                     continue;
                 }
-                if source_like(&canonical) { result.push(path); }
+                if source_like(&canonical) {
+                    result.push(path);
+                }
             }
             children.sort();
             for child in children.into_iter().rev() {
@@ -280,9 +334,35 @@ fn objective_tokens(objective: &str) -> Vec<String> {
 fn source_like(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
-        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(),
-            "rs" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "py" | "go" | "java" | "kt" | "kts" |
-            "c" | "cc" | "cpp" | "h" | "hpp" | "cs" | "toml" | "json" | "yaml" | "yml" | "md" | "xml" | "gradle"))
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "rs" | "ts"
+                    | "tsx"
+                    | "js"
+                    | "jsx"
+                    | "mjs"
+                    | "cjs"
+                    | "py"
+                    | "go"
+                    | "java"
+                    | "kt"
+                    | "kts"
+                    | "c"
+                    | "cc"
+                    | "cpp"
+                    | "h"
+                    | "hpp"
+                    | "cs"
+                    | "toml"
+                    | "json"
+                    | "yaml"
+                    | "yml"
+                    | "md"
+                    | "xml"
+                    | "gradle"
+            )
+        })
 }
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
@@ -297,21 +377,37 @@ mod tests {
 
     #[test]
     fn relevance_scoring_finds_deep_runtime_recovery_after_many_noise_files() {
-        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("localbridge-context-relevance-{}-{nonce}", std::process::id()));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-context-relevance-{}-{nonce}",
+            std::process::id()
+        ));
         fs::create_dir_all(root.join("src/runtime")).unwrap();
         for index in 0..140 {
-            fs::write(root.join(format!("noise-{index:03}.rs")), "fn unrelated_noise() {}
-").unwrap();
+            fs::write(
+                root.join(format!("noise-{index:03}.rs")),
+                "fn unrelated_noise() {}
+",
+            )
+            .unwrap();
         }
         fs::write(
             root.join("src/runtime/recovery.rs"),
             "fn authenticated_mcp_recovery_runtime() { /* authenticated MCP recovery */ }
 ",
-        ).unwrap();
+        )
+        .unwrap();
         let service = ContextService::new(&root, ".").unwrap();
         let related = service.select_related_files("authenticated MCP runtime recovery");
-        assert!(related.iter().any(|path| path.replace('\\', "/").ends_with("src/runtime/recovery.rs")), "{related:#?}");
+        assert!(
+            related
+                .iter()
+                .any(|path| path.replace('\\', "/").ends_with("src/runtime/recovery.rs")),
+            "{related:#?}"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -319,13 +415,26 @@ mod tests {
     #[test]
     fn junction_escape_is_excluded_from_context_discovery() {
         use std::process::Command;
-        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let root = std::env::temp_dir().join(format!("localbridge-context-root-{}-{nonce}", std::process::id()));
-        let outside = std::env::temp_dir().join(format!("localbridge-context-outside-{}-{nonce}", std::process::id()));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-context-root-{}-{nonce}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "localbridge-context-outside-{}-{nonce}",
+            std::process::id()
+        ));
         fs::create_dir_all(&root).unwrap();
         fs::create_dir_all(&outside).unwrap();
-        fs::write(outside.join("secret_recovery.rs"), "UNIQUE_OUTSIDE_RECOVERY_SENTINEL
-").unwrap();
+        fs::write(
+            outside.join("secret_recovery.rs"),
+            "UNIQUE_OUTSIDE_RECOVERY_SENTINEL
+",
+        )
+        .unwrap();
         let junction = root.join("linked-outside");
         let status = Command::new("cmd.exe")
             .args(["/d", "/c", "mklink", "/J"])
@@ -336,7 +445,10 @@ mod tests {
         assert!(status.success(), "failed to create junction attack fixture");
         let service = ContextService::new(&root, ".").unwrap();
         let related = service.select_related_files("UNIQUE_OUTSIDE_RECOVERY_SENTINEL");
-        assert!(related.is_empty(), "junction escaped context authority: {related:#?}");
+        assert!(
+            related.is_empty(),
+            "junction escaped context authority: {related:#?}"
+        );
         let _ = fs::remove_dir_all(&junction);
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
@@ -371,13 +483,19 @@ mod tests {
             })
             .unwrap();
         assert_eq!(bytes, b"inside-context");
-        assert_eq!(fs::read(outside.join("source.rs")).unwrap(), b"outside-secret-context");
+        assert_eq!(
+            fs::read(outside.join("source.rs")).unwrap(),
+            b"outside-secret-context"
+        );
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();
     }
 
     #[test]
     fn objective_tokens_are_bounded_and_deterministic() {
-        assert_eq!(objective_tokens("Fix Runtime runtime HEALTH foo"), vec!["fix", "foo", "health", "runtime"]);
+        assert_eq!(
+            objective_tokens("Fix Runtime runtime HEALTH foo"),
+            vec!["fix", "foo", "health", "runtime"]
+        );
     }
 }

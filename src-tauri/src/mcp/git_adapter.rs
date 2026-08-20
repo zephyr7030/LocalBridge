@@ -16,7 +16,20 @@ const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 const DEFAULT_TEXT_BYTES: usize = 256 * 1024;
 const DEFAULT_MAX_LINES: usize = 2_000;
 
+#[cfg(test)]
 pub(crate) fn handle_git_tool(workspace: &Path, name: &str, arguments: &Value) -> Option<Value> {
+    let authority = match PathAuthority::active_workspace(workspace) {
+        Ok(authority) => authority,
+        Err(error) => return Some(resolve_error(authority_error(error))),
+    };
+    handle_git_tool_with_authority(&authority, name, arguments)
+}
+
+pub(crate) fn handle_git_tool_with_authority(
+    authority: &PathAuthority,
+    name: &str,
+    arguments: &Value,
+) -> Option<Value> {
     if !matches!(
         name,
         "git_status" | "git_diff" | "git_log" | "git_show" | "git_blame"
@@ -26,10 +39,7 @@ pub(crate) fn handle_git_tool(workspace: &Path, name: &str, arguments: &Value) -
     let Some(arguments) = arguments.as_object() else {
         return Some(tool_error("INVALID_ARGUMENT", "Git 工具参数必须是对象"));
     };
-    let resolver = match GitRepositoryResolver::new(workspace) {
-        Ok(resolver) => resolver,
-        Err(error) => return Some(resolve_error(error)),
-    };
+    let resolver = GitRepositoryResolver::from_authority(authority.clone());
     match name {
         "git_status" => git_status(&resolver, arguments),
         "git_diff" => git_diff(&resolver, arguments),
@@ -40,9 +50,12 @@ pub(crate) fn handle_git_tool(workspace: &Path, name: &str, arguments: &Value) -
     }
 }
 
-pub(crate) fn changed_paths(workspace: &Path, path: &str) -> Result<Vec<String>, String> {
-    let result = handle_git_tool(
-        workspace,
+pub(crate) fn changed_paths_with_authority(
+    authority: &PathAuthority,
+    path: &str,
+) -> Result<Vec<String>, String> {
+    let result = handle_git_tool_with_authority(
+        authority,
         "git_status",
         &json!({"path":path,"include_untracked":true,"max_entries":10_000}),
     )
@@ -99,6 +112,7 @@ pub(crate) struct GitRepositoryResolver {
 }
 
 impl GitRepositoryResolver {
+    #[cfg(test)]
     fn new(workspace: &Path) -> Result<Self, ResolveError> {
         let authority = PathAuthority::active_workspace(workspace).map_err(authority_error)?;
         Ok(Self::from_authority(authority))
@@ -960,7 +974,10 @@ fn machine_file_metadata(
         return Err(git_failure(&names));
     }
     if names.truncated {
-        return Err(tool_error("GIT_ERROR", "Git file metadata exceeded the bounded capture limit"));
+        return Err(tool_error(
+            "GIT_ERROR",
+            "Git file metadata exceeded the bounded capture limit",
+        ));
     }
     let numstat = run_git(repository, numstat_args, MAX_CAPTURE_BYTES)
         .map_err(|message| tool_error("GIT_ERROR", &message))?;
@@ -968,7 +985,10 @@ fn machine_file_metadata(
         return Err(git_failure(&numstat));
     }
     if numstat.truncated {
-        return Err(tool_error("GIT_ERROR", "Git binary metadata exceeded the bounded capture limit"));
+        return Err(tool_error(
+            "GIT_ERROR",
+            "Git binary metadata exceeded the bounded capture limit",
+        ));
     }
     let binaries = parse_numstat_binary_paths_z(&numstat.output);
     let mut files = parse_name_status_z(&names.output);
@@ -1363,12 +1383,29 @@ mod tests {
         .unwrap();
         assert_eq!(shown["isError"], false, "{shown:#?}");
         let files = shown["structuredContent"]["files"].as_array().unwrap();
-        assert!(files.iter().any(|file| file["path"] == "B.txt" && file["status"] == "modified"), "{files:#?}");
-        assert!(files.iter().any(|file| file["path"] == "中文.txt" && file["status"] == "deleted"), "{files:#?}");
-        assert!(!files.iter().any(|file| file["path"] == "B.txt" && file["status"] == "deleted"), "{files:#?}");
-        assert!(shown["structuredContent"]["content"]
-            .as_str()
-            .is_some_and(|content| content.contains("deleted file mode")));
+        assert!(
+            files
+                .iter()
+                .any(|file| file["path"] == "B.txt" && file["status"] == "modified"),
+            "{files:#?}"
+        );
+        assert!(
+            files
+                .iter()
+                .any(|file| file["path"] == "中文.txt" && file["status"] == "deleted"),
+            "{files:#?}"
+        );
+        assert!(
+            !files
+                .iter()
+                .any(|file| file["path"] == "B.txt" && file["status"] == "deleted"),
+            "{files:#?}"
+        );
+        assert!(
+            shown["structuredContent"]["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("deleted file mode"))
+        );
 
         fs::remove_dir_all(root).unwrap();
     }

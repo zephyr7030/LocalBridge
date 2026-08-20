@@ -33,7 +33,8 @@
     },
     "windows": {
       "nsis": {
-        "installMode": "perMachine"
+        "installMode": "perMachine",
+        "installerHooks": "../scripts/public-release/nsis-hooks.nsh"
       }
     }
   }
