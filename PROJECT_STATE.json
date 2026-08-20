@@ -6343,7 +6343,34 @@
     "next_required_g2_generation": 40,
     "next_required_g3_generation": 24,
     "fresh_g3_unlocked": false,
-    "release_candidate_unlocked": false
+    "release_candidate_unlocked": false,
+    "g3_execution_preflight_2026_08_20": {
+      "status": "SELF_CHECK_PASS_AWAITING_INDEPENDENT_REVIEW",
+      "review_generation": 24,
+      "review_decision_recorded": false,
+      "product_baseline_commit": "b5ef8a453a63a13a3e01c429bfb1f9f9251d1cf6",
+      "governance_head_before_record": "d57d6580cd5bf87f60f8d5d81e66aded651b1f08",
+      "product_code_changed_since_baseline": false,
+      "governance_files_changed_since_baseline": [
+        "PROJECT_STATE.json",
+        "PR_INDEX.json"
+      ],
+      "evidence": [
+        "Current schema43 LB-019PRE desktop/background execution-side preflight completed on the unchanged product baseline.",
+        "Background, startup, autostart, single-instance and diagnostics behavior tests passed.",
+        "Recovery and tunnel runtime behavior tests passed, including managed-child no-console coverage on the bundled runtime path.",
+        "TaskAggregate/schema43 Broker route checks, frontend tests/build, UI-language/runtime-manifest checks and native fixed-window WebView2 E2E passed.",
+        "The historical production_watchdog source-literal assertion is stale against monitor_recovery_with_observer and is not used as a behavioral failure; real recovery behavior tests passed."
+      ],
+      "gate_state_preserved": {
+        "g2": "REVIEW_REQUIRED generation40 pending independent decision",
+        "g3": "historical generation23 PASS only; fresh generation24 remains locked",
+        "fresh_g3_unlocked": false,
+        "release_candidate_unlocked": false
+      },
+      "blocked_by": "fresh schema43 G2 adversarial generation40 PASS",
+      "next_action": "After independent G2 generation40 PASS is recorded, perform or refresh the formal fresh G3 generation24 execution verification and leave the review PASS/FAIL decision to the independent review dialogue."
+    }
   },
   "g2_adversarial_review_generation_38_2026_08_19": {
     "status": "FAIL",
