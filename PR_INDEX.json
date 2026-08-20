@@ -348,8 +348,8 @@
         "LB-011",
         "LB-012"
       ],
-      "status": "REWORK_REQUIRED",
-      "review_status": "FAIL",
+      "status": "REVIEW_REQUIRED",
+      "review_status": "REQUIRED",
       "review_generation": 39,
       "review_provenance": {
         "generation": 39,

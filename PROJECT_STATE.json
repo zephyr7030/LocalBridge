@@ -6296,7 +6296,7 @@
     "next_pr": "LB-019"
   },
   "schema43_v0_1_1_no_console_and_filesystem_amendment_2026_08_19": {
-    "status": "G2_REWORK_REQUIRED",
+    "status": "G2_REVIEW_REQUIRED",
     "source": "explicit user instruction to merge the planned P0 no-console correction and structured filesystem feature into v0.1.1 and amend contracts before implementation",
     "target_release_version": "0.1.1",
     "current_pr": "LB-019PRE",
