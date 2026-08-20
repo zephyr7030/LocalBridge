@@ -6330,7 +6330,7 @@
     ],
     "review_sequence": [
       "LB-019PRE implementation and targeted/runtime gates",
-      "fresh G2 adversarial generation38",
+      "fresh G2 adversarial generation39",
       "fresh G3 adversarial generation24",
       "v0.1.1 release-candidate packaging refresh",
       "LB-019 clean-machine/reboot E2E",
