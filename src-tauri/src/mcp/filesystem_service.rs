@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::fs::{self, File, Metadata, OpenOptions};
+use std::fs::{self, DirEntry, File, Metadata, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -197,6 +197,40 @@ impl FilesystemService {
             Err(FilesystemError::Cancelled)
         } else {
             Ok(())
+        }
+    }
+
+    #[cfg(windows)]
+    fn reject_broker_aliased_mutation_handle(
+        &self,
+        handle: &ValidatedPathHandle,
+    ) -> Result<(), FilesystemError> {
+        if self.authority.scope() == PathAuthorityScope::BrokerAdministrator
+            && handle
+                .regular_file_link_count()
+                .map_err(map_path_error)?
+                .is_some_and(|links| links > 1)
+        {
+            return Err(FilesystemError::OutsideAuthority);
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn reject_broker_aliased_existing_target(&self, target: &Path) -> Result<(), FilesystemError> {
+        if self.authority.scope() != PathAuthorityScope::BrokerAdministrator {
+            return Ok(());
+        }
+        match fs::symlink_metadata(target) {
+            Ok(_) => {
+                let handle = self
+                    .authority
+                    .open_validated_handle(target, 0)
+                    .map_err(map_path_error)?;
+                self.reject_broker_aliased_mutation_handle(&handle)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(FilesystemError::Io),
         }
     }
 
@@ -825,6 +859,7 @@ impl FilesystemService {
                     .open_validated_handle(&temp, DELETE)
                     .map_err(map_path_error)?;
                 let committed = parent_handle.final_path().join(&leaf);
+                self.reject_broker_aliased_existing_target(&committed)?;
                 rename_handle_to_path(temp_handle.raw_handle(), &committed, overwrite)
                     .map_err(map_rename_error)?;
                 Ok(())
@@ -1096,6 +1131,7 @@ impl FilesystemService {
                     .open_validated_handle(&temp, DELETE | FILE_GENERIC_READ)
                     .map_err(map_path_error)?;
                 let committed_path = parent_handle.final_path().join(&leaf);
+                self.reject_broker_aliased_existing_target(&committed_path)?;
                 rename_handle_to_path(temp_handle.raw_handle(), &committed_path, overwrite)
                     .map_err(map_rename_error)?;
                 let source_hash = sha256_open_file(&mut input, &self.cancellation)?;
@@ -1160,6 +1196,7 @@ impl FilesystemService {
                 .open_validated_handle(&temp, DELETE | FILE_GENERIC_READ)
                 .map_err(map_path_error)?;
             let committed_path = parent_handle.final_path().join(&leaf);
+            self.reject_broker_aliased_existing_target(&committed_path)?;
             rename_handle_to_path(temp_handle.raw_handle(), &committed_path, overwrite)
                 .map_err(map_rename_error)?;
             let source_hash = sha256_open_file(input, &self.cancellation)?;
@@ -1223,6 +1260,7 @@ impl FilesystemService {
                 .authority
                 .open_move_root_validated_handle(&source_path, desired_access)
                 .map_err(map_path_error)?;
+            self.reject_broker_aliased_mutation_handle(&source_handle)?;
             let stable_source = source_handle.final_path().to_path_buf();
             let source_metadata =
                 fs::symlink_metadata(&stable_source).map_err(|_| FilesystemError::Io)?;
@@ -1439,6 +1477,7 @@ impl FilesystemService {
                 .authority
                 .open_validated_handle(&target, desired_access)
                 .map_err(map_path_error)?;
+            self.reject_broker_aliased_mutation_handle(&target_handle)?;
             let stable_target = target_handle.final_path().to_path_buf();
             let stable_metadata =
                 fs::symlink_metadata(&stable_target).map_err(|_| FilesystemError::Io)?;
@@ -1521,25 +1560,26 @@ impl FilesystemService {
         scanned: &mut usize,
     ) -> Result<Vec<ValidatedPathHandle>, FilesystemError> {
         self.check_cancelled()?;
-        let mut children = fs::read_dir(directory)
-            .map_err(|_| FilesystemError::Io)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| FilesystemError::Io)?;
-        children.sort_by_key(|entry| entry.file_name());
         if depth >= max_depth {
-            return if children.is_empty() {
-                Ok(Vec::new())
-            } else {
+            return if directory_has_entry_with_budget(
+                directory,
+                scanned,
+                max_entries,
+                &self.cancellation,
+            )? {
                 Err(FilesystemError::LimitExceeded)
+            } else {
+                Ok(Vec::new())
             };
+        }
+        let (children, overflow) =
+            read_dir_bounded(directory, scanned, max_entries, &self.cancellation)?;
+        if overflow {
+            return Err(FilesystemError::LimitExceeded);
         }
         let mut locks = Vec::new();
         for child in children {
             self.check_cancelled()?;
-            if *scanned >= max_entries {
-                return Err(FilesystemError::LimitExceeded);
-            }
-            *scanned += 1;
             let path = child.path();
             let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
             if metadata_is_reparse(&metadata) {
@@ -1559,6 +1599,7 @@ impl FilesystemService {
                     },
                 )
                 .map_err(map_path_error)?;
+            self.reject_broker_aliased_mutation_handle(&handle)?;
             let stable = handle.final_path().to_path_buf();
             if metadata.is_dir() {
                 let mut descendants = self.lock_cross_volume_move_tree(
@@ -1614,20 +1655,25 @@ impl FilesystemService {
         // made while its validated child-directory handle remains alive. Those
         // handles omit FILE_SHARE_DELETE, so the enumerated directory object
         // cannot be replaced while this preflight walks it.
-        let mut children = fs::read_dir(directory)
-            .map_err(|_| FilesystemError::Io)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| FilesystemError::Io)?;
-        children.sort_by_key(|entry| entry.file_name());
-        if !children.is_empty() && depth >= max_depth {
+        if depth >= max_depth {
+            return if directory_has_entry_with_budget(
+                directory,
+                scanned,
+                max_entries,
+                &self.cancellation,
+            )? {
+                Err(FilesystemError::LimitExceeded)
+            } else {
+                Ok(())
+            };
+        }
+        let (children, overflow) =
+            read_dir_bounded(directory, scanned, max_entries, &self.cancellation)?;
+        if overflow {
             return Err(FilesystemError::LimitExceeded);
         }
         for child in children {
             self.check_cancelled()?;
-            if *scanned >= max_entries {
-                return Err(FilesystemError::LimitExceeded);
-            }
-            *scanned += 1;
             let path = child.path();
             let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
             if metadata_is_reparse(&metadata) {
@@ -1646,6 +1692,7 @@ impl FilesystemService {
                 .authority
                 .open_move_root_validated_handle(&path, access)
                 .map_err(map_path_error)?;
+            self.reject_broker_aliased_mutation_handle(&handle)?;
             let stable = handle.final_path().to_path_buf();
             let stable_metadata = fs::symlink_metadata(&stable).map_err(|_| FilesystemError::Io)?;
             if metadata_is_reparse(&stable_metadata) {
@@ -1682,20 +1729,25 @@ impl FilesystemService {
         pending: &mut Vec<ValidatedPathHandle>,
     ) -> Result<(), FilesystemError> {
         self.check_cancelled()?;
-        let mut children = fs::read_dir(directory)
-            .map_err(|_| FilesystemError::Io)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| FilesystemError::Io)?;
-        children.sort_by_key(|entry| entry.file_name());
-        if !children.is_empty() && depth >= max_depth {
+        if depth >= max_depth {
+            return if directory_has_entry_with_budget(
+                directory,
+                scanned,
+                max_entries,
+                &self.cancellation,
+            )? {
+                Err(FilesystemError::LimitExceeded)
+            } else {
+                Ok(())
+            };
+        }
+        let (children, overflow) =
+            read_dir_bounded(directory, scanned, max_entries, &self.cancellation)?;
+        if overflow {
             return Err(FilesystemError::LimitExceeded);
         }
         for child in children {
             self.check_cancelled()?;
-            if *scanned >= max_entries {
-                return Err(FilesystemError::LimitExceeded);
-            }
-            *scanned += 1;
             let path = child.path();
             let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
             if metadata_is_reparse(&metadata) {
@@ -1716,6 +1768,7 @@ impl FilesystemService {
                 .authority
                 .open_move_root_validated_handle(&path, access)
                 .map_err(map_path_error)?;
+            self.reject_broker_aliased_mutation_handle(&handle)?;
             let stable = handle.final_path().to_path_buf();
             let stable_metadata = handle.metadata().map_err(|_| FilesystemError::Io)?;
             if metadata_is_reparse(&stable_metadata) {
@@ -1898,24 +1951,25 @@ impl FilesystemService {
             let mut stack = vec![(root.to_path_buf(), 0u32)];
             while let Some((directory, depth)) = stack.pop() {
                 self.check_cancelled()?;
-                let mut children = fs::read_dir(&directory)
-                    .map_err(|_| FilesystemError::Io)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|_| FilesystemError::Io)?;
-                children.sort_by_key(|entry| entry.file_name());
                 if depth >= max_depth {
-                    if !children.is_empty() {
+                    if directory_has_entry_with_budget(
+                        &directory,
+                        &mut scanned_entries,
+                        max_entries,
+                        &self.cancellation,
+                    )? {
                         truncated = true;
                     }
                     continue;
                 }
+                let (children, overflow) = read_dir_bounded(
+                    &directory,
+                    &mut scanned_entries,
+                    max_entries,
+                    &self.cancellation,
+                )?;
                 for child in children {
                     self.check_cancelled()?;
-                    if scanned_entries >= max_entries {
-                        truncated = true;
-                        break;
-                    }
-                    scanned_entries += 1;
                     let path = child.path();
                     let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
                     if metadata_is_reparse(&metadata) {
@@ -1934,6 +1988,9 @@ impl FilesystemService {
                     if metadata.is_dir() {
                         stack.push((stable_path, depth + 1));
                     }
+                }
+                if overflow {
+                    truncated = true;
                 }
                 if truncated {
                     break;
@@ -1961,24 +2018,21 @@ impl FilesystemService {
         truncated: &mut bool,
     ) -> Result<(), FilesystemError> {
         self.check_cancelled()?;
-        let mut children = fs::read_dir(directory)
-            .map_err(|_| FilesystemError::Io)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| FilesystemError::Io)?;
-        children.sort_by_key(|entry| entry.file_name());
         if depth >= max_depth {
-            if !children.is_empty() {
+            if directory_has_entry_with_budget(
+                directory,
+                scanned_entries,
+                max_entries,
+                &self.cancellation,
+            )? {
                 *truncated = true;
             }
             return Ok(());
         }
+        let (children, overflow) =
+            read_dir_bounded(directory, scanned_entries, max_entries, &self.cancellation)?;
         for child in children {
             self.check_cancelled()?;
-            if *scanned_entries >= max_entries {
-                *truncated = true;
-                return Ok(());
-            }
-            *scanned_entries += 1;
             let path = child.path();
             let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
             if metadata_is_reparse(&metadata) {
@@ -2018,6 +2072,9 @@ impl FilesystemService {
                     return Ok(());
                 }
             }
+        }
+        if overflow {
+            *truncated = true;
         }
         Ok(())
     }
@@ -2085,6 +2142,60 @@ fn validate_walk_bounds(max_depth: u32, max_entries: usize) -> Result<(), Filesy
         return Err(FilesystemError::LimitExceeded);
     }
     Ok(())
+}
+
+fn read_dir_bounded(
+    directory: &Path,
+    scanned_entries: &mut usize,
+    max_entries: usize,
+    cancellation: &FilesystemCancellation,
+) -> Result<(Vec<DirEntry>, bool), FilesystemError> {
+    let mut read_dir = fs::read_dir(directory).map_err(|_| FilesystemError::Io)?;
+    let remaining = max_entries.saturating_sub(*scanned_entries);
+    if remaining == 0 {
+        return Ok((Vec::new(), true));
+    }
+    let mut children: Vec<DirEntry> = Vec::with_capacity(remaining.min(1024));
+    while children.len() < remaining {
+        if cancellation.is_cancelled() {
+            return Err(FilesystemError::Cancelled);
+        }
+        let Some(entry) = read_dir.next() else {
+            children.sort_by_key(|entry| entry.file_name());
+            return Ok((children, false));
+        };
+        children.push(entry.map_err(|_| FilesystemError::Io)?);
+        *scanned_entries += 1;
+    }
+    // The physical enumeration budget is exactly max_entries. Once the budget
+    // is consumed we fail closed and report possible truncation rather than
+    // probing an (N+1)th entry just to distinguish an exact boundary.
+    children.sort_by_key(|entry| entry.file_name());
+    Ok((children, true))
+}
+
+fn directory_has_entry_with_budget(
+    directory: &Path,
+    scanned_entries: &mut usize,
+    max_entries: usize,
+    cancellation: &FilesystemCancellation,
+) -> Result<bool, FilesystemError> {
+    if cancellation.is_cancelled() {
+        return Err(FilesystemError::Cancelled);
+    }
+    if *scanned_entries >= max_entries {
+        return Ok(true);
+    }
+    let mut read_dir = fs::read_dir(directory).map_err(|_| FilesystemError::Io)?;
+    let has_entry = read_dir
+        .next()
+        .transpose()
+        .map_err(|_| FilesystemError::Io)?
+        .is_some();
+    if has_entry {
+        *scanned_entries += 1;
+    }
+    Ok(has_entry)
 }
 
 fn map_path_error(error: PathAuthorityError) -> FilesystemError {
@@ -2423,21 +2534,21 @@ fn tree_manifest(
             return Err(FilesystemError::Cancelled);
         }
         if depth >= max_depth {
+            if directory_has_entry_with_budget(&directory, &mut scanned, max_entries, cancellation)?
+            {
+                return Err(FilesystemError::LimitExceeded);
+            }
             continue;
         }
-        let mut children = fs::read_dir(&directory)
-            .map_err(|_| FilesystemError::Io)?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| FilesystemError::Io)?;
-        children.sort_by_key(|entry| entry.file_name());
+        let (children, overflow) =
+            read_dir_bounded(&directory, &mut scanned, max_entries, cancellation)?;
+        if overflow {
+            return Err(FilesystemError::LimitExceeded);
+        }
         for child in children {
             if cancellation.is_cancelled() {
                 return Err(FilesystemError::Cancelled);
             }
-            if scanned >= max_entries {
-                return Err(FilesystemError::LimitExceeded);
-            }
-            scanned += 1;
             let path = child.path();
             let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
             if metadata_is_reparse(&metadata) {
@@ -2600,6 +2711,9 @@ mod tests {
         fs::write(root.join("alpha.txt"), b"a").unwrap();
         fs::write(root.join("beta.bin"), b"bb").unwrap();
         fs::write(root.join("sub").join("gamma.txt"), b"ccc").unwrap();
+        for index in 0..32 {
+            fs::write(root.join(format!("noise-{index:02}.bin")), b"x").unwrap();
+        }
         let service = FilesystemService::active_workspace(&root).unwrap();
         let found = service
             .search(
@@ -2621,6 +2735,20 @@ mod tests {
         let bounded = service.list(".", true, 8, 2).unwrap();
         assert_eq!(bounded.scanned_entries, 2);
         assert!(bounded.truncated);
+        assert_eq!(bounded.entries.len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn tree_manifest_fails_closed_at_the_scan_bound() {
+        let root = workspace("manifest-bound");
+        for index in 0..16 {
+            fs::write(root.join(format!("entry-{index:02}.txt")), b"x").unwrap();
+        }
+        assert_eq!(
+            tree_manifest(&root, 8, 2, &FilesystemCancellation::default()),
+            Err(FilesystemError::LimitExceeded)
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

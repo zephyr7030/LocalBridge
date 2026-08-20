@@ -35,5 +35,16 @@ if (!broker.startsWith("#![cfg_attr(windows, windows_subsystem = \"windows\")]")
 if (/cloudflared|cloudflare managed/i.test(manifest)) throw new Error("final runtime manifest advertises Cloudflare runtime");
 if (existsSync("runtime/tunnel-client/cloudflared.exe") || existsSync("runtime/tunnel-client/cloudflared-manifest.json")) throw new Error("Cloudflare runtime remains in final payload");
 for (const marker of ["prepare-toolbox.mjs", "localbridge-privileged-broker", "cargo", "release-stage"]) if (!prep.includes(marker)) throw new Error(`release prepare marker missing: ${marker}`);
-for (const marker of ["CycloneDX", "package-inventory.json", "release-provenance.json", "size-report.json", "LocalBridge.exe", "runtime-manifest.toml", "runtime-policy.toml", "THIRD_PARTY_NOTICES.md", "inventory hash mismatch", "installer hash mismatch", "LB019PRE_RELEASE_REFRESH=PASS", "coding_runtime_managed_command_visible_window_behavior_gate", "CREATE_NO_WINDOW", "cloudflared", "verifyUninstallCredentialCleanupInvariant", "uninstall_deletes_runtime_api_key_credential"]) if (!release.includes(marker)) throw new Error(`release evidence marker missing: ${marker}`);
+for (const marker of [
+  "CycloneDX", "package-inventory.json", "release-provenance.json", "size-report.json",
+  "LocalBridge.exe", "runtime-manifest.toml", "runtime-policy.toml", "THIRD_PARTY_NOTICES.md",
+  "inventory hash mismatch", "installer hash mismatch", "artifact installer does not match current NSIS build output",
+  "LB019PRE_RELEASE_${label}=PASS", "buildReleaseTransaction(\"REFRESH\")", "build_binding",
+  "assertTrackedSourceClean", "src-tauri/target/release/bundle/nsis", "src-tauri/target/release/localbridge.exe",
+  "configured_foreground_runtime_start", "background_launch", "runtime_restart_or_recovery",
+  "tunnel_reconnect", "login_autostart", "managed_shell_or_direct_command_child",
+  "CREATE_NO_WINDOW", "cloudflared", "verifyUninstallCredentialCleanupInvariant",
+  "uninstall_deletes_runtime_api_key_credential"
+]) if (!release.includes(marker)) throw new Error(`release evidence marker missing: ${marker}`);
+if (release.includes("coding_runtime_managed_command_visible_window_behavior_gate")) throw new Error("obsolete single-scenario no-console evidence remains");
 console.log("LB018_PACKAGING_CONTRACT=PASS real_runtime=true dummy=false cloudflared=false broker=true sbom=true provenance=true credential_cleanup=true");

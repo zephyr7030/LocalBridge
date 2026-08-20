@@ -89,6 +89,10 @@ path = "../tests/integration/policy/policy_enforcement.rs"
 name = "lb011_broker_ipc"
 path = "../tests/integration/privilege/broker_ipc.rs"
 
+[[test]]
+name = "lb019pre_release_no_console"
+path = "../tests/integration/packaging/lb019pre_release_no_console.rs"
+
 [profile.release]
 strip = true
 lto = "thin"

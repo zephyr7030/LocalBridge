@@ -2610,8 +2610,9 @@ fn reviewed_administrator_shell(arguments: &Value) -> bool {
         || request.timeout_ms > MAX_ELEVATED_TIMEOUT_MS
         || request.max_output_bytes == 0
         || request.max_output_bytes > MAX_ELEVATED_OUTPUT_BYTES
-        || explicit_control_plane_reference(&request.command)
+        || explicit_control_plane_reference_obfuscated(&request.command)
         || explicit_control_plane_reference(&request.workdir)
+        || administrator_shell_dynamic_target_construction(request.shell, &request.command)
     {
         return false;
     }
@@ -2624,8 +2625,71 @@ fn reviewed_administrator_shell(arguments: &Value) -> bool {
     {
         return false;
     }
-    let _trusted_logical_selector = request.shell;
     true
+}
+
+fn administrator_shell_dynamic_target_construction(shell: ShellSelector, command: &str) -> bool {
+    match shell {
+        ShellSelector::Cmd => administrator_cmd_dynamic_target_construction(command),
+        ShellSelector::Auto
+        | ShellSelector::Powershell
+        | ShellSelector::Pwsh
+        | ShellSelector::WindowsPowershell => {
+            administrator_powershell_dynamic_target_construction(command)
+                || static_nested_cmd_inner(command).is_some_and(|inner| {
+                    administrator_cmd_dynamic_target_construction(nested_cmd_body(inner))
+                })
+        }
+    }
+}
+
+fn administrator_powershell_dynamic_target_construction(command: &str) -> bool {
+    // Administrator Shell requests must be statically reviewable. These are
+    // PowerShell language surfaces that can synthesize a path/command after the
+    // PEP decision, so allowing them would make control_plane_mutation=deny_always
+    // depend on request spelling rather than the executed target.
+    if command.chars().any(|ch| {
+        matches!(
+            ch,
+            '$' | '`' | '+' | '@' | '(' | ')' | '{' | '}' | '[' | ']'
+        )
+    }) {
+        return true;
+    }
+    let lower = command.to_ascii_lowercase();
+    [
+        "invoke-expression",
+        " iex ",
+        "set-variable",
+        "new-variable",
+        "set-alias",
+        "new-alias",
+        "invoke-command",
+        "foreach-object",
+        "start-process",
+        " -join ",
+        " -f ",
+        "function ",
+        "filter ",
+        "workflow ",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn administrator_cmd_dynamic_target_construction(command: &str) -> bool {
+    if command.chars().any(|ch| matches!(ch, '%' | '!' | '^')) {
+        return true;
+    }
+    command
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, '&' | '|' | '(' | ')' | ';'))
+        .filter(|word| !word.is_empty())
+        .any(|word| {
+            matches!(
+                word.to_ascii_lowercase().as_str(),
+                "call" | "for" | "setlocal"
+            )
+        })
 }
 
 fn reviewed_administrator_filesystem(arguments: &Value) -> bool {
@@ -2671,6 +2735,26 @@ pub(crate) fn explicit_control_plane_reference(value: &str) -> bool {
     ]
     .iter()
     .any(|marker| lower.contains(marker))
+}
+
+fn explicit_control_plane_reference_obfuscated(value: &str) -> bool {
+    if explicit_control_plane_reference(value) {
+        return true;
+    }
+    let compact = value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    [
+        "localbridge",
+        "comlocalbridgedesktop",
+        "runtimepolicytoml",
+        "runtimemanifesttoml",
+        "startupprofilejson",
+    ]
+    .iter()
+    .any(|marker| compact.contains(marker))
 }
 
 fn canonical_regular_file(path: &Path) -> Option<PathBuf> {
@@ -2735,6 +2819,47 @@ mod administrator_gateway_tests {
             "operation":"filesystem","action":"delete","path":"C:\\ProgramData\\LocalBridge",
             "destination":null,"content_base64":null,"recursive":true
         })));
+    }
+
+    #[test]
+    fn administrator_shell_rejects_dynamic_or_obfuscated_control_plane_targets() {
+        for command in [
+            "$a='Local'; $b='Bridge'; Set-Content ('C:\\ProgramData\\'+$a+$b+'\\settings.json') x",
+            "Set-Content ('C:\\ProgramData\\Loc'+'alBridge\\settings.json') x",
+        ] {
+            assert!(
+                !reviewed_elevated_exec(&json!({
+                    "operation":"shell","shell":"powershell","command":command,
+                    "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
+                })),
+                "{command}"
+            );
+        }
+        for command in [
+            "set a=Local&set b=Bridge&del C:\\ProgramData\\%a%%b%\\settings.json",
+            "del C:\\ProgramData\\Loc\"alBri\"dge\\settings.json",
+        ] {
+            assert!(
+                !reviewed_elevated_exec(&json!({
+                    "operation":"shell","shell":"cmd","command":command,
+                    "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
+                })),
+                "{command}"
+            );
+        }
+        for (shell, command) in [
+            ("cmd", "whoami /user"),
+            ("cmd", "sc.exe query wuauserv"),
+            ("powershell", "Get-Service wuauserv"),
+        ] {
+            assert!(
+                reviewed_elevated_exec(&json!({
+                    "operation":"shell","shell":shell,"command":command,
+                    "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
+                })),
+                "{shell}: {command}"
+            );
+        }
     }
 
     #[test]

@@ -436,6 +436,35 @@ mod tests {
         root
     }
 
+    fn administrator_spec(action: AdministratorFilesystemAction) -> AdministratorFilesystemSpec {
+        AdministratorFilesystemSpec {
+            action,
+            path: None,
+            source: None,
+            destination: None,
+            workspace_root: None,
+            workspace_identity: None,
+            workspace_fields: Vec::new(),
+            recursive: false,
+            max_depth: 16,
+            max_entries: 100,
+            max_results: 100,
+            offset: 0,
+            max_bytes: 65_536,
+            content_base64: None,
+            pattern: None,
+            kind: None,
+            min_size: None,
+            max_size: None,
+            modified_after_ms: None,
+            modified_before_ms: None,
+            sort_by: AdministratorFilesystemSortBy::Path,
+            sort_order: AdministratorFilesystemSortOrder::Asc,
+            overwrite: false,
+            calculate_size: false,
+        }
+    }
+
     #[test]
     fn structured_privileged_filesystem_supports_binary_roundtrip_rename_and_delete() {
         let root = temp_root();
@@ -560,6 +589,58 @@ mod tests {
         assert!(!destination.exists());
 
         fs::remove_dir(&safe).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn administrator_mutation_rejects_non_sensitive_hardlink_alias_to_control_plane_object() {
+        let root = temp_root();
+        let protected = root.join("runtime-policy.toml");
+        let alias = root.join("notes.txt");
+        let moved = root.join("moved.txt");
+        let ordinary = root.join("ordinary.txt");
+        fs::write(&protected, b"protected-sentinel").unwrap();
+        fs::hard_link(&protected, &alias).unwrap();
+        fs::write(&ordinary, b"old").unwrap();
+
+        let mut write = administrator_spec(AdministratorFilesystemAction::Write);
+        write.path = Some(alias.to_string_lossy().into_owned());
+        write.content_base64 = Some(STANDARD.encode(b"mutated"));
+        write.overwrite = true;
+        assert_eq!(
+            run_administrator_filesystem(write),
+            Err(AdministratorFilesystemErrorCode::OutsideAuthority)
+        );
+        assert_eq!(fs::read(&protected).unwrap(), b"protected-sentinel");
+        assert_eq!(fs::read(&alias).unwrap(), b"protected-sentinel");
+
+        let mut delete = administrator_spec(AdministratorFilesystemAction::Delete);
+        delete.path = Some(alias.to_string_lossy().into_owned());
+        assert_eq!(
+            run_administrator_filesystem(delete),
+            Err(AdministratorFilesystemErrorCode::OutsideAuthority)
+        );
+        assert!(protected.exists());
+        assert!(alias.exists());
+
+        let mut move_alias = administrator_spec(AdministratorFilesystemAction::Move);
+        move_alias.source = Some(alias.to_string_lossy().into_owned());
+        move_alias.destination = Some(moved.to_string_lossy().into_owned());
+        assert_eq!(
+            run_administrator_filesystem(move_alias),
+            Err(AdministratorFilesystemErrorCode::OutsideAuthority)
+        );
+        assert!(protected.exists());
+        assert!(alias.exists());
+        assert!(!moved.exists());
+
+        let mut normal_write = administrator_spec(AdministratorFilesystemAction::Write);
+        normal_write.path = Some(ordinary.to_string_lossy().into_owned());
+        normal_write.content_base64 = Some(STANDARD.encode(b"new"));
+        normal_write.overwrite = true;
+        run_administrator_filesystem(normal_write).unwrap();
+        assert_eq!(fs::read(&ordinary).unwrap(), b"new");
+
         fs::remove_dir_all(root).unwrap();
     }
 }

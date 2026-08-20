@@ -7,10 +7,19 @@ import { pathToFileURL } from "node:url";
 const root = resolve(import.meta.dirname, "..");
 const artifacts = resolve(root, "release-artifacts/LB-019PRE");
 const PRODUCT_VERSION = "0.1.1";
+const NO_CONSOLE_SCENARIOS = [
+  "configured_foreground_runtime_start",
+  "background_launch",
+  "runtime_restart_or_recovery",
+  "tunnel_reconnect",
+  "login_autostart",
+  "managed_shell_or_direct_command_child",
+];
 const sha = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+const sourceHead = () => run("git", ["rev-parse", "HEAD"]).trim();
 const run = (program, args, options = {}) => {
-  const result = spawnSync(program, args, { cwd: options.cwd ?? root, encoding: "utf8", stdio: options.stdio ?? "pipe", windowsHide: true, maxBuffer: 256 * 1024 * 1024 });
-  if (result.status !== 0) throw new Error(`${program} ${args.join(" ")} failed (${result.status ?? "start failure"}): ${String(result.stderr ?? result.error?.message ?? "").trim()}`);
+  const result = spawnSync(program, args, { cwd: options.cwd ?? root, env: options.env ?? process.env, encoding: "utf8", stdio: options.stdio ?? "pipe", windowsHide: true, maxBuffer: 256 * 1024 * 1024 });
+  if (result.status !== 0) throw new Error(`${program} ${args.join(" ")} failed (${result.status ?? "start failure"}): ${String(result.stderr ?? result.error?.message ?? result.stdout ?? "").trim()}`);
   return String(result.stdout ?? "");
 };
 const walk = (base, dir = base, out = []) => {
@@ -28,6 +37,18 @@ const peSubsystem = (path) => {
 };
 const json = (name, value) => writeFileSync(resolve(artifacts, name), `${JSON.stringify(value, null, 2)}\n`, "utf8");
 const forbiddenPath = (value) => /(?:^|\/)(?:tests?|source-tree|governance|skills|templates|\.coding-tools)(?:\/|$)|cloudflared|PR_CONTRACTS|PROJECT_STATE|PR_INDEX|FINAL_REVIEW|\.dmp$|\.log$/i.test(value);
+
+function assertTrackedSourceClean() {
+  const dirty = run("git", ["status", "--porcelain", "--untracked-files=all"])
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .filter((line) => {
+      const path = line.slice(3).replaceAll("\\", "/");
+      return !path.startsWith("release-artifacts/");
+    });
+  if (dirty.length) throw new Error(`release source has uncommitted source changes: ${dirty[0]}`);
+}
 
 function verifyUninstallCredentialCleanupInvariant() {
   const tauri = JSON.parse(readFileSync(resolve(root, "src-tauri/tauri.conf.json"), "utf8"));
@@ -81,15 +102,23 @@ function verifyReleaseVersionSurfaces() {
   }
 }
 
-function verifyNoVisibleConsoleBehavior() {
-  run("cargo", [
+function verifyNoVisibleConsoleBehavior(releaseExe) {
+  if (!existsSync(releaseExe)) throw new Error(`release executable missing for no-console gate: ${releaseExe}`);
+  const output = run("cargo", [
     "test",
     "--manifest-path", "src-tauri/Cargo.toml",
-    "--test", "lb006_coding_runtime",
-    "actual_bundled_runtime_is_authenticated_loopback_owned_and_secret_redacted",
+    "--test", "lb019pre_release_no_console",
     "--", "--nocapture", "--test-threads=1",
-  ], { stdio: "inherit" });
-  return true;
+  ], { env: { ...process.env, LOCALBRIDGE_RELEASE_EXE: releaseExe } });
+  const result = Object.fromEntries(NO_CONSOLE_SCENARIOS.map((scenario) => [
+    scenario,
+    output.includes(`NO_CONSOLE_SCENARIO ${scenario}=PASS`),
+  ]));
+  for (const scenario of NO_CONSOLE_SCENARIOS) {
+    if (result[scenario] !== true) throw new Error(`no-console scenario evidence missing: ${scenario}`);
+  }
+  process.stdout.write(output);
+  return result;
 }
 
 function generateSbom() {
@@ -112,12 +141,16 @@ function findInstaller() {
   return candidates[0];
 }
 
-function emitEvidence(codingRuntimeNoVisibleConsole) {
+function emitEvidence(noConsoleScenarios, sourceCommit, buildStartedMs) {
   verifyReleaseVersionSurfaces();
   verifyUninstallCredentialCleanupInvariant();
-  if (codingRuntimeNoVisibleConsole !== true) throw new Error("coding runtime no-visible-console behavior gate missing");
+  if (sourceHead() !== sourceCommit) throw new Error("source HEAD changed during release build transaction");
+  for (const scenario of NO_CONSOLE_SCENARIOS) {
+    if (noConsoleScenarios[scenario] !== true) throw new Error(`no-console behavior gate missing: ${scenario}`);
+  }
   mkdirSync(artifacts, { recursive: true });
   const installer = findInstaller();
+  if (statSync(installer).mtimeMs + 2000 < buildStartedMs) throw new Error("NSIS installer predates current build transaction");
   const targetInstaller = resolve(artifacts, basename(installer));
   writeFileSync(targetInstaller, readFileSync(installer));
   generateSbom();
@@ -133,7 +166,7 @@ function emitEvidence(codingRuntimeNoVisibleConsole) {
   for (const file of releaseFiles) if (forbiddenPath(file.path)) throw new Error(`forbidden release payload: ${file.path}`);
   const broker = resolve(root, "src-tauri/target/release-stage/localbridge-privileged-broker.exe");
   const main = resolve(root, "src-tauri/target/release/localbridge.exe");
-  const inventory = { schema: 1, source_commit: run("git", ["rev-parse", "HEAD"]).trim(), payload_files: releaseFiles, installer: { file: basename(targetInstaller), bytes: statSync(targetInstaller).size, sha256: sha(targetInstaller) } };
+  const inventory = { schema: 1, source_commit: sourceCommit, payload_files: releaseFiles, installer: { file: basename(targetInstaller), bytes: statSync(targetInstaller).size, sha256: sha(targetInstaller) } };
   json("package-inventory.json", inventory);
   const installedBytes = releaseFiles.reduce((sum, item) => sum + item.bytes, 0);
   const size = { installer_bytes: statSync(targetInstaller).size, installer_mib: Number((statSync(targetInstaller).size / 1048576).toFixed(2)), installed_payload_bytes: installedBytes, installed_payload_mib: Number((installedBytes / 1048576).toFixed(2)) };
@@ -143,34 +176,50 @@ function emitEvidence(codingRuntimeNoVisibleConsole) {
   json("release-provenance.json", {
     schema: 1, product: "LocalBridge", version: PRODUCT_VERSION, target: "windows-11-x86_64", source_commit: inventory.source_commit,
     installer: inventory.installer, runtime_manifest_sha256: sha(resolve(root, "runtime-manifest.toml")), sbom_sha256: sha(resolve(artifacts, "sbom.cdx.json")),
+    build_binding: { source_commit: sourceCommit, installer_sha256: inventory.installer.sha256, installer_bytes: inventory.installer.bytes, build_started_unix_ms: buildStartedMs },
     packaging: { per_machine: true, system_webview2: true, bundled_webview2: false, cloudflared: false, runtime_payload_location: "install-root/runtime", mutable_state_root: "%LOCALAPPDATA%\\LocalBridge", secret_store: "Windows Credential Manager", uninstall_deletes_runtime_api_key_credential: true },
-    no_console_evidence: { localbridge_pe_subsystem: mainSubsystem, broker_pe_subsystem: brokerSubsystem, managed_runtime_supervisor_uses_CREATE_NO_WINDOW: primaryManagedSpawnUsesNoWindow(readFileSync(resolve(root, "src-tauri/src/runtime/windows_supervisor.rs"), "utf8")), privileged_execution_uses_CREATE_NO_WINDOW: readFileSync(resolve(root, "src-tauri/src/privilege/execution.rs"), "utf8").includes("CREATE_NO_WINDOW"), coding_runtime_managed_command_visible_window_behavior_gate: codingRuntimeNoVisibleConsole },
+    no_console_evidence: { ...noConsoleScenarios, localbridge_pe_subsystem: mainSubsystem, broker_pe_subsystem: brokerSubsystem, managed_runtime_supervisor_uses_CREATE_NO_WINDOW: primaryManagedSpawnUsesNoWindow(readFileSync(resolve(root, "src-tauri/src/runtime/windows_supervisor.rs"), "utf8")), privileged_execution_uses_CREATE_NO_WINDOW: readFileSync(resolve(root, "src-tauri/src/privilege/execution.rs"), "utf8").includes("CREATE_NO_WINDOW") },
     ordinary_launch: { token: "current_windows_user", integrity: "medium", foreground_uac: false, background_uac: false, login_autostart_uac: false, high_integrity_route: "elevated_exec_broker_uac_only" }
   });
   return { installer: basename(targetInstaller), size };
 }
 
-function build() {
+function buildReleaseTransaction(label) {
   const cli = resolve(root, "node_modules/@tauri-apps/cli/tauri.js");
   if (!existsSync(cli)) throw new Error("local Tauri CLI missing; run npm ci");
-  const codingRuntimeNoVisibleConsole = verifyNoVisibleConsoleBehavior();
+  assertTrackedSourceClean();
+  const sourceCommit = sourceHead();
+  const buildStartedMs = Date.now();
+  rmSync(resolve(root, "src-tauri/target/release/bundle/nsis"), { recursive: true, force: true });
+  rmSync(resolve(root, "src-tauri/target/release/localbridge.exe"), { force: true });
   run(process.execPath, [cli, "build", "--bundles", "nsis"], { stdio: "inherit" });
-  const result = emitEvidence(codingRuntimeNoVisibleConsole);
-  console.log(`LB019PRE_RELEASE_BUILD=PASS installer=${result.installer} size_mib=${result.size.installer_mib} installed_payload_mib=${result.size.installed_payload_mib}`);
+  if (sourceHead() !== sourceCommit) throw new Error("source HEAD changed while building release candidate");
+  const releaseExe = resolve(root, "src-tauri/target/release/localbridge.exe");
+  if (!existsSync(releaseExe) || statSync(releaseExe).mtimeMs + 2000 < buildStartedMs) throw new Error("release executable was not freshly produced by current transaction");
+  const noConsoleScenarios = verifyNoVisibleConsoleBehavior(releaseExe);
+  const result = emitEvidence(noConsoleScenarios, sourceCommit, buildStartedMs);
+  console.log(`LB019PRE_RELEASE_${label}=PASS installer=${result.installer} source_commit=${sourceCommit} size_mib=${result.size.installer_mib} installed_payload_mib=${result.size.installed_payload_mib}`);
+  return result;
+}
+
+function build() {
+  buildReleaseTransaction("BUILD");
 }
 
 function refresh() {
-  const codingRuntimeNoVisibleConsole = verifyNoVisibleConsoleBehavior();
-  const result = emitEvidence(codingRuntimeNoVisibleConsole);
-  console.log(`LB019PRE_RELEASE_REFRESH=PASS installer=${result.installer} source_commit=${run("git", ["rev-parse", "HEAD"]).trim()}`);
+  buildReleaseTransaction("REFRESH");
 }
 
 function verify() {
+  assertTrackedSourceClean();
   verifyReleaseVersionSurfaces();
   verifyUninstallCredentialCleanupInvariant();
-  const codingRuntimeNoVisibleConsole = verifyNoVisibleConsoleBehavior();
+  const currentHead = sourceHead();
+  const releaseExe = resolve(root, "src-tauri/target/release/localbridge.exe");
+  const noConsoleScenarios = verifyNoVisibleConsoleBehavior(releaseExe);
   for (const path of ["sbom.cdx.json", "package-inventory.json", "release-provenance.json", "size-report.json"]) if (!existsSync(resolve(artifacts, path))) throw new Error(`release evidence missing: ${path}`);
   const inventory = JSON.parse(readFileSync(resolve(artifacts, "package-inventory.json"), "utf8"));
+  if (inventory.source_commit !== currentHead) throw new Error("release inventory is not bound to current source HEAD");
   const requiredPayloads = ["LocalBridge.exe", "localbridge-privileged-broker.exe", "runtime-manifest.toml", "runtime-policy.toml", "LICENSE", "THIRD_PARTY_NOTICES.md"];
   for (const path of requiredPayloads) if (!inventory.payload_files.some((item) => item.path === path)) throw new Error(`required inventory payload missing: ${path}`);
   const seen = new Set();
@@ -187,11 +236,17 @@ function verify() {
   if (JSON.stringify(inventory).toLowerCase().includes("cloudflared")) throw new Error("cloudflared present in release inventory");
   const installer = resolve(artifacts, inventory.installer.file);
   if (!existsSync(installer) || statSync(installer).size !== inventory.installer.bytes || sha(installer) !== inventory.installer.sha256) throw new Error("installer hash mismatch");
+  const bundleInstaller = findInstaller();
+  if (statSync(bundleInstaller).size !== inventory.installer.bytes || sha(bundleInstaller) !== inventory.installer.sha256) throw new Error("artifact installer does not match current NSIS build output");
   const provenance = JSON.parse(readFileSync(resolve(artifacts, "release-provenance.json"), "utf8"));
   if (provenance.source_commit !== inventory.source_commit) throw new Error("release provenance source commit mismatch");
+  if (provenance.source_commit !== currentHead) throw new Error("release provenance is not bound to current source HEAD");
+  if (provenance.build_binding?.source_commit !== currentHead || provenance.build_binding?.installer_sha256 !== inventory.installer.sha256 || provenance.build_binding?.installer_bytes !== inventory.installer.bytes) throw new Error("release build binding mismatch");
   if (provenance.packaging.cloudflared !== false || provenance.packaging.bundled_webview2 !== false || provenance.packaging.uninstall_deletes_runtime_api_key_credential !== true) throw new Error("release provenance packaging invariant failed");
-  if (!Object.values(provenance.no_console_evidence).every((value) => value === 2 || value === true)) throw new Error("no-console evidence incomplete");
-  if (provenance.no_console_evidence.coding_runtime_managed_command_visible_window_behavior_gate !== codingRuntimeNoVisibleConsole) throw new Error("coding runtime no-visible-console behavior evidence mismatch");
+  for (const scenario of NO_CONSOLE_SCENARIOS) {
+    if (provenance.no_console_evidence?.[scenario] !== true || noConsoleScenarios[scenario] !== true) throw new Error(`no-console scenario evidence mismatch: ${scenario}`);
+  }
+  if (provenance.no_console_evidence.localbridge_pe_subsystem !== 2 || provenance.no_console_evidence.broker_pe_subsystem !== 2 || provenance.no_console_evidence.managed_runtime_supervisor_uses_CREATE_NO_WINDOW !== true || provenance.no_console_evidence.privileged_execution_uses_CREATE_NO_WINDOW !== true) throw new Error("no-console defense-in-depth evidence incomplete");
   if (!primaryManagedSpawnUsesNoWindow(readFileSync(resolve(root, "src-tauri/src/runtime/windows_supervisor.rs"), "utf8"))) throw new Error("primary managed runtime spawn is missing CREATE_NO_WINDOW");
   console.log("LB019PRE_RELEASE_VERIFY=PASS cloudflared=false webview2=system sbom=true provenance=true no_console=true");
 }

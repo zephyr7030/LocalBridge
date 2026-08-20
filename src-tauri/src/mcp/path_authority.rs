@@ -113,6 +113,18 @@ impl ValidatedPathHandle {
         file.metadata()
     }
 
+    pub(crate) fn regular_file_link_count(&self) -> Result<Option<u32>, PathAuthorityError> {
+        let mut information = BY_HANDLE_FILE_INFORMATION::default();
+        if unsafe { GetFileInformationByHandle(self.handle, &mut information) } == 0 {
+            return Err(PathAuthorityError::InvalidPath);
+        }
+        if information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            Ok(None)
+        } else {
+            Ok(Some(information.nNumberOfLinks))
+        }
+    }
+
     pub(crate) fn into_file(self) -> File {
         let handle = self.handle;
         std::mem::forget(self);
