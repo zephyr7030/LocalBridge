@@ -2571,7 +2571,7 @@ const SCHEMA43_V011_NO_CONSOLE_FILESYSTEM_AMENDMENT_2026_08_19 = Object.freeze({
     schema43_release_target_version:"0.1.1",
     schema43_revision_scope:["packaged-managed-child-no-console-p0","public-filesystem-tool","filesystem-path-authority-and-toctou","v0.1.1-release-refresh"],
     schema43_owner_pr:"LB-019PRE",
-    schema43_next_g2_review_generation:39,
+    schema43_next_g2_review_generation:40,
     schema43_next_g3_review_generation:24,
     schema43_lb019_blocked_until_lb019pre_pass:true,
     schema43_prior_g2_g3_pass_provenance_remains_historical:true,
@@ -2637,7 +2637,7 @@ export function hasExactSchema43V011NoConsoleFilesystemAmendment20260819(doc){
   for(const [k,v] of Object.entries(SCHEMA43_V011_NO_CONSOLE_FILESYSTEM_AMENDMENT_2026_08_19.replacedRules)) if(canonicalJson(doc?.rules?.[k])!==canonicalJson(v.current))return false;
   const pr=doc?.prs?.["LB-019PRE"];
   if(!pr)return false;
-  if(!(pr.required_tests??[]).some(x=>x.includes("generation39"))||!(pr.required_tests??[]).some(x=>x.includes("generation24")))return false;
+  if(!(pr.required_tests??[]).some(x=>x.includes("generation40"))||!(pr.required_tests??[]).some(x=>x.includes("generation24")))return false;
   return true;
 }
 

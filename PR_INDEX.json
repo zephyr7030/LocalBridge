@@ -350,11 +350,11 @@
       ],
       "status": "REWORK_REQUIRED",
       "review_status": "FAIL",
-      "review_generation": 38,
+      "review_generation": 39,
       "review_provenance": {
-        "generation": 38,
+        "generation": 39,
         "kind": "independent_adversarial",
-        "commit": "48d763c5036d3b4180240a0e363ea16a2a3ce7e9",
+        "commit": "e6b40b472552122f5e0363ecc63368cb0a746be2",
         "invalidated_generations": [
           {
             "generation": 8,

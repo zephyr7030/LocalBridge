@@ -33,8 +33,8 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "fresh schema43 runtime/security adversarial review generation39 PASS is required before LB-019PRE can PASS",
-    "fresh schema43 desktop/background adversarial review generation24 remains blocked until generation39 PASS"
+    "fresh schema43 runtime/security adversarial review generation40 PASS is required before LB-019PRE can PASS",
+    "fresh schema43 desktop/background adversarial review generation24 remains blocked until generation40 PASS"
   ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
@@ -6330,7 +6330,7 @@
     ],
     "review_sequence": [
       "LB-019PRE implementation and targeted/runtime gates",
-      "fresh G2 adversarial generation39",
+      "fresh G2 adversarial generation40",
       "fresh G3 adversarial generation24",
       "v0.1.1 release-candidate packaging refresh",
       "LB-019 clean-machine/reboot E2E",
@@ -6339,7 +6339,8 @@
     "lb019_status": "BLOCKED",
     "implementation_started": true,
     "g2_generation_38_consumed": true,
-    "next_required_g2_generation": 39,
+    "g2_generation_39_consumed": true,
+    "next_required_g2_generation": 40,
     "next_required_g3_generation": 24,
     "fresh_g3_unlocked": false,
     "release_candidate_unlocked": false
@@ -6381,6 +6382,40 @@
       "Full serial Rust regression, all-targets Clippy -D warnings, frontend tests/build, schema43 ARCH-030/031/032/034, architecture/runtime-manifest/UI-language and packaging contract gates passed on the reviewed baseline before adversarial review."
     ],
     "next_required_g2_generation": 39,
+    "next_required_g3_generation": 24,
+    "fresh_g3_unlocked": false,
+    "release_candidate_unlocked": false,
+    "lb019_unlocked": false,
+    "current_group": "G4",
+    "current_pr": "LB-019PRE"
+  },
+  "g2_adversarial_review_generation_39_2026_08_20": {
+    "status": "FAIL",
+    "decision": "REWORK_REQUIRED",
+    "generation": 39,
+    "kind": "independent_adversarial",
+    "reviewed_baseline_commit": "e6b40b472552122f5e0363ecc63368cb0a746be2",
+    "reopen_from_pr": "LB-019PRE",
+    "findings": [
+      {
+        "severity": "MAJOR",
+        "owner_pr": "LB-019PRE",
+        "title": "Workspace discovery and ContextService still reopen validated paths by pathname and retain a read TOCTOU escape",
+        "evidence": [
+          "compact_project_discovery resolves default_cwd through PathAuthority and then reads package.json Cargo.toml and pyproject.toml with std::fs::read_to_string on the pathname after validation.",
+          "ContextService search_text and read_relevant_ranges similarly perform canonical/path-authority selection and later fs::metadata/fs::read by pathname; read_relevant_ranges returns matched source snippets and content identities to agent_workflow prepare.",
+          "A concurrent ancestor directory rename followed by junction/reparse replacement can redirect the second pathname lookup outside active workspace; the shared validated HANDLE read used by document_workflow/view_image demonstrates the required identity-preserving boundary."
+        ],
+        "required_fix": "Route compact project manifest reads and ContextService source reads through the shared FilesystemService/PathAuthority validated-HANDLE read boundary, preserve existing bounds/optional discovery semantics, and add deterministic ancestor-swap regression proving agent workflow context cannot read outside active workspace."
+      }
+    ],
+    "verified_passes": [
+      "Generation38 filesystem mutation HANDLE binding and legacy Broker FilesystemService unification remain fixed.",
+      "CodingEditService deterministic ancestor-swap, shared document/image HANDLE read, junction mutation denial, response transport diagnostics, schema43 nine-action Broker filesystem and legacy filesystem compatibility targeted tests all PASS.",
+      "Real bundled runtime no-console behavior test PASS for startup and managed command descendants.",
+      "Full serial Rust regression, all-targets/all-features Clippy, frontend tests/build, runtime-manifest, ARCH-026/027/030/031/032/034 and diff checks PASS; full architecture remained fail-closed only on the expected G2 review-transition lock before this decision."
+    ],
+    "next_required_g2_generation": 40,
     "next_required_g3_generation": 24,
     "fresh_g3_unlocked": false,
     "release_candidate_unlocked": false,
