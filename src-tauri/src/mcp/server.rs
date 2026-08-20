@@ -5417,7 +5417,7 @@ mod tests {
             nonempty.body
         );
         assert!(workspace.join("schema30-nonempty/keep.txt").is_file());
-        let cancelled_failed_workflow = public_tool_call(
+        let cancel_after_failed_workflow = public_tool_call(
             pep.port(),
             &session,
             6945,
@@ -5425,10 +5425,23 @@ mod tests {
             json!({"action":"cancel"}),
         );
         assert_eq!(
-            cancelled_failed_workflow.body["result"]["structuredContent"]["data"]["durable_task_cancelled"],
-            true,
+            cancel_after_failed_workflow.body["result"]["structuredContent"]["data"]["durable_task_cancelled"],
+            false,
             "{:#?}",
-            cancelled_failed_workflow.body
+            cancel_after_failed_workflow.body
+        );
+        assert_eq!(
+            cancel_after_failed_workflow.body["result"]["structuredContent"]["data"]["state"],
+            "idle",
+            "{:#?}",
+            cancel_after_failed_workflow.body
+        );
+        assert!(
+            cancel_after_failed_workflow.body["result"]["structuredContent"]["data"]
+                ["current_workflow"]
+                .is_null(),
+            "{:#?}",
+            cancel_after_failed_workflow.body
         );
         let escaped_directory = public_tool_call(
             pep.port(),
