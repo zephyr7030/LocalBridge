@@ -3245,18 +3245,28 @@ fn compact_project_discovery(
     git_status: Option<&Value>,
     runtime: &Value,
 ) -> Value {
+    const MAX_COMPACT_MANIFEST_BYTES: usize = 128 * 1024;
     let project_root = PathAuthority::active_workspace(workspace)
         .ok()
         .and_then(|authority| authority.resolve_existing(default_cwd).ok())
         .unwrap_or_else(|| workspace.to_path_buf());
-    let package_json = std::fs::read_to_string(project_root.join("package.json"))
-        .ok()
+    let filesystem = FilesystemService::active_workspace(workspace).ok();
+    let manifest_text = |name: &str| {
+        let relative = Path::new(default_cwd)
+            .join(name)
+            .to_string_lossy()
+            .replace('\\', "/");
+        filesystem
+            .as_ref()?
+            .read_bytes_bounded(&relative, MAX_COMPACT_MANIFEST_BYTES)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+    };
+    let package_json = manifest_text("package.json")
         .and_then(|text| serde_json::from_str::<Value>(&text).ok());
-    let cargo_toml = std::fs::read_to_string(project_root.join("Cargo.toml"))
-        .ok()
+    let cargo_toml = manifest_text("Cargo.toml")
         .and_then(|text| text.parse::<toml::Value>().ok());
-    let pyproject = std::fs::read_to_string(project_root.join("pyproject.toml"))
-        .ok()
+    let pyproject = manifest_text("pyproject.toml")
         .and_then(|text| text.parse::<toml::Value>().ok());
 
     let package_field = |name: &str| {

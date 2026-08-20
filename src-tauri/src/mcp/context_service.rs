@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use super::filesystem_service::FilesystemService;
 use super::path_authority::{PathAuthority, PathAuthorityError};
 
 const MAX_CANDIDATE_FILES: usize = 96;
@@ -17,17 +18,20 @@ const MAX_RANGE_LINES: usize = 9;
 #[derive(Debug, Clone)]
 pub(crate) struct ContextService {
     authority: PathAuthority,
+    filesystem: FilesystemService,
     project_root: PathBuf,
 }
 
 impl ContextService {
     pub(crate) fn new(workspace: &Path, project_path: &str) -> Result<Self, PathAuthorityError> {
         let authority = PathAuthority::active_workspace(workspace)?;
+        let filesystem = FilesystemService::active_workspace(workspace)
+            .map_err(|_| PathAuthorityError::InvalidPath)?;
         let project_root = authority.resolve_existing(project_path)?;
         if !project_root.is_dir() {
             return Err(PathAuthorityError::InvalidPath);
         }
-        Ok(Self { authority, project_root })
+        Ok(Self { authority, filesystem, project_root })
     }
 
     pub(crate) fn discovery_metadata(&self) -> Value {
@@ -115,9 +119,13 @@ impl ContextService {
         let tokens = objective_tokens(query);
         let mut scored = Vec::<(usize, String)>::new();
         for path in self.candidate_files() {
-            let Ok(metadata) = fs::metadata(&path) else { continue };
-            if metadata.len() > MAX_FILE_BYTES { continue; }
-            let Ok(bytes) = fs::read(&path) else { continue };
+            let Ok(workspace_path) = self.authority.display_path(&path) else { continue };
+            let Ok(bytes) = self
+                .filesystem
+                .read_bytes_bounded(&workspace_path, MAX_FILE_BYTES as usize)
+            else {
+                continue;
+            };
             let Ok(text) = std::str::from_utf8(&bytes) else { continue };
             let lower = text.to_lowercase();
             let relative = path
@@ -170,9 +178,12 @@ impl ContextService {
         let mut metadata = Vec::new();
         for relative in ordered {
             if ranges.len() >= MAX_RELEVANT_RANGES { break; }
-            let Ok(path) = self.authority.resolve_existing(&relative) else { continue };
-            let Ok(bytes) = fs::read(&path) else { continue };
-            if bytes.len() as u64 > MAX_FILE_BYTES { continue; }
+            let Ok(bytes) = self
+                .filesystem
+                .read_bytes_bounded(&relative, MAX_FILE_BYTES as usize)
+            else {
+                continue;
+            };
             let Ok(text) = std::str::from_utf8(&bytes) else { continue };
             let lines = text.lines().collect::<Vec<_>>();
             if lines.is_empty() { continue; }
@@ -329,6 +340,40 @@ mod tests {
         let _ = fs::remove_dir_all(&junction);
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn context_shared_read_handle_blocks_deterministic_ancestor_swap() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-context-race-root-{}-{nonce}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "localbridge-context-race-outside-{}-{nonce}",
+            std::process::id()
+        ));
+        let safe = root.join("safe");
+        let displaced = root.join("safe-original");
+        fs::create_dir_all(&safe).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(safe.join("source.rs"), b"inside-context").unwrap();
+        fs::write(outside.join("source.rs"), b"outside-secret-context").unwrap();
+        let service = ContextService::new(&root, ".").unwrap();
+        let bytes = service
+            .filesystem
+            .read_bytes_bounded_with_test_hook("safe/source.rs", MAX_FILE_BYTES as usize, || {
+                assert!(fs::rename(&safe, &displaced).is_err());
+            })
+            .unwrap();
+        assert_eq!(bytes, b"inside-context");
+        assert_eq!(fs::read(outside.join("source.rs")).unwrap(), b"outside-secret-context");
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 
     #[test]

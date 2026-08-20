@@ -340,10 +340,23 @@ impl FilesystemService {
     }
 
     pub(crate) fn read_all_bytes(&self, path: &str) -> Result<Vec<u8>, FilesystemError> {
-        self.read_all_bytes_with(path, || {})
+        self.read_bytes_with_limit(path, None, || {})
     }
 
-    fn read_all_bytes_with<F>(&self, path: &str, before_read: F) -> Result<Vec<u8>, FilesystemError>
+    pub(crate) fn read_bytes_bounded(
+        &self,
+        path: &str,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, FilesystemError> {
+        self.read_bytes_with_limit(path, Some(max_bytes), || {})
+    }
+
+    fn read_bytes_with_limit<F>(
+        &self,
+        path: &str,
+        max_bytes: Option<usize>,
+        before_read: F,
+    ) -> Result<Vec<u8>, FilesystemError>
     where
         F: FnOnce(),
     {
@@ -361,16 +374,19 @@ impl FilesystemService {
             if !metadata.is_file() || metadata_is_reparse(&metadata) {
                 return Err(FilesystemError::InvalidArgument);
             }
+            if max_bytes.is_some_and(|limit| metadata.len() > limit as u64) {
+                return Err(FilesystemError::LimitExceeded);
+            }
             before_read();
             let mut file = target_handle.into_file();
-            read_open_file_bytes(&mut file)
+            read_open_file_bytes_with_limit(&mut file, max_bytes)
         }
         #[cfg(not(windows))]
         {
             self.authority.revalidate_parent(&target).map_err(map_path_error)?;
             let mut file = File::open(&target).map_err(|_| FilesystemError::Io)?;
             before_read();
-            read_open_file_bytes(&mut file)
+            read_open_file_bytes_with_limit(&mut file, max_bytes)
         }
     }
 
@@ -379,7 +395,20 @@ impl FilesystemService {
     where
         F: FnOnce(),
     {
-        self.read_all_bytes_with(path, before_read)
+        self.read_bytes_with_limit(path, None, before_read)
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn read_bytes_bounded_with_test_hook<F>(
+        &self,
+        path: &str,
+        max_bytes: usize,
+        before_read: F,
+    ) -> Result<Vec<u8>, FilesystemError>
+    where
+        F: FnOnce(),
+    {
+        self.read_bytes_with_limit(path, Some(max_bytes), before_read)
     }
 
     pub(crate) fn validate_new_file_path(&self, path: &str) -> Result<(), FilesystemError> {
@@ -1576,9 +1605,32 @@ fn sha256_open_file(file: &mut File) -> Result<String, FilesystemError> {
 }
 
 fn read_open_file_bytes(file: &mut File) -> Result<Vec<u8>, FilesystemError> {
+    read_open_file_bytes_with_limit(file, None)
+}
+
+fn read_open_file_bytes_with_limit(
+    file: &mut File,
+    max_bytes: Option<usize>,
+) -> Result<Vec<u8>, FilesystemError> {
     file.seek(SeekFrom::Start(0)).map_err(|_| FilesystemError::Io)?;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|_| FilesystemError::Io)?;
+    match max_bytes {
+        Some(limit) => {
+            let read_limit = u64::try_from(limit)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1);
+            Read::by_ref(file)
+                .take(read_limit)
+                .read_to_end(&mut bytes)
+                .map_err(|_| FilesystemError::Io)?;
+            if bytes.len() > limit {
+                return Err(FilesystemError::LimitExceeded);
+            }
+        }
+        None => {
+            file.read_to_end(&mut bytes).map_err(|_| FilesystemError::Io)?;
+        }
+    }
     Ok(bytes)
 }
 
@@ -1985,6 +2037,38 @@ mod tests {
         }).unwrap();
         assert_eq!(bytes, b"inside");
         assert_eq!(fs::read(outside_parent.join("read.txt")).unwrap(), b"outside");
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bounded_validated_read_blocks_ancestor_swap_and_enforces_limit() {
+        let root = workspace("bounded-read-handle-swap");
+        let outside = workspace("bounded-read-handle-swap-outside");
+        let safe = root.join("safe");
+        let parent = safe.join("parent");
+        let outside_parent = outside.join("parent");
+        let displaced = root.join("safe-original");
+        fs::create_dir_all(&parent).unwrap();
+        fs::create_dir_all(&outside_parent).unwrap();
+        fs::write(parent.join("read.txt"), b"inside").unwrap();
+        fs::write(outside_parent.join("read.txt"), b"outside-secret").unwrap();
+        let service = FilesystemService::active_workspace(&root).unwrap();
+        let bytes = service
+            .read_bytes_bounded_with_test_hook("safe/parent/read.txt", 6, || {
+                assert!(fs::rename(&safe, &displaced).is_err());
+            })
+            .unwrap();
+        assert_eq!(bytes, b"inside");
+        assert_eq!(
+            service.read_bytes_bounded("safe/parent/read.txt", 5),
+            Err(FilesystemError::LimitExceeded)
+        );
+        assert_eq!(
+            fs::read(outside_parent.join("read.txt")).unwrap(),
+            b"outside-secret"
+        );
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();
     }
