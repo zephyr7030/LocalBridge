@@ -40,8 +40,8 @@ for (const required of [
   '"process" => reviewed_administrator_process(arguments)',
   '"shell" => reviewed_administrator_shell(arguments)',
   '"filesystem" => reviewed_administrator_filesystem(arguments)',
-  "trusted_system_program(basename)",
-  "administrator_shell_executable(basename)",
+  "reviewed_elevated_program()",
+  "same_windows_path(&requested, &trusted_program)",
   "explicit_control_plane_reference",
   '"reg.exe"',
   '"schtasks.exe"',
@@ -50,6 +50,9 @@ for (const required of [
   '"bcdedit.exe"',
   '"dism.exe"',
 ]) if (!policy.includes(required)) throw new Error(`ARCH-026 policy seam missing: ${required}`);
+if (!policy.includes('matches!(arg.as_str(), "/all" | "/groups" | "/priv" | "/user")')) {
+  throw new Error("ARCH-026 direct process is not frozen to the read-only identity diagnostic argv profile");
+}
 
 const server = read("src-tauri/src/mcp/server.rs");
 for (const required of [
@@ -64,6 +67,7 @@ for (const required of [
   "privileged.filesystem(spec)",
   "broker_direct_spec(&shell_spec)",
   "typed_administrator_process_shell_and_filesystem_routes_are_broker_only",
+  "opaque administrator helper must be denied before Broker dispatch",
 ]) if (!server.includes(required)) throw new Error(`ARCH-026 Broker route missing: ${required}`);
 const elevatedStart=server.indexOf('"name": "elevated_exec"'); const elevatedEnd=server.indexOf("fn elevated_exec_output_schema",elevatedStart); if(elevatedStart<0||elevatedEnd<=elevatedStart||server.slice(elevatedStart,elevatedEnd).includes('"oneOf"')) throw new Error("ARCH-026 elevated_exec input schema regressed to a client-hostile top-level combinator");
 if (server.slice(server.indexOf("fn handle_elevated_exec"), server.indexOf("fn request_id", server.indexOf("fn handle_elevated_exec"))).includes("guard.call_tool")) {
@@ -106,4 +110,4 @@ for (const required of [
   "actual_broker_structured_filesystem_roundtrips_outside_workspace_without_shell",
 ]) if (!brokerTests.includes(required)) throw new Error(`ARCH-026 behavioral evidence missing: ${required}`);
 
-console.log("ARCH-026_VERIFY=PASS broker_only=true general_admin_process=true trusted_logical_shell=true privileged_filesystem=true system32_management_identity=true control_plane_denied=true active_gate=true");
+console.log("ARCH-026_VERIFY=PASS broker_only=true arbitrary_admin_process=false direct_process=read_only_identity_diagnostic trusted_logical_shell=true privileged_filesystem=true system32_management_identity=true control_plane_denied=true active_gate=true");

@@ -209,9 +209,9 @@
     },
     {
       "id": "ARCH-026",
-      "description": "Elevated administrator execution is Broker-backed after explicit user consent/UAC; it may run general administrator programs and trusted logical shells, but LocalBridge control-plane mutation remains denied",
+      "description": "Elevated administrator execution is Broker-backed after explicit user consent/UAC; direct process execution is frozen to an explicitly reviewed read-only identity diagnostic while trusted System32 system-management operations and trusted logical shells provide reviewed administrator maintenance, and LocalBridge control-plane mutation remains denied",
       "severity": "error",
-      "verification": { "mode": "deferred", "activate_at_pr": "LB-012", "reason": "General administrator-token execution and privileged filesystem routing are implemented in LB-012", "type": "elevated_administrator_gateway" }
+      "verification": { "mode": "deferred", "activate_at_pr": "LB-012", "reason": "Reviewed administrator-token execution and privileged filesystem routing are implemented in LB-012", "type": "elevated_administrator_gateway" }
     },
     {
       "id": "ARCH-027",
