@@ -2939,15 +2939,22 @@ fn write_rpc_result(
     result: Value,
     session: Option<&str>,
 ) -> Result<(), ()> {
-    if let Some(session) = session {
-        record_mcp_request_result(&request_diagnostic_key(&id), session, &result);
-    }
-    write_json(
+    let request_key = session.map(|_| request_diagnostic_key(&id));
+    let write_result = write_json(
         stream,
         200,
-        &json!({"jsonrpc":"2.0","id":id,"result":result}),
+        &json!({"jsonrpc":"2.0","id":id,"result":result.clone()}),
         session,
-    )
+    );
+    match (session, request_key.as_deref()) {
+        (Some(session), Some(request_key)) => finalize_response_diagnostic(
+            request_key,
+            session,
+            write_result,
+            || record_mcp_request_result(request_key, session, &result),
+        ),
+        _ => write_result,
+    }
 }
 
 fn write_rpc_error(
@@ -2964,15 +2971,47 @@ fn write_rpc_error(
         -32602 => mcp_invalid("invalid_params"),
         _ => mcp_unknown("internal_error"),
     };
-    if let Some(session) = session {
-        record_mcp_request_error(&request_diagnostic_key(&id), session, diagnostic.clone());
-    }
-    write_json(
+    let request_key = session.map(|_| request_diagnostic_key(&id));
+    let write_result = write_json(
         stream,
         200,
         &json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message,"data":diagnostic.to_value()}}),
         session,
-    )
+    );
+    match (session, request_key.as_deref()) {
+        (Some(session), Some(request_key)) => finalize_response_diagnostic(
+            request_key,
+            session,
+            write_result,
+            || record_mcp_request_error(request_key, session, diagnostic),
+        ),
+        _ => write_result,
+    }
+}
+
+fn finalize_response_diagnostic<F>(
+    request_key: &str,
+    session: &str,
+    write_result: Result<(), ()>,
+    delivered: F,
+) -> Result<(), ()>
+where
+    F: FnOnce(),
+{
+    match write_result {
+        Ok(()) => {
+            delivered();
+            Ok(())
+        }
+        Err(()) => {
+            record_mcp_request_error(
+                request_key,
+                session,
+                transport_unavailable("response_write_failure", None),
+            );
+            Err(())
+        }
+    }
 }
 
 fn request_diagnostic_key(id: &Value) -> String {
@@ -3843,6 +3882,52 @@ mod tests {
         assert_eq!(end.error_code.as_deref(), Some("Unknown"));
         assert_eq!(end.phase.as_deref(), Some("mcp"));
         assert_eq!(end.cause.as_deref(), Some("special_handler_aborted"));
+    }
+
+    #[test]
+    fn schema43_response_diagnostics_finalize_after_transport_delivery() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        crate::diagnostics::reset_request_diagnostics_for_test();
+        record_mcp_request_start("response-ok", "session-response", "filesystem");
+        let delivered = AtomicBool::new(false);
+        let result = stable_success(json!({"changed":true}), "done");
+        assert!(
+            finalize_response_diagnostic("response-ok", "session-response", Ok(()), || {
+                delivered.store(true, Ordering::Release);
+                record_mcp_request_result("response-ok", "session-response", &result);
+            })
+            .is_ok()
+        );
+        assert!(delivered.load(Ordering::Acquire));
+        assert_eq!(crate::diagnostics::active_request_diagnostics_for_test(), 0);
+        let events = crate::diagnostics::request_diagnostics_for_test();
+        let success = events
+            .iter()
+            .find(|event| event.kind == crate::diagnostics::RequestDiagnosticKind::End)
+            .expect("delivered response terminal diagnostic");
+        assert_eq!(success.outcome.as_deref(), Some("success"));
+
+        crate::diagnostics::reset_request_diagnostics_for_test();
+        record_mcp_request_start("response-fail", "session-response", "filesystem");
+        let delivered = AtomicBool::new(false);
+        assert!(
+            finalize_response_diagnostic("response-fail", "session-response", Err(()), || {
+                delivered.store(true, Ordering::Release);
+                record_mcp_request_result("response-fail", "session-response", &result);
+            })
+            .is_err()
+        );
+        assert!(!delivered.load(Ordering::Acquire));
+        assert_eq!(crate::diagnostics::active_request_diagnostics_for_test(), 0);
+        let events = crate::diagnostics::request_diagnostics_for_test();
+        let failed = events
+            .iter()
+            .find(|event| event.kind == crate::diagnostics::RequestDiagnosticKind::End)
+            .expect("failed response transport diagnostic");
+        assert_eq!(failed.outcome.as_deref(), Some("failed"));
+        assert_eq!(failed.phase.as_deref(), Some("transport"));
+        assert_eq!(failed.cause.as_deref(), Some("response_write_failure"));
     }
 
     #[test]

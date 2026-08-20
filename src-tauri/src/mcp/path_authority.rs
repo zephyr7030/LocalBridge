@@ -196,6 +196,29 @@ impl PathAuthority {
         path: &Path,
         desired_access: u32,
     ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        self.open_validated_handle_with_share(
+            path,
+            desired_access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+        )
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn open_exclusive_validated_handle(
+        &self,
+        path: &Path,
+        desired_access: u32,
+    ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        self.open_validated_handle_with_share(path, desired_access, 0)
+    }
+
+    #[cfg(windows)]
+    fn open_validated_handle_with_share(
+        &self,
+        path: &Path,
+        desired_access: u32,
+        share_mode: u32,
+    ) -> Result<ValidatedPathHandle, PathAuthorityError> {
         let wide = path
             .as_os_str()
             .encode_wide()
@@ -205,7 +228,7 @@ impl PathAuthority {
             CreateFileW(
                 wide.as_ptr(),
                 desired_access,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                share_mode,
                 null(),
                 OPEN_EXISTING,
                 FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,

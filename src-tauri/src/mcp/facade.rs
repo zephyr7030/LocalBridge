@@ -2062,7 +2062,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         expected: &Map<String, Value>,
     ) -> Result<(), FacadeError> {
         CodingEditService::new(&self.workspace)
-            .map_err(normalize_path_authority_error)?
+            .map_err(normalize_coding_edit_error)?
             .apply_patch_preconditions(expected)
             .map_err(normalize_coding_edit_error)
     }
@@ -2073,7 +2073,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         expected: &Map<String, Value>,
     ) -> Result<Vec<String>, FacadeError> {
         CodingEditService::new(&self.workspace)
-            .map_err(normalize_path_authority_error)?
+            .map_err(normalize_coding_edit_error)?
             .apply_patch(patch, expected)
             .map_err(normalize_coding_edit_error)
     }
@@ -2425,9 +2425,15 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     ) -> Result<Value, FacadeError> {
         let object = arguments.as_object().ok_or_else(invalid_argument)?;
         let relative = required_string(object, "path")?;
-        let path = self.resolve_existing_workspace_path(relative)?;
-        let raw = std::fs::read(&path)
-            .map_err(|_| FacadeError::new(FacadeErrorCode::NotFound, "文档不可读", false))?;
+        let raw = FilesystemService::active_workspace(&self.workspace)
+            .map_err(normalize_filesystem_error)?
+            .read_all_bytes(relative)
+            .map_err(|error| match error {
+                FilesystemError::NotFound | FilesystemError::Io => {
+                    FacadeError::new(FacadeErrorCode::NotFound, "文档不可读", false)
+                }
+                other => normalize_filesystem_error(other),
+            })?;
         let source = std::str::from_utf8(&raw).map_err(|_| {
             FacadeError::new(FacadeErrorCode::InvalidArgument, "文档不是 UTF-8", false)
         })?;
@@ -2511,9 +2517,15 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     ) -> Result<Value, FacadeError> {
         let object = arguments.as_object().ok_or_else(invalid_argument)?;
         let relative = required_string(object, "path")?;
-        let path = self.resolve_existing_workspace_path(relative)?;
-        let bytes = std::fs::read(path)
-            .map_err(|_| FacadeError::new(FacadeErrorCode::NotFound, "图像不可读", false))?;
+        let bytes = FilesystemService::active_workspace(&self.workspace)
+            .map_err(normalize_filesystem_error)?
+            .read_all_bytes(relative)
+            .map_err(|error| match error {
+                FilesystemError::NotFound | FilesystemError::Io => {
+                    FacadeError::new(FacadeErrorCode::NotFound, "图像不可读", false)
+                }
+                other => normalize_filesystem_error(other),
+            })?;
         let image = image::load_from_memory(&bytes).map_err(|_| {
             FacadeError::new(FacadeErrorCode::InvalidArgument, "图像格式不受支持", false)
         })?;
@@ -6064,6 +6076,11 @@ fn normalize_filesystem_error(error: FilesystemError) -> FacadeError {
         FilesystemError::AlreadyExists => FacadeError::new(
             FacadeErrorCode::FileChanged,
             "文件系统目标已存在",
+            false,
+        ),
+        FilesystemError::FileChanged => FacadeError::new(
+            FacadeErrorCode::FileChanged,
+            "文件系统目标自读取后已发生变化",
             false,
         ),
         FilesystemError::Io => {

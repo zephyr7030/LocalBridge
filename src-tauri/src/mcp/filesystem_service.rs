@@ -40,6 +40,7 @@ pub(crate) enum FilesystemError {
     NotFound,
     OutsideAuthority,
     AlreadyExists,
+    FileChanged,
     LimitExceeded,
     Io,
     Unsupported,
@@ -336,6 +337,179 @@ impl FilesystemService {
             encoding,
             content,
         })
+    }
+
+    pub(crate) fn read_all_bytes(&self, path: &str) -> Result<Vec<u8>, FilesystemError> {
+        self.read_all_bytes_with(path, || {})
+    }
+
+    fn read_all_bytes_with<F>(&self, path: &str, before_read: F) -> Result<Vec<u8>, FilesystemError>
+    where
+        F: FnOnce(),
+    {
+        let target = self.authority.resolve_existing(path).map_err(map_path_error)?;
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
+            let _parent_guard = self.open_directory_chain(
+                target.parent().ok_or(FilesystemError::OutsideAuthority)?,
+            )?;
+            let target_handle = self.authority
+                .open_validated_handle(&target, FILE_GENERIC_READ)
+                .map_err(map_path_error)?;
+            let metadata = target_handle.metadata().map_err(|_| FilesystemError::Io)?;
+            if !metadata.is_file() || metadata_is_reparse(&metadata) {
+                return Err(FilesystemError::InvalidArgument);
+            }
+            before_read();
+            let mut file = target_handle.into_file();
+            read_open_file_bytes(&mut file)
+        }
+        #[cfg(not(windows))]
+        {
+            self.authority.revalidate_parent(&target).map_err(map_path_error)?;
+            let mut file = File::open(&target).map_err(|_| FilesystemError::Io)?;
+            before_read();
+            read_open_file_bytes(&mut file)
+        }
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn read_all_bytes_with_test_hook<F>(&self, path: &str, before_read: F) -> Result<Vec<u8>, FilesystemError>
+    where
+        F: FnOnce(),
+    {
+        self.read_all_bytes_with(path, before_read)
+    }
+
+    pub(crate) fn validate_new_file_path(&self, path: &str) -> Result<(), FilesystemError> {
+        let target = self.authority.resolve_missing_leaf(path).map_err(map_path_error)?;
+        if target.exists() { return Err(FilesystemError::FileChanged); }
+        #[cfg(windows)]
+        { let _parent_guard = self.open_mutation_parent(&target)?; }
+        #[cfg(not(windows))]
+        self.authority.revalidate_parent(&target).map_err(map_path_error)?;
+        Ok(())
+    }
+
+    pub(crate) fn create_file_for_edit(&self, path: &str, content: &[u8]) -> Result<(), FilesystemError> {
+        let target = self.authority.resolve_missing_leaf(path).map_err(map_path_error)?;
+        #[cfg(windows)]
+        let parent_guard = self.open_mutation_parent(&target)?;
+        #[cfg(windows)]
+        let stable_target = parent_guard.final_path().join(target.file_name().ok_or(FilesystemError::InvalidArgument)?);
+        #[cfg(not(windows))]
+        let stable_target = { self.authority.revalidate_parent(&target).map_err(map_path_error)?; target };
+        write_new_synced(&stable_target, content).map_err(|error| match error {
+            FilesystemError::AlreadyExists => FilesystemError::FileChanged,
+            other => other,
+        })?;
+        match self.authority.revalidate_opened_path(&stable_target) {
+            Ok(_) => Ok(()),
+            Err(error) => { let _ = fs::remove_file(&stable_target); Err(map_path_error(error)) }
+        }
+    }
+
+    pub(crate) fn replace_file_if_sha256(&self, path: &str, expected_sha256: &str, content: &[u8]) -> Result<(), FilesystemError> {
+        self.replace_file_if_sha256_with(path, expected_sha256, content, || {})
+    }
+
+    fn replace_file_if_sha256_with<F>(&self, path: &str, expected_sha256: &str, content: &[u8], before_write: F) -> Result<(), FilesystemError>
+    where
+        F: FnOnce(),
+    {
+        if expected_sha256.len() != 64 { return Err(FilesystemError::InvalidArgument); }
+        let target = self.authority.resolve_existing(path).map_err(map_path_error)?;
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+            let _parent_guard = self.open_directory_chain(target.parent().ok_or(FilesystemError::OutsideAuthority)?)?;
+            let target_handle = self.authority
+                .open_exclusive_validated_handle(&target, FILE_GENERIC_READ | FILE_GENERIC_WRITE)
+                .map_err(|error| match error {
+                    PathAuthorityError::NotFound | PathAuthorityError::InvalidPath => FilesystemError::FileChanged,
+                    other => map_path_error(other),
+                })?;
+            let metadata = target_handle.metadata().map_err(|_| FilesystemError::Io)?;
+            if !metadata.is_file() || metadata_is_reparse(&metadata) { return Err(FilesystemError::InvalidArgument); }
+            let mut file = target_handle.into_file();
+            let original = read_open_file_bytes(&mut file)?;
+            if sha256_bytes(&original) != expected_sha256 { return Err(FilesystemError::FileChanged); }
+            before_write();
+            replace_open_file_contents(&mut file, &original, content)
+        }
+        #[cfg(not(windows))]
+        {
+            self.authority.revalidate_parent(&target).map_err(map_path_error)?;
+            let mut file = OpenOptions::new().read(true).write(true).open(&target).map_err(|_| FilesystemError::Io)?;
+            let original = read_open_file_bytes(&mut file)?;
+            if sha256_bytes(&original) != expected_sha256 { return Err(FilesystemError::FileChanged); }
+            before_write();
+            replace_open_file_contents(&mut file, &original, content)
+        }
+    }
+
+    #[cfg(all(test, windows))]
+    pub(crate) fn replace_file_if_sha256_with_test_hook<F>(&self, path: &str, expected_sha256: &str, content: &[u8], before_write: F) -> Result<(), FilesystemError>
+    where
+        F: FnOnce(),
+    {
+        self.replace_file_if_sha256_with(path, expected_sha256, content, before_write)
+    }
+
+    pub(crate) fn delete_file_if_sha256(&self, path: &str, expected_sha256: &str) -> Result<(), FilesystemError> {
+        if expected_sha256.len() != 64 { return Err(FilesystemError::InvalidArgument); }
+        let target = self.authority.resolve_existing(path).map_err(map_path_error)?;
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_GENERIC_READ};
+            let _parent_guard = self.open_directory_chain(target.parent().ok_or(FilesystemError::OutsideAuthority)?)?;
+            let target_handle = self.authority.open_validated_handle(&target, DELETE | FILE_GENERIC_READ).map_err(map_path_error)?;
+            let metadata = target_handle.metadata().map_err(|_| FilesystemError::Io)?;
+            if !metadata.is_file() || metadata_is_reparse(&metadata) { return Err(FilesystemError::InvalidArgument); }
+            let mut file = target_handle.into_file();
+            let bytes = read_open_file_bytes(&mut file)?;
+            if sha256_bytes(&bytes) != expected_sha256 { return Err(FilesystemError::FileChanged); }
+            delete_raw_handle(file_raw_handle(&file)).map_err(|_| FilesystemError::Io)
+        }
+        #[cfg(not(windows))]
+        {
+            self.authority.revalidate_parent(&target).map_err(map_path_error)?;
+            let bytes = fs::read(&target).map_err(|_| FilesystemError::Io)?;
+            if sha256_bytes(&bytes) != expected_sha256 { return Err(FilesystemError::FileChanged); }
+            fs::remove_file(&target).map_err(|_| FilesystemError::Io)
+        }
+    }
+
+    pub(crate) fn move_file_if_sha256(&self, source: &str, destination: &str, expected_sha256: &str) -> Result<(), FilesystemError> {
+        if expected_sha256.len() != 64 { return Err(FilesystemError::InvalidArgument); }
+        let source_path = self.authority.resolve_existing(source).map_err(map_path_error)?;
+        let destination_path = self.authority.resolve_missing_leaf(destination).map_err(map_path_error)?;
+        if destination_path.exists() { return Err(FilesystemError::FileChanged); }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_GENERIC_READ};
+            let _source_parent_guard = self.open_directory_chain(source_path.parent().ok_or(FilesystemError::OutsideAuthority)?)?;
+            let destination_parent_guard = self.open_mutation_parent(&destination_path)?;
+            let source_handle = self.authority.open_validated_handle(&source_path, DELETE | FILE_GENERIC_READ).map_err(map_path_error)?;
+            let metadata = source_handle.metadata().map_err(|_| FilesystemError::Io)?;
+            if !metadata.is_file() || metadata_is_reparse(&metadata) { return Err(FilesystemError::InvalidArgument); }
+            let mut file = source_handle.into_file();
+            let bytes = read_open_file_bytes(&mut file)?;
+            if sha256_bytes(&bytes) != expected_sha256 { return Err(FilesystemError::FileChanged); }
+            let committed = destination_parent_guard.final_path().join(destination_path.file_name().ok_or(FilesystemError::InvalidArgument)?);
+            rename_handle_to_path(file_raw_handle(&file), &committed, false).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists { FilesystemError::FileChanged } else { FilesystemError::Io }
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            self.authority.revalidate_parent(&source_path).map_err(map_path_error)?;
+            self.authority.revalidate_parent(&destination_path).map_err(map_path_error)?;
+            let bytes = fs::read(&source_path).map_err(|_| FilesystemError::Io)?;
+            if sha256_bytes(&bytes) != expected_sha256 { return Err(FilesystemError::FileChanged); }
+            fs::rename(source_path, destination_path).map_err(|_| FilesystemError::Io)
+        }
     }
 
     pub(crate) fn write(
@@ -1401,6 +1575,35 @@ fn sha256_open_file(file: &mut File) -> Result<String, FilesystemError> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+fn read_open_file_bytes(file: &mut File) -> Result<Vec<u8>, FilesystemError> {
+    file.seek(SeekFrom::Start(0)).map_err(|_| FilesystemError::Io)?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).map_err(|_| FilesystemError::Io)?;
+    Ok(bytes)
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+fn replace_open_file_contents(file: &mut File, original: &[u8], updated: &[u8]) -> Result<(), FilesystemError> {
+    let write_result = (|| -> std::io::Result<()> {
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(updated)?;
+        file.set_len(updated.len() as u64)?;
+        file.sync_all()?;
+        Ok(())
+    })();
+    if write_result.is_ok() { return Ok(()); }
+    let _ = file.seek(SeekFrom::Start(0));
+    let _ = file.write_all(original);
+    let _ = file.set_len(original.len() as u64);
+    let _ = file.sync_all();
+    Err(FilesystemError::Io)
+}
+
 #[cfg(windows)]
 fn file_raw_handle(file: &File) -> windows_sys::Win32::Foundation::HANDLE {
     use std::os::windows::io::AsRawHandle;
@@ -1761,6 +1964,29 @@ mod tests {
         assert!(!moved.exists());
         assert!(!displaced.exists());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validated_shared_read_handle_blocks_ancestor_swap_and_reads_opened_object() {
+        let root = workspace("read-handle-swap");
+        let outside = workspace("read-handle-swap-outside");
+        let safe = root.join("safe");
+        let parent = safe.join("parent");
+        let outside_parent = outside.join("parent");
+        let displaced = root.join("safe-original");
+        fs::create_dir_all(&parent).unwrap();
+        fs::create_dir_all(&outside_parent).unwrap();
+        fs::write(parent.join("read.txt"), b"inside").unwrap();
+        fs::write(outside_parent.join("read.txt"), b"outside").unwrap();
+        let service = FilesystemService::active_workspace(&root).unwrap();
+        let bytes = service.read_all_bytes_with_test_hook("safe/parent/read.txt", || {
+            assert!(fs::rename(&safe, &displaced).is_err());
+        }).unwrap();
+        assert_eq!(bytes, b"inside");
+        assert_eq!(fs::read(outside_parent.join("read.txt")).unwrap(), b"outside");
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 
     #[cfg(windows)]

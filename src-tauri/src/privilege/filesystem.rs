@@ -316,6 +316,7 @@ fn administrator_filesystem_error(error: FilesystemError) -> AdministratorFilesy
         FilesystemError::NotFound => AdministratorFilesystemErrorCode::NotFound,
         FilesystemError::OutsideAuthority => AdministratorFilesystemErrorCode::OutsideAuthority,
         FilesystemError::AlreadyExists => AdministratorFilesystemErrorCode::AlreadyExists,
+        FilesystemError::FileChanged => AdministratorFilesystemErrorCode::AlreadyExists,
         FilesystemError::LimitExceeded => AdministratorFilesystemErrorCode::LimitExceeded,
         FilesystemError::Unsupported => AdministratorFilesystemErrorCode::Unsupported,
         FilesystemError::Io => AdministratorFilesystemErrorCode::Io,
