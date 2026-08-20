@@ -47,6 +47,7 @@ const PUBLIC_EXACT = new Set([
   "runtime-policy.toml",
   "scripts/prepare-toolbox.mjs",
   "scripts/prepare-lb018-resources.mjs",
+  "compatibility/coding-tools/0.2.2/tools-list.json",
 ]);
 
 const PUBLIC_PREFIXES = [
@@ -67,6 +68,7 @@ export function normalizeRepoPath(value) {
 export function isPrivatePath(value) {
   const path = slash(value);
   if (!path || path === ".git" || path === ".coding-tools") return true;
+  if (PUBLIC_EXACT.has(path)) return false;
   if (PRIVATE_EXACT.has(path)) return true;
   if (PRIVATE_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
   if (/^授权信息(?:\.|$)/i.test(path)) return true;
