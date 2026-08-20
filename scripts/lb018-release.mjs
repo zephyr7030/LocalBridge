@@ -104,12 +104,19 @@ function verifyReleaseVersionSurfaces() {
 
 function verifyNoVisibleConsoleBehavior(releaseExe) {
   if (!existsSync(releaseExe)) throw new Error(`release executable missing for no-console gate: ${releaseExe}`);
+  const testTargetDir = resolve(root, "src-tauri/target/lb019pre-no-console-test");
   const output = run("cargo", [
     "test",
     "--manifest-path", "src-tauri/Cargo.toml",
     "--test", "lb019pre_release_no_console",
     "--", "--nocapture", "--test-threads=1",
-  ], { env: { ...process.env, LOCALBRIDGE_RELEASE_EXE: releaseExe } });
+  ], {
+    env: {
+      ...process.env,
+      CARGO_TARGET_DIR: testTargetDir,
+      LOCALBRIDGE_RELEASE_EXE: releaseExe,
+    },
+  });
   const result = Object.fromEntries(NO_CONSOLE_SCENARIOS.map((scenario) => [
     scenario,
     output.includes(`NO_CONSOLE_SCENARIO ${scenario}=PASS`),
