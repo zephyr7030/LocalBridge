@@ -363,4 +363,4 @@
 | A357 | filesystem bounded/data-integrity behavior | list 默认非递归；递归/search/stat-size/read 均有硬 bounds；binary read 仅 bounded base64；write 原子替换；move 跨卷必须 copy→verify→delete source；delete 无 force；hash 仅 SHA256 |
 | A358 | filesystem task integration | 大型结构化文件操作复用现有 TaskAggregate/task_control；不得新增 filesystem session、第二套 task API、task history、pause/snapshot/rollback |
 | A359 | P0 packaged no-console | primary WindowsProcessSupervisor 真实 managed spawn 使用 `CREATE_NO_WINDOW`；configured foreground/background/recovery/Tunnel reconnect/autostart/managed command child 的 release-style 行为无意外 console；只检查源码 token 不得作为 PASS |
-| A360 | v0.1.1 release sequence | LB-019PRE 完成实现与 targeted/runtime Gate 后必须 fresh G2 generation38 PASS，再 fresh G3 generation24 PASS，再生成 v0.1.1 RC；LB-019 clean-machine/reboot E2E PASS 后才允许发布最终 GitHub v0.1.1 |
+| A360 | v0.1.1 release sequence | LB-019PRE 完成实现与 targeted/runtime Gate 后必须 fresh G2 generation39 PASS，再 fresh G3 generation24 PASS，再生成 v0.1.1 RC；generation38 历史 FAIL 保留且不得改写；LB-019 clean-machine/reboot E2E PASS 后才允许发布最终 GitHub v0.1.1 |

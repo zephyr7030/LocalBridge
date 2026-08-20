@@ -33,8 +33,8 @@
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
   "known_blockers": [
-    "P0 packaged/background managed runtime command windows can become visible because the primary WindowsProcessSupervisor spawn path does not yet enforce CREATE_NO_WINDOW",
-    "schema43 filesystem public tool and its path/Broker/TOCTOU acceptance are contracted but not yet implemented"
+    "fresh schema43 runtime/security adversarial review generation39 PASS is required before LB-019PRE can PASS",
+    "fresh schema43 desktop/background adversarial review generation24 remains blocked until generation39 PASS"
   ],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",

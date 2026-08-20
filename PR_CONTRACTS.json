@@ -1344,7 +1344,7 @@
       "v0.1.1-release-refresh"
     ],
     "schema43_owner_pr": "LB-019PRE",
-    "schema43_next_g2_review_generation": 38,
+    "schema43_next_g2_review_generation": 39,
     "schema43_next_g3_review_generation": 24,
     "schema43_lb019_blocked_until_lb019pre_pass": true,
     "schema43_prior_g2_g3_pass_provenance_remains_historical": true,
@@ -2612,8 +2612,8 @@
         "filesystem cannot mutate WorkspaceRegistry active workspace LocalBridge credentials runtime policy Broker state or other LocalBridge control-plane authority",
         "filesystem failures reuse existing InvalidArgument NotFound WorkspaceDenied CapabilityDenied PolicyDenied PrivilegedRouteUnavailable ElevationRequired FileChanged and Internal normalization as applicable",
         "filesystem activity participates in existing TaskAggregate current/last activity projection and large operations reuse task_control rather than inventing filesystem sessions or task history",
-        "fresh schema43 runtime/security adversarial review generation38 PASS is required before this PR can PASS",
-        "fresh schema43 desktop/background adversarial review generation24 PASS is required after generation38 and before this PR can PASS",
+        "fresh schema43 runtime/security adversarial review generation39 PASS is required before this PR can PASS",
+        "fresh schema43 desktop/background adversarial review generation24 PASS is required after generation39 and before this PR can PASS",
         "v0.1.1 package metadata installer filename provenance manifest and release evidence agree on version 0.1.1",
         "full Rust serial regression Clippy frontend test/build runtime-manifest architecture public-release preflight packaging verifier and git diff checks PASS"
       ],
