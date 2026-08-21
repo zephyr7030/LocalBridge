@@ -5,7 +5,7 @@
   "contract_file": "CONTROL_PLANE_REFACTOR_CONTRACT.json",
   "human_authority": "docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md",
   "status": "REFACTOR_IN_PROGRESS",
-  "current_phase": "R6",
+  "current_phase": "R7",
   "implementation_started": true,
   "phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
   "phases": {
@@ -115,12 +115,33 @@
     },
     "R6": {
       "title": "Boundary Cleanup",
-      "status": "IN_PROGRESS"
+      "status": "VERIFIED",
+      "implementation_commit": "e76b644",
+      "verification": {
+        "tests": [
+          "cargo test --manifest-path src-tauri/Cargo.toml -- --test-threads=1 (332 library tests plus all migration/integration/policy/privilege/packaging tests passed)",
+          "npm test (10 passed)",
+          "npm run build",
+          "npm run verify:runtime-manifest",
+          "npm run verify:ui-language",
+          "WorkspaceResolver absolute/relative/default-cwd convergence",
+          "filesystem path policy and shell execution policy separation",
+          "ControlPlane composition root shares one session-scoped request owner"
+        ],
+        "removed_old_truth": [
+          "domain, execution, filesystem, workspace and checkpoint implementations under mcp",
+          "runtime dependency on concrete MCP implementation",
+          "PathAuthority compatibility alias across workspace operations",
+          "shared shell-string policy for structured filesystem authorization",
+          "serde_json::Value workflow checkpoint state",
+          "parallel production construction of lifecycle registries"
+        ],
+        "verified_invariants": ["INV-01", "INV-02", "INV-04", "INV-09"]
+      }
     },
     "R7": {
       "title": "Product Lifecycle",
-      "status": "BLOCKED",
-      "blocked_by": "R6 verification"
+      "status": "IN_PROGRESS"
     }
   },
   "baseline_release": {
@@ -138,7 +159,7 @@
       "complex workflow expansion",
       "additional long-lived background execution capabilities"
     ],
-    "deferred": ["Update Checker"],
+    "deferred": [],
     "filesystem": "bug fixes only"
   },
   "governance_transition": {
@@ -157,5 +178,5 @@
     "automatic_next_phase": true,
     "unified_final_acceptance_after": "R7"
   },
-  "next_action": "Implement and verify R6 Boundary Cleanup, then continue to R7 and perform one unified final acceptance."
+  "next_action": "Implement and verify R7 Product Lifecycle, then perform the unified schema44 acceptance and publish the architecture migration report."
 }
