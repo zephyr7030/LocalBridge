@@ -59,6 +59,7 @@ const PUBLIC_PREFIXES = [
   "runtime/",
   "scripts/public-release/",
   "scripts/test/",
+  "scripts/verify-schema44/",
   "tests/",
 ];
 
