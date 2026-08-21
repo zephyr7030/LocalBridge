@@ -125,13 +125,18 @@ impl TaskRegistry {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.order.iter().rev().find_map(|task_id| {
-            state
-                .tasks
-                .get(task_id)
-                .filter(|task| !task.lifecycle.is_terminal())
-                .cloned()
-        })
+        for lifecycle in [LifecycleState::Running, LifecycleState::Queued] {
+            if let Some(task) = state.order.iter().rev().find_map(|task_id| {
+                state
+                    .tasks
+                    .get(task_id)
+                    .filter(|task| task.lifecycle == lifecycle)
+                    .cloned()
+            }) {
+                return Some(task);
+            }
+        }
+        None
     }
 
     pub(crate) fn latest_terminal(&self) -> Option<TaskRecord> {

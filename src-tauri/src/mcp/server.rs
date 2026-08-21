@@ -16,7 +16,12 @@ use crate::control_plane::execution_registry::ExecutionRegistry;
 use crate::control_plane::request_registry::{
     ActiveRequest, RequestCancellationTarget, RequestRegistry,
 };
-use crate::control_plane::session_registry::{SessionInsertError, SessionRecord, SessionRegistry};
+use crate::control_plane::scheduler::{
+    Scheduler, SchedulerAdmissionError, SchedulerLane,
+};
+use crate::control_plane::session_registry::{
+    MCP_SESSION_TTL_MS, SessionInsertError, SessionReaper, SessionRecord, SessionRegistry,
+};
 use crate::control_plane::task_registry::TaskRegistry;
 use crate::diagnostics::error::{
     ErrorDiagnostic, mcp_invalid, mcp_unavailable, mcp_unknown, transport_unavailable,
@@ -64,7 +69,6 @@ const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const ACCEPT_IDLE: Duration = Duration::from_millis(10);
 const MIN_TASK_PRESENTATION: Duration = Duration::from_millis(500);
-const MAX_CONNECTION_WORKERS: usize = 32;
 const MAX_DOWNSTREAM_MCP_SESSIONS: usize = 64;
 static SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -78,6 +82,7 @@ struct ConnectionContext<'a> {
     current_task: &'a CurrentTaskProjection,
     executions: &'a ExecutionRegistry,
     tasks: &'a TaskRegistry,
+    scheduler: &'a Scheduler,
     sessions: &'a SessionRegistry,
     requests: &'a RequestRegistry,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
@@ -114,6 +119,7 @@ struct TaskControlContext<'a> {
     current_task: &'a CurrentTaskProjection,
     executions: &'a ExecutionRegistry,
     tasks: &'a TaskRegistry,
+    scheduler: &'a Scheduler,
     sessions: &'a SessionRegistry,
     requests: &'a RequestRegistry,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
@@ -127,9 +133,33 @@ struct ServeContext {
     current_task: CurrentTaskProjection,
     executions: ExecutionRegistry,
     tasks: TaskRegistry,
+    scheduler: Scheduler,
     sessions: SessionRegistry,
     privileged: Option<Arc<dyn PrivilegedExecution>>,
     shutdown: mpsc::Receiver<()>,
+}
+
+struct SessionRequestLease {
+    sessions: SessionRegistry,
+    owner: McpSessionId,
+    request: RequestKey,
+}
+
+impl SessionRequestLease {
+    fn new(sessions: SessionRegistry, owner: McpSessionId, request: RequestKey) -> Self {
+        let _ = sessions.add_request(&owner, request.clone());
+        Self {
+            sessions,
+            owner,
+            request,
+        }
+    }
+}
+
+impl Drop for SessionRequestLease {
+    fn drop(&mut self) {
+        let _ = self.sessions.remove_request(&self.owner, &self.request);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -574,6 +604,7 @@ pub struct PolicyEnforcementRuntime {
     current_task: CurrentTaskProjection,
     executions: ExecutionRegistry,
     tasks: TaskRegistry,
+    scheduler: Scheduler,
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
     health_client: McpHealthClient,
@@ -662,6 +693,8 @@ impl PolicyEnforcementRuntime {
         let runtime_executions = executions.clone();
         let tasks = TaskRegistry::default();
         let runtime_tasks = tasks.clone();
+        let scheduler = Scheduler::default();
+        let runtime_scheduler = scheduler.clone();
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| PolicyEnforcementError::BindFailed)?;
         listener
@@ -694,6 +727,7 @@ impl PolicyEnforcementRuntime {
                         current_task: thread_task,
                         executions,
                         tasks,
+                        scheduler,
                         sessions: thread_sessions,
                         privileged,
                         shutdown: shutdown_rx,
@@ -707,6 +741,7 @@ impl PolicyEnforcementRuntime {
             current_task,
             executions: runtime_executions,
             tasks: runtime_tasks,
+            scheduler: runtime_scheduler,
             guard: Some(guard),
             public_policy,
             health_client,
@@ -767,7 +802,12 @@ impl PolicyEnforcementRuntime {
                 Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
             },
         };
-        merge_control_plane_activity(aggregate, &self.tasks, &self.executions)
+        merge_control_plane_activity(
+            aggregate,
+            &self.tasks,
+            &self.executions,
+            &self.scheduler,
+        )
     }
 
     pub fn is_running(&self) -> bool {
@@ -880,11 +920,13 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         current_task,
         executions,
         tasks,
+        scheduler,
         sessions,
         privileged,
         shutdown,
     } = context;
     let requests = RequestRegistry::default();
+    let session_reaper = SessionReaper::new(sessions.clone(), MCP_SESSION_TTL_MS);
     let stopping = Arc::new(AtomicBool::new(false));
     let mut workers = Vec::<JoinHandle<()>>::new();
     let mut next_session_reap = Instant::now();
@@ -894,6 +936,16 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
             break;
         }
         if Instant::now() >= next_session_reap {
+            for expired in session_reaper.reap_expired() {
+                settle_closed_session(
+                    &expired,
+                    &requests,
+                    &scheduler,
+                    &tasks,
+                    &cancellation,
+                    privileged.as_ref(),
+                );
+            }
             if let Ok(mut facade) = guard.try_lock() {
                 if facade.reap_command_sessions().is_err() {
                     stopping.store(true, Ordering::Release);
@@ -912,10 +964,6 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
             }
         }
         match listener.accept() {
-            Ok((mut stream, _)) if workers.len() >= MAX_CONNECTION_WORKERS => {
-                let _ =
-                    write_mcp_http_error(&mut stream, 503, mcp_unavailable("server_busy"), None);
-            }
             Ok((stream, _)) => {
                 let worker_guard = Arc::clone(&guard);
                 let worker_policy = Arc::clone(&public_policy);
@@ -923,6 +971,7 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                 let worker_task = current_task.clone();
                 let worker_executions = executions.clone();
                 let worker_tasks = tasks.clone();
+                let worker_scheduler = scheduler.clone();
                 let worker_sessions = sessions.clone();
                 let worker_requests = requests.clone();
                 let worker_privileged = privileged.as_ref().map(Arc::clone);
@@ -939,6 +988,7 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                             current_task: &worker_task,
                             executions: &worker_executions,
                             tasks: &worker_tasks,
+                            scheduler: &worker_scheduler,
                             sessions: &worker_sessions,
                             requests: &worker_requests,
                             privileged: worker_privileged.as_ref(),
@@ -976,6 +1026,22 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+fn settle_closed_session(
+    session: &SessionRecord,
+    requests: &RequestRegistry,
+    scheduler: &Scheduler,
+    tasks: &TaskRegistry,
+    cancellation: &McpCancellationClient,
+    privileged: Option<&Arc<dyn PrivilegedExecution>>,
+) {
+    for request in requests.owned_by(&session.id) {
+        let _ = cancel_registered_request(&request, cancellation, privileged);
+    }
+    for task_id in scheduler.cancel_queued_by_session(&session.id) {
+        let _ = tasks.finish(&task_id, TerminalOutcome::Cancelled);
+    }
+}
+
 fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> Result<(), ()> {
     let ConnectionContext {
         guard,
@@ -985,6 +1051,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         current_task,
         executions,
         tasks,
+        scheduler,
         sessions,
         requests,
         privileged,
@@ -1014,7 +1081,15 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             );
         };
         let session_id = McpSessionId::new(session);
-        if sessions.remove(&session_id).is_some() {
+        if let Some(closed) = sessions.close_and_remove(&session_id) {
+            settle_closed_session(
+                &closed,
+                requests,
+                scheduler,
+                tasks,
+                cancellation,
+                privileged,
+            );
             return write_empty(&mut stream, 204, None);
         }
         return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_not_found"), None);
@@ -1127,6 +1202,16 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 None,
             );
         }
+        for expired in SessionReaper::new(sessions.clone(), MCP_SESSION_TTL_MS).reap_expired() {
+            settle_closed_session(
+                &expired,
+                requests,
+                scheduler,
+                tasks,
+                cancellation,
+                privileged,
+            );
+        }
         let protocol = object
             .get("params")
             .and_then(Value::as_object)
@@ -1213,7 +1298,16 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         effective_tool_catalog_signature(&policy, mode)
     };
     if stored_session.tool_catalog_signature != current_signature {
-        sessions.remove(&session_id);
+        if let Some(closed) = sessions.close_and_remove(&session_id) {
+            settle_closed_session(
+                &closed,
+                requests,
+                scheduler,
+                tasks,
+                cancellation,
+                privileged,
+            );
+        }
         return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_stale"), None);
     }
     if request
@@ -1331,15 +1425,64 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             let mode = *permission_mode
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let scoped_request = request_key_from_json(session_id.clone(), &id)
+                .expect("validated downstream request id");
+            let _session_request_lease = SessionRequestLease::new(
+                sessions.clone(),
+                session_id.clone(),
+                scoped_request.clone(),
+            );
+            let lane = scheduler_lane(name, &arguments);
+            let (scheduled_task, _scheduler_permit) = match lane {
+                SchedulerLane::Work => {
+                    let task_id = tasks.queue(
+                        session_id.clone(),
+                        scoped_request.clone(),
+                        public_task_kind(name, &arguments),
+                        public_safe_summary(name, &arguments),
+                    );
+                    let _ = sessions.add_task(&session_id, task_id.clone());
+                    match scheduler.admit_work(session_id.clone(), task_id.clone()) {
+                        Ok(permit) => {
+                            let _ = tasks.mark_running(&task_id);
+                            (Some(task_id), permit)
+                        }
+                        Err(SchedulerAdmissionError::QueueCapacityExceeded) => {
+                            let _ = tasks.finish(&task_id, TerminalOutcome::Blocked);
+                            return write_rpc_result(
+                                &mut stream,
+                                id,
+                                FacadeError::new(
+                                    FacadeErrorCode::QueueCapacityExceeded,
+                                    "工作队列容量已满",
+                                    true,
+                                )
+                                .to_mcp_result(),
+                                Some(session),
+                            );
+                        }
+                        Err(SchedulerAdmissionError::Cancelled) => {
+                            let _ = tasks.finish(&task_id, TerminalOutcome::Cancelled);
+                            return write_rpc_result(
+                                &mut stream,
+                                id,
+                                FacadeError::new(
+                                    FacadeErrorCode::ProcessCancelled,
+                                    "排队任务已取消",
+                                    false,
+                                )
+                                .to_mcp_result(),
+                                Some(session),
+                            );
+                        }
+                    }
+                }
+                immediate => (None, scheduler.enter_immediate(immediate)),
+            };
             if name == "elevated_exec" {
-                let scoped_request = request_key_from_json(session_id.clone(), &id)
-                    .expect("validated downstream request id");
-                let task_id = tasks.queue(
-                    session_id.clone(),
-                    scoped_request,
-                    public_task_kind(name, &arguments),
-                    public_safe_summary(name, &arguments),
-                );
+                let task_id = scheduled_task
+                    .clone()
+                    .expect("elevated_exec is admitted through Work lane");
                 let registered_task = RegisteredTaskProjection::new(
                     task_id,
                     tasks.clone(),
@@ -1364,14 +1507,9 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 return finalize_special_handler_request(&request_key, session, result);
             }
             if name == "filesystem" {
-                let scoped_request = request_key_from_json(session_id.clone(), &id)
-                    .expect("validated downstream request id");
-                let task_id = tasks.queue(
-                    session_id.clone(),
-                    scoped_request,
-                    public_task_kind(name, &arguments),
-                    public_safe_summary(name, &arguments),
-                );
+                let task_id = scheduled_task
+                    .clone()
+                    .expect("filesystem is admitted through Work lane");
                 let registered_task = RegisteredTaskProjection::new(
                     task_id,
                     tasks.clone(),
@@ -1423,6 +1561,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         current_task,
                         executions,
                         tasks,
+                        scheduler,
                         sessions,
                         requests,
                         privileged,
@@ -1430,8 +1569,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 );
                 return finalize_special_handler_request(&request_key, session, result);
             }
-            let request_key = request_key_from_json(session_id.clone(), &id)
-                .expect("validated downstream request id");
+            let request_key = scoped_request.clone();
             let controlled_public_session = command_control_public_session(name, &arguments);
             if controlled_public_session
                 .as_ref()
@@ -1463,17 +1601,30 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     Some(session),
                 );
             }
-            let registered_task = is_work_tool(name).then(|| {
-                tasks.queue(
-                    session_id.clone(),
-                    request_key.clone(),
-                    public_task_kind(name, &arguments),
-                    public_safe_summary(name, &arguments),
-                )
-            });
-            let mut guard = guard
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let registered_task = scheduled_task.clone();
+            let mut guard = match lane {
+                SchedulerLane::Work => guard
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                SchedulerLane::Observation | SchedulerLane::Control => match guard.try_lock() {
+                    Ok(guard) => guard,
+                    Err(TryLockError::Poisoned(error)) => error.into_inner(),
+                    Err(TryLockError::WouldBlock) => {
+                        requests.remove(&request_key);
+                        return write_rpc_result(
+                            &mut stream,
+                            id,
+                            FacadeError::new(
+                                FacadeErrorCode::RuntimeUnavailable,
+                                "控制面正在处理工作请求",
+                                true,
+                            )
+                            .to_mcp_result(),
+                            Some(session),
+                        );
+                    }
+                },
+            };
             if stopping.load(Ordering::Acquire) {
                 requests.remove(&request_key);
                 if let Some(task_id) = &registered_task {
@@ -1624,6 +1775,7 @@ fn handle_task_control(
         current_task,
         executions,
         tasks,
+        scheduler,
         sessions,
         requests,
         privileged,
@@ -1673,6 +1825,10 @@ fn handle_task_control(
         },
         "cancel" => {
             let session_id = McpSessionId::new(session);
+            let queued_tasks = scheduler.cancel_queued_by_session(&session_id);
+            for task_id in &queued_tasks {
+                let _ = tasks.finish(task_id, TerminalOutcome::Cancelled);
+            }
             let owned = requests.owned_by(&session_id);
             let mut cancelled = 0u64;
             for active in &owned {
@@ -1716,6 +1872,10 @@ fn handle_task_control(
             if let Some(object) = data.as_object_mut() {
                 object.insert("cancelled_requests".into(), Value::from(cancelled));
                 object.insert(
+                    "cancelled_queued_tasks".into(),
+                    Value::from(queued_tasks.len() as u64),
+                );
+                object.insert(
                     "durable_task_cancelled".into(),
                     Value::Bool(durable_cancelled),
                 );
@@ -1732,7 +1892,7 @@ fn handle_task_control(
             );
         }
     };
-    let data = merge_control_plane_activity(data, tasks, executions);
+    let data = merge_control_plane_activity(data, tasks, executions, scheduler);
     write_rpc_result(
         stream,
         id,
@@ -1949,6 +2109,7 @@ fn merge_control_plane_activity(
     mut aggregate: Value,
     tasks: &TaskRegistry,
     executions: &ExecutionRegistry,
+    scheduler: &Scheduler,
 ) -> Value {
     let active_task = tasks.latest_active();
     let running_execution = executions.latest_running();
@@ -1990,6 +2151,18 @@ fn merge_control_plane_activity(
         object.insert(
             "last_activity".into(),
             last_activity.unwrap_or(Value::Null),
+        );
+        let scheduler = scheduler.snapshot();
+        object.insert(
+            "scheduler".into(),
+            json!({
+                "observation_active":scheduler.observation_active,
+                "control_active":scheduler.control_active,
+                "work_running":scheduler.work_running,
+                "work_queued":scheduler.work_queued,
+                "work_capacity":scheduler.work_capacity,
+                "rejected_total":scheduler.rejected_total
+            }),
         );
         object.insert(
             "state".into(),
@@ -3400,6 +3573,19 @@ fn is_work_tool(name: &str) -> bool {
     )
 }
 
+fn scheduler_lane(name: &str, arguments: &Value) -> SchedulerLane {
+    match name {
+        "workspace_context" => SchedulerLane::Observation,
+        "task_control" => match arguments.get("action").and_then(Value::as_str) {
+            Some("cancel") => SchedulerLane::Control,
+            _ => SchedulerLane::Observation,
+        },
+        "command_control" => SchedulerLane::Control,
+        _ if is_work_tool(name) => SchedulerLane::Work,
+        _ => SchedulerLane::Observation,
+    }
+}
+
 fn task_terminal_outcome(result: &Result<Value, FacadeCallError>) -> TerminalOutcome {
     let Ok(value) = result else {
         return TerminalOutcome::Blocked;
@@ -4077,7 +4263,9 @@ mod tests {
         tasks.mark_running(&task_b).unwrap();
 
         let base = json!({"state":"idle","current_workflow":null});
-        let foreground = merge_control_plane_activity(base.clone(), &tasks, &executions);
+        let scheduler = Scheduler::default();
+        let foreground =
+            merge_control_plane_activity(base.clone(), &tasks, &executions, &scheduler);
         assert_eq!(
             foreground["current_activity"]["task_id"],
             task_b.to_string()
@@ -4087,7 +4275,7 @@ mod tests {
         tasks
             .finish(&task_b, TerminalOutcome::Completed)
             .unwrap();
-        let restored = merge_control_plane_activity(base, &tasks, &executions);
+        let restored = merge_control_plane_activity(base, &tasks, &executions, &scheduler);
         assert_eq!(
             restored["current_activity"]["execution_id"],
             execution_a.to_string()
@@ -7254,6 +7442,9 @@ mod tests {
             )
         });
         thread::sleep(Duration::from_millis(100));
+        let queued = pep.scheduler.snapshot();
+        assert_eq!(queued.work_running, 1);
+        assert_eq!(queued.work_queued, 1, "session B did not enter Work FIFO");
 
         let cancel = public_tool_call(
             pep.port(),

@@ -68,6 +68,7 @@ pub enum FacadeErrorCode {
     ProcessFailed,
     ProcessTimedOut,
     ProcessCancelled,
+    QueueCapacityExceeded,
     SessionUnavailable,
     OutputTruncated,
     RuntimeUnavailable,
@@ -94,6 +95,7 @@ impl FacadeErrorCode {
             Self::ProcessFailed => "ProcessFailed",
             Self::ProcessTimedOut => "ProcessTimedOut",
             Self::ProcessCancelled => "ProcessCancelled",
+            Self::QueueCapacityExceeded => "QueueCapacityExceeded",
             Self::SessionUnavailable => "SessionUnavailable",
             Self::OutputTruncated => "OutputTruncated",
             Self::RuntimeUnavailable => "RuntimeUnavailable",
@@ -122,6 +124,7 @@ impl FacadeErrorCode {
             Self::ProcessTimedOut => "process_timeout",
             Self::ProcessFailed
             | Self::ProcessCancelled
+            | Self::QueueCapacityExceeded
             | Self::SessionUnavailable
             | Self::OutputTruncated => "command_runtime",
             Self::FileChanged | Self::PatchConflict | Self::AmbiguousMatch => "edit_conflict",
@@ -147,6 +150,7 @@ impl FacadeErrorCode {
             }
             Self::ProcessTimedOut => "提高 timeout_ms 或缩小单次任务",
             Self::ProcessCancelled => "重新发起命令",
+            Self::QueueCapacityExceeded => "等待其他任务完成后重试",
             Self::SessionUnavailable => "重新执行命令以创建新会话",
             Self::OutputTruncated => {
                 "若返回 output_ref 则分页读取；否则提高 max_bytes 或 resize 后重试"
@@ -749,7 +753,7 @@ pub(crate) fn public_error_output_schema() -> Value {
             "code":{"type":"string","enum":[
                 "InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied",
                 "InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
-                "ProcessCancelled","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
+                "ProcessCancelled","QueueCapacityExceeded","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
                 "RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"
             ]},
             "error_code":{"type":"string","enum":["InvalidRequest","Unavailable","Denied","Timeout","Cancelled","ExecutionFailed","Unknown"]},
