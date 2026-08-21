@@ -137,6 +137,11 @@ impl PublicRuntimeFixture {
         let runtime = self.runtime.take().expect("test runtime is active");
         let mut coding = runtime.stop().expect("public MCP test runtime stops");
         coding.stop().expect("bundled MCP test runtime stops");
+        assert_eq!(
+            coding.active_processes().unwrap(),
+            0,
+            "test fixture leaked a managed process"
+        );
         cleanup_test_directory(&self.workspace);
         self.cleaned = true;
     }

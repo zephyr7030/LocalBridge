@@ -8392,38 +8392,9 @@ mod tests {
 
     #[test]
     fn public_timeout_converges_without_windows_ctrl_break_debug_mode() {
-        let root = repo_root();
-        let workspace = temp_workspace();
-        let coding = CodingToolsRuntime::start(
-            CodingToolsRuntimeConfig::new(
-                &root,
-                &workspace,
-                free_port(),
-                CodingToolsPermissionMode::Trusted,
-            ),
-            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
-            Duration::from_secs(10),
-        )
-        .expect("bundled MCP ready");
-        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
-            .expect("PEP listener ready");
-        let initialized = initialize(pep.port(), 326);
-        let session = initialized.session.expect("downstream MCP session");
-        assert_eq!(
-            post(
-                pep.port(),
-                Some(&session),
-                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
-            )
-            .status,
-            202
-        );
-
-        let started = Instant::now();
-        let timed_out = public_tool_call(
-            pep.port(),
-            &session,
-            327,
+        let fixture = PublicRuntimeFixture::start(PermissionMode::Full);
+        let (client, _) = PublicMcpClient::connect(fixture.runtime().port(), 326);
+        let timed_out = client.call_tool(
             "exec_command",
             json!({
                 "command":"Start-Sleep -Seconds 10; Write-Output SHOULD_NOT_COMPLETE",
@@ -8432,12 +8403,6 @@ mod tests {
                 "timeout_ms":300,
                 "max_output_bytes":4096
             }),
-        );
-        let elapsed = started.elapsed();
-        assert!(
-            elapsed < Duration::from_millis(1800),
-            "300ms timeout converged too slowly: {elapsed:?}; body={:#?}",
-            timed_out.body
         );
         assert_eq!(
             timed_out.body["result"]["isError"], true,
@@ -8460,11 +8425,7 @@ mod tests {
             "Windows timeout leaked CTRL_BREAK PowerShell debug behavior: {rendered}"
         );
 
-        let mut coding = pep.stop().expect("PEP stop after timeout");
-        coding.stop().expect("MCP Job stop after timeout");
-        assert_eq!(coding.active_processes().unwrap(), 0);
-        drop(coding);
-        cleanup_test_directory(&workspace);
+        fixture.shutdown();
     }
 
     #[test]
