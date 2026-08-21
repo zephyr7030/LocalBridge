@@ -5,7 +5,7 @@
   "contract_file": "CONTROL_PLANE_REFACTOR_CONTRACT.json",
   "human_authority": "docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md",
   "status": "REFACTOR_IN_PROGRESS",
-  "current_phase": "R3",
+  "current_phase": "R6",
   "implementation_started": true,
   "phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
   "phases": {
@@ -92,12 +92,30 @@
     },
     "R5": {
       "title": "Snapshot / Typed UI",
-      "status": "IN_PROGRESS"
+      "status": "VERIFIED",
+      "implementation_commit": "db7f0a4",
+      "verification": {
+        "tests": [
+          "cargo test --manifest-path src-tauri/Cargo.toml -- --test-threads=1 (328 library tests plus all migration/integration/policy/privilege/packaging tests passed)",
+          "npm test -- --run (10 passed)",
+          "npm run build",
+          "snapshot read is side-effect free and does not assemble live state",
+          "runtime lock contention preserves stale/unavailable and never fabricates Running",
+          "faulted snapshot sections remain isolated from ready sections"
+        ],
+        "removed_old_truth": [
+          "live MainProjection composition from settings, credentials, runtime and convergence owners",
+          "ProjectionWake revision separate from published state",
+          "opaque serde_json::Value task aggregate in the runtime and UI core",
+          "Result<T, String> command boundary",
+          "lock-contention Running compensation"
+        ],
+        "verified_invariants": ["INV-01", "INV-06", "INV-07"]
+      }
     },
     "R6": {
       "title": "Boundary Cleanup",
-      "status": "BLOCKED",
-      "blocked_by": "R5 verification"
+      "status": "IN_PROGRESS"
     },
     "R7": {
       "title": "Product Lifecycle",
@@ -139,5 +157,5 @@
     "automatic_next_phase": true,
     "unified_final_acceptance_after": "R7"
   },
-  "next_action": "Implement and verify R5 Snapshot / Typed UI, then continue serially through R7 and perform one unified final acceptance."
+  "next_action": "Implement and verify R6 Boundary Cleanup, then continue to R7 and perform one unified final acceptance."
 }
