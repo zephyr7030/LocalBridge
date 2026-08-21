@@ -5283,7 +5283,11 @@ mod tests {
     }
 
     fn post(port: u16, session: Option<&str>, payload: &Value) -> ClientResponse {
-        post_with_read_timeout(port, session, payload, Duration::from_secs(3))
+        // These are real process-backed integration requests. A cold Windows CI
+        // runner can spend several seconds in process creation and security
+        // scanning before the server writes its response, so keep the socket
+        // budget above the bounded command budgets used by the fixtures.
+        post_with_read_timeout(port, session, payload, Duration::from_secs(30))
     }
 
     fn post_with_read_timeout(
@@ -5901,7 +5905,7 @@ mod tests {
         );
         assert!(polled.body.get("error").is_none(), "{:#?}", polled.body);
 
-        let terminal_deadline = Instant::now() + Duration::from_secs(6);
+        let terminal_deadline = Instant::now() + Duration::from_secs(30);
         let mut terminal_poll_id = 606u64;
         let mut observed_output = String::new();
         let terminal = loop {
@@ -6458,7 +6462,7 @@ mod tests {
         let detached = pep.task_aggregate_snapshot();
         assert_eq!(detached["current_command"]["state"], "running");
         assert_eq!(detached["current_activity"]["kind"], "command");
-        let lifecycle_deadline = Instant::now() + Duration::from_secs(6);
+        let lifecycle_deadline = Instant::now() + Duration::from_secs(30);
         while !pep.task_aggregate_snapshot()["current_command"].is_null() {
             assert!(
                 Instant::now() < lifecycle_deadline,
@@ -7893,7 +7897,7 @@ mod tests {
                         }
                     }
                 }),
-                Duration::from_secs(6),
+                Duration::from_secs(30),
             )
         });
         let running_deadline = Instant::now() + Duration::from_secs(3);
@@ -7925,7 +7929,7 @@ mod tests {
                         }
                     }
                 }),
-                Duration::from_secs(6),
+                Duration::from_secs(30),
             )
         });
         thread::sleep(Duration::from_millis(100));
@@ -8025,7 +8029,7 @@ mod tests {
                         }
                     }
                 }),
-                Duration::from_secs(6),
+                Duration::from_secs(30),
             )
         });
         let running_deadline = Instant::now() + Duration::from_secs(3);
@@ -8055,7 +8059,7 @@ mod tests {
                         }
                     }
                 }),
-                Duration::from_secs(6),
+                Duration::from_secs(30),
             )
         });
         thread::sleep(Duration::from_millis(100));

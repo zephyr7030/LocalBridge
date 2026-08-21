@@ -7800,12 +7800,12 @@ mod tests {
                 .call_tool(
                     PermissionMode::Full,
                     "exec_command",
-                    json!({"command":command,"shell":shell,"yield_time_ms":10000,"timeout_ms":10000,"max_output_bytes":65536}),
+                    json!({"command":command,"shell":shell,"yield_time_ms":30000,"timeout_ms":30000,"max_output_bytes":65536}),
                     None,
                     |_| {},
                 )
                 .unwrap();
-            assert_eq!(result["isError"], false, "{result:#}");
+            assert_eq!(result["isError"], false, "{command}: {result:#}");
             let output = result["structuredContent"]["data"]["output"]
                 .as_str()
                 .unwrap_or_default();

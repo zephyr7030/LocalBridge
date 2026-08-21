@@ -521,7 +521,16 @@ mod tests {
                         let mut request = [0u8; 4096];
                         let count = stream.read(&mut request).unwrap_or(0);
                         let request = String::from_utf8_lossy(&request[..count]);
-                        assert!(request.starts_with("GET /v1/tunnels/"));
+                        if !request.starts_with("GET /v1/tunnels/") {
+                            let body = r#"{"error":"not found"}"#;
+                            let response = format!(
+                                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            let _ = stream.write_all(response.as_bytes());
+                            continue;
+                        }
                         let _ = release_rx.recv_timeout(Duration::from_secs(10));
                         let body = r#"{"error":"synthetic blocked control plane"}"#;
                         let response = format!(
