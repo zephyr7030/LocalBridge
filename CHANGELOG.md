@@ -6,6 +6,18 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 No user-visible changes yet.
 
+## [0.1.2] - 2026-08-21
+
+### Improved
+- Multiple MCP sessions and app windows now share bounded, fair work scheduling while retaining session-scoped request and cancellation isolation.
+- Detached commands and long-running tasks now keep stable identities and converge to explicit terminal outcomes across disconnects and runtime restarts.
+- Permission and workspace changes now reconcile desired and observed state before exposing effective authority, preventing partially applied control-plane state.
+- The app now renders one revisioned live-state snapshot, including scheduler pressure and actionable faults, without guessing task completion or runtime activity.
+
+### Reliability
+- Runtime restart recovery marks orphaned executions as lost and preserves unaffected sessions and tasks.
+- Lock contention and unavailable observations are reported as stale or unavailable instead of fabricated running state.
+
 ## [0.1.1] - 2026-08-21
 
 ### Added
