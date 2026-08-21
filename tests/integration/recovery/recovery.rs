@@ -8,7 +8,6 @@ type SharedEvents = Rc<RefCell<Vec<&'static str>>>;
 type SharedFailures = Rc<RefCell<usize>>;
 type SharedHealth = Rc<RefCell<bool>>;
 type SharedFault = Rc<RefCell<RuntimeFault>>;
-type SharedCancellation = Rc<RefCell<Option<RecoveryCancellation>>>;
 
 #[derive(Debug, Default)]
 struct FakeClock {
@@ -31,7 +30,6 @@ struct RecoveryDriver {
     fail_mcp_starts: SharedFailures,
     fail_tunnel_starts: SharedFailures,
     tunnel_start_fault: SharedFault,
-    cancel_on_tunnel_recovery_ready: SharedCancellation,
     pep_healthy: SharedHealth,
     mcp_healthy: SharedHealth,
     mcp_fault: SharedFault,
@@ -45,7 +43,6 @@ impl RecoveryDriver {
         let fail_mcp_starts = Rc::new(RefCell::new(0));
         let fail_tunnel_starts = Rc::new(RefCell::new(0));
         let tunnel_start_fault = Rc::new(RefCell::new(RuntimeFault::TunnelExited));
-        let cancel_on_tunnel_recovery_ready = Rc::new(RefCell::new(None));
         let pep_healthy = Rc::new(RefCell::new(true));
         let mcp_healthy = Rc::new(RefCell::new(true));
         let mcp_fault = Rc::new(RefCell::new(RuntimeFault::McpExited));
@@ -56,7 +53,6 @@ impl RecoveryDriver {
                 fail_mcp_starts,
                 fail_tunnel_starts: fail_tunnel_starts.clone(),
                 tunnel_start_fault,
-                cancel_on_tunnel_recovery_ready,
                 pep_healthy: pep_healthy.clone(),
                 mcp_healthy: mcp_healthy.clone(),
                 mcp_fault,
@@ -72,9 +68,6 @@ impl RecoveryDriver {
     fn event(&self, value: &'static str) { self.events.borrow_mut().push(value); }
     fn set_tunnel_start_fault(&self, fault: RuntimeFault) {
         *self.tunnel_start_fault.borrow_mut() = fault;
-    }
-    fn cancel_during_tunnel_recovery_ready(&self, cancellation: RecoveryCancellation) {
-        *self.cancel_on_tunnel_recovery_ready.borrow_mut() = Some(cancellation);
     }
     fn set_mcp_fault(&self, fault: RuntimeFault) {
         *self.mcp_fault.borrow_mut() = fault;
@@ -118,14 +111,9 @@ impl RuntimeDriver for RecoveryDriver {
     fn confirm_tunnel_ready_for_recovery(
         &mut self,
         _tunnel: &mut Self::Tunnel,
-        permit: &RecoveryPermit,
+        _permit: &RecoveryPermit,
     ) -> Result<(), RuntimeFault> {
         self.event("tunnel.ready");
-        if let Some(cancellation) = self.cancel_on_tunnel_recovery_ready.borrow_mut().take() {
-            cancellation.cancel();
-            assert!(permit.is_cancelled());
-            return Err(RuntimeFault::UserStopped);
-        }
         Ok(())
     }
     fn stop_tunnel(&mut self, _tunnel: &mut Self::Tunnel) -> Result<(), RuntimeFault> { self.event("tunnel.stop"); Ok(()) }
@@ -146,18 +134,6 @@ impl RuntimeDriver for RecoveryDriver {
     }
     fn current_workspace(&self) -> Option<&Path> { Some(&self.workspace) }
     fn configure_workspace(&mut self, workspace: PathBuf) -> Result<(), RuntimeFault> { self.workspace = workspace; Ok(()) }
-    fn configure_permission_mode(&mut self, _mode: PermissionMode) -> Result<(), RuntimeFault> {
-        self.event("permission.configure");
-        Ok(())
-    }
-    fn set_permission_mode(
-        &mut self,
-        _pep: &Self::Pep,
-        _mode: PermissionMode,
-    ) -> Result<(), RuntimeFault> {
-        self.event("permission.set");
-        Ok(())
-    }
 }
 
 #[test]
@@ -453,44 +429,6 @@ fn cooperative_auto_cancellation_during_backoff_consumes_no_attempt_or_attention
 }
 
 #[test]
-fn permission_switch_during_backoff_rearms_same_generation_without_budget_reset() {
-    let (driver, events, _, _, _) = RecoveryDriver::new();
-    let tunnel_healthy = driver.tunnel_healthy.clone();
-    let mut runtime = RuntimeOrchestrator::new(driver);
-    runtime.start().unwrap();
-    let mut monitored = AutoRecoveryRuntime::new(runtime, FakeClock::default());
-    events.borrow_mut().clear();
-    *tunnel_healthy.borrow_mut() = false;
-
-    assert!(monitored.monitor_once().is_none());
-    let generation = monitored.runtime().active_outage().unwrap().id;
-    monitored.cancellation().cancel();
-    monitored
-        .set_permission_mode_after_control_cancellation(PermissionMode::Full)
-        .expect("permission change during backoff succeeds");
-    assert_eq!(monitored.controller.current_attempt(), 0);
-    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
-    assert!(events.borrow().contains(&"permission.set"));
-
-    monitored.recovery_clock_mut().advance(Duration::from_secs(1));
-    let outcome = monitored
-        .monitor_once()
-        .expect("same pending attempt resumes after permission change");
-    assert!(matches!(
-        outcome,
-        RecoveryOutcome::Recovered {
-            generation: recovered_generation,
-            attempt: 1,
-        } if recovered_generation == generation
-    ));
-    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
-    let outage = monitored.runtime().active_outage().unwrap();
-    assert_eq!(outage.id, generation);
-    assert!(!outage.user_attention_emitted());
-    assert!(monitored.recovery_clock().sleeps.is_empty());
-}
-
-#[test]
 fn successful_workspace_switch_retires_exhausted_generation_and_new_workspace_gets_full_budget() {
     let (driver, _, fail_counter, _, _) = RecoveryDriver::new();
     let tunnel_healthy = driver.tunnel_healthy.clone();
@@ -520,10 +458,7 @@ fn successful_workspace_switch_retires_exhausted_generation_and_new_workspace_ge
     *fail_counter.borrow_mut() = 0;
     monitored.cancellation().cancel();
     monitored
-        .switch_workspace_after_control_cancellation(
-            Path::new(r"D:\project\replacement"),
-            Some(Path::new(r"D:\project\active")),
-        )
+        .switch_workspace_after_control_cancellation(Path::new(r"D:\project\replacement"))
         .expect("explicit switch to replacement workspace succeeds");
     assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
     assert!(monitored.runtime().active_outage().is_none());
@@ -551,7 +486,7 @@ fn successful_workspace_switch_retires_exhausted_generation_and_new_workspace_ge
 }
 
 #[test]
-fn failed_workspace_switch_and_failed_rollback_retire_stale_auto_recovery_fail_closed() {
+fn failed_workspace_switch_retires_stale_auto_recovery_fail_closed() {
     let (driver, events, _, _, _) = RecoveryDriver::new();
     let fail_mcp_starts = driver.fail_mcp_starts.clone();
     let tunnel_healthy = driver.tunnel_healthy.clone();
@@ -566,16 +501,11 @@ fn failed_workspace_switch_and_failed_rollback_retire_stale_auto_recovery_fail_c
     assert!(monitored.pending_auto.is_some());
 
     monitored.cancellation().cancel();
-    *fail_mcp_starts.borrow_mut() = 2;
+    *fail_mcp_starts.borrow_mut() = 1;
     let error = monitored
-        .switch_workspace_after_control_cancellation(
-            Path::new(r"D:\project\replacement"),
-            Some(Path::new(r"D:\project\active")),
-        )
-        .expect_err("candidate start and rollback start both fail");
+        .switch_workspace_after_control_cancellation(Path::new(r"D:\project\replacement"))
+        .expect_err("candidate start fails without rollback compensation");
     assert_eq!(error.candidate_fault, RuntimeFault::McpSpawnFailed);
-    assert_eq!(error.rollback_fault, Some(RuntimeFault::McpSpawnFailed));
-    assert_eq!(error.rollback_cleanup_fault, None);
     assert_eq!(
         monitored.runtime().state(),
         &RuntimeState::Faulted(RuntimeFault::McpSpawnFailed)
@@ -597,7 +527,7 @@ fn failed_workspace_switch_and_failed_rollback_retire_stale_auto_recovery_fail_c
     assert_eq!(
         events.borrow().iter().filter(|event| **event == "mcp.start").count(),
         starts_after_failure,
-        "Faulted rollback failure must not reactivate the stale generation"
+        "Faulted candidate failure must not reactivate the stale generation"
     );
     assert!(
         monitored.manual_retry_current_outage().is_none(),
@@ -639,74 +569,6 @@ fn cooperative_attempt_stops_on_new_nonrecoverable_fault_without_later_deadlines
         events.borrow().iter().filter(|event| **event == "tunnel.start").count(),
         1
     );
-}
-
-#[test]
-fn permission_switch_after_inflight_cancellation_resumes_same_attempt_and_returns_ready() {
-    let (driver, events, _, _, _) = RecoveryDriver::new();
-    let tunnel_healthy = driver.tunnel_healthy.clone();
-    let cancellation = RecoveryCancellation::default();
-    driver.cancel_during_tunnel_recovery_ready(cancellation.clone());
-    let mut runtime = RuntimeOrchestrator::new(driver);
-    runtime.start().unwrap();
-    let mut monitored = AutoRecoveryRuntime::new_with_cancellation(
-        runtime,
-        FakeClock::default(),
-        cancellation,
-    );
-    events.borrow_mut().clear();
-    *tunnel_healthy.borrow_mut() = false;
-
-    assert!(monitored.monitor_once().is_none());
-    let generation = monitored.runtime().active_outage().unwrap().id;
-    monitored.recovery_clock_mut().advance(Duration::from_secs(1));
-    assert!(monitored.monitor_once().is_none(), "UserStopped cancellation is silent");
-    assert!(matches!(
-        monitored.runtime().state(),
-        RuntimeState::Recovering {
-            component: RuntimeComponent::Tunnel,
-            attempt: 1,
-        }
-    ));
-    assert_eq!(monitored.controller.current_attempt(), 1);
-    let outage = monitored.runtime().active_outage().unwrap();
-    assert_eq!(outage.id, generation);
-    assert!(!outage.user_attention_emitted());
-    assert_eq!(
-        events.borrow().iter().filter(|event| **event == "tunnel.start").count(),
-        1
-    );
-    assert_eq!(
-        events.borrow().iter().filter(|event| **event == "tunnel.stop").count(),
-        2,
-        "old Tunnel and cancelled replacement are both owned and stopped"
-    );
-
-    monitored
-        .set_permission_mode_after_control_cancellation(PermissionMode::Full)
-        .expect("permission change applies to retained PEP");
-    assert!(events.borrow().contains(&"permission.set"));
-    let outcome = monitored
-        .monitor_once()
-        .expect("cancelled attempt is rearmed immediately after control update");
-    assert!(matches!(
-        outcome,
-        RecoveryOutcome::Recovered {
-            generation: recovered_generation,
-            attempt: 1,
-        } if recovered_generation == generation
-    ));
-    assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
-    let outage = monitored.runtime().active_outage().unwrap();
-    assert_eq!(outage.id, generation);
-    assert!(!outage.user_attention_emitted());
-    assert_eq!(events.borrow().iter().filter(|event| **event == "tunnel.start").count(), 2);
-    monitored
-        .orchestrator_mut()
-        .stop()
-        .expect("explicit stop cleans recovered Tunnel/PEP/MCP");
-    assert!(events.borrow().contains(&"pep.stop"));
-    assert!(events.borrow().contains(&"mcp.stop"));
 }
 
 #[test]

@@ -12,7 +12,7 @@ use crate::mcp::InternalBearer;
 #[cfg(windows)]
 use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver, RuntimeDriver};
 #[cfg(windows)]
-use crate::state::{PermissionMode, RuntimeFault};
+use crate::state::RuntimeFault;
 #[cfg(windows)]
 use crate::tunnel::{PreparedTunnelStart, TunnelId, TunnelRuntimeConfig};
 #[cfg(windows)]
@@ -244,6 +244,7 @@ impl ExitRuntime for BlockingMonitorRuntime {
             current_task_elapsed_ms: None,
             last_tool: None,
             configured_workspace: None,
+            connection_profile: None,
             outage: None,
         }
     }
@@ -336,6 +337,7 @@ impl ExitRuntime for GenerationTestRuntime {
             current_task_elapsed_ms: None,
             last_tool: None,
             configured_workspace: Some(self.workspace.clone()),
+            connection_profile: None,
             outage: None,
         }
     }
@@ -348,7 +350,6 @@ fn ui_ready_test_config(workspace: &str) -> ProductionRuntimeConfig {
         PathBuf::from(workspace),
         PathBuf::from(r"C:\LocalBridge-health"),
         TunnelId::new("tunnel_0123456789abcdef0123456789abcdef").unwrap(),
-        PermissionMode::Full,
     )
 }
 
@@ -719,7 +720,6 @@ fn production_tray_exit_owns_actual_adapter_and_stops_tunnel_gate_pep_mcp() {
         &workspace,
         &health,
         TunnelId::new(ACTUAL_TUNNEL_ID).unwrap(),
-        PermissionMode::Full,
     );
     let mut driver = ProductionRuntimeDriver::new_owned(
         config,

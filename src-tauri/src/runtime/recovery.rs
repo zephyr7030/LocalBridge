@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crate::state::{PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState};
+use crate::state::{RuntimeComponent, RuntimeFault, RuntimeState};
 
 use super::{
     OutageGenerationId, RecoveryCancellation, RecoveryPermit, RecoveryScope, RuntimeDriver,
@@ -211,38 +211,17 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
         self.cancellation.clone()
     }
 
-    pub fn set_permission_mode_after_control_cancellation(
-        &mut self,
-        mode: PermissionMode,
-    ) -> Result<(), RuntimeFault> {
-        let result = self.runtime.set_permission_mode(mode);
-        self.resume_after_control_interruption();
-        result
-    }
-
     pub fn switch_workspace_after_control_cancellation(
         &mut self,
         candidate: &Path,
-        rollback_workspace: Option<&Path>,
     ) -> Result<(), WorkspaceSwitchError> {
-        match self
-            .runtime
-            .switch_workspace_to(candidate, rollback_workspace)
-        {
+        match self.runtime.switch_workspace_to(candidate) {
             Ok(()) => {
                 self.retire_recovery_for_successful_workspace_switch();
                 Ok(())
             }
             Err(error) => {
-                let previous_runtime_restored = self.runtime.state() == &RuntimeState::Ready
-                    && error.candidate_cleanup_fault.is_none()
-                    && error.rollback_fault.is_none()
-                    && error.rollback_cleanup_fault.is_none();
-                if previous_runtime_restored {
-                    self.resume_after_control_interruption();
-                } else {
-                    self.retire_recovery_for_failed_workspace_switch();
-                }
+                self.retire_recovery_for_failed_workspace_switch();
                 Err(error)
             }
         }
@@ -280,54 +259,6 @@ impl<D: RuntimeDriver, C: RecoveryClock> AutoRecoveryRuntime<D, C> {
             &mut self.runtime,
             RuntimeOutage::classify(outage.component, outage.fault),
         ))
-    }
-
-    fn resume_after_control_interruption(&mut self) {
-        let pending_cancelled = self
-            .pending_auto
-            .as_ref()
-            .is_some_and(|pending| pending.permit.is_cancelled());
-        if self.pending_auto.is_some() {
-            if pending_cancelled {
-                let fresh_permit = self.cancellation.permit();
-                if let Some(pending) = self.pending_auto.as_mut() {
-                    pending.permit = fresh_permit;
-                }
-            }
-            return;
-        }
-
-        if !matches!(self.runtime.state(), RuntimeState::Recovering { .. }) {
-            return;
-        }
-        let attempt = self.controller.current_attempt;
-        if attempt == 0 || attempt > RECONNECT_BACKOFF_SECONDS.len() as u32 {
-            return;
-        }
-        let Some(generation) = self.controller.generation else {
-            return;
-        };
-        let Some(outage) = self.runtime.active_outage().cloned() else {
-            return;
-        };
-        if outage.id != generation {
-            return;
-        }
-        let request_id = outage.request_id;
-        let classified = RuntimeOutage::classify(outage.component, outage.fault);
-        if classified.disposition != RecoveryDisposition::Recoverable {
-            return;
-        }
-        self.pending_auto = Some(PendingAutoRecovery {
-            generation,
-            request_id,
-            component: classified.component,
-            fault: classified.fault.clone(),
-            scope: classified.recovery_scope(),
-            next_attempt: attempt,
-            next_deadline: self.controller.clock.now(),
-            permit: self.cancellation.permit(),
-        });
     }
 
     fn retire_recovery_for_successful_workspace_switch(&mut self) {

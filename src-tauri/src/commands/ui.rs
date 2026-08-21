@@ -10,8 +10,12 @@ use crate::app::{
     StartupProfileStore, manual_stop_services,
 };
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
+use crate::control_plane::convergence::{
+    ConnectionProfile, DesiredWorkspace, PermissionReconcileAction, RuntimeReconcileAction,
+    ServiceIntent,
+};
 use crate::runtime::ProductionRuntimeConfig;
-use crate::settings::{AppData, SettingsStore, StoredPermissionMode};
+use crate::settings::{AppData, SettingsStore};
 use crate::state::{
     LastToolTiming, PermissionMode, PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState, TaskKind,
 };
@@ -267,22 +271,21 @@ fn get_main_projection_blocking(
 ) -> Result<MainProjection, String> {
     let (_, data) = load_app_data(&app)?;
     let (snapshot, projection_revision) = lifecycle.runtime_snapshot_with_revision();
+    let convergence = lifecycle.convergence_snapshot();
     let task_aggregate = lifecycle.task_aggregate_snapshot();
-    let privilege = lifecycle.privilege().refresh_broker_state();
     let metadata = WindowsCredentialStore::default()
         .runtime_api_key_metadata()
         .map_err(|_| "无法读取 Runtime API Key 状态".to_string())?;
-    let profile = StartupProfileStore::new(app_data_dir(&app)?.join(STARTUP_PROFILE_FILE_NAME))
-        .load()
-        .map_err(|_| "无法读取连接设置".to_string())?;
-    let tunnel_id = profile
-        .validated_tunnel_id()
-        .map_err(|_| "Tunnel ID 格式无效".to_string())?
-        .map(|value| value.expose().to_owned());
-    let active_id = data
-        .workspace
-        .active_workspace_id
+    let tunnel_id = convergence
+        .desired
+        .connection
         .as_ref()
+        .map(|profile| profile.tunnel_id.expose().to_owned());
+    let active_id = convergence
+        .desired
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.id.as_ref())
         .map(WorkspaceId::as_str);
     let projects = data
         .workspace
@@ -317,8 +320,8 @@ fn get_main_projection_blocking(
             })
     });
     Ok(MainProjection {
-        permission: stored_permission_code(data.settings.permission_mode),
-        privilege: privilege_code(&privilege),
+        permission: permission_code(convergence.desired.permission),
+        privilege: privilege_code(&convergence.observed.broker),
         local_environment_service: local_environment_service_code(&snapshot.state),
         tunnel_service,
         coding_service,
@@ -366,40 +369,23 @@ pub async fn set_permission_mode(mode: String, app: AppHandle) -> Result<(), Str
             return Err("管理员确认尚未完成".to_string());
         }
         let (store, mut data) = load_app_data(&app)?;
-        let previous_stored = data.settings.permission_mode;
-        let previous: PermissionMode = previous_stored.into();
-        if previous == PermissionMode::Elevated && requested != PermissionMode::Elevated {
-            lifecycle
-                .privilege()
-                .disable()
-                .map_err(|_| "无法关闭管理员权限".to_string())?;
-        }
-        let runtime_active = lifecycle.runtime_snapshot().active;
-        if runtime_active {
-            lifecycle
-                .set_runtime_permission_mode(requested)
-                .map_err(|_| "无法更新当前权限模式".to_string())?;
-        }
         data.settings.permission_mode = requested.into();
-        if store.save(&data).is_err() {
-            if runtime_active {
-                let _ = lifecycle.set_runtime_permission_mode(previous);
+        store
+            .save(&data)
+            .map_err(|_| "无法保存权限设置".to_string())?;
+        lifecycle.set_desired_permission(requested);
+        match lifecycle.reconciliation_plan().permission {
+            PermissionReconcileAction::RequestAuthorization => {
+                if request_explicit_admin(&lifecycle).is_err() {
+                    return Err("管理员权限目标已保存，Broker 当前不可用".to_string());
+                }
             }
-            return Err("无法保存权限设置".to_string());
-        }
-        if requested == PermissionMode::Elevated
-            && !privilege_active
-            && request_explicit_admin(&lifecycle).is_err()
-        {
-            data.settings.permission_mode = previous_stored;
-            let _ = store.save(&data);
-            if runtime_active {
-                let _ = lifecycle.set_runtime_permission_mode(previous);
+            PermissionReconcileAction::DisableBroker => {
+                lifecycle.privilege().disable().map_err(|_| {
+                    "权限目标已保存，但管理员 Broker 尚未完全关闭".to_string()
+                })?;
             }
-            if previous != PermissionMode::Elevated {
-                let _ = lifecycle.privilege().disable();
-            }
-            return Err("无法准备管理员权限".to_string());
+            PermissionReconcileAction::None => {}
         }
         Ok(())
     })
@@ -481,6 +467,7 @@ pub async fn save_runtime_key(value: String, app: AppHandle) -> Result<(), Strin
             .save_runtime_api_key(&secret)
             .map_err(|_| "无法安全保存 Runtime API Key".to_string())?;
         let lifecycle = app.state::<DesktopLifecycle>();
+        lifecycle.mark_connection_credentials_changed();
         reconnect_after_connection_change(&app, &lifecycle)?;
         Ok(())
     })
@@ -511,6 +498,15 @@ pub async fn save_tunnel_id(value: String, app: AppHandle) -> Result<(), String>
             .save(&profile)
             .map_err(|_| "无法保存 Tunnel ID".to_string())?;
         let lifecycle = app.state::<DesktopLifecycle>();
+        let epoch = lifecycle
+            .desired_state()
+            .snapshot()
+            .state
+            .connection
+            .as_ref()
+            .map(|profile| profile.credential_epoch)
+            .unwrap_or(0);
+        lifecycle.set_desired_connection(Some(ConnectionProfile::new(requested, epoch)));
         reconnect_after_connection_change(&app, &lifecycle)?;
         Ok(())
     })
@@ -526,6 +522,7 @@ pub async fn delete_runtime_key(app: AppHandle) -> Result<(), String> {
             .map_err(|_| "无法删除Runtime API Key".to_string())?;
         if deleted {
             let lifecycle = app.state::<DesktopLifecycle>();
+            lifecycle.mark_connection_credentials_changed();
             reconnect_after_connection_change(&app, &lifecycle)?;
         }
         Ok(())
@@ -658,28 +655,23 @@ fn remove_project_blocking(
 ) -> Result<(), String> {
     let id = WorkspaceId::from_validated(id).map_err(|_| "项目不存在".to_string())?;
     let (store, mut data) = load_app_data(app)?;
-    let original = data.clone();
     if data.workspace.registry.get(&id).is_none() {
         return Err("项目不存在".to_string());
     }
     let was_active = data.workspace.active_workspace_id.as_ref() == Some(&id);
-    let runtime_before = lifecycle.runtime_snapshot();
-    if was_active {
-        lifecycle
-            .stop_runtime_for_control_plane()
-            .map_err(|_| "无法停止当前项目服务".to_string())?;
-    }
     if was_active {
         data.workspace.clear_active();
     }
     let _ = data.workspace.registry.remove(&id);
-    if store.save(&data).is_err() {
-        if was_active && !matches!(runtime_before.state, RuntimeState::Stopped) {
-            if let Some(path) = runtime_before.configured_workspace.as_deref() {
-                let _ = start_runtime_for_path(app, lifecycle, &original, path);
-            }
-        }
-        return Err("无法保存项目变更".to_string());
+    store
+        .save(&data)
+        .map_err(|_| "无法保存项目变更".to_string())?;
+    if was_active {
+        lifecycle.set_desired_workspace(None);
+        lifecycle.set_desired_services(ServiceIntent::Disabled);
+        lifecycle
+            .stop_runtime_for_control_plane()
+            .map_err(|_| "项目移除目标已保存，但旧服务尚未完全停止".to_string())?;
     }
     Ok(())
 }
@@ -693,32 +685,36 @@ fn activate_project(
     candidate: &Path,
 ) -> Result<(), String> {
     clear_manual_stop_for_explicit_action(app)?;
-    let before = lifecycle.runtime_snapshot();
-    let already_current = before
-        .configured_workspace
-        .as_deref()
-        .is_some_and(|path| path == candidate);
-    if !already_current {
-        if before.active {
-            lifecycle
-                .switch_runtime_workspace(candidate, before.configured_workspace.as_deref())
-                .map_err(|_| "无法切换到所选项目".to_string())?;
-        } else {
-            start_runtime_for_path(app, lifecycle, data, candidate)?;
-        }
-    }
     data.workspace
-        .set_active_reference(id)
+        .set_active_reference(id.clone())
         .map_err(|_| "无法设置当前项目".to_string())?;
-    if store.save(data).is_err() {
-        if !already_current {
-            if let Some(previous) = before.configured_workspace.as_deref() {
-                let _ = lifecycle.switch_runtime_workspace(previous, Some(candidate));
-            } else if lifecycle.runtime_snapshot().active {
-                let _ = lifecycle.stop_runtime_for_control_plane();
-            }
+    store
+        .save(data)
+        .map_err(|_| "无法保存当前项目".to_string())?;
+    lifecycle.set_desired_workspace(Some(DesiredWorkspace::new(id, candidate)));
+    lifecycle.set_desired_services(ServiceIntent::Enabled);
+    match lifecycle.reconciliation_plan().runtime {
+        RuntimeReconcileAction::ApplyWorkspace(path) => {
+            lifecycle
+                .switch_runtime_workspace(&path)
+                .map_err(|_| "项目切换目标已保存，运行服务仍在收敛".to_string())?;
         }
-        return Err("无法保存当前项目".to_string());
+        RuntimeReconcileAction::Start => {
+            start_runtime_for_path(app, lifecycle, candidate).map_err(|_| {
+                "项目切换目标已保存，运行服务当前不可用".to_string()
+            })?;
+        }
+        RuntimeReconcileAction::RestartConnection => {
+            let config = production_runtime_config_for_path(app, candidate)?;
+            lifecycle
+                .backend_handle()
+                .restart_production_runtime(config)
+                .map_err(|_| "项目目标已保存，连接服务仍在收敛".to_string())?;
+        }
+        RuntimeReconcileAction::None => {}
+        RuntimeReconcileAction::Stop | RuntimeReconcileAction::WaitForObservation => {
+            return Err("项目目标已保存，运行服务正在收敛".to_string());
+        }
     }
     Ok(())
 }
@@ -726,10 +722,9 @@ fn activate_project(
 fn start_runtime_for_path(
     app: &AppHandle,
     lifecycle: &DesktopLifecycle,
-    data: &AppData,
     path: &Path,
 ) -> Result<(), String> {
-    let config = production_runtime_config_for_path(app, data, path)?;
+    let config = production_runtime_config_for_path(app, path)?;
     lifecycle
         .start_production_runtime(config)
         .map_err(runtime_start_message)
@@ -737,7 +732,6 @@ fn start_runtime_for_path(
 
 fn production_runtime_config_for_path(
     app: &AppHandle,
-    data: &AppData,
     path: &Path,
 ) -> Result<ProductionRuntimeConfig, String> {
     let app_data = app_data_dir(app)?;
@@ -753,7 +747,6 @@ fn production_runtime_config_for_path(
         path,
         app_data.join("health"),
         tunnel_id,
-        PermissionMode::from(data.settings.permission_mode),
     ))
 }
 
@@ -771,36 +764,38 @@ fn production_runtime_config_for_active_workspace(
     if entry.validated_identity.as_str() != validated.identity().as_str() {
         return Err("项目身份已变化，请重新添加".to_string());
     }
-    production_runtime_config_for_path(app, data, validated.execution_path())
-}
-
-fn connection_change_requires_restart(state: &RuntimeState) -> bool {
-    !matches!(state, RuntimeState::Stopped)
+    production_runtime_config_for_path(app, validated.execution_path())
 }
 
 fn reconnect_after_connection_change(
     app: &AppHandle,
     lifecycle: &DesktopLifecycle,
 ) -> Result<(), String> {
-    let snapshot = lifecycle.runtime_snapshot();
-    if !connection_change_requires_restart(&snapshot.state) {
-        return Ok(());
+    match lifecycle.reconciliation_plan().runtime {
+        RuntimeReconcileAction::RestartConnection | RuntimeReconcileAction::Start => {
+            let (_, data) = load_app_data(app)?;
+            let config = production_runtime_config_for_active_workspace(app, &data)?;
+            lifecycle
+                .backend_handle()
+                .restart_production_runtime(config)
+                .map_err(|_| "连接设置已保存，但服务重连失败".to_string())
+        }
+        RuntimeReconcileAction::ApplyWorkspace(_)
+        | RuntimeReconcileAction::WaitForObservation => {
+            Err("连接设置已保存，运行服务正在收敛".to_string())
+        }
+        RuntimeReconcileAction::None | RuntimeReconcileAction::Stop => Ok(()),
     }
-    let (_, data) = load_app_data(app)?;
-    let config = production_runtime_config_for_active_workspace(app, &data)?;
-    lifecycle
-        .backend_handle()
-        .restart_production_runtime(config)
-        .map_err(|_| "连接设置已保存，但服务重连失败".to_string())
 }
 
 #[tauri::command]
 pub async fn restart_services(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         clear_manual_stop_for_explicit_action(&app)?;
+        let lifecycle = app.state::<DesktopLifecycle>();
+        lifecycle.set_desired_services(ServiceIntent::Enabled);
         let (_, data) = load_app_data(&app)?;
         let config = production_runtime_config_for_active_workspace(&app, &data)?;
-        let lifecycle = app.state::<DesktopLifecycle>();
         lifecycle
             .backend_handle()
             .restart_production_runtime(config)
@@ -941,11 +936,11 @@ fn parse_permission(value: &str) -> Result<PermissionMode, String> {
         _ => Err("权限模式无效".to_string()),
     }
 }
-fn stored_permission_code(value: StoredPermissionMode) -> &'static str {
+fn permission_code(value: PermissionMode) -> &'static str {
     match value {
-        StoredPermissionMode::Edit => "edit",
-        StoredPermissionMode::Full => "full",
-        StoredPermissionMode::Elevated => "admin",
+        PermissionMode::Edit => "edit",
+        PermissionMode::Full => "full",
+        PermissionMode::Elevated => "admin",
     }
 }
 fn privilege_code(value: &PrivilegeState) -> &'static str {
@@ -1174,15 +1169,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn connection_changes_restart_runtime_when_starting_or_connected() {
-        assert!(!connection_change_requires_restart(&RuntimeState::Stopped));
-        assert!(connection_change_requires_restart(
-            &RuntimeState::StartingMcp
-        ));
-        assert!(connection_change_requires_restart(
-            &RuntimeState::WaitingMcpReady
-        ));
-        assert!(connection_change_requires_restart(&RuntimeState::Ready));
-    }
 }

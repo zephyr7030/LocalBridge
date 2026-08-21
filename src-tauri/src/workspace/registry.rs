@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::state::{WorkspaceControlState, WorkspaceIdentity, WorkspaceRef};
-
 use super::{ValidatedWorkspace, WorkspaceValidator};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -104,19 +102,12 @@ impl WorkspaceEntry {
         Ok(())
     }
 
-    fn to_domain_ref(
-        &self,
-        freshly_validated: &ValidatedWorkspace,
-    ) -> Result<WorkspaceRef, WorkspaceRegistryError> {
-        if self.validated_identity.as_str() != freshly_validated.identity().as_str() {
-            return Err(WorkspaceRegistryError::PersistedIdentityMismatch);
-        }
-        let identity =
-            WorkspaceIdentity::from_validated(freshly_validated.identity().as_str().to_owned())
-                .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)?;
-        WorkspaceRef::from_validated(identity, freshly_validated.execution_path().to_path_buf())
-            .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)
-    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedWorkspace {
+    pub workspace_id: WorkspaceId,
+    pub validated: ValidatedWorkspace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -160,7 +151,7 @@ impl WorkspaceRegistry {
     }
 
     /// Migration-only path: preserves a historical identity as an untrusted claim. It must never
-    /// be used as authorization; to_control_state always revalidates against the filesystem.
+    /// be used as authorization; resolve_active always revalidates against the filesystem.
     pub(crate) fn upsert_persisted_claim(
         &mut self,
         incoming: WorkspaceEntry,
@@ -265,7 +256,7 @@ impl WorkspacePersistence {
             .and_then(|id| self.registry.get(id))
     }
 
-    /// Selects persisted metadata only. Authorization is established later by to_control_state.
+    /// Selects persisted metadata only. Authorization is established later by resolve_active.
     pub fn set_active_reference(&mut self, id: WorkspaceId) -> Result<(), WorkspaceRegistryError> {
         if self.registry.get(&id).is_none() {
             return Err(WorkspaceRegistryError::ActiveWorkspaceMissingFromRegistry);
@@ -278,21 +269,24 @@ impl WorkspacePersistence {
         self.active_workspace_id = None;
     }
 
-    /// Revalidates the active filesystem object before producing any Active authority.
-    pub fn to_control_state(
+    /// Revalidates persisted selection metadata without creating a second mutable
+    /// workspace state. The caller may submit the immutable result to DesiredState.
+    pub fn resolve_active(
         &self,
         validator: &WorkspaceValidator,
-    ) -> Result<WorkspaceControlState, WorkspaceRegistryError> {
+    ) -> Result<Option<ResolvedWorkspace>, WorkspaceRegistryError> {
         self.validate()?;
-        let mut state = WorkspaceControlState::default();
-        if let Some(active) = self.active_entry() {
-            let freshly_validated = validator.validate(&active.display_path)?;
-            state.begin_switch(active.to_domain_ref(&freshly_validated)?);
-            state
-                .commit_candidate()
-                .map_err(|_| WorkspaceRegistryError::DomainMappingFailed)?;
+        let Some(active) = self.active_entry() else {
+            return Ok(None);
+        };
+        let validated = validator.validate(&active.display_path)?;
+        if active.validated_identity.as_str() != validated.identity().as_str() {
+            return Err(WorkspaceRegistryError::PersistedIdentityMismatch);
         }
-        Ok(state)
+        Ok(Some(ResolvedWorkspace {
+            workspace_id: active.workspace_id.clone(),
+            validated,
+        }))
     }
 
     pub fn is_no_active_workspace(&self) -> bool {
@@ -321,5 +315,4 @@ pub enum WorkspaceRegistryError {
     WorkspaceNotDirectory,
     WorkspaceValidationWindowsApi { operation: &'static str, code: u32 },
     UnsupportedPlatform,
-    DomainMappingFailed,
 }

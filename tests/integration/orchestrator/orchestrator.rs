@@ -348,7 +348,6 @@ fn production_driver_composes_actual_bundled_mcp_then_loopback_pep_and_recovers_
         &workspace,
         &health,
         TunnelId::new("tunnel_0123456789abcdef0123456789abcdef").unwrap(),
-        PermissionMode::Edit,
     );
     let store = NoopCredentialStore;
     let mut driver = ProductionRuntimeDriver::new(config, &store, || {

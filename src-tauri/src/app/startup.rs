@@ -2,7 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::settings::{SettingsStore, SettingsStoreError};
-use crate::state::{ActiveWorkspaceState, PermissionMode, PrivilegeFault};
+use crate::state::{PermissionMode, PrivilegeFault};
+use crate::control_plane::convergence::{
+    ConnectionProfile, DesiredState, DesiredWorkspace, ServiceIntent,
+};
 use crate::workspace::{WorkspaceRegistryError, WorkspaceValidator};
 
 use super::{
@@ -77,12 +80,33 @@ pub fn configure_desktop_startup(
     let profile_store = StartupProfileStore::new(app_data_dir.join(STARTUP_PROFILE_FILE_NAME));
     let profile = profile_store.load().map_err(DesktopStartupError::Profile)?;
 
+    let desired_workspace = data
+        .workspace
+        .resolve_active(&WorkspaceValidator)
+        .map_err(DesktopStartupError::Workspace)?
+        .map(|workspace| {
+            DesiredWorkspace::new(
+                workspace.workspace_id,
+                workspace.validated.execution_path(),
+            )
+        });
+    let desired_connection = profile
+        .validated_tunnel_id()
+        .map_err(DesktopStartupError::Profile)?
+        .map(|tunnel_id| ConnectionProfile::new(tunnel_id, 0));
+    let permission_mode: PermissionMode = data.settings.permission_mode.into();
+    lifecycle.replace_desired_state(DesiredState {
+        permission: permission_mode,
+        workspace: desired_workspace,
+        services: ServiceIntent::Disabled,
+        connection: desired_connection,
+    });
+
     AutostartManager::for_current_executable()
         .map_err(DesktopStartupError::Autostart)?
         .set_enabled(data.settings.auto_start_services)
         .map_err(DesktopStartupError::Autostart)?;
 
-    let permission_mode: PermissionMode = data.settings.permission_mode.into();
     restore_privilege_preference(permission_mode, lifecycle)?;
 
     let config = match build_background_resume_config(
@@ -155,23 +179,18 @@ fn build_background_resume_config(
         return Ok(Err(StartupSuppression::TunnelIdMissing));
     };
 
-    let control = data
+    let resolved = data
         .workspace
-        .to_control_state(&WorkspaceValidator)
+        .resolve_active(&WorkspaceValidator)
         .map_err(DesktopStartupError::Workspace)?;
-    let workspace = match control.active() {
-        ActiveWorkspaceState::NoActiveWorkspace => {
-            return Ok(Err(StartupSuppression::NoActiveWorkspace));
-        }
-        ActiveWorkspaceState::Active(workspace) => workspace.display_path().to_path_buf(),
+    let Some(workspace) = resolved else {
+        return Ok(Err(StartupSuppression::NoActiveWorkspace));
     };
-    let permission_mode: PermissionMode = data.settings.permission_mode.into();
     Ok(Ok(ProductionRuntimeConfig::new(
         install_root,
-        workspace,
+        workspace.validated.execution_path(),
         app_data_dir.join("health"),
         tunnel_id,
-        permission_mode,
     )))
 }
 

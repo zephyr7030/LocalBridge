@@ -2,8 +2,8 @@
 mod state;
 
 use state::{
-    ActiveWorkspaceState, CurrentTaskContractError, CurrentTaskStatus, PrivilegeState,
-    SafeTaskSummary, TaskExecutionState, TaskKind, WorkspaceControlState,
+    CurrentTaskContractError, CurrentTaskStatus, PrivilegeState, SafeTaskSummary,
+    TaskExecutionState, TaskKind,
 };
 
 #[test]
@@ -81,8 +81,6 @@ fn terminal_current_task_cannot_transition_back_to_running() {
 }
 
 #[test]
-fn privilege_and_workspace_defaults_are_fail_closed() {
+fn privilege_default_is_fail_closed() {
     assert!(!PrivilegeState::Disabled.accepts_privileged_calls());
-    let workspace = WorkspaceControlState::default();
-    assert_eq!(workspace.active(), &ActiveWorkspaceState::NoActiveWorkspace);
 }

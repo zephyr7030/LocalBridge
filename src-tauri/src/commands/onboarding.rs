@@ -16,6 +16,7 @@ use windows_sys::Win32::UI::Shell::{
 use crate::app::{DesktopLifecycle, STARTUP_PROFILE_FILE_NAME, StartupProfileStore};
 use crate::commands::ui;
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
+use crate::control_plane::convergence::ConnectionProfile;
 use crate::settings::SettingsStore;
 use crate::state::RuntimeState;
 
@@ -85,20 +86,36 @@ pub async fn save_onboarding_connection(
             .save(&profile)
             .map_err(|_| "无法保存 Tunnel ID".to_string())?;
 
-        if runtime_key.trim().is_empty() {
+        let credentials_changed = if runtime_key.trim().is_empty() {
             let metadata = WindowsCredentialStore::default()
                 .runtime_api_key_metadata()
                 .map_err(|_| "无法读取Runtime API Key状态".to_string())?;
             if !metadata.has_runtime_key {
                 return Err("请输入Runtime API Key".to_string());
             }
+            false
         } else {
             let secret = SecretString::new(runtime_key)
                 .map_err(|_| "Runtime API Key格式无效".to_string())?;
             WindowsCredentialStore::default()
                 .save_runtime_api_key(&secret)
                 .map_err(|_| "无法安全保存Runtime API Key".to_string())?;
+            true
+        };
+        let tunnel_id = profile
+            .validated_tunnel_id()
+            .map_err(|_| "Tunnel ID 格式无效".to_string())?
+            .expect("saved profile has a tunnel id");
+        let lifecycle = app.state::<DesktopLifecycle>();
+        let current = lifecycle.desired_state().snapshot().state.connection;
+        let mut epoch = current
+            .as_ref()
+            .map(|profile| profile.credential_epoch)
+            .unwrap_or(0);
+        if credentials_changed {
+            epoch = epoch.saturating_add(1);
         }
+        lifecycle.set_desired_connection(Some(ConnectionProfile::new(tunnel_id, epoch)));
         Ok(())
     })
     .await
@@ -211,12 +228,7 @@ fn project_state(app: &AppHandle, lifecycle: &DesktopLifecycle) -> Result<Onboar
     let data = SettingsStore::new(app_data.join("settings.json"))
         .load()
         .map_err(|_| "无法读取设置".to_string())?;
-    let profile = StartupProfileStore::new(app_data.join(STARTUP_PROFILE_FILE_NAME))
-        .load()
-        .map_err(|_| "无法读取 OpenAI 连接设置".to_string())?;
-    let tunnel_id = profile
-        .validated_tunnel_id()
-        .map_err(|_| "Tunnel ID 格式无效".to_string())?;
+    let tunnel_id = lifecycle.desired_state().snapshot().state.connection;
     let connection_configured = tunnel_id.is_some();
     let runtime_key = WindowsCredentialStore::default()
         .read_runtime_api_key()
@@ -230,7 +242,7 @@ fn project_state(app: &AppHandle, lifecycle: &DesktopLifecycle) -> Result<Onboar
         connection_configured,
         runtime_key_saved,
         runtime_key_length,
-        tunnel_id: tunnel_id.map(|value| value.expose().to_owned()),
+        tunnel_id: tunnel_id.map(|value| value.tunnel_id.expose().to_owned()),
         readiness: readiness(lifecycle),
     })
 }

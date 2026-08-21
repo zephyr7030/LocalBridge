@@ -1,6 +1,5 @@
 #![cfg(windows)]
 
-use localbridge_lib::state::ActiveWorkspaceState;
 use localbridge_lib::workspace::{
     WorkspaceId, WorkspacePersistence, WorkspaceRegistryError, WorkspaceValidator,
 };
@@ -85,12 +84,9 @@ fn remembered_registry_never_implies_multi_root_authorization() {
     assert!(state.active_entry().is_none());
 
     state.set_active_reference(first).unwrap();
-    let control = state.to_control_state(&validator).unwrap();
-    let ActiveWorkspaceState::Active(active) = control.active() else {
-        panic!("expected exactly one active workspace");
-    };
+    let active = state.resolve_active(&validator).unwrap().unwrap();
     assert_eq!(
-        active.identity().as_str(),
+        active.validated.identity().as_str(),
         first_identity.identity().as_str()
     );
 }
@@ -112,12 +108,9 @@ fn legitimate_persisted_workspace_is_revalidated_on_restart() {
 
     let json = serde_json::to_string(&state).unwrap();
     let decoded: WorkspacePersistence = serde_json::from_str(&json).unwrap();
-    let control = decoded.to_control_state(&validator).unwrap();
-    let ActiveWorkspaceState::Active(active) = control.active() else {
-        panic!("expected active workspace after fresh validation");
-    };
-    assert_eq!(active.identity().as_str(), expected.identity().as_str());
-    assert_eq!(active.display_path(), expected.execution_path());
+    let active = decoded.resolve_active(&validator).unwrap().unwrap();
+    assert_eq!(active.validated.identity().as_str(), expected.identity().as_str());
+    assert_eq!(active.validated.execution_path(), expected.execution_path());
 }
 
 #[test]
@@ -143,13 +136,22 @@ fn verbatim_alias_is_identity_only_and_active_execution_path_is_ordinary() {
         )
         .unwrap();
     state.set_active_reference(id).unwrap();
-    let control = state.to_control_state(&validator).unwrap();
-    let ActiveWorkspaceState::Active(active) = control.active() else {
-        panic!("expected active workspace");
-    };
-    assert_eq!(active.identity().as_str(), through_alias.identity().as_str());
-    assert_eq!(active.display_path(), through_alias.execution_path());
-    assert!(!active.display_path().to_string_lossy().starts_with(r"\\?\"));
+    let active = state.resolve_active(&validator).unwrap().unwrap();
+    assert_eq!(
+        active.validated.identity().as_str(),
+        through_alias.identity().as_str()
+    );
+    assert_eq!(
+        active.validated.execution_path(),
+        through_alias.execution_path()
+    );
+    assert!(
+        !active
+            .validated
+            .execution_path()
+            .to_string_lossy()
+            .starts_with(r"\\?\")
+    );
 }
 
 #[test]
@@ -172,7 +174,7 @@ fn deserialized_workspace_identity_is_revalidated_before_activation() {
     let decoded: WorkspacePersistence = serde_json::from_value(json).unwrap();
 
     assert!(matches!(
-        decoded.to_control_state(&validator),
+        decoded.resolve_active(&validator),
         Err(WorkspaceRegistryError::PersistedIdentityMismatch)
     ));
 }
@@ -198,7 +200,7 @@ fn persisted_display_path_substitution_cannot_authorize_another_directory() {
     let decoded: WorkspacePersistence = serde_json::from_value(json).unwrap();
 
     assert!(matches!(
-        decoded.to_control_state(&validator),
+        decoded.resolve_active(&validator),
         Err(WorkspaceRegistryError::PersistedIdentityMismatch)
     ));
 }
@@ -216,7 +218,7 @@ fn missing_workspace_after_restart_cannot_become_active() {
     let decoded: WorkspacePersistence = serde_json::from_str(&json).unwrap();
 
     assert!(matches!(
-        decoded.to_control_state(&validator),
+        decoded.resolve_active(&validator),
         Err(WorkspaceRegistryError::WorkspaceValidationWindowsApi {
             operation: "CreateFileW",
             ..

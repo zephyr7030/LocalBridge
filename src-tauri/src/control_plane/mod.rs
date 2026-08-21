@@ -1,3 +1,4 @@
+pub(crate) mod convergence;
 pub(crate) mod execution_registry;
 pub(crate) mod request_registry;
 pub(crate) mod scheduler;

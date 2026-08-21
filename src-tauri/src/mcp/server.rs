@@ -13,6 +13,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Map, Value, json};
 
 use crate::control_plane::execution_registry::ExecutionRegistry;
+use crate::control_plane::convergence::{
+    ConnectionProfile, ConvergenceSnapshot, DesiredState, DesiredStateOwner, DesiredWorkspace,
+    EffectiveState, ObservedState, ServiceIntent,
+};
 use crate::control_plane::request_registry::{
     ActiveRequest, RequestCancellationTarget, RequestRegistry,
 };
@@ -78,7 +82,9 @@ struct ConnectionContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     public_policy: &'a RwLock<CapabilityPolicy>,
     cancellation: &'a McpCancellationClient,
-    permission_mode: &'a RwLock<PermissionMode>,
+    desired_state: &'a DesiredStateOwner,
+    observed_workspace: &'a Path,
+    observed_connection: Option<&'a ConnectionProfile>,
     current_task: &'a CurrentTaskProjection,
     executions: &'a ExecutionRegistry,
     tasks: &'a TaskRegistry,
@@ -129,7 +135,9 @@ struct ServeContext {
     guard: Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
     cancellation: McpCancellationClient,
-    permission_mode: Arc<RwLock<PermissionMode>>,
+    desired_state: DesiredStateOwner,
+    observed_workspace: PathBuf,
+    observed_connection: Option<ConnectionProfile>,
     current_task: CurrentTaskProjection,
     executions: ExecutionRegistry,
     tasks: TaskRegistry,
@@ -600,7 +608,7 @@ impl std::error::Error for PolicyEnforcementError {}
 
 pub struct PolicyEnforcementRuntime {
     port: u16,
-    permission_mode: Arc<RwLock<PermissionMode>>,
+    desired_state: DesiredStateOwner,
     current_task: CurrentTaskProjection,
     executions: ExecutionRegistry,
     tasks: TaskRegistry,
@@ -629,7 +637,15 @@ impl PolicyEnforcementRuntime {
         policy: CapabilityPolicy,
         permission_mode: PermissionMode,
     ) -> Result<Self, PolicyEnforcementError> {
-        Self::start_inner(coding_runtime, policy, permission_mode, None, None)
+        Self::start_inner(
+            coding_runtime,
+            policy,
+            permission_mode,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     pub fn start_with_wake(
@@ -638,7 +654,15 @@ impl PolicyEnforcementRuntime {
         permission_mode: PermissionMode,
         wake: CurrentTaskWake,
     ) -> Result<Self, PolicyEnforcementError> {
-        Self::start_inner(coding_runtime, policy, permission_mode, None, Some(wake))
+        Self::start_inner(
+            coding_runtime,
+            policy,
+            permission_mode,
+            None,
+            None,
+            None,
+            Some(wake),
+        )
     }
 
     pub fn start_with_privilege(
@@ -651,6 +675,8 @@ impl PolicyEnforcementRuntime {
             coding_runtime,
             policy,
             permission_mode,
+            None,
+            None,
             Some(privileged),
             None,
         )
@@ -667,8 +693,30 @@ impl PolicyEnforcementRuntime {
             coding_runtime,
             policy,
             permission_mode,
+            None,
+            None,
             Some(privileged),
             Some(wake),
+        )
+    }
+
+    pub fn start_with_control_plane(
+        coding_runtime: CodingToolsRuntime,
+        policy: CapabilityPolicy,
+        desired_state: DesiredStateOwner,
+        observed_connection: Option<ConnectionProfile>,
+        privileged: Option<Arc<dyn PrivilegedExecution>>,
+        wake: Option<CurrentTaskWake>,
+    ) -> Result<Self, PolicyEnforcementError> {
+        let permission = desired_state.snapshot().state.permission;
+        Self::start_inner(
+            coding_runtime,
+            policy,
+            permission,
+            Some(desired_state),
+            observed_connection,
+            privileged,
+            wake,
         )
     }
 
@@ -676,6 +724,8 @@ impl PolicyEnforcementRuntime {
         coding_runtime: CodingToolsRuntime,
         policy: CapabilityPolicy,
         permission_mode: PermissionMode,
+        desired_state: Option<DesiredStateOwner>,
+        observed_connection: Option<ConnectionProfile>,
         privileged: Option<Arc<dyn PrivilegedExecution>>,
         wake: Option<CurrentTaskWake>,
     ) -> Result<Self, PolicyEnforcementError> {
@@ -704,10 +754,21 @@ impl PolicyEnforcementRuntime {
             .local_addr()
             .map_err(|_| PolicyEnforcementError::BindFailed)?
             .port();
-        let permission_mode = Arc::new(RwLock::new(permission_mode));
+        let desired_state = desired_state.unwrap_or_else(|| {
+            let owner = DesiredStateOwner::default();
+            owner.replace(DesiredState {
+                permission: permission_mode,
+                workspace: Some(DesiredWorkspace::for_runtime_path(&health_workspace)),
+                services: ServiceIntent::Enabled,
+                connection: observed_connection.clone(),
+            });
+            owner
+        });
         let current_task = CurrentTaskProjection::new(wake);
         let sessions = SessionRegistry::default();
-        let thread_mode = Arc::clone(&permission_mode);
+        let thread_desired = desired_state.clone();
+        let thread_workspace = health_workspace.clone();
+        let thread_connection = observed_connection.clone();
         let thread_task = current_task.clone();
         let thread_sessions = sessions.clone();
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
@@ -723,7 +784,9 @@ impl PolicyEnforcementRuntime {
                         guard: thread_guard,
                         public_policy: thread_policy,
                         cancellation,
-                        permission_mode: thread_mode,
+                        desired_state: thread_desired,
+                        observed_workspace: thread_workspace,
+                        observed_connection: thread_connection,
                         current_task: thread_task,
                         executions,
                         tasks,
@@ -737,7 +800,7 @@ impl PolicyEnforcementRuntime {
             .map_err(|_| PolicyEnforcementError::ThreadSpawnFailed)?;
         Ok(Self {
             port,
-            permission_mode,
+            desired_state,
             current_task,
             executions: runtime_executions,
             tasks: runtime_tasks,
@@ -760,11 +823,7 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn set_permission_mode(&self, mode: PermissionMode) {
-        let mut current = self
-            .permission_mode
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *current = mode;
+        self.desired_state.set_permission(mode);
     }
 
     pub fn replace_policy(&self, policy: CapabilityPolicy) -> Result<(), PolicyEnforcementError> {
@@ -916,7 +975,9 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         guard,
         public_policy,
         cancellation,
-        permission_mode,
+        desired_state,
+        observed_workspace,
+        observed_connection,
         current_task,
         executions,
         tasks,
@@ -967,7 +1028,9 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
             Ok((stream, _)) => {
                 let worker_guard = Arc::clone(&guard);
                 let worker_policy = Arc::clone(&public_policy);
-                let worker_mode = Arc::clone(&permission_mode);
+                let worker_desired = desired_state.clone();
+                let worker_workspace = observed_workspace.clone();
+                let worker_connection = observed_connection.clone();
                 let worker_task = current_task.clone();
                 let worker_executions = executions.clone();
                 let worker_tasks = tasks.clone();
@@ -984,7 +1047,9 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                             guard: &worker_guard,
                             public_policy: &worker_policy,
                             cancellation: &worker_cancellation,
-                            permission_mode: &worker_mode,
+                            desired_state: &worker_desired,
+                            observed_workspace: &worker_workspace,
+                            observed_connection: worker_connection.as_ref(),
                             current_task: &worker_task,
                             executions: &worker_executions,
                             tasks: &worker_tasks,
@@ -1042,12 +1107,34 @@ fn settle_closed_session(
     }
 }
 
+fn policy_effective_state(
+    desired_state: &DesiredStateOwner,
+    privileged: Option<&Arc<dyn PrivilegedExecution>>,
+    observed_workspace: &Path,
+    observed_connection: Option<&ConnectionProfile>,
+) -> EffectiveState {
+    ConvergenceSnapshot::derive(
+        desired_state.snapshot(),
+        ObservedState {
+            broker: privileged
+                .map(|gateway| gateway.state())
+                .unwrap_or(PrivilegeState::Disabled),
+            runtime: crate::state::RuntimeState::Ready,
+            workspace: Some(observed_workspace.to_path_buf()),
+            connection: observed_connection.cloned(),
+        },
+    )
+    .effective
+}
+
 fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> Result<(), ()> {
     let ConnectionContext {
         guard,
         public_policy,
         cancellation,
-        permission_mode,
+        desired_state,
+        observed_workspace,
+        observed_connection,
         current_task,
         executions,
         tasks,
@@ -1103,9 +1190,14 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 None,
             );
         };
-        let mode = *permission_mode
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mode = policy_effective_state(
+            desired_state,
+            privileged,
+            observed_workspace,
+            observed_connection,
+        )
+        .authority
+        .execution;
         let current_signature = {
             let policy = public_policy
                 .read()
@@ -1228,9 +1320,14 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 None,
             );
         };
-        let mode = *permission_mode
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mode = policy_effective_state(
+            desired_state,
+            privileged,
+            observed_workspace,
+            observed_connection,
+        )
+        .authority
+        .execution;
         let tool_catalog_signature = {
             let policy = public_policy
                 .read()
@@ -1288,9 +1385,14 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
     let Some(stored_session) = stored_session else {
         return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_not_found"), None);
     };
-    let mode = *permission_mode
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mode = policy_effective_state(
+        desired_state,
+        privileged,
+        observed_workspace,
+        observed_connection,
+    )
+    .authority
+    .execution;
     let current_signature = {
         let policy = public_policy
             .read()
@@ -1364,9 +1466,14 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
     match method {
         "ping" => write_rpc_result(&mut stream, id, json!({}), Some(session)),
         "tools/list" => {
-            let mode = *permission_mode
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mode = policy_effective_state(
+                desired_state,
+                privileged,
+                observed_workspace,
+                observed_connection,
+            )
+            .authority
+            .execution;
             let policy = public_policy
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1422,9 +1529,16 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     Some(session),
                 );
             }
-            let mode = *permission_mode
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let effective = policy_effective_state(
+                desired_state,
+                privileged,
+                observed_workspace,
+                observed_connection,
+            );
+            // Dispatch receives the configured route class from the already-derived
+            // EffectiveAuthority so an unavailable broker can report
+            // ElevationRequired without ever granting elevated execution.
+            let mode = effective.authority.configured;
             let scoped_request = request_key_from_json(session_id.clone(), &id)
                 .expect("validated downstream request id");
             let _session_request_lease = SessionRequestLease::new(
@@ -1433,6 +1547,19 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 scoped_request.clone(),
             );
             let lane = scheduler_lane(name, &arguments);
+            if lane == SchedulerLane::Work && !effective.work_is_authorized() {
+                return write_rpc_result(
+                    &mut stream,
+                    id,
+                    FacadeError::new(
+                        FacadeErrorCode::RuntimeUnavailable,
+                        "控制面目标尚未与运行状态收敛",
+                        true,
+                    )
+                    .to_mcp_result(),
+                    Some(session),
+                );
+            }
             let (scheduled_task, _scheduler_permit) = match lane {
                 SchedulerLane::Work => {
                     let task_id = tasks.queue(
@@ -5038,6 +5165,46 @@ mod tests {
 
         let _coding = pep.stop().unwrap();
         let _ = fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn desired_workspace_change_denies_work_until_runtime_observes_the_same_workspace() {
+        let root = repo_root();
+        let workspace_a = temp_workspace();
+        let workspace_b = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace_a,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("workspace convergence PEP ready");
+        let session = initialize(pep.port(), 650)
+            .session
+            .expect("downstream MCP session");
+
+        pep.desired_state
+            .set_workspace(Some(DesiredWorkspace::for_runtime_path(&workspace_b)));
+        let denied = public_tool_call(
+            pep.port(),
+            &session,
+            651,
+            "filesystem",
+            json!({"action":"read_file","path":"probe.txt"}),
+        );
+        assert_tool_error(&denied, "RuntimeUnavailable");
+        assert_eq!(pep.scheduler.snapshot().work_running, 0);
+        assert_eq!(pep.scheduler.snapshot().work_queued, 0);
+
+        let _coding = pep.stop().unwrap();
+        let _ = fs::remove_dir_all(workspace_a);
+        let _ = fs::remove_dir_all(workspace_b);
     }
 
     #[test]

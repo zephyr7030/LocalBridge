@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::credentials::CredentialStore;
+use crate::control_plane::convergence::{ConnectionProfile, DesiredStateOwner};
 use crate::mcp::{
     CapabilityPolicy, CodingRuntimeHealthState, CodingToolsPermissionMode, CodingToolsRuntime,
     CodingToolsRuntimeConfig, CurrentTaskWake, InternalBearer, PolicyEnforcementError,
@@ -14,8 +15,7 @@ use crate::mcp::{
 };
 use crate::privilege::PrivilegedExecution;
 use crate::state::{
-    CurrentTaskStatus, CurrentTaskTiming, PermissionMode, RuntimeComponent, RuntimeFault,
-    RuntimeState,
+    CurrentTaskStatus, CurrentTaskTiming, PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState,
 };
 use crate::tunnel::{
     ConnectorEndpoint, PreparedTunnelStart, TunnelId, TunnelRuntime, TunnelRuntimeConfig,
@@ -126,6 +126,10 @@ pub trait RuntimeDriver {
         None
     }
 
+    fn connection_profile(&self) -> Option<ConnectionProfile> {
+        None
+    }
+
     fn probe_mcp_health(&mut self, _pep: &Self::Pep) -> Result<(), RuntimeFault> {
         Ok(())
     }
@@ -146,17 +150,6 @@ pub trait RuntimeDriver {
         Err(RuntimeFault::ConfigurationInvalid)
     }
 
-    fn configure_permission_mode(&mut self, _mode: PermissionMode) -> Result<(), RuntimeFault> {
-        Err(RuntimeFault::ConfigurationInvalid)
-    }
-
-    fn set_permission_mode(
-        &mut self,
-        _pep: &Self::Pep,
-        _mode: PermissionMode,
-    ) -> Result<(), RuntimeFault> {
-        Err(RuntimeFault::ConfigurationInvalid)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,8 +169,6 @@ pub enum RecoveryScope {
 pub struct WorkspaceSwitchError {
     pub candidate_fault: RuntimeFault,
     pub candidate_cleanup_fault: Option<RuntimeFault>,
-    pub rollback_fault: Option<RuntimeFault>,
-    pub rollback_cleanup_fault: Option<RuntimeFault>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,6 +282,10 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
             .and_then(|ready| self.driver.connector_endpoint(&ready.tunnel))
     }
 
+    pub fn configured_connection_profile(&self) -> Option<ConnectionProfile> {
+        self.driver.connection_profile()
+    }
+
     pub fn probe_ready_health(&mut self) -> Result<(), RuntimeHealthFailure> {
         if self.state != RuntimeState::Ready {
             return Ok(());
@@ -320,16 +315,6 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
                 fault,
             })?;
         Ok(())
-    }
-
-    pub fn set_permission_mode(&mut self, mode: PermissionMode) -> Result<(), RuntimeFault> {
-        if let Some(ready) = self.ready.as_ref() {
-            return self.driver.set_permission_mode(&ready.pep, mode);
-        }
-        if let Some(pep) = self.recovering_pep.as_ref() {
-            return self.driver.set_permission_mode(pep, mode);
-        }
-        self.driver.configure_permission_mode(mode)
     }
 
     pub fn start(&mut self) -> Result<(), OrchestratorError> {
@@ -571,41 +556,30 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
     pub fn switch_workspace_to(
         &mut self,
         candidate: &Path,
-        rollback_workspace: Option<&Path>,
     ) -> Result<(), WorkspaceSwitchError> {
         if candidate.as_os_str().is_empty() {
             return Err(WorkspaceSwitchError {
                 candidate_fault: RuntimeFault::WorkspaceInvalid,
                 candidate_cleanup_fault: None,
-                rollback_fault: None,
-                rollback_cleanup_fault: None,
             });
         }
-        let previous = rollback_workspace.map(Path::to_path_buf);
         if let Err(error) = self.stop() {
             return Err(WorkspaceSwitchError {
                 candidate_fault: error.fault,
                 candidate_cleanup_fault: error.cleanup_fault,
-                rollback_fault: None,
-                rollback_cleanup_fault: None,
             });
         }
         if let Err(fault) = self.driver.configure_workspace(candidate.to_path_buf()) {
-            let (rollback_fault, rollback_cleanup_fault) = self.rollback_workspace(previous);
+            self.state = RuntimeState::Faulted(fault.clone());
             return Err(WorkspaceSwitchError {
                 candidate_fault: fault,
                 candidate_cleanup_fault: None,
-                rollback_fault,
-                rollback_cleanup_fault,
             });
         }
         if let Err(error) = self.start() {
-            let (rollback_fault, rollback_cleanup_fault) = self.rollback_workspace(previous);
             return Err(WorkspaceSwitchError {
                 candidate_fault: error.fault,
                 candidate_cleanup_fault: error.cleanup_fault,
-                rollback_fault,
-                rollback_cleanup_fault,
             });
         }
         Ok(())
@@ -1041,26 +1015,6 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
     }
 
-    fn rollback_workspace(
-        &mut self,
-        previous: Option<PathBuf>,
-    ) -> (Option<RuntimeFault>, Option<RuntimeFault>) {
-        if let Err(error) = self.stop() {
-            return (Some(error.fault), error.cleanup_fault);
-        }
-        let Some(previous) = previous else {
-            return (None, None);
-        };
-        if let Err(fault) = self.driver.configure_workspace(previous) {
-            self.state = RuntimeState::Faulted(fault.clone());
-            return (Some(fault), None);
-        }
-        match self.start() {
-            Ok(()) => (None, None),
-            Err(error) => (Some(error.fault), error.cleanup_fault),
-        }
-    }
-
     fn transition<F>(&mut self, state: RuntimeState, project: &mut F)
     where
         F: FnMut(&RuntimeState),
@@ -1209,7 +1163,6 @@ pub struct ProductionRuntimeConfig {
     workspace_identity: Option<String>,
     pub health_state_dir: PathBuf,
     pub tunnel_id: TunnelId,
-    pub permission_mode: PermissionMode,
     pub mcp_readiness_timeout: Duration,
     pub tunnel_readiness_timeout: Duration,
 }
@@ -1220,7 +1173,6 @@ impl ProductionRuntimeConfig {
         workspace: impl Into<PathBuf>,
         health_state_dir: impl Into<PathBuf>,
         tunnel_id: TunnelId,
-        permission_mode: PermissionMode,
     ) -> Self {
         let workspace = workspace.into();
         let workspace_identity = WorkspaceValidator
@@ -1233,7 +1185,6 @@ impl ProductionRuntimeConfig {
             workspace_identity,
             health_state_dir: health_state_dir.into(),
             tunnel_id,
-            permission_mode,
             mcp_readiness_timeout: Duration::from_secs(10),
             tunnel_readiness_timeout: Duration::from_secs(15),
         }
@@ -1268,6 +1219,8 @@ where
     bearer_factory: B,
     privileged_execution: Option<Arc<dyn PrivilegedExecution>>,
     task_projection_wake: Option<CurrentTaskWake>,
+    desired_state: Option<DesiredStateOwner>,
+    observed_connection: Option<ConnectionProfile>,
 }
 
 impl<'a, C, B> ProductionRuntimeDriver<'a, C, B>
@@ -1286,6 +1239,8 @@ where
             bearer_factory,
             privileged_execution: None,
             task_projection_wake: None,
+            desired_state: None,
+            observed_connection: None,
         }
     }
 
@@ -1303,6 +1258,8 @@ where
             bearer_factory,
             privileged_execution: None,
             task_projection_wake: None,
+            desired_state: None,
+            observed_connection: None,
         }
     }
 
@@ -1316,6 +1273,16 @@ where
 
     pub fn with_task_projection_wake(mut self, wake: CurrentTaskWake) -> Self {
         self.task_projection_wake = Some(wake);
+        self
+    }
+
+    pub fn with_control_plane_state(
+        mut self,
+        desired_state: DesiredStateOwner,
+        observed_connection: Option<ConnectionProfile>,
+    ) -> Self {
+        self.desired_state = Some(desired_state);
+        self.observed_connection = observed_connection;
         self
     }
 
@@ -1398,6 +1365,17 @@ where
     fn start_pep(&mut self, mcp: Self::Mcp) -> Result<Self::Pep, RuntimeFault> {
         let policy = CapabilityPolicy::load(&self.config.install_root.join("runtime-policy.toml"))
             .map_err(|_| RuntimeFault::PolicyInvalid)?;
+        if let Some(desired_state) = self.desired_state.as_ref() {
+            return PolicyEnforcementRuntime::start_with_control_plane(
+                mcp,
+                policy,
+                desired_state.clone(),
+                self.observed_connection.clone(),
+                self.privileged_execution.clone(),
+                self.task_projection_wake.clone(),
+            )
+            .map_err(policy_runtime_fault);
+        }
         match (
             self.privileged_execution.as_ref(),
             self.task_projection_wake.as_ref(),
@@ -1406,7 +1384,7 @@ where
                 PolicyEnforcementRuntime::start_with_privilege_and_wake(
                     mcp,
                     policy,
-                    self.config.permission_mode,
+                    PermissionMode::Edit,
                     Arc::clone(privileged_execution),
                     Arc::clone(wake),
                 )
@@ -1414,17 +1392,17 @@ where
             (Some(privileged_execution), None) => PolicyEnforcementRuntime::start_with_privilege(
                 mcp,
                 policy,
-                self.config.permission_mode,
+                PermissionMode::Edit,
                 Arc::clone(privileged_execution),
             ),
             (None, Some(wake)) => PolicyEnforcementRuntime::start_with_wake(
                 mcp,
                 policy,
-                self.config.permission_mode,
+                PermissionMode::Edit,
                 Arc::clone(wake),
             ),
             (None, None) => {
-                PolicyEnforcementRuntime::start(mcp, policy, self.config.permission_mode)
+                PolicyEnforcementRuntime::start(mcp, policy, PermissionMode::Edit)
             }
         }
         .map_err(policy_runtime_fault)
@@ -1533,6 +1511,10 @@ where
         tunnel.connector_endpoint()
     }
 
+    fn connection_profile(&self) -> Option<ConnectionProfile> {
+        self.observed_connection.clone()
+    }
+
     fn probe_mcp_health(&mut self, pep: &Self::Pep) -> Result<(), RuntimeFault> {
         if let Some(fault) = pep.take_coding_runtime_fault() {
             return Err(fault);
@@ -1579,20 +1561,6 @@ where
         Ok(())
     }
 
-    fn configure_permission_mode(&mut self, mode: PermissionMode) -> Result<(), RuntimeFault> {
-        self.config.permission_mode = mode;
-        Ok(())
-    }
-
-    fn set_permission_mode(
-        &mut self,
-        pep: &Self::Pep,
-        mode: PermissionMode,
-    ) -> Result<(), RuntimeFault> {
-        pep.set_permission_mode(mode);
-        self.config.permission_mode = mode;
-        Ok(())
-    }
 }
 
 fn available_loopback_port() -> Result<u16, RuntimeFault> {
@@ -1635,7 +1603,6 @@ fn production_runtime_config_keeps_workspace_identity_after_same_path_replacemen
         &workspace,
         workspace.join("health"),
         TunnelId::new("tunnel_0123456789abcdef0123456789abcdef").unwrap(),
-        PermissionMode::Edit,
     );
     let original_identity = config.workspace_identity().unwrap().to_owned();
 

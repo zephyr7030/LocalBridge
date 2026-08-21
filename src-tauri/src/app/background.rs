@@ -10,6 +10,10 @@ use crate::credentials::WindowsCredentialStore;
 use crate::diagnostics::{
     DiagnosticsOutageInput, record_recovery_attempt_event, record_runtime_user_events,
 };
+use crate::control_plane::convergence::{
+    ConnectionProfile, ConvergenceSnapshot, DesiredState, DesiredStateOwner, DesiredWorkspace,
+    ObservedState, ReconcilePlan, Reconciler, ServiceIntent,
+};
 #[cfg(windows)]
 use crate::mcp::{CurrentTaskWake, InternalBearer};
 use crate::privilege::PrivilegeController;
@@ -122,17 +126,9 @@ pub trait ExitRuntime {
         None
     }
 
-    fn set_permission_mode(
-        &mut self,
-        _mode: PermissionMode,
-    ) -> Result<(), DesktopRuntimeControlError> {
-        Err(DesktopRuntimeControlError::NoActiveRuntime)
-    }
-
     fn switch_workspace(
         &mut self,
         _candidate: &Path,
-        _rollback: Option<&Path>,
     ) -> Result<(), DesktopRuntimeControlError> {
         Err(DesktopRuntimeControlError::NoActiveRuntime)
     }
@@ -170,6 +166,7 @@ pub struct DesktopRuntimeSnapshot {
     pub current_task_elapsed_ms: Option<u64>,
     pub last_tool: Option<LastToolTiming>,
     pub configured_workspace: Option<PathBuf>,
+    pub connection_profile: Option<ConnectionProfile>,
     pub outage: Option<DesktopOutageSnapshot>,
 }
 
@@ -182,6 +179,7 @@ impl DesktopRuntimeSnapshot {
             current_task_elapsed_ms: None,
             last_tool: None,
             configured_workspace: None,
+            connection_profile: None,
             outage: None,
         }
     }
@@ -279,6 +277,7 @@ where
             current_task_elapsed_ms: timing.elapsed_ms,
             last_tool: timing.last_tool,
             configured_workspace: self.configured_workspace().map(Path::to_path_buf),
+            connection_profile: self.configured_connection_profile(),
             outage: self.active_outage().map(|outage| DesktopOutageSnapshot {
                 generation: outage.id.get(),
                 request_id: outage.request_id.clone(),
@@ -295,20 +294,11 @@ where
         RuntimeOrchestrator::connector_endpoint(self)
     }
 
-    fn set_permission_mode(
-        &mut self,
-        mode: PermissionMode,
-    ) -> Result<(), DesktopRuntimeControlError> {
-        RuntimeOrchestrator::set_permission_mode(self, mode)
-            .map_err(DesktopRuntimeControlError::Runtime)
-    }
-
     fn switch_workspace(
         &mut self,
         candidate: &Path,
-        rollback: Option<&Path>,
     ) -> Result<(), DesktopRuntimeControlError> {
-        RuntimeOrchestrator::switch_workspace_to(self, candidate, rollback)
+        RuntimeOrchestrator::switch_workspace_to(self, candidate)
             .map_err(DesktopRuntimeControlError::Workspace)
     }
 
@@ -353,6 +343,7 @@ where
             current_task_elapsed_ms: timing.elapsed_ms,
             last_tool: timing.last_tool,
             configured_workspace: runtime.configured_workspace().map(Path::to_path_buf),
+            connection_profile: runtime.configured_connection_profile(),
             outage: runtime.active_outage().map(|outage| DesktopOutageSnapshot {
                 generation: outage.id.get(),
                 request_id: outage.request_id.clone(),
@@ -369,20 +360,11 @@ where
         self.runtime().connector_endpoint()
     }
 
-    fn set_permission_mode(
-        &mut self,
-        mode: PermissionMode,
-    ) -> Result<(), DesktopRuntimeControlError> {
-        self.set_permission_mode_after_control_cancellation(mode)
-            .map_err(DesktopRuntimeControlError::Runtime)
-    }
-
     fn switch_workspace(
         &mut self,
         candidate: &Path,
-        rollback: Option<&Path>,
     ) -> Result<(), DesktopRuntimeControlError> {
-        self.switch_workspace_after_control_cancellation(candidate, rollback)
+        self.switch_workspace_after_control_cancellation(candidate)
             .map_err(DesktopRuntimeControlError::Workspace)
     }
 
@@ -441,6 +423,7 @@ where
 
 pub struct DesktopLifecycle {
     privilege: PrivilegeController,
+    desired: DesiredStateOwner,
     runtime_operation: Arc<Mutex<()>>,
     runtime: Arc<Mutex<ProductionRuntimeOwner>>,
     recovery_cancellation: RecoveryCancellation,
@@ -553,6 +536,7 @@ impl std::fmt::Debug for DesktopLifecycle {
 
 impl DesktopLifecycle {
     pub fn new(privilege: PrivilegeController) -> Self {
+        let desired = DesiredStateOwner::default();
         let runtime_operation = Arc::new(Mutex::new(()));
         let runtime = Arc::new(Mutex::new(ProductionRuntimeOwner::default()));
         let recovery_cancellation = RecoveryCancellation::default();
@@ -606,6 +590,7 @@ impl DesktopLifecycle {
             .expect("runtime watchdog thread must start");
         Self {
             privilege,
+            desired,
             runtime_operation,
             runtime,
             recovery_cancellation,
@@ -624,6 +609,75 @@ impl DesktopLifecycle {
         &self.privilege
     }
 
+    pub fn desired_state(&self) -> DesiredStateOwner {
+        self.desired.clone()
+    }
+
+    pub fn replace_desired_state(&self, state: DesiredState) {
+        let before = self.desired.snapshot().revision;
+        let after = self.desired.replace(state);
+        if after != before {
+            self.projection_wake.notify();
+        }
+    }
+
+    pub fn set_desired_permission(&self, permission: PermissionMode) {
+        let before = self.desired.snapshot().revision;
+        let after = self.desired.set_permission(permission);
+        if after != before {
+            self.projection_wake.notify();
+        }
+    }
+
+    pub fn set_desired_workspace(&self, workspace: Option<DesiredWorkspace>) {
+        let before = self.desired.snapshot().revision;
+        let after = self.desired.set_workspace(workspace);
+        if after != before {
+            self.projection_wake.notify();
+        }
+    }
+
+    pub fn set_desired_services(&self, services: ServiceIntent) {
+        let before = self.desired.snapshot().revision;
+        let after = self.desired.set_services(services);
+        if after != before {
+            self.projection_wake.notify();
+        }
+    }
+
+    pub fn set_desired_connection(&self, connection: Option<ConnectionProfile>) {
+        let before = self.desired.snapshot().revision;
+        let after = self.desired.set_connection(connection);
+        if after != before {
+            self.projection_wake.notify();
+        }
+    }
+
+    pub fn mark_connection_credentials_changed(&self) {
+        let before = self.desired.snapshot().revision;
+        let after = self.desired.mark_credentials_changed();
+        if after != before {
+            self.projection_wake.notify();
+        }
+    }
+
+    pub fn convergence_snapshot(&self) -> ConvergenceSnapshot {
+        let runtime = self.runtime_snapshot();
+        ConvergenceSnapshot::derive(
+            self.desired.snapshot(),
+            ObservedState {
+                broker: self.privilege.state(),
+                runtime: runtime.state,
+                workspace: runtime.configured_workspace,
+                connection: runtime.connection_profile,
+            },
+        )
+    }
+
+    pub fn reconciliation_plan(&self) -> ReconcilePlan {
+        Reconciler::plan(&self.convergence_snapshot())
+    }
+
     pub fn set_close_window_continue_running(&self, enabled: bool) {
         self.close_window_continue_running
             .store(enabled, Ordering::Release);
@@ -636,6 +690,7 @@ impl DesktopLifecycle {
     pub fn backend_handle(&self) -> DesktopBackendHandle {
         DesktopBackendHandle {
             privilege: self.privilege.clone(),
+            desired: self.desired.clone(),
             runtime_operation: Arc::clone(&self.runtime_operation),
             runtime: Arc::clone(&self.runtime),
             recovery_cancellation: self.recovery_cancellation.clone(),
@@ -660,6 +715,7 @@ impl DesktopLifecycle {
             return false;
         }
         *pending = Some(config);
+        self.set_desired_services(ServiceIntent::Enabled);
         true
     }
 
@@ -710,6 +766,7 @@ impl DesktopLifecycle {
     }
 
     pub fn stop_services_for_manual_action(&self) -> ShutdownReport {
+        self.set_desired_services(ServiceIntent::Disabled);
         #[cfg(windows)]
         self.clear_staged_foreground_start();
         self.recovery_cancellation.cancel();
@@ -730,6 +787,7 @@ impl DesktopLifecycle {
     }
 
     pub fn stop_runtime_for_control_plane(&self) -> Result<(), DesktopRuntimeControlError> {
+        self.set_desired_services(ServiceIntent::Disabled);
         #[cfg(windows)]
         self.clear_staged_foreground_start();
         self.recovery_cancellation.cancel();
@@ -831,34 +889,9 @@ impl DesktopLifecycle {
             .connector_endpoint()
     }
 
-    pub fn set_runtime_permission_mode(
-        &self,
-        mode: PermissionMode,
-    ) -> Result<(), DesktopRuntimeControlError> {
-        self.recovery_cancellation.cancel();
-        let _operation = self
-            .runtime_operation
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut owner = self
-            .runtime
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let result = owner
-            .active
-            .as_deref_mut()
-            .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?
-            .set_permission_mode(mode);
-        let snapshot = owner.snapshot();
-        drop(owner);
-        self.write_snapshot_cache(snapshot);
-        result
-    }
-
     pub fn switch_runtime_workspace(
         &self,
         candidate: &Path,
-        rollback: Option<&Path>,
     ) -> Result<(), DesktopRuntimeControlError> {
         self.recovery_cancellation.cancel();
         let _operation = self
@@ -873,7 +906,7 @@ impl DesktopLifecycle {
             .active
             .as_deref_mut()
             .ok_or(DesktopRuntimeControlError::NoActiveRuntime)?
-            .switch_workspace(candidate, rollback);
+            .switch_workspace(candidate);
         let snapshot = owner.snapshot();
         drop(owner);
         self.write_snapshot_cache(snapshot);
@@ -985,6 +1018,7 @@ fn record_desktop_runtime_events(snapshot: &DesktopRuntimeSnapshot, privilege: &
 #[derive(Clone)]
 pub struct DesktopBackendHandle {
     privilege: PrivilegeController,
+    desired: DesiredStateOwner,
     runtime_operation: Arc<Mutex<()>>,
     runtime: Arc<Mutex<ProductionRuntimeOwner>>,
     recovery_cancellation: RecoveryCancellation,
@@ -1001,6 +1035,7 @@ impl DesktopBackendHandle {
         &self,
         config: ProductionRuntimeConfig,
     ) -> Result<(), DesktopRuntimeStartError> {
+        self.desired.set_services(ServiceIntent::Enabled);
         self.clear_staged_foreground_start();
         self.recovery_cancellation.cancel();
         let generation = self
@@ -1045,7 +1080,11 @@ impl DesktopBackendHandle {
             generate_internal_bearer,
         )
         .with_privileged_execution(Arc::new(self.privilege.gateway()))
-        .with_task_projection_wake(wake);
+        .with_task_projection_wake(wake)
+        .with_control_plane_state(
+            self.desired.clone(),
+            self.desired.snapshot().state.connection,
+        );
         let mut runtime = RuntimeOrchestrator::new(driver);
         runtime.start().map_err(DesktopRuntimeStartError::Runtime)?;
         let runtime = AutoRecoveryRuntime::new_with_cancellation(
@@ -1097,6 +1136,7 @@ impl DesktopBackendHandle {
         &self,
         config: ProductionRuntimeConfig,
     ) -> Result<(), DesktopRuntimeControlError> {
+        self.desired.set_services(ServiceIntent::Enabled);
         self.clear_staged_foreground_start();
         self.recovery_cancellation.cancel();
         let generation = self
@@ -1153,6 +1193,7 @@ impl DesktopBackendHandle {
         &self,
         config: ProductionRuntimeConfig,
     ) -> std::io::Result<JoinHandle<()>> {
+        self.desired.set_services(ServiceIntent::Enabled);
         self.clear_staged_foreground_start();
         self.recovery_cancellation.cancel();
         let backend = self.clone();
@@ -1231,6 +1272,7 @@ impl DesktopBackendHandle {
             current_task_elapsed_ms: None,
             last_tool: None,
             configured_workspace: Some(workspace),
+            connection_profile: self.desired.snapshot().state.connection,
             outage: None,
         };
         self.projection_wake.notify();
@@ -1250,12 +1292,14 @@ impl DesktopBackendHandle {
             current_task_elapsed_ms: None,
             last_tool: None,
             configured_workspace: Some(workspace),
+            connection_profile: self.desired.snapshot().state.connection,
             outage: None,
         };
         self.projection_wake.notify();
     }
 
     pub fn shutdown(&self) -> ShutdownReport {
+        self.desired.set_services(ServiceIntent::Disabled);
         #[cfg(windows)]
         self.clear_staged_foreground_start();
         self.recovery_cancellation.cancel();

@@ -3,7 +3,6 @@ mod privilege;
 mod runtime;
 mod settings;
 mod task;
-mod workspace;
 
 pub use permission::{Capability, PermissionMode};
 pub use privilege::{GenerationId, PrivilegeFault, PrivilegeState};
@@ -14,8 +13,4 @@ pub use settings::Settings;
 pub use task::{
     CurrentTask, CurrentTaskContractError, CurrentTaskStatus, CurrentTaskTiming, LastToolTiming,
     SafeTaskSummary, TaskExecutionState, TaskKind,
-};
-pub use workspace::{
-    ActiveWorkspaceState, WorkspaceControlState, WorkspaceIdentity, WorkspaceModelError,
-    WorkspaceRef,
 };

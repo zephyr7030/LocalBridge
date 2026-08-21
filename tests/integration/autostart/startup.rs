@@ -128,7 +128,6 @@ fn manual_foreground_launch_ignores_login_autostart_and_manual_stop_latch() {
     .unwrap();
     let freshly_validated = WorkspaceValidator.validate(&workspace.0).unwrap();
     assert_eq!(config.workspace, freshly_validated.execution_path());
-    assert_eq!(config.permission_mode, PermissionMode::Full);
 }
 
 #[test]
