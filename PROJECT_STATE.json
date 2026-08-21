@@ -4,14 +4,14 @@
   "governance_model": "refactor_phases",
   "contract_file": "CONTROL_PLANE_REFACTOR_CONTRACT.json",
   "human_authority": "docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md",
-  "status": "REFACTOR_READY",
+  "status": "REFACTOR_IN_PROGRESS",
   "current_phase": "R1",
-  "implementation_started": false,
+  "implementation_started": true,
   "phase_order": ["R1", "R2", "R3", "R4", "R5"],
   "phases": {
     "R1": {
       "title": "Identity / Isolation",
-      "status": "READY"
+      "status": "IN_PROGRESS"
     },
     "R2": {
       "title": "Task / Execution Convergence",
@@ -61,5 +61,5 @@
     "legacy_pr_group_state_is_authoritative": false,
     "legacy_history_location": "Git history before schema44 governance transition"
   },
-  "next_action": "Execute R1 only after reading the current schema44 contract and current disk implementation. Do not start R2 automatically after R1 acceptance."
+  "next_action": "Implement and verify R1 Identity / Isolation only. Do not start R2 automatically after R1 acceptance."
 }
