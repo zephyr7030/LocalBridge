@@ -1,6 +1,8 @@
 use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct McpSessionId(String);
 
 impl McpSessionId {
@@ -19,7 +21,7 @@ impl fmt::Display for McpSessionId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PublicSessionId(String);
 
 impl PublicSessionId {
@@ -38,7 +40,45 @@ impl fmt::Display for PublicSessionId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TaskId(String);
+
+impl TaskId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for TaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ExecutionId(String);
+
+impl ExecutionId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ExecutionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RpcRequestId {
     Number(i64),
     String(String),
@@ -53,7 +93,7 @@ impl fmt::Display for RpcRequestId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct RequestKey {
     pub session_id: McpSessionId,
     pub request_id: RpcRequestId,
@@ -97,5 +137,14 @@ mod tests {
         let mcp = McpSessionId::new("same-text");
         let public = PublicSessionId::new("same-text");
         assert_eq!(mcp.as_str(), public.as_str());
+    }
+
+    #[test]
+    fn task_execution_and_public_session_are_distinct_identities() {
+        let task = TaskId::new("same-text");
+        let execution = ExecutionId::new("same-text");
+        let public = PublicSessionId::new("same-text");
+        assert_eq!(task.as_str(), execution.as_str());
+        assert_eq!(execution.as_str(), public.as_str());
     }
 }

@@ -12,17 +12,24 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
+use crate::control_plane::execution_registry::ExecutionRegistry;
 use crate::control_plane::request_registry::{
     ActiveRequest, RequestCancellationTarget, RequestRegistry,
 };
 use crate::control_plane::session_registry::{SessionInsertError, SessionRecord, SessionRegistry};
+use crate::control_plane::task_registry::TaskRegistry;
 use crate::diagnostics::error::{
     ErrorDiagnostic, mcp_invalid, mcp_unavailable, mcp_unknown, transport_unavailable,
 };
 use crate::diagnostics::{
     record_mcp_request_error, record_mcp_request_result, record_mcp_request_start,
 };
-use crate::domain::{McpSessionId, PublicSessionId, RequestKey, RpcRequestId};
+use crate::domain::{
+    ExecutionRecord, ExecutionState, LifecycleState, McpSessionId, PublicSessionId, RequestKey,
+    RpcRequestId, TaskId, TaskRecord, TerminalOutcome,
+};
+#[cfg(test)]
+use crate::domain::ExecutionTerminal;
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
@@ -40,8 +47,8 @@ use super::facade::{
     AGENT_API_REVISION, AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter,
     FacadeCallError, FacadeDenied, FacadeError, FacadeErrorCode, FilesystemAction,
     FilesystemRequest, normalize_path_authority_error, parse_filesystem_request,
-    public_error_output_schema, public_tools_for_policy, run_workspace_filesystem_with_authority,
-    stable_success, validate_workspace_context_probe,
+    public_error_output_schema, public_safe_summary, public_task_kind, public_tools_for_policy,
+    run_workspace_filesystem_with_authority, stable_success, validate_workspace_context_probe,
 };
 use super::filesystem_service::FilesystemCancellation;
 use super::http::{McpCancellationClient, McpHealthClient};
@@ -49,7 +56,6 @@ use super::path_authority::PathAuthority;
 use super::policy::{CapabilityPolicy, explicit_control_plane_reference};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use super::shell::{ShellExecutionSpec, ShellExecutor, ShellSelector};
-use super::task_state::{CommandTaskStateStore, TerminalCommandSnapshot};
 
 const CURRENT_PROTOCOL_VERSION: &str = "2025-11-25";
 const COMPATIBLE_PROTOCOL_VERSION: &str = "2025-06-18";
@@ -70,7 +76,8 @@ struct ConnectionContext<'a> {
     cancellation: &'a McpCancellationClient,
     permission_mode: &'a RwLock<PermissionMode>,
     current_task: &'a CurrentTaskProjection,
-    task_state: &'a CommandTaskStateStore,
+    executions: &'a ExecutionRegistry,
+    tasks: &'a TaskRegistry,
     sessions: &'a SessionRegistry,
     requests: &'a RequestRegistry,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
@@ -80,7 +87,7 @@ struct ConnectionContext<'a> {
 struct ElevatedCallContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
-    current_task: &'a CurrentTaskProjection,
+    current_task: &'a RegisteredTaskProjection,
     requests: &'a RequestRegistry,
     stopping: &'a AtomicBool,
 }
@@ -88,14 +95,14 @@ struct ElevatedCallContext<'a> {
 struct AdministratorFilesystemContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
-    current_task: &'a CurrentTaskProjection,
+    current_task: &'a RegisteredTaskProjection,
     requests: &'a RequestRegistry,
     stopping: &'a AtomicBool,
 }
 
 struct WorkspaceFilesystemContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
-    current_task: &'a CurrentTaskProjection,
+    current_task: &'a RegisteredTaskProjection,
     requests: &'a RequestRegistry,
     stopping: &'a AtomicBool,
 }
@@ -105,7 +112,8 @@ struct TaskControlContext<'a> {
     public_policy: &'a RwLock<CapabilityPolicy>,
     cancellation: &'a McpCancellationClient,
     current_task: &'a CurrentTaskProjection,
-    task_state: &'a CommandTaskStateStore,
+    executions: &'a ExecutionRegistry,
+    tasks: &'a TaskRegistry,
     sessions: &'a SessionRegistry,
     requests: &'a RequestRegistry,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
@@ -117,7 +125,8 @@ struct ServeContext {
     cancellation: McpCancellationClient,
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
-    task_state: CommandTaskStateStore,
+    executions: ExecutionRegistry,
+    tasks: TaskRegistry,
     sessions: SessionRegistry,
     privileged: Option<Arc<dyn PrivilegedExecution>>,
     shutdown: mpsc::Receiver<()>,
@@ -146,7 +155,7 @@ struct CompletedTool {
 
 #[derive(Debug)]
 struct CurrentTaskProjectionState {
-    actual_status: CurrentTaskStatus,
+    latest_presentation: CurrentTaskStatus,
     current: Option<PresentedTask>,
     queued: VecDeque<QueuedTask>,
     active_sequence: Option<u64>,
@@ -157,7 +166,7 @@ struct CurrentTaskProjectionState {
 impl Default for CurrentTaskProjectionState {
     fn default() -> Self {
         Self {
-            actual_status: CurrentTaskStatus::Idle,
+            latest_presentation: CurrentTaskStatus::Idle,
             current: None,
             queued: VecDeque::new(),
             active_sequence: None,
@@ -174,8 +183,63 @@ struct CurrentTaskProjectionInner {
     wake: Option<CurrentTaskWake>,
 }
 
+/// Minimum-duration UI presentation only. Authoritative lifecycle lives in TaskRegistry.
 #[derive(Clone)]
 pub struct CurrentTaskProjection(Arc<CurrentTaskProjectionInner>);
+
+struct RegisteredTaskProjection {
+    task_id: TaskId,
+    tasks: TaskRegistry,
+    presentation: CurrentTaskProjection,
+}
+
+impl Drop for RegisteredTaskProjection {
+    fn drop(&mut self) {
+        let _ = self.tasks.finish(&self.task_id, TerminalOutcome::Lost);
+    }
+}
+
+impl RegisteredTaskProjection {
+    fn new(task_id: TaskId, tasks: TaskRegistry, presentation: CurrentTaskProjection) -> Self {
+        Self {
+            task_id,
+            tasks,
+            presentation,
+        }
+    }
+
+    fn project(&self, status: CurrentTaskStatus) {
+        match &status {
+            CurrentTaskStatus::Idle => {
+                let _ = self
+                    .tasks
+                    .finish(&self.task_id, TerminalOutcome::Completed);
+            }
+            CurrentTaskStatus::Active(task) => match task.state {
+                TaskExecutionState::Running => {
+                    let _ = self.tasks.mark_running(&self.task_id);
+                }
+                TaskExecutionState::AwaitingAuthorization | TaskExecutionState::Blocked => {
+                    let _ = self.tasks.finish(&self.task_id, TerminalOutcome::Blocked);
+                }
+                TaskExecutionState::Failed => {
+                    let _ = self.tasks.finish(&self.task_id, TerminalOutcome::Failed);
+                }
+                TaskExecutionState::Cancelled => {
+                    let _ = self
+                        .tasks
+                        .finish(&self.task_id, TerminalOutcome::Cancelled);
+                }
+                TaskExecutionState::Idle => {}
+            },
+        }
+        self.presentation.project(status);
+    }
+
+    fn finish(&self, outcome: TerminalOutcome) {
+        let _ = self.tasks.finish(&self.task_id, outcome);
+    }
+}
 
 impl Default for CurrentTaskProjection {
     fn default() -> Self {
@@ -210,12 +274,12 @@ impl CurrentTaskProjection {
             .unwrap_or(CurrentTaskStatus::Idle)
     }
 
-    fn actual_snapshot(&self) -> CurrentTaskStatus {
+    fn latest_snapshot(&self) -> CurrentTaskStatus {
         self.0
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .actual_status
+            .latest_presentation
             .clone()
     }
 
@@ -231,7 +295,7 @@ impl CurrentTaskProjection {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let current = match &state.actual_status {
+        let current = match &state.latest_presentation {
             CurrentTaskStatus::Idle => None,
             CurrentTaskStatus::Active(task) => {
                 let visible_since = state.active_sequence.and_then(|sequence| {
@@ -307,7 +371,7 @@ impl CurrentTaskProjection {
                 CurrentTaskStatus::Active(task) => {
                     let sequence = match state.active_sequence {
                         Some(sequence)
-                            if matches!(state.actual_status, CurrentTaskStatus::Active(_)) =>
+                            if matches!(state.latest_presentation, CurrentTaskStatus::Active(_)) =>
                         {
                             sequence
                         }
@@ -345,7 +409,7 @@ impl CurrentTaskProjection {
                     {
                         queued.task = task.clone();
                     }
-                    state.actual_status = status;
+                    state.latest_presentation = status;
                 }
                 CurrentTaskStatus::Idle => {
                     if let Some(sequence) = state.active_sequence.take() {
@@ -364,7 +428,7 @@ impl CurrentTaskProjection {
                             queued.completed_at = Some(now);
                         }
                     }
-                    state.actual_status = CurrentTaskStatus::Idle;
+                    state.latest_presentation = CurrentTaskStatus::Idle;
                 }
             }
         }
@@ -508,7 +572,8 @@ pub struct PolicyEnforcementRuntime {
     port: u16,
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
-    task_state: CommandTaskStateStore,
+    executions: ExecutionRegistry,
+    tasks: TaskRegistry,
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
     health_client: McpHealthClient,
@@ -593,8 +658,10 @@ impl PolicyEnforcementRuntime {
             .map_err(|_| PolicyEnforcementError::UpstreamHealthUnavailable)?;
         let guard = AgentFacade::from_coding_runtime(coding_runtime, policy)
             .map_err(|_| PolicyEnforcementError::UpstreamFacadeNegotiationFailed)?;
-        let task_state = guard.command_task_state();
-        let runtime_task_state = task_state.clone();
+        let executions = guard.execution_registry();
+        let runtime_executions = executions.clone();
+        let tasks = TaskRegistry::default();
+        let runtime_tasks = tasks.clone();
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| PolicyEnforcementError::BindFailed)?;
         listener
@@ -625,7 +692,8 @@ impl PolicyEnforcementRuntime {
                         cancellation,
                         permission_mode: thread_mode,
                         current_task: thread_task,
-                        task_state,
+                        executions,
+                        tasks,
                         sessions: thread_sessions,
                         privileged,
                         shutdown: shutdown_rx,
@@ -637,7 +705,8 @@ impl PolicyEnforcementRuntime {
             port,
             permission_mode,
             current_task,
-            task_state: runtime_task_state,
+            executions: runtime_executions,
+            tasks: runtime_tasks,
             guard: Some(guard),
             public_policy,
             health_client,
@@ -686,19 +755,19 @@ impl PolicyEnforcementRuntime {
     pub fn task_aggregate_snapshot(&self) -> Value {
         let aggregate = match self.guard.as_ref() {
             None => task_control_snapshot_with_terminal(
-                &self.current_task.actual_snapshot(),
-                &self.task_state,
+                &self.current_task.latest_snapshot(),
+                &self.executions,
             ),
             Some(guard) => match guard.try_lock() {
                 Ok(guard) => guard.task_aggregate_snapshot(),
                 Err(TryLockError::WouldBlock) => task_control_snapshot_with_terminal(
-                    &self.current_task.actual_snapshot(),
-                    &self.task_state,
+                    &self.current_task.latest_snapshot(),
+                    &self.executions,
                 ),
                 Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
             },
         };
-        merge_task_aggregate_activity(aggregate, &self.current_task)
+        merge_control_plane_activity(aggregate, &self.tasks, &self.executions)
     }
 
     pub fn is_running(&self) -> bool {
@@ -809,7 +878,8 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         cancellation,
         permission_mode,
         current_task,
-        task_state,
+        executions,
+        tasks,
         sessions,
         privileged,
         shutdown,
@@ -828,26 +898,6 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                 if facade.reap_command_sessions().is_err() {
                     stopping.store(true, Ordering::Release);
                     break;
-                }
-                let running_command = facade.has_running_command_session();
-                match (running_command, current_task.actual_snapshot()) {
-                    (true, CurrentTaskStatus::Idle) => current_task.project(
-                        CurrentTaskStatus::project(
-                            TaskKind::ExecuteCommand,
-                            SafeTaskSummary::Omitted,
-                            TaskExecutionState::Running,
-                        )
-                        .expect("running command session is a valid projected task"),
-                    ),
-                    (
-                        false,
-                        CurrentTaskStatus::Active(CurrentTask {
-                            kind: TaskKind::ExecuteCommand,
-                            state: TaskExecutionState::Running,
-                            ..
-                        }),
-                    ) => current_task.project(CurrentTaskStatus::Idle),
-                    _ => {}
                 }
             }
             next_session_reap = Instant::now() + Duration::from_millis(100);
@@ -871,7 +921,8 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                 let worker_policy = Arc::clone(&public_policy);
                 let worker_mode = Arc::clone(&permission_mode);
                 let worker_task = current_task.clone();
-                let worker_task_state = task_state.clone();
+                let worker_executions = executions.clone();
+                let worker_tasks = tasks.clone();
                 let worker_sessions = sessions.clone();
                 let worker_requests = requests.clone();
                 let worker_privileged = privileged.as_ref().map(Arc::clone);
@@ -886,7 +937,8 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                             cancellation: &worker_cancellation,
                             permission_mode: &worker_mode,
                             current_task: &worker_task,
-                            task_state: &worker_task_state,
+                            executions: &worker_executions,
+                            tasks: &worker_tasks,
                             sessions: &worker_sessions,
                             requests: &worker_requests,
                             privileged: worker_privileged.as_ref(),
@@ -931,7 +983,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         cancellation,
         permission_mode,
         current_task,
-        task_state,
+        executions,
+        tasks,
         sessions,
         requests,
         privileged,
@@ -1279,6 +1332,19 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if name == "elevated_exec" {
+                let scoped_request = request_key_from_json(session_id.clone(), &id)
+                    .expect("validated downstream request id");
+                let task_id = tasks.queue(
+                    session_id.clone(),
+                    scoped_request,
+                    public_task_kind(name, &arguments),
+                    public_safe_summary(name, &arguments),
+                );
+                let registered_task = RegisteredTaskProjection::new(
+                    task_id,
+                    tasks.clone(),
+                    current_task.clone(),
+                );
                 let request_key = request_diagnostic_key(&id);
                 record_mcp_request_start(&request_key, session, name);
                 let result = handle_elevated_exec(
@@ -1290,7 +1356,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     ElevatedCallContext {
                         guard,
                         privileged,
-                        current_task,
+                        current_task: &registered_task,
                         requests,
                         stopping,
                     },
@@ -1298,6 +1364,19 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 return finalize_special_handler_request(&request_key, session, result);
             }
             if name == "filesystem" {
+                let scoped_request = request_key_from_json(session_id.clone(), &id)
+                    .expect("validated downstream request id");
+                let task_id = tasks.queue(
+                    session_id.clone(),
+                    scoped_request,
+                    public_task_kind(name, &arguments),
+                    public_safe_summary(name, &arguments),
+                );
+                let registered_task = RegisteredTaskProjection::new(
+                    task_id,
+                    tasks.clone(),
+                    current_task.clone(),
+                );
                 if let Some(result) = handle_administrator_filesystem_if_needed(
                     &mut stream,
                     id.clone(),
@@ -1307,7 +1386,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     AdministratorFilesystemContext {
                         guard,
                         privileged,
-                        current_task,
+                        current_task: &registered_task,
                         requests,
                         stopping,
                     },
@@ -1322,7 +1401,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     arguments,
                     WorkspaceFilesystemContext {
                         guard,
-                        current_task,
+                        current_task: &registered_task,
                         requests,
                         stopping,
                     },
@@ -1342,7 +1421,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         public_policy,
                         cancellation,
                         current_task,
-                        task_state,
+                        executions,
+                        tasks,
                         sessions,
                         requests,
                         privileged,
@@ -1383,11 +1463,22 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     Some(session),
                 );
             }
+            let registered_task = is_work_tool(name).then(|| {
+                tasks.queue(
+                    session_id.clone(),
+                    request_key.clone(),
+                    public_task_kind(name, &arguments),
+                    public_safe_summary(name, &arguments),
+                )
+            });
             let mut guard = guard
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if stopping.load(Ordering::Acquire) {
                 requests.remove(&request_key);
+                if let Some(task_id) = &registered_task {
+                    let _ = tasks.finish(task_id, TerminalOutcome::Lost);
+                }
                 return write_mcp_http_error(
                     &mut stream,
                     503,
@@ -1397,16 +1488,42 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             }
             record_mcp_request_start(&request_diagnostic_key(&id), session, name);
             let private_request_value = rpc_request_id_to_json(&private_request_id);
-            let result = guard.call_tool(
+            let call_task_id = registered_task
+                .clone()
+                .unwrap_or_else(|| TaskId::new(format!("projection-{}", private_request_id)));
+            let result = guard.call_tool_for_task(
                 mode,
                 name,
                 arguments,
                 Some(&private_request_value),
-                |status| current_task.project(status),
+                call_task_id,
+                |status| {
+                    if let (
+                        Some(task_id),
+                        CurrentTaskStatus::Active(CurrentTask {
+                            state: TaskExecutionState::Running,
+                            ..
+                        }),
+                    ) = (&registered_task, &status)
+                    {
+                        let _ = tasks.mark_running(task_id);
+                    }
+                    current_task.project(status);
+                },
             );
             requests.remove(&request_key);
+            if let Some(task_id) = &registered_task {
+                let _ = tasks.finish(task_id, task_terminal_outcome(&result));
+            }
             if let Ok(result) = &result {
-                update_public_session_ownership(sessions, &session_id, name, result);
+                if let Some(public_session) =
+                    update_public_session_ownership(sessions, &session_id, name, result)
+                {
+                    let _ = guard.bind_public_command_owner(
+                        public_session.as_str(),
+                        session_id.clone(),
+                    );
+                }
             }
             match result {
                 Ok(mut result) => {
@@ -1467,7 +1584,7 @@ fn enrich_workspace_context_privilege(
     let aggregate = data
         .get("current_task")
         .cloned()
-        .unwrap_or_else(|| task_control_snapshot(&current_task.actual_snapshot()));
+        .unwrap_or_else(|| task_control_snapshot(&current_task.latest_snapshot()));
     data.insert(
         "current_task".into(),
         merge_task_aggregate_activity(aggregate, current_task),
@@ -1505,7 +1622,8 @@ fn handle_task_control(
         public_policy,
         cancellation,
         current_task,
-        task_state,
+        executions,
+        tasks,
         sessions,
         requests,
         privileged,
@@ -1544,12 +1662,12 @@ fn handle_task_control(
             Some(session),
         );
     };
-    let before = current_task.actual_snapshot();
+    let before = current_task.latest_snapshot();
     let data = match action {
         "get" => match guard.try_lock() {
             Ok(guard) => guard.task_aggregate_snapshot(),
             Err(TryLockError::WouldBlock) => {
-                task_control_snapshot_with_terminal(&before, task_state)
+                task_control_snapshot_with_terminal(&before, executions)
             }
             Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
         },
@@ -1581,14 +1699,17 @@ fn handle_task_control(
             if cancelled > 0 {
                 wait_for_task_cancel_settlement(
                     current_task,
-                    task_state,
+                    executions,
                     Duration::from_millis(1_500),
                 );
             }
             let mut data = match guard.try_lock() {
                 Ok(guard) => guard.task_aggregate_snapshot(),
                 Err(TryLockError::WouldBlock) => {
-                    task_control_snapshot_with_terminal(&current_task.actual_snapshot(), task_state)
+                    task_control_snapshot_with_terminal(
+                        &current_task.latest_snapshot(),
+                        executions,
+                    )
                 }
                 Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
             };
@@ -1611,7 +1732,7 @@ fn handle_task_control(
             );
         }
     };
-    let data = merge_task_aggregate_activity(data, current_task);
+    let data = merge_control_plane_activity(data, tasks, executions);
     write_rpc_result(
         stream,
         id,
@@ -1622,12 +1743,12 @@ fn handle_task_control(
 
 fn wait_for_task_cancel_settlement(
     current_task: &CurrentTaskProjection,
-    task_state: &CommandTaskStateStore,
+    executions: &ExecutionRegistry,
     max_wait: Duration,
 ) {
     let deadline = Instant::now() + max_wait;
-    while (!matches!(current_task.actual_snapshot(), CurrentTaskStatus::Idle)
-        || task_state.current_owner().is_some())
+    while (!matches!(current_task.latest_snapshot(), CurrentTaskStatus::Idle)
+        || !executions.running().is_empty())
         && Instant::now() < deadline
     {
         thread::sleep(Duration::from_millis(10));
@@ -1636,17 +1757,18 @@ fn wait_for_task_cancel_settlement(
 
 fn task_control_snapshot_with_terminal(
     status: &CurrentTaskStatus,
-    task_state: &CommandTaskStateStore,
+    executions: &ExecutionRegistry,
 ) -> Value {
     let mut data = task_control_snapshot(status);
     if let Some(object) = data.as_object_mut() {
-        let terminal = task_state.latest_terminal().map(terminal_command_value);
-        let current_command = task_state.current_owner().map(|owner| {
+        let terminal = executions.latest_terminal().map(terminal_execution_value);
+        let current_command = executions.latest_running().map(|execution| {
             json!({
                 "state":"running",
-                "task_id":owner.task_id,
-                "session_id":owner.session_id,
-                "elapsed_ms":Value::Null
+                "task_id":execution.task_id,
+                "execution_id":execution.id,
+                "session_id":execution.public_session_id,
+                "elapsed_ms":unix_time_ms().saturating_sub(execution.started_at_ms)
             })
         });
         object.insert("current_workflow".into(), Value::Null);
@@ -1669,13 +1791,14 @@ fn task_control_snapshot_with_terminal(
 #[cfg(test)]
 fn durable_task_snapshot_with_terminal(
     mut durable: Value,
-    task_state: &CommandTaskStateStore,
+    executions: &ExecutionRegistry,
 ) -> Value {
     let terminal = durable
         .get("task_id")
         .and_then(Value::as_str)
-        .and_then(|task_id| task_state.latest_terminal_for_task(task_id))
-        .map(terminal_command_value)
+        .map(TaskId::new)
+        .and_then(|task_id| executions.latest_terminal_for_task(&task_id))
+        .map(terminal_execution_value)
         .unwrap_or(Value::Null);
     if let Some(object) = durable.as_object_mut() {
         object.insert("last_terminal_command".into(), terminal);
@@ -1683,19 +1806,31 @@ fn durable_task_snapshot_with_terminal(
     durable
 }
 
-fn terminal_command_value(terminal: TerminalCommandSnapshot) -> Value {
+fn terminal_execution_value(execution: ExecutionRecord) -> Value {
+    let ExecutionState::Terminal(terminal) = execution.state else {
+        return Value::Null;
+    };
     json!({
-        "task_id": terminal.owner.task_id,
-        "session_id": terminal.owner.session_id,
-        "status": terminal.status.as_str(),
+        "task_id": execution.task_id,
+        "execution_id": execution.id,
+        "session_id": execution.public_session_id,
+        "status": terminal.outcome.as_str(),
         "exit_code": terminal.exit_code,
         "signal": terminal.signal,
-        "timed_out": terminal.timed_out,
-        "cancelled": terminal.cancelled,
+        "timed_out": terminal.outcome == TerminalOutcome::TimedOut,
+        "cancelled": terminal.outcome == TerminalOutcome::Cancelled,
         "output_refs": terminal.output_refs,
         "error_code": terminal.error_code,
         "completed_at_ms": terminal.completed_at_ms
     })
+}
+
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
 }
 
 fn current_task_activity_value(task: &CurrentTask, elapsed_ms: Option<u64>) -> Value {
@@ -1782,6 +1917,15 @@ fn merge_task_aggregate_activity(
         (None, None) => None,
     };
     if let Some(object) = aggregate.as_object_mut() {
+        for stale_projection_key in [
+            "task_id",
+            "execution_id",
+            "kind",
+            "execution_state",
+            "summary",
+        ] {
+            object.remove(stale_projection_key);
+        }
         object.insert(
             "current_activity".into(),
             current_activity.clone().unwrap_or(Value::Null),
@@ -1799,6 +1943,162 @@ fn merge_task_aggregate_activity(
         object.insert("state".into(), Value::String(state.into()));
     }
     aggregate
+}
+
+fn merge_control_plane_activity(
+    mut aggregate: Value,
+    tasks: &TaskRegistry,
+    executions: &ExecutionRegistry,
+) -> Value {
+    let active_task = tasks.latest_active();
+    let running_execution = executions.latest_running();
+    let current_workflow = aggregate
+        .get("current_workflow")
+        .filter(|value| !value.is_null())
+        .cloned();
+    let current_activity = active_task
+        .as_ref()
+        .map(registered_task_activity_value)
+        .or_else(|| {
+            running_execution
+                .as_ref()
+                .map(running_execution_activity_value)
+        })
+        .or_else(|| current_workflow.as_ref().map(workflow_activity_value));
+    let terminal_execution = executions.latest_terminal();
+    let terminal_task = tasks.latest_terminal();
+    let last_activity = latest_registry_activity(terminal_task.as_ref(), terminal_execution.as_ref());
+
+    if let Some(object) = aggregate.as_object_mut() {
+        object.insert(
+            "current_command".into(),
+            running_execution
+                .as_ref()
+                .map(running_execution_value)
+                .unwrap_or(Value::Null),
+        );
+        let terminal_value = terminal_execution
+            .clone()
+            .map(terminal_execution_value)
+            .unwrap_or(Value::Null);
+        object.insert("last_command".into(), terminal_value.clone());
+        object.insert("last_terminal_command".into(), terminal_value);
+        object.insert(
+            "current_activity".into(),
+            current_activity.clone().unwrap_or(Value::Null),
+        );
+        object.insert(
+            "last_activity".into(),
+            last_activity.unwrap_or(Value::Null),
+        );
+        object.insert(
+            "state".into(),
+            Value::String(
+                match current_activity
+                    .as_ref()
+                    .and_then(|value| value.get("state"))
+                    .and_then(Value::as_str)
+                {
+                    Some("queued" | "waiting") => "waiting",
+                    Some(_) => "active",
+                    None => "idle",
+                }
+                .into(),
+            ),
+        );
+        if let Some(task) = active_task {
+            object.insert("task_id".into(), Value::String(task.id.to_string()));
+            object.insert("kind".into(), Value::String(activity_kind_name(task.kind).into()));
+        } else if let Some(execution) = running_execution {
+            object.insert("task_id".into(), Value::String(execution.task_id.to_string()));
+            object.insert(
+                "execution_id".into(),
+                Value::String(execution.id.to_string()),
+            );
+            object.insert("kind".into(), Value::String("command".into()));
+        }
+    }
+    aggregate
+}
+
+fn registered_task_activity_value(task: &TaskRecord) -> Value {
+    let state = match task.lifecycle {
+        LifecycleState::Queued => "queued",
+        LifecycleState::Running => "running",
+        LifecycleState::Terminal(_) => "terminal",
+    };
+    json!({
+        "task_id":task.id,
+        "kind":activity_kind_name(task.kind),
+        "state":state,
+        "summary":task.summary.as_deref(),
+        "elapsed_ms":unix_time_ms().saturating_sub(task.created_at_ms),
+        "step":Value::Null,
+        "progress_current":Value::Null,
+        "progress_total":Value::Null
+    })
+}
+
+fn running_execution_value(execution: &ExecutionRecord) -> Value {
+    json!({
+        "state":"running",
+        "task_id":execution.task_id,
+        "execution_id":execution.id,
+        "session_id":execution.public_session_id,
+        "elapsed_ms":unix_time_ms().saturating_sub(execution.started_at_ms)
+    })
+}
+
+fn running_execution_activity_value(execution: &ExecutionRecord) -> Value {
+    json!({
+        "task_id":execution.task_id,
+        "execution_id":execution.id,
+        "kind":"command",
+        "state":"running",
+        "summary":Value::Null,
+        "elapsed_ms":unix_time_ms().saturating_sub(execution.started_at_ms),
+        "step":Value::Null,
+        "progress_current":Value::Null,
+        "progress_total":Value::Null
+    })
+}
+
+fn latest_registry_activity(
+    task: Option<&TaskRecord>,
+    execution: Option<&ExecutionRecord>,
+) -> Option<Value> {
+    let task_at = task.map(|task| task.updated_at_ms).unwrap_or(0);
+    let execution_at = execution
+        .and_then(|execution| match &execution.state {
+            ExecutionState::Terminal(terminal) => Some(terminal.completed_at_ms),
+            _ => None,
+        })
+        .unwrap_or(0);
+    if execution_at >= task_at && execution_at > 0 {
+        let execution = execution?;
+        let ExecutionState::Terminal(terminal) = &execution.state else {
+            return None;
+        };
+        return Some(json!({
+            "task_id":execution.task_id,
+            "execution_id":execution.id,
+            "kind":"command",
+            "summary":Value::Null,
+            "outcome":terminal.outcome.as_str(),
+            "completed_at_ms":terminal.completed_at_ms
+        }));
+    }
+    let task = task?;
+    let LifecycleState::Terminal(outcome) = task.lifecycle else {
+        return None;
+    };
+    Some(json!({
+        "task_id":task.id,
+        "kind":activity_kind_name(task.kind),
+        "summary":task.summary.as_deref(),
+        "outcome":outcome.as_str(),
+        "completed_at_ms":task.updated_at_ms
+    }))
 }
 
 const fn activity_kind_name(kind: TaskKind) -> &'static str {
@@ -1911,7 +2211,7 @@ fn filesystem_task_kind(action: FilesystemAction) -> TaskKind {
 }
 
 fn project_filesystem_task(
-    current_task: &CurrentTaskProjection,
+    current_task: &RegisteredTaskProjection,
     kind: TaskKind,
     state: TaskExecutionState,
 ) {
@@ -1922,7 +2222,7 @@ fn project_filesystem_task(
 }
 
 fn finish_filesystem_task(
-    current_task: &CurrentTaskProjection,
+    current_task: &RegisteredTaskProjection,
     kind: TaskKind,
     terminal: Option<TaskExecutionState>,
 ) {
@@ -2670,7 +2970,7 @@ fn elevated_exec_error_output_schema() -> Value {
     })
 }
 
-fn project_elevated_task(current_task: &CurrentTaskProjection, state: TaskExecutionState) {
+fn project_elevated_task(current_task: &RegisteredTaskProjection, state: TaskExecutionState) {
     current_task.project(
         CurrentTaskStatus::project(TaskKind::ElevatedOperation, SafeTaskSummary::Omitted, state)
             .expect("elevated task state is a valid active task state"),
@@ -2678,7 +2978,7 @@ fn project_elevated_task(current_task: &CurrentTaskProjection, state: TaskExecut
 }
 
 fn finish_elevated_task(
-    current_task: &CurrentTaskProjection,
+    current_task: &RegisteredTaskProjection,
     terminal: Option<TaskExecutionState>,
 ) {
     if let Some(state) = terminal {
@@ -2975,6 +3275,11 @@ fn handle_elevated_exec(
         ElevatedExecOutcome::TimedOut => Some(TaskExecutionState::Failed),
         ElevatedExecOutcome::Cancelled => Some(TaskExecutionState::Cancelled),
     };
+    current_task.finish(match execution.outcome {
+        ElevatedExecOutcome::Completed => TerminalOutcome::Completed,
+        ElevatedExecOutcome::TimedOut => TerminalOutcome::TimedOut,
+        ElevatedExecOutcome::Cancelled => TerminalOutcome::Cancelled,
+    });
     let is_error = !matches!(execution.outcome, ElevatedExecOutcome::Completed);
     let diagnostic = match execution.outcome {
         ElevatedExecOutcome::Completed => None,
@@ -3082,25 +3387,69 @@ fn command_control_public_session(name: &str, arguments: &Value) -> Option<Publi
         .map(PublicSessionId::new)
 }
 
+fn is_work_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "agent_workflow"
+            | "filesystem"
+            | "exec_command"
+            | "git_workflow"
+            | "document_workflow"
+            | "view_image"
+            | "elevated_exec"
+    )
+}
+
+fn task_terminal_outcome(result: &Result<Value, FacadeCallError>) -> TerminalOutcome {
+    let Ok(value) = result else {
+        return TerminalOutcome::Blocked;
+    };
+    if value.get("isError").and_then(Value::as_bool) != Some(true) {
+        return TerminalOutcome::Completed;
+    }
+    match value
+        .pointer("/structuredContent/error/code")
+        .and_then(Value::as_str)
+    {
+        Some("ProcessCancelled") => TerminalOutcome::Cancelled,
+        Some("ProcessTimedOut") => TerminalOutcome::TimedOut,
+        Some(
+            "SessionUnavailable"
+            | "RuntimeUnavailable"
+            | "RuntimeProtocolMismatch"
+            | "RuntimeCapabilityMismatch",
+        ) => TerminalOutcome::Lost,
+        Some(
+            "WorkspaceDenied"
+            | "CapabilityDenied"
+            | "PolicyDenied"
+            | "ElevationRequired"
+            | "PrivilegedRouteUnavailable",
+        ) => TerminalOutcome::Blocked,
+        _ => TerminalOutcome::Failed,
+    }
+}
+
 fn update_public_session_ownership(
     sessions: &SessionRegistry,
     owner: &McpSessionId,
     tool_name: &str,
     result: &Value,
-) {
+) -> Option<PublicSessionId> {
     let Some(data) = result.pointer("/structuredContent/data") else {
-        return;
+        return None;
     };
-    let status = data.get("status").and_then(Value::as_str);
-    if tool_name == "exec_command" && status == Some("running") {
+    if tool_name == "exec_command" {
         if let Some(public_session) = data
             .get("session_id")
             .and_then(Value::as_str)
             .map(PublicSessionId::new)
         {
-            sessions.add_public_session(owner, public_session);
+            sessions.add_public_session(owner, public_session.clone());
+            return Some(public_session);
         }
     }
+    None
 }
 
 fn valid_downstream_request_id(request_id: &Value) -> bool {
@@ -3581,7 +3930,6 @@ mod tests {
     use super::super::runtime::{
         CodingToolsPermissionMode, CodingToolsRuntimeConfig, InternalBearer,
     };
-    use super::super::task_state::{CommandOwner, CommandTerminalStatus, TerminalCommandSnapshot};
 
     const SYNTHETIC_BEARER: &str = "LB009_PEP_INTERNAL_BEARER_SYNTHETIC_DO_NOT_LEAK";
 
@@ -3627,34 +3975,38 @@ mod tests {
     #[test]
     fn durable_task_terminal_ignores_newer_unrelated_command() {
         let workspace = temp_workspace();
-        let store = CommandTaskStateStore::open_at(workspace.join("owned-terminal.json")).unwrap();
-        let a = CommandOwner::new("workflow-a", "lb-session-a");
-        store.begin(a.clone()).unwrap();
-        store
-            .finalize(TerminalCommandSnapshot::new(
-                a.clone(),
-                CommandTerminalStatus::Completed,
-                Some(0),
-                None,
-                false,
-                false,
-                vec!["lb-output-a".into()],
-                None,
-            ))
+        let store = ExecutionRegistry::open_at(workspace.join("owned-terminal.json")).unwrap();
+        let a = store
+            .start(TaskId::new("workflow-a"), PublicSessionId::new("lb-session-a"))
             .unwrap();
-        let b = CommandOwner::new("direct-b", "lb-session-b");
-        store.begin(b.clone()).unwrap();
         store
-            .finalize(TerminalCommandSnapshot::new(
-                b,
-                CommandTerminalStatus::TimedOut,
-                None,
-                None,
-                true,
-                false,
-                vec!["lb-output-b".into()],
-                Some("ProcessTimedOut".into()),
-            ))
+            .finish(
+                &a,
+                ExecutionTerminal {
+                    outcome: TerminalOutcome::Completed,
+                    exit_code: Some(0),
+                    signal: None,
+                    output_refs: vec!["lb-output-a".into()],
+                    error_code: None,
+                    completed_at_ms: unix_time_ms(),
+                },
+            )
+            .unwrap();
+        let b = store
+            .start(TaskId::new("direct-b"), PublicSessionId::new("lb-session-b"))
+            .unwrap();
+        store
+            .finish(
+                &b,
+                ExecutionTerminal {
+                    outcome: TerminalOutcome::TimedOut,
+                    exit_code: None,
+                    signal: None,
+                    output_refs: vec!["lb-output-b".into()],
+                    error_code: Some("ProcessTimedOut".into()),
+                    completed_at_ms: unix_time_ms(),
+                },
+            )
             .unwrap();
         let data = durable_task_snapshot_with_terminal(
             json!({"task_id":"workflow-a","state":"waiting"}),
@@ -3669,35 +4021,79 @@ mod tests {
     fn task_control_get_reads_durable_terminal_without_private_session() {
         let workspace = temp_workspace();
         let path = workspace.join("durable-command-state.json");
-        let owner = CommandOwner::new("task-durable", "lb-session-durable");
         {
-            let store = CommandTaskStateStore::open_at(path.clone()).unwrap();
-            store.begin(owner.clone()).unwrap();
+            let store = ExecutionRegistry::open_at(path.clone()).unwrap();
+            let execution = store
+                .start(
+                    TaskId::new("task-durable"),
+                    PublicSessionId::new("lb-session-durable"),
+                )
+                .unwrap();
             store
-                .finalize(TerminalCommandSnapshot::new(
-                    owner.clone(),
-                    CommandTerminalStatus::TimedOut,
-                    Some(124),
-                    Some("TERM".to_string()),
-                    true,
-                    false,
-                    vec!["lb-output-durable".to_string()],
-                    Some("ProcessTimedOut".to_string()),
-                ))
+                .finish(
+                    &execution,
+                    ExecutionTerminal {
+                        outcome: TerminalOutcome::TimedOut,
+                        exit_code: Some(124),
+                        signal: Some("TERM".to_string()),
+                        output_refs: vec!["lb-output-durable".to_string()],
+                        error_code: Some("ProcessTimedOut".to_string()),
+                        completed_at_ms: unix_time_ms(),
+                    },
+                )
                 .unwrap();
         }
 
         // Reopen from disk: there is deliberately no private runtime/session object here.
-        let reopened = CommandTaskStateStore::open_at(path).unwrap();
+        let reopened = ExecutionRegistry::open_at(path).unwrap();
         let data = task_control_snapshot_with_terminal(&CurrentTaskStatus::Idle, &reopened);
         let terminal = &data["last_terminal_command"];
-        assert_eq!(terminal["task_id"], owner.task_id);
-        assert_eq!(terminal["session_id"], owner.session_id);
+        assert_eq!(terminal["task_id"], "task-durable");
+        assert_eq!(terminal["session_id"], "lb-session-durable");
         assert_eq!(terminal["status"], "timed_out");
         assert_eq!(terminal["exit_code"], 124);
         assert_eq!(terminal["timed_out"], true);
         assert_eq!(terminal["output_refs"][0], "lb-output-durable");
         assert_eq!(terminal["error_code"], "ProcessTimedOut");
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn completed_foreground_task_restores_detached_execution_projection() {
+        let workspace = temp_workspace();
+        let executions =
+            ExecutionRegistry::open_at(workspace.join("projection-executions.json")).unwrap();
+        let execution_a = executions
+            .start(TaskId::new("task-a"), PublicSessionId::new("session-a"))
+            .unwrap();
+        let tasks = TaskRegistry::default();
+        let owner = McpSessionId::new("mcp-b");
+        let task_b = tasks.queue(
+            owner.clone(),
+            RequestKey::new(owner, RpcRequestId::Number(2)),
+            TaskKind::ReadFile,
+            SafeTaskSummary::from_untrusted("read file"),
+        );
+        tasks.mark_running(&task_b).unwrap();
+
+        let base = json!({"state":"idle","current_workflow":null});
+        let foreground = merge_control_plane_activity(base.clone(), &tasks, &executions);
+        assert_eq!(
+            foreground["current_activity"]["task_id"],
+            task_b.to_string()
+        );
+        assert_eq!(foreground["current_activity"]["kind"], "read");
+
+        tasks
+            .finish(&task_b, TerminalOutcome::Completed)
+            .unwrap();
+        let restored = merge_control_plane_activity(base, &tasks, &executions);
+        assert_eq!(
+            restored["current_activity"]["execution_id"],
+            execution_a.to_string()
+        );
+        assert_eq!(restored["current_activity"]["state"], "running");
+        assert_eq!(restored["current_command"]["session_id"], "session-a");
         cleanup_test_directory(&workspace);
     }
 
@@ -5245,22 +5641,23 @@ mod tests {
             long_command.body
         );
         thread::sleep(Duration::from_millis(650));
-        assert!(
-            matches!(
-                pep.current_task_projection().actual_snapshot(),
-                CurrentTaskStatus::Active(CurrentTask {
-                    kind: TaskKind::ExecuteCommand,
-                    state: TaskExecutionState::Running,
-                    ..
-                })
-            ),
-            "CurrentTask stopped before the public command session became terminal"
+        assert_eq!(
+            pep.current_task_projection().latest_snapshot(),
+            CurrentTaskStatus::Idle,
+            "foreground Task must finish after exec_command returns"
         );
+        assert!(matches!(
+            pep.tasks.latest_terminal().map(|task| task.lifecycle),
+            Some(LifecycleState::Terminal(TerminalOutcome::Completed))
+        ));
+        let detached = pep.task_aggregate_snapshot();
+        assert_eq!(detached["current_command"]["state"], "running");
+        assert_eq!(detached["current_activity"]["kind"], "command");
         let lifecycle_deadline = Instant::now() + Duration::from_secs(6);
-        while pep.current_task_projection().actual_snapshot() != CurrentTaskStatus::Idle {
+        while !pep.task_aggregate_snapshot()["current_command"].is_null() {
             assert!(
                 Instant::now() < lifecycle_deadline,
-                "CurrentTask did not converge to Idle after public command terminal"
+                "detached Execution did not reach a terminal outcome"
             );
             thread::sleep(Duration::from_millis(25));
         }
@@ -6696,7 +7093,7 @@ mod tests {
         });
         let running_deadline = Instant::now() + Duration::from_secs(3);
         while !matches!(
-            pep.current_task_projection().actual_snapshot(),
+            pep.current_task_projection().latest_snapshot(),
             CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
         ) {
             assert!(Instant::now() < running_deadline, "session A never ran");
@@ -6828,7 +7225,7 @@ mod tests {
         });
         let running_deadline = Instant::now() + Duration::from_secs(3);
         while !matches!(
-            pep.current_task_projection().actual_snapshot(),
+            pep.current_task_projection().latest_snapshot(),
             CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
         ) {
             assert!(Instant::now() < running_deadline, "session A never ran");
@@ -7086,7 +7483,7 @@ mod tests {
 
         let running_deadline = std::time::Instant::now() + Duration::from_secs(3);
         while !matches!(
-            pep.current_task_projection().actual_snapshot(),
+            pep.current_task_projection().latest_snapshot(),
             CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
         ) {
             assert!(
@@ -7195,7 +7592,7 @@ mod tests {
 
         let running_deadline = Instant::now() + Duration::from_secs(3);
         while !matches!(
-            pep.current_task_projection().actual_snapshot(),
+            pep.current_task_projection().latest_snapshot(),
             CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
         ) {
             assert!(
@@ -7392,7 +7789,7 @@ mod tests {
             "ProcessCancelled"
         );
         assert_eq!(
-            pep.current_task_projection().actual_snapshot(),
+            pep.current_task_projection().latest_snapshot(),
             CurrentTaskStatus::Idle
         );
 
