@@ -1,0 +1,20 @@
+{
+  "coding_tools_mcp": {
+    "version": "0.2.2",
+    "commit": "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc",
+    "tool_count": 20,
+    "tools_list_sha256": "d187db7ad6729893f17fceb539f030eb0c6139528ab35cb3f9564d27383d3674"
+  },
+  "tunnel_client": {
+    "version": "0.0.11",
+    "commit": "8d55683eeef80bc5e360d95abf4692454fafc615",
+    "windows_asset": "tunnel-client-v0.0.11-windows-amd64.zip",
+    "windows_asset_sha256": "eb912c86c6ccde90cda805cb17009507176a656725cf86c36fabe1901a12e29b"
+  },
+  "python_feasibility": {
+    "sample_version": "3.12.10",
+    "archive_sha256": "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
+  },
+  "pep": "first_party_rust_mcp_guard",
+  "process_ownership": "windows_job_object"
+}
