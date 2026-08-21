@@ -50,12 +50,27 @@
     },
     "R3": {
       "title": "Explicit Scheduler + Session Lifecycle",
-      "status": "IN_PROGRESS"
+      "status": "VERIFIED",
+      "implementation_commit": "6fc5215",
+      "verification": {
+        "tests": [
+          "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1 (326 passed)",
+          "bounded FIFO admits one foreground Work item and rejects beyond capacity",
+          "Control lane remains available while Work is running",
+          "session cancellation removes only that session's queued Work",
+          "expired MCP sessions are closed and reaped before capacity checks"
+        ],
+        "removed_old_truth": [
+          "transport worker saturation represented as HTTP server_busy",
+          "Facade mutex acquisition acting as the implicit Work scheduler",
+          "session deletion without an explicit lifecycle or TTL reaper"
+        ],
+        "verified_invariants": ["INV-04", "INV-05", "INV-09"]
+      }
     },
     "R4": {
       "title": "Desired / Observed Convergence",
-      "status": "BLOCKED",
-      "blocked_by": "R3 verification"
+      "status": "IN_PROGRESS"
     },
     "R5": {
       "title": "Snapshot / Typed UI",
@@ -107,5 +122,5 @@
     "automatic_next_phase": true,
     "unified_final_acceptance_after": "R7"
   },
-  "next_action": "Implement and verify R3 Explicit Scheduler + Session Lifecycle, then continue serially through R7 and perform one unified final acceptance."
+  "next_action": "Implement and verify R4 Desired / Observed Convergence, then continue serially through R7 and perform one unified final acceptance."
 }
