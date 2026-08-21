@@ -5,6 +5,8 @@ mod guard;
 mod http;
 mod runtime;
 mod server;
+#[cfg(all(test, windows))]
+mod test_support;
 
 pub use driver::{ProductionRuntimeConfig, ProductionRuntimeDriver};
 pub use facade::{

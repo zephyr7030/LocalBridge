@@ -72,7 +72,7 @@ use crate::filesystem::policy::FilesystemPathPolicy;
 use crate::filesystem::service::FilesystemCancellation;
 use crate::workspace::path_authority::WorkspaceResolver;
 
-const CURRENT_PROTOCOL_VERSION: &str = "2025-11-25";
+pub(super) const CURRENT_PROTOCOL_VERSION: &str = "2025-11-25";
 const COMPATIBLE_PROTOCOL_VERSION: &str = "2025-06-18";
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
@@ -4517,6 +4517,7 @@ fn write_response(
 
 #[cfg(all(test, windows))]
 mod tests {
+    use super::super::test_support::*;
     use super::*;
 
     #[test]
@@ -4671,7 +4672,7 @@ mod tests {
     }
 
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
     #[cfg(windows)]
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
@@ -5203,286 +5204,6 @@ mod tests {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .remove(&request_id);
             Ok(())
-        }
-    }
-
-    struct ClientResponse {
-        status: u16,
-        session: Option<String>,
-        body: Value,
-    }
-
-    struct RawHttpResponse {
-        status: u16,
-        session: Option<String>,
-        content_type: Option<String>,
-        body: Vec<u8>,
-    }
-
-    fn assert_tool_error(response: &ClientResponse, expected_code: &str) {
-        assert_eq!(response.status, 200, "{:#?}", response.body);
-        assert!(response.body.get("error").is_none(), "{:#?}", response.body);
-        assert_eq!(
-            response.body["result"]["isError"], true,
-            "{:#?}",
-            response.body
-        );
-        assert_eq!(
-            response.body["result"]["structuredContent"]["error"]["code"], expected_code,
-            "{:#?}",
-            response.body
-        );
-    }
-
-    fn repo_root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("src-tauri has repository parent")
-            .to_path_buf()
-    }
-
-    fn temp_workspace() -> PathBuf {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock after epoch")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "localbridge-lb009-pep-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        fs::write(path.join("probe.txt"), b"LB009 PEP\n").unwrap();
-        path
-    }
-
-    fn free_port() -> u16 {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        listener.local_addr().unwrap().port()
-    }
-
-    fn cleanup_test_directory(path: &Path) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        loop {
-            match fs::remove_dir_all(path) {
-                Ok(()) => return,
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Other
-                    ) && std::time::Instant::now() < deadline =>
-                {
-                    thread::sleep(Duration::from_millis(25));
-                }
-                Err(error) => panic!("remove test workspace {}: {error}", path.display()),
-            }
-        }
-    }
-
-    fn policy(root: &Path) -> CapabilityPolicy {
-        CapabilityPolicy::load(&root.join("runtime-policy.toml")).unwrap()
-    }
-
-    fn post(port: u16, session: Option<&str>, payload: &Value) -> ClientResponse {
-        // These are real process-backed integration requests. A cold Windows CI
-        // runner can spend several seconds in process creation and security
-        // scanning before the server writes its response, so keep the socket
-        // budget above the bounded command budgets used by the fixtures.
-        post_with_read_timeout(port, session, payload, Duration::from_secs(30))
-    }
-
-    fn post_with_read_timeout(
-        port: u16,
-        session: Option<&str>,
-        payload: &Value,
-        read_timeout: Duration,
-    ) -> ClientResponse {
-        let body = serde_json::to_vec(payload).unwrap();
-        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-        stream.set_read_timeout(Some(read_timeout)).unwrap();
-        let mut request = format!(
-            "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json, text/event-stream\r\nContent-Type: application/json\r\nMCP-Protocol-Version: {CURRENT_PROTOCOL_VERSION}\r\nConnection: close\r\nContent-Length: {}\r\n",
-            body.len()
-        );
-        if let Some(session) = session {
-            request.push_str("Mcp-Session-Id: ");
-            request.push_str(session);
-            request.push_str("\r\n");
-        }
-        request.push_str("\r\n");
-        stream.write_all(request.as_bytes()).unwrap();
-        stream.write_all(&body).unwrap();
-        stream.flush().unwrap();
-        parse_client_response(stream)
-    }
-
-    fn delete(port: u16, session: &str) -> u16 {
-        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-        let request = format!(
-            "DELETE /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nMcp-Session-Id: {session}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
-        );
-        stream.write_all(request.as_bytes()).unwrap();
-        stream.flush().unwrap();
-        parse_client_response(stream).status
-    }
-
-    fn get_sse(port: u16, session: &str) -> RawHttpResponse {
-        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        let request = format!(
-            "GET /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: text/event-stream\r\nMCP-Protocol-Version: {CURRENT_PROTOCOL_VERSION}\r\nMcp-Session-Id: {session}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
-        );
-        stream.write_all(request.as_bytes()).unwrap();
-        stream.flush().unwrap();
-        parse_raw_http_response(stream)
-    }
-
-    fn parse_raw_http_response(mut stream: TcpStream) -> RawHttpResponse {
-        let mut bytes = Vec::new();
-        stream.read_to_end(&mut bytes).unwrap();
-        let split = bytes
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .unwrap();
-        let headers = std::str::from_utf8(&bytes[..split]).unwrap();
-        let mut lines = headers.split("\r\n");
-        let status = lines
-            .next()
-            .unwrap()
-            .split_whitespace()
-            .nth(1)
-            .unwrap()
-            .parse::<u16>()
-            .unwrap();
-        let mut session = None;
-        let mut content_type = None;
-        for line in lines {
-            if let Some((name, value)) = line.split_once(':') {
-                if name.eq_ignore_ascii_case("Mcp-Session-Id") {
-                    session = Some(value.trim().to_string());
-                } else if name.eq_ignore_ascii_case("Content-Type") {
-                    content_type = Some(value.trim().to_string());
-                }
-            }
-        }
-        RawHttpResponse {
-            status,
-            session,
-            content_type,
-            body: bytes[(split + 4)..].to_vec(),
-        }
-    }
-
-    fn parse_client_response(mut stream: TcpStream) -> ClientResponse {
-        let mut bytes = Vec::new();
-        stream.read_to_end(&mut bytes).unwrap();
-        let split = bytes
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .unwrap();
-        let headers = std::str::from_utf8(&bytes[..split]).unwrap();
-        let mut lines = headers.split("\r\n");
-        let status = lines
-            .next()
-            .unwrap()
-            .split_whitespace()
-            .nth(1)
-            .unwrap()
-            .parse::<u16>()
-            .unwrap();
-        let session = lines.find_map(|line| {
-            line.split_once(':').and_then(|(name, value)| {
-                name.eq_ignore_ascii_case("Mcp-Session-Id")
-                    .then(|| value.trim().to_string())
-            })
-        });
-        let body_bytes = &bytes[(split + 4)..];
-        let body = if body_bytes.is_empty() {
-            Value::Null
-        } else {
-            serde_json::from_slice(body_bytes).unwrap()
-        };
-        ClientResponse {
-            status,
-            session,
-            body,
-        }
-    }
-
-    fn initialize(port: u16, id: u64) -> ClientResponse {
-        post(
-            port,
-            None,
-            &json!({
-                "jsonrpc":"2.0",
-                "id":id,
-                "method":"initialize",
-                "params":{
-                    "protocolVersion":CURRENT_PROTOCOL_VERSION,
-                    "capabilities":{},
-                    "clientInfo":{"name":"lb009-pep-test","version":"1"}
-                }
-            }),
-        )
-    }
-
-    fn public_tool_call(
-        port: u16,
-        session: &str,
-        id: u64,
-        name: &str,
-        arguments: Value,
-    ) -> ClientResponse {
-        post(
-            port,
-            Some(session),
-            &json!({
-                "jsonrpc":"2.0",
-                "id":id,
-                "method":"tools/call",
-                "params":{"name":name,"arguments":arguments}
-            }),
-        )
-    }
-
-    fn settle_public_command(
-        port: u16,
-        session: &str,
-        mut poll_id: u64,
-        mut response: ClientResponse,
-    ) -> (ClientResponse, String) {
-        let deadline = Instant::now() + Duration::from_secs(150);
-        let mut output = String::new();
-        loop {
-            let data = &response.body["result"]["structuredContent"]["data"];
-            output.push_str(data["output"].as_str().unwrap_or_default());
-            match data["status"].as_str() {
-                Some("running") => {
-                    assert!(
-                        Instant::now() < deadline,
-                        "public command did not converge: {:#?}",
-                        response.body
-                    );
-                    let public_session = data["session_id"]
-                        .as_str()
-                        .expect("running command has PublicSessionId")
-                        .to_string();
-                    response = public_tool_call(
-                        port,
-                        session,
-                        poll_id,
-                        "command_control",
-                        json!({"action":"poll","session_id":public_session,"wait_ms":1000}),
-                    );
-                    poll_id = poll_id.saturating_add(1);
-                }
-                Some(_) => return (response, output),
-                None => panic!(
-                    "public command response has no status: {:#?}",
-                    response.body
-                ),
-            }
         }
     }
 
@@ -6174,7 +5895,6 @@ mod tests {
     fn schema28_public_runtime_behavior_is_real_end_to_end() {
         use base64::Engine as _;
 
-        let root = repo_root();
         let workspace = temp_workspace();
         let nested_project = workspace.join("NestedProject");
         fs::create_dir_all(nested_project.join("src")).unwrap();
@@ -6202,19 +5922,8 @@ mod tests {
         )
         .unwrap();
 
-        let coding = CodingToolsRuntime::start(
-            CodingToolsRuntimeConfig::new(
-                &root,
-                &workspace,
-                free_port(),
-                CodingToolsPermissionMode::Trusted,
-            ),
-            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
-            Duration::from_secs(10),
-        )
-        .expect("schema28 bundled MCP ready");
-        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
-            .expect("schema28 PEP ready after live private-result semantic probe");
+        let fixture = PublicRuntimeFixture::start_in(workspace.clone(), PermissionMode::Full);
+        let pep = fixture.runtime();
         let initialized = initialize(pep.port(), 700);
         assert_eq!(
             initialized.body["result"]["capabilities"]["tools"]["listChanged"], true,
@@ -6928,203 +6637,6 @@ mod tests {
         );
         assert!(auto_utf8_output.contains("自动中文✓"));
 
-        let running = public_tool_call(
-            pep.port(),
-            &session,
-            703,
-            "exec_command",
-            json!({
-                "command":"Start-Sleep -Milliseconds 300; Write-Output 'poll-1'; Start-Sleep -Milliseconds 600; Write-Output 'poll-2'; Start-Sleep -Milliseconds 600; Write-Output 'poll-3'; $line=[Console]::In.ReadLine(); Write-Output ('write:'+ $line); Start-Sleep -Seconds 30",
-                "shell":"windows_powershell",
-                "yield_time_ms":0,
-                "timeout_ms":45000
-            }),
-        );
-        assert_eq!(
-            running.body["result"]["structuredContent"]["data"]["status"], "running",
-            "{:#?}",
-            running.body
-        );
-        let public_session = running.body["result"]["structuredContent"]["data"]["session_id"]
-            .as_str()
-            .expect("schema28 public session")
-            .to_string();
-
-        let mut nonempty_polls = Vec::new();
-        let poll_deadline = Instant::now() + Duration::from_secs(6);
-        let mut poll_id = 710u64;
-        while nonempty_polls.len() < 3 && Instant::now() < poll_deadline {
-            thread::sleep(Duration::from_millis(120));
-            let poll = public_tool_call(
-                pep.port(),
-                &session,
-                poll_id,
-                "command_control",
-                json!({"action":"poll","session_id":public_session,"wait_ms":0}),
-            );
-            poll_id += 1;
-            assert!(poll.body.get("error").is_none(), "{:#?}", poll.body);
-            let output = poll.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            if !output.is_empty() {
-                nonempty_polls.push(output);
-            }
-        }
-        assert_eq!(
-            nonempty_polls.len(),
-            3,
-            "incremental polls: {nonempty_polls:#?}"
-        );
-        for (index, marker) in ["poll-1", "poll-2", "poll-3"].into_iter().enumerate() {
-            assert!(
-                nonempty_polls[index].contains(marker),
-                "{nonempty_polls:#?}"
-            );
-            for other in ["poll-1", "poll-2", "poll-3"] {
-                if other != marker {
-                    assert!(
-                        !nonempty_polls[index].contains(other),
-                        "{nonempty_polls:#?}"
-                    );
-                }
-            }
-        }
-        let empty_poll = public_tool_call(
-            pep.port(),
-            &session,
-            poll_id,
-            "command_control",
-            json!({"action":"poll","session_id":public_session,"wait_ms":0}),
-        );
-        assert_eq!(
-            empty_poll.body["result"]["structuredContent"]["data"]["output"], "",
-            "poll output replayed: {:#?}",
-            empty_poll.body
-        );
-
-        let wait_started = Instant::now();
-        let waited_poll = public_tool_call(
-            pep.port(),
-            &session,
-            poll_id + 1,
-            "command_control",
-            json!({"action":"poll","session_id":public_session,"wait_ms":500}),
-        );
-        assert!(
-            wait_started.elapsed() <= Duration::from_millis(1500),
-            "poll wait_ms budget exceeded: {:?}",
-            wait_started.elapsed()
-        );
-        assert_eq!(
-            waited_poll.body["result"]["structuredContent"]["data"]["output"],
-            ""
-        );
-
-        let write_started = Instant::now();
-        let written = public_tool_call(
-            pep.port(),
-            &session,
-            poll_id + 2,
-            "command_control",
-            json!({
-                "action":"write",
-                "session_id":public_session,
-                "chars":"after-start\n",
-                "wait_ms":500
-            }),
-        );
-        assert!(
-            write_started.elapsed() <= Duration::from_millis(1500),
-            "write wait_ms budget exceeded: {:?}",
-            write_started.elapsed()
-        );
-        assert_eq!(
-            written.body["result"]["isError"], false,
-            "{:#?}",
-            written.body
-        );
-        assert!(
-            written.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("write:after-start"),
-            "{:#?}",
-            written.body
-        );
-
-        let kill_started = Instant::now();
-        let killed = public_tool_call(
-            pep.port(),
-            &session,
-            poll_id + 3,
-            "command_control",
-            json!({"action":"kill","session_id":public_session,"signal":"TERM","wait_ms":1000}),
-        );
-        assert_eq!(
-            killed.body["result"]["isError"], false,
-            "healthy kill regressed: {:#?}",
-            killed.body
-        );
-        assert!(
-            kill_started.elapsed() <= Duration::from_millis(2000),
-            "kill wait_ms budget exceeded: {:?}",
-            kill_started.elapsed()
-        );
-        assert_eq!(killed.body["result"]["structuredContent"]["ok"], true);
-        assert_eq!(
-            killed.body["result"]["structuredContent"]["data"]["status"],
-            "cancelled"
-        );
-        for id in [poll_id + 4, poll_id + 5] {
-            let terminal = public_tool_call(
-                pep.port(),
-                &session,
-                id,
-                "command_control",
-                json!({"action":"poll","session_id":public_session}),
-            );
-            assert_eq!(
-                terminal.body["result"]["structuredContent"]["error"]["code"], "ProcessCancelled",
-                "terminal regressed to unavailable: {:#?}",
-                terminal.body
-            );
-            assert_eq!(
-                terminal.body["result"]["structuredContent"]["data"]["status"],
-                "cancelled"
-            );
-        }
-        let second_terminal = public_tool_call(
-            pep.port(),
-            &session,
-            poll_id + 5,
-            "command_control",
-            json!({"action":"poll","session_id":public_session}),
-        );
-        assert_eq!(
-            second_terminal.body["result"]["structuredContent"]["data"]["output"],
-            ""
-        );
-
-        let durable_terminal = public_tool_call(
-            pep.port(),
-            &session,
-            poll_id + 6,
-            "task_control",
-            json!({"action":"get"}),
-        );
-        let durable =
-            &durable_terminal.body["result"]["structuredContent"]["data"]["last_terminal_command"];
-        assert_eq!(durable["session_id"], public_session);
-        assert_eq!(durable["status"], "cancelled");
-        assert_eq!(durable["cancelled"], true);
-        assert_eq!(durable["error_code"], "ProcessCancelled");
-        assert!(
-            !serde_json::to_string(durable).unwrap().contains("PRIVATE_"),
-            "schema29 durable terminal task-state leaked a private handle: {durable:#?}"
-        );
-
         for (id, size) in [(760u64, 512u32), (761u64, 64u32)] {
             let viewed = public_tool_call(
                 pep.port(),
@@ -7203,9 +6715,90 @@ mod tests {
             invalid_range.body
         );
 
-        let mut coding = pep.stop().expect("schema28 PEP stops");
-        coding.stop().expect("schema28 Coding Tools runtime stops");
-        cleanup_test_directory(&workspace);
+        fixture.shutdown();
+    }
+
+    #[test]
+    fn schema28_detached_command_lifecycle_is_incremental_and_durable() {
+        let fixture = PublicRuntimeFixture::start(PermissionMode::Full);
+        let pep = fixture.runtime();
+        let (client, _) = PublicMcpClient::connect(pep.port(), 45_000);
+
+        // Explicit stdin handshakes create causal output boundaries. This does
+        // not assume a cold PowerShell process starts within a fixed delay or
+        // that the OS schedules exactly one marker per transport poll.
+        let mut command = client.start_detached_command(json!({
+            "command":"Write-Output 'poll-1'; $null=[Console]::In.ReadLine(); Write-Output 'poll-2'; $null=[Console]::In.ReadLine(); Write-Output 'poll-3'; $line=[Console]::In.ReadLine(); Write-Output ('write:'+ $line); Start-Sleep -Seconds 30",
+            "shell":"windows_powershell",
+            "yield_time_ms":0,
+            "timeout_ms":120000
+        }));
+        let public_session = command.session_id().to_string();
+
+        for (marker, input) in [
+            ("poll-1", Some("step-2\n")),
+            ("poll-2", Some("step-3\n")),
+            ("poll-3", Some("after-start\n")),
+            ("write:after-start", None),
+        ] {
+            command.wait_for_output(marker, Duration::from_secs(120));
+            assert_eq!(
+                command.output().matches(marker).count(),
+                1,
+                "output was replayed: {:?}",
+                command.output()
+            );
+            command.assert_next_poll_empty();
+            if let Some(input) = input {
+                command.write(input, 1_000);
+            }
+        }
+
+        let killed = command.kill("TERM", 1_000);
+        assert_eq!(
+            killed.body["result"]["isError"], false,
+            "healthy kill regressed: {:#?}",
+            killed.body
+        );
+        assert_eq!(killed.body["result"]["structuredContent"]["ok"], true);
+        assert_eq!(
+            killed.body["result"]["structuredContent"]["data"]["status"],
+            "cancelled"
+        );
+
+        for _ in 0..3 {
+            let terminal = client.call_tool(
+                "command_control",
+                json!({"action":"poll","session_id":public_session}),
+            );
+            assert_eq!(
+                terminal.body["result"]["structuredContent"]["error"]["code"], "ProcessCancelled",
+                "terminal regressed to unavailable: {:#?}",
+                terminal.body
+            );
+            assert_eq!(
+                terminal.body["result"]["structuredContent"]["data"]["status"],
+                "cancelled"
+            );
+            assert_eq!(
+                terminal.body["result"]["structuredContent"]["data"]["output"],
+                ""
+            );
+        }
+
+        let durable_terminal = client.call_tool("task_control", json!({"action":"get"}));
+        let durable =
+            &durable_terminal.body["result"]["structuredContent"]["data"]["last_terminal_command"];
+        assert_eq!(durable["session_id"], public_session);
+        assert_eq!(durable["status"], "cancelled");
+        assert_eq!(durable["cancelled"], true);
+        assert_eq!(durable["error_code"], "ProcessCancelled");
+        assert!(
+            !serde_json::to_string(durable).unwrap().contains("PRIVATE_"),
+            "durable terminal task-state leaked a private handle: {durable:#?}"
+        );
+
+        fixture.shutdown();
     }
 
     #[test]
