@@ -70,12 +70,29 @@
     },
     "R4": {
       "title": "Desired / Observed Convergence",
-      "status": "IN_PROGRESS"
+      "status": "VERIFIED",
+      "implementation_commit": "6dded95",
+      "verification": {
+        "tests": [
+          "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1 (319 passed)",
+          "Desired Elevated plus unavailable Broker remains configured but effectively non-elevated",
+          "Desired workspace B plus observed workspace A rejects Work before scheduler admission",
+          "connection credential revision mismatch plans restart and remains fail-closed",
+          "workspace switch failure retains Desired intent without runtime or settings rollback"
+        ],
+        "removed_old_truth": [
+          "MCP RwLock<PermissionMode> live truth",
+          "ProductionRuntimeConfig mutable permission copy",
+          "WorkspaceControlState desired/candidate/active parallel state",
+          "WorkspaceCoordinator and Runtime workspace rollback compensation",
+          "unused AppState permission/runtime/workspace mirror"
+        ],
+        "verified_invariants": ["INV-01", "INV-08", "INV-09"]
+      }
     },
     "R5": {
       "title": "Snapshot / Typed UI",
-      "status": "BLOCKED",
-      "blocked_by": "R4 verification"
+      "status": "IN_PROGRESS"
     },
     "R6": {
       "title": "Boundary Cleanup",
@@ -122,5 +139,5 @@
     "automatic_next_phase": true,
     "unified_final_acceptance_after": "R7"
   },
-  "next_action": "Implement and verify R4 Desired / Observed Convergence, then continue serially through R7 and perform one unified final acceptance."
+  "next_action": "Implement and verify R5 Snapshot / Typed UI, then continue serially through R7 and perform one unified final acceptance."
 }
