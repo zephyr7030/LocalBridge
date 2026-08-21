@@ -4,6 +4,18 @@ Status: **CURRENT HUMAN AUTHORITY**
 Effective date: 2026-08-21  
 Supersedes: `docs/06_PR_GROUPS_AND_EXECUTION.md`, the live LB-PR/G0–G4 execution model, and all live `current_pr/current_group` semantics.
 
+## Execution amendment (2026-08-21)
+
+The live serial sequence is `R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R7`.
+
+After each phase is implemented and verified against executable behavior, update `PROJECT_STATE.json.current_phase` and continue automatically. Phase verification is not final acceptance. Perform one unified final acceptance only after R7.
+
+- R5 owns revisioned snapshot and typed UI convergence.
+- R6 owns MCP boundary cleanup, shell/filesystem policy separation, WorkspaceResolver convergence, dependency direction, and remaining core type cleanup.
+- R7 owns the bounded Update Checker, GitHub release link, version detection, and non-blocking startup check lifecycle.
+
+This amendment supersedes later text in this document that limits the sequence to R1-R5, defers Update Checker beyond the refactor, or requires stopping at a phase boundary.
+
 ## 1. 重构目标
 
 下一轮暂停继续增加 Update Checker、窗口控制、浏览器能力等上层功能，优先完成底层控制面收口。

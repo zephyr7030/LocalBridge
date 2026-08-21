@@ -20,9 +20,9 @@ Current disk code and real tests define implementation reality. The schema44 con
 
 The live sequence is strictly:
 
-`R1 → R2 → R3 → R4 → R5`
+`R1 → R2 → R3 → R4 → R5 → R6 → R7`
 
-`PROJECT_STATE.json.current_phase` is the only current-phase pointer. Single agent, serial execution. Do not start the next phase automatically after acceptance.
+`PROJECT_STATE.json.current_phase` is the only current-phase pointer. Single agent, serial execution. After each phase is implemented and verified, update the pointer and continue automatically. Perform one unified final acceptance after R7.
 
 Do not add unrelated product features while the contract freezes them. Keep product changes and governance/provenance changes separate. Never fabricate PASS, review, authorization, provenance, or human evidence.
 
@@ -54,4 +54,4 @@ Existing Edit / Full / Elevated security boundaries remain in force unless the c
 
 Target the current phase and the contract invariants first. Concurrency, cancellation, session lifecycle, terminal convergence, recovery, and snapshot consistency require executable behavior tests; source markers or function names are not substitutes.
 
-Any command/session/operation returning a non-terminal state must be followed to a durable terminal state before completion is claimed. Once the current phase reaches its required terminal acceptance state, report and stop.
+Any command/session/operation returning a non-terminal state must be followed to a durable terminal state before completion is claimed. Report each verified phase while continuing serially; claim acceptance only after the unified final gate following R7.

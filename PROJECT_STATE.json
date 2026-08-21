@@ -7,7 +7,7 @@
   "status": "REFACTOR_IN_PROGRESS",
   "current_phase": "R1",
   "implementation_started": true,
-  "phase_order": ["R1", "R2", "R3", "R4", "R5"],
+  "phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
   "phases": {
     "R1": {
       "title": "Identity / Isolation",
@@ -16,22 +16,32 @@
     "R2": {
       "title": "Task / Execution Convergence",
       "status": "BLOCKED",
-      "blocked_by": "R1 acceptance"
+      "blocked_by": "R1 verification"
     },
     "R3": {
       "title": "Explicit Scheduler + Session Lifecycle",
       "status": "BLOCKED",
-      "blocked_by": "R2 acceptance"
+      "blocked_by": "R2 verification"
     },
     "R4": {
       "title": "Desired / Observed Convergence",
       "status": "BLOCKED",
-      "blocked_by": "R3 acceptance"
+      "blocked_by": "R3 verification"
     },
     "R5": {
-      "title": "Snapshot / Typed UI / Module Cleanup",
+      "title": "Snapshot / Typed UI",
       "status": "BLOCKED",
-      "blocked_by": "R4 acceptance"
+      "blocked_by": "R4 verification"
+    },
+    "R6": {
+      "title": "Boundary Cleanup",
+      "status": "BLOCKED",
+      "blocked_by": "R5 verification"
+    },
+    "R7": {
+      "title": "Product Lifecycle",
+      "status": "BLOCKED",
+      "blocked_by": "R6 verification"
     }
   },
   "baseline_release": {
@@ -57,9 +67,16 @@
     "source": "explicit_user_instruction",
     "decision": "ABOLISH_LB_PR_AND_G_GROUP_LIVE_GOVERNANCE",
     "old_live_model": "LB PR sequence plus G0-G4 gates",
-    "new_live_model": "R1-R5 control-plane refactor phases",
+    "new_live_model": "R1-R7 control-plane refactor phases with unified final acceptance",
     "legacy_pr_group_state_is_authoritative": false,
     "legacy_history_location": "Git history before schema44 governance transition"
   },
-  "next_action": "Implement and verify R1 Identity / Isolation only. Do not start R2 automatically after R1 acceptance."
+  "execution_amendment": {
+    "effective_at": "2026-08-21",
+    "source": "explicit_user_instruction",
+    "decision": "SERIAL_AUTO_ADVANCE_WITH_UNIFIED_FINAL_ACCEPTANCE",
+    "automatic_next_phase": true,
+    "unified_final_acceptance_after": "R7"
+  },
+  "next_action": "Implement and verify R1 Identity / Isolation, then continue serially through R7 and perform one unified final acceptance."
 }

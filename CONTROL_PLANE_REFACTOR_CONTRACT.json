@@ -18,9 +18,10 @@
     "single_agent": true,
     "serial": true,
     "current_phase_source": "PROJECT_STATE.json.current_phase",
-    "strict_phase_order": ["R1", "R2", "R3", "R4", "R5"],
-    "advance_only_after_phase_acceptance": true,
-    "no_automatic_next_phase": true,
+    "strict_phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
+    "advance_only_after_phase_verification": true,
+    "automatic_next_phase": true,
+    "unified_final_acceptance_after": "R7",
     "product_and_governance_changes_separate": true,
     "disk_code_and_real_tests_define_implementation_reality": true,
     "contract_defines_required_behavior": true,
@@ -438,16 +439,36 @@
       ]
     },
     "R5": {
-      "title": "Snapshot / Typed UI / Module Cleanup",
-      "goal": "Make projection/error first-class and complete transport/domain boundary cleanup after ownership is stable.",
+      "title": "Snapshot / Typed UI",
+      "goal": "Make projection and error first-class revisioned control-plane state.",
       "required_outcomes": [
         "ControlPlaneSnapshot with revision",
         "UiError and active_faults",
         "No fabricated running",
         "No live composite MainProjection",
         "No core Result<T,String> boundary",
-        "No core TaskAggregate serde_json::Value",
-        "MCP module reduced to transport/mapping role"
+        "No core TaskAggregate serde_json::Value"
+      ]
+    },
+    "R6": {
+      "title": "Boundary Cleanup",
+      "goal": "Complete transport/domain separation after ownership and snapshot migration are stable.",
+      "required_outcomes": [
+        "MCP module reduced to protocol, transport, and mapping",
+        "Structured filesystem authorization separated from shell execution policy",
+        "All workspace paths resolved through WorkspaceResolver",
+        "Dependency direction is transport -> control_plane -> domain/runtime/privilege/workspace",
+        "No core lifecycle/control-plane serde_json::Value state"
+      ]
+    },
+    "R7": {
+      "title": "Product Lifecycle",
+      "goal": "Add bounded update and release-discovery lifecycle on top of the converged control plane.",
+      "required_outcomes": [
+        "Update checker has one typed owner and explicit lifecycle",
+        "GitHub release link and version detection are typed and observable",
+        "Startup update check is bounded, retryable, and cannot block runtime readiness",
+        "Update state is published through the revisioned snapshot and typed UI boundary"
       ]
     }
   },
@@ -494,7 +515,7 @@
       "complex workflow expansion",
       "additional long-lived background execution capabilities"
     ],
-    "defer_low_coupling": ["Update Checker"],
+    "defer_low_coupling_until": {"Update Checker": "R7"},
     "filesystem_policy": "bug fixes only; do not expand responsibility during R1-R3"
   },
   "final_completion_criteria": [
@@ -510,6 +531,9 @@
     "No live-composite MainProjection read",
     "No core UI Result<T,String> boundary",
     "No manually synchronized duplicate Permission/Workspace truths",
-    "No MCP Transport ownership of domain lifecycle"
+    "No MCP Transport ownership of domain lifecycle",
+    "Structured filesystem and shell execution use distinct policy models",
+    "All workspace operations use WorkspaceResolver",
+    "Update checking has a bounded typed lifecycle and cannot block startup"
   ]
 }
