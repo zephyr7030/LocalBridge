@@ -5,18 +5,32 @@
   "contract_file": "CONTROL_PLANE_REFACTOR_CONTRACT.json",
   "human_authority": "docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md",
   "status": "REFACTOR_IN_PROGRESS",
-  "current_phase": "R1",
+  "current_phase": "R2",
   "implementation_started": true,
   "phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
   "phases": {
     "R1": {
       "title": "Identity / Isolation",
-      "status": "IN_PROGRESS"
+      "status": "VERIFIED",
+      "implementation_commit": "4289b79",
+      "verification": {
+        "tests": [
+          "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1 (316 passed)",
+          "same RPC id in two MCP sessions with isolated notifications/cancelled",
+          "session-scoped task_control(cancel) with another session surviving",
+          "cross-session public command kill rejected"
+        ],
+        "removed_old_truth": [
+          "bare active_requests vector",
+          "parallel local/privileged cancellation vectors",
+          "global durable workflow cancellation fallback"
+        ],
+        "verified_invariants": ["INV-02", "INV-04"]
+      }
     },
     "R2": {
       "title": "Task / Execution Convergence",
-      "status": "BLOCKED",
-      "blocked_by": "R1 verification"
+      "status": "IN_PROGRESS"
     },
     "R3": {
       "title": "Explicit Scheduler + Session Lifecycle",
@@ -78,5 +92,5 @@
     "automatic_next_phase": true,
     "unified_final_acceptance_after": "R7"
   },
-  "next_action": "Implement and verify R1 Identity / Isolation, then continue serially through R7 and perform one unified final acceptance."
+  "next_action": "Implement and verify R2 Task / Execution Convergence, then continue serially through R7 and perform one unified final acceptance."
 }
