@@ -1607,7 +1607,9 @@ fn available_loopback_port() -> Result<u16, RuntimeFault> {
 fn policy_runtime_fault(error: PolicyEnforcementError) -> RuntimeFault {
     match error {
         PolicyEnforcementError::BindFailed => RuntimeFault::PolicyBindFailed,
-        PolicyEnforcementError::UpstreamSessionUnavailable
+        PolicyEnforcementError::UpstreamCancellationUnavailable
+        | PolicyEnforcementError::UpstreamHealthUnavailable
+        | PolicyEnforcementError::UpstreamFacadeNegotiationFailed
         | PolicyEnforcementError::ThreadSpawnFailed
         | PolicyEnforcementError::ThreadTerminated => RuntimeFault::PolicyInvalid,
     }

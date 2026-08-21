@@ -481,7 +481,9 @@ impl CurrentTaskProjection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyEnforcementError {
     BindFailed,
-    UpstreamSessionUnavailable,
+    UpstreamCancellationUnavailable,
+    UpstreamHealthUnavailable,
+    UpstreamFacadeNegotiationFailed,
     ThreadSpawnFailed,
     ThreadTerminated,
 }
@@ -490,8 +492,14 @@ impl fmt::Display for PolicyEnforcementError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BindFailed => f.write_str("policy enforcement loopback bind failed"),
-            Self::UpstreamSessionUnavailable => {
-                f.write_str("policy enforcement upstream MCP session is unavailable")
+            Self::UpstreamCancellationUnavailable => f.write_str(
+                "policy enforcement upstream MCP cancellation client is unavailable",
+            ),
+            Self::UpstreamHealthUnavailable => {
+                f.write_str("policy enforcement upstream MCP health client is unavailable")
+            }
+            Self::UpstreamFacadeNegotiationFailed => {
+                f.write_str("policy enforcement upstream facade negotiation failed")
             }
             Self::ThreadSpawnFailed => f.write_str("policy enforcement thread could not start"),
             Self::ThreadTerminated => {
@@ -586,12 +594,12 @@ impl PolicyEnforcementRuntime {
         let health_workspace = coding_runtime.workspace().to_path_buf();
         let cancellation = coding_runtime
             .cancellation_client()
-            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
+            .map_err(|_| PolicyEnforcementError::UpstreamCancellationUnavailable)?;
         let health_client = coding_runtime
             .health_client()
-            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
+            .map_err(|_| PolicyEnforcementError::UpstreamHealthUnavailable)?;
         let guard = AgentFacade::from_coding_runtime(coding_runtime, policy)
-            .map_err(|_| PolicyEnforcementError::UpstreamSessionUnavailable)?;
+            .map_err(|_| PolicyEnforcementError::UpstreamFacadeNegotiationFailed)?;
         let task_state = guard.command_task_state();
         let runtime_task_state = task_state.clone();
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
