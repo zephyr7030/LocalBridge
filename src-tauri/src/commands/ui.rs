@@ -1059,6 +1059,7 @@ fn production_install_root() -> UiResult<PathBuf> {
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .ok_or_else(|| "无法定位本地运行环境".to_string())
+            .map_err(UiError::from_string)
     }
 }
 
