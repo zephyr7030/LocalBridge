@@ -1,4 +1,6 @@
-use std::collections::{HashMap, VecDeque};
+#[cfg(test)]
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
@@ -10,12 +12,17 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
+use crate::control_plane::request_registry::{
+    ActiveRequest, RequestCancellationTarget, RequestRegistry,
+};
+use crate::control_plane::session_registry::{SessionInsertError, SessionRecord, SessionRegistry};
 use crate::diagnostics::error::{
     ErrorDiagnostic, mcp_invalid, mcp_unavailable, mcp_unknown, transport_unavailable,
 };
 use crate::diagnostics::{
     record_mcp_request_error, record_mcp_request_result, record_mcp_request_start,
 };
+use crate::domain::{McpSessionId, PublicSessionId, RequestKey, RpcRequestId};
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
@@ -55,13 +62,7 @@ const MAX_CONNECTION_WORKERS: usize = 32;
 const MAX_DOWNSTREAM_MCP_SESSIONS: usize = 64;
 static SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Debug, Clone)]
-struct McpSession {
-    protocol: String,
-    tool_catalog_signature: String,
-    tools_list_changed_pending: bool,
-}
+static PRIVATE_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct ConnectionContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
@@ -70,12 +71,9 @@ struct ConnectionContext<'a> {
     permission_mode: &'a RwLock<PermissionMode>,
     current_task: &'a CurrentTaskProjection,
     task_state: &'a CommandTaskStateStore,
-    sessions: &'a Mutex<HashMap<String, McpSession>>,
-    active_requests: &'a Mutex<Vec<Value>>,
-    local_filesystem_requests: &'a Mutex<Vec<(Value, FilesystemCancellation)>>,
+    sessions: &'a SessionRegistry,
+    requests: &'a RequestRegistry,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
-    privileged_requests: &'a Mutex<Vec<(Value, String)>>,
-    privileged_filesystem_requests: &'a Mutex<Vec<(Value, String)>>,
     stopping: &'a AtomicBool,
 }
 
@@ -83,8 +81,7 @@ struct ElevatedCallContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
     current_task: &'a CurrentTaskProjection,
-    active_requests: &'a Mutex<Vec<Value>>,
-    privileged_requests: &'a Mutex<Vec<(Value, String)>>,
+    requests: &'a RequestRegistry,
     stopping: &'a AtomicBool,
 }
 
@@ -92,16 +89,14 @@ struct AdministratorFilesystemContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
     current_task: &'a CurrentTaskProjection,
-    active_requests: &'a Mutex<Vec<Value>>,
-    privileged_filesystem_requests: &'a Mutex<Vec<(Value, String)>>,
+    requests: &'a RequestRegistry,
     stopping: &'a AtomicBool,
 }
 
 struct WorkspaceFilesystemContext<'a> {
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     current_task: &'a CurrentTaskProjection,
-    active_requests: &'a Mutex<Vec<Value>>,
-    local_filesystem_requests: &'a Mutex<Vec<(Value, FilesystemCancellation)>>,
+    requests: &'a RequestRegistry,
     stopping: &'a AtomicBool,
 }
 
@@ -111,11 +106,9 @@ struct TaskControlContext<'a> {
     cancellation: &'a McpCancellationClient,
     current_task: &'a CurrentTaskProjection,
     task_state: &'a CommandTaskStateStore,
-    active_requests: &'a Mutex<Vec<Value>>,
-    local_filesystem_requests: &'a Mutex<Vec<(Value, FilesystemCancellation)>>,
+    sessions: &'a SessionRegistry,
+    requests: &'a RequestRegistry,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
-    privileged_requests: &'a Mutex<Vec<(Value, String)>>,
-    privileged_filesystem_requests: &'a Mutex<Vec<(Value, String)>>,
 }
 
 struct ServeContext {
@@ -125,7 +118,7 @@ struct ServeContext {
     permission_mode: Arc<RwLock<PermissionMode>>,
     current_task: CurrentTaskProjection,
     task_state: CommandTaskStateStore,
-    sessions: Arc<Mutex<HashMap<String, McpSession>>>,
+    sessions: SessionRegistry,
     privileged: Option<Arc<dyn PrivilegedExecution>>,
     shutdown: mpsc::Receiver<()>,
 }
@@ -492,9 +485,9 @@ impl fmt::Display for PolicyEnforcementError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::BindFailed => f.write_str("policy enforcement loopback bind failed"),
-            Self::UpstreamCancellationUnavailable => f.write_str(
-                "policy enforcement upstream MCP cancellation client is unavailable",
-            ),
+            Self::UpstreamCancellationUnavailable => {
+                f.write_str("policy enforcement upstream MCP cancellation client is unavailable")
+            }
             Self::UpstreamHealthUnavailable => {
                 f.write_str("policy enforcement upstream MCP health client is unavailable")
             }
@@ -613,10 +606,10 @@ impl PolicyEnforcementRuntime {
             .port();
         let permission_mode = Arc::new(RwLock::new(permission_mode));
         let current_task = CurrentTaskProjection::new(wake);
-        let sessions = Arc::new(Mutex::new(HashMap::<String, McpSession>::new()));
+        let sessions = SessionRegistry::default();
         let thread_mode = Arc::clone(&permission_mode);
         let thread_task = current_task.clone();
-        let thread_sessions = Arc::clone(&sessions);
+        let thread_sessions = sessions.clone();
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
         let guard = Arc::new(Mutex::new(guard));
         let thread_guard = Arc::clone(&guard);
@@ -821,11 +814,7 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         privileged,
         shutdown,
     } = context;
-    let active_requests = Arc::new(Mutex::new(Vec::<Value>::new()));
-    let local_filesystem_requests =
-        Arc::new(Mutex::new(Vec::<(Value, FilesystemCancellation)>::new()));
-    let privileged_requests = Arc::new(Mutex::new(Vec::<(Value, String)>::new()));
-    let privileged_filesystem_requests = Arc::new(Mutex::new(Vec::<(Value, String)>::new()));
+    let requests = RequestRegistry::default();
     let stopping = Arc::new(AtomicBool::new(false));
     let mut workers = Vec::<JoinHandle<()>>::new();
     let mut next_session_reap = Instant::now();
@@ -883,13 +872,9 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                 let worker_mode = Arc::clone(&permission_mode);
                 let worker_task = current_task.clone();
                 let worker_task_state = task_state.clone();
-                let worker_sessions = Arc::clone(&sessions);
-                let worker_active = Arc::clone(&active_requests);
-                let worker_local_filesystem = Arc::clone(&local_filesystem_requests);
+                let worker_sessions = sessions.clone();
+                let worker_requests = requests.clone();
                 let worker_privileged = privileged.as_ref().map(Arc::clone);
-                let worker_privileged_requests = Arc::clone(&privileged_requests);
-                let worker_privileged_filesystem_requests =
-                    Arc::clone(&privileged_filesystem_requests);
                 let worker_stopping = Arc::clone(&stopping);
                 let worker_cancellation = cancellation.clone();
                 if let Ok(worker) = thread::Builder::new()
@@ -903,11 +888,8 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                             current_task: &worker_task,
                             task_state: &worker_task_state,
                             sessions: &worker_sessions,
-                            active_requests: &worker_active,
-                            local_filesystem_requests: &worker_local_filesystem,
+                            requests: &worker_requests,
                             privileged: worker_privileged.as_ref(),
-                            privileged_requests: &worker_privileged_requests,
-                            privileged_filesystem_requests: &worker_privileged_filesystem_requests,
                             stopping: &worker_stopping,
                         };
                         let _ = handle_connection(stream, context);
@@ -923,55 +905,14 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         }
     }
     for _ in 0..3 {
-        let active = active_requests
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let active = requests.all();
         if active.is_empty() {
             break;
         }
-        for request_id in &active {
-            if cancel_local_filesystem(&local_filesystem_requests, request_id) {
-                continue;
-            }
-            if let Some(broker_request_id) =
-                privileged_request_id(&privileged_filesystem_requests, request_id)
-            {
-                if let Some(privileged) = privileged.as_ref() {
-                    let _ = privileged.cancel_structured_filesystem(broker_request_id);
-                }
-                continue;
-            }
-            if let Some(broker_request_id) = privileged_request_id(&privileged_requests, request_id)
-            {
-                if let Some(privileged) = privileged.as_ref() {
-                    let _ = privileged.cancel_execute(broker_request_id);
-                }
-            } else {
-                let _ = cancellation.cancel_request(request_id);
-            }
+        for request in &active {
+            let _ = cancel_registered_request(request, &cancellation, privileged.as_ref());
         }
         thread::sleep(Duration::from_millis(25));
-    }
-    if let Some(privileged) = privileged.as_ref() {
-        let filesystem_requests = privileged_filesystem_requests
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .map(|(_, broker_request_id)| broker_request_id.clone())
-            .collect::<Vec<_>>();
-        for broker_request_id in filesystem_requests {
-            let _ = privileged.cancel_structured_filesystem(broker_request_id);
-        }
-        let requests = privileged_requests
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .map(|(_, broker_request_id)| broker_request_id.clone())
-            .collect::<Vec<_>>();
-        for broker_request_id in requests {
-            let _ = privileged.cancel_execute(broker_request_id);
-        }
     }
     for worker in workers {
         let _ = worker.join();
@@ -992,11 +933,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         current_task,
         task_state,
         sessions,
-        active_requests,
-        local_filesystem_requests,
+        requests,
         privileged,
-        privileged_requests,
-        privileged_filesystem_requests,
         stopping,
     } = context;
     stream
@@ -1022,12 +960,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 None,
             );
         };
-        if sessions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(session)
-            .is_some()
-        {
+        let session_id = McpSessionId::new(session);
+        if sessions.remove(&session_id).is_some() {
             return write_empty(&mut stream, 204, None);
         }
         return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_not_found"), None);
@@ -1050,37 +984,37 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             effective_tool_catalog_signature(&policy, mode)
         };
-        let pending = {
-            let mut sessions = sessions
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let Some(stored) = sessions.get_mut(session) else {
-                return write_mcp_http_error(
-                    &mut stream,
-                    404,
-                    mcp_unavailable("session_not_found"),
-                    None,
-                );
-            };
-            if request
-                .header("mcp-protocol-version")
-                .is_some_and(|version| version != stored.protocol)
-            {
-                return write_mcp_http_error(
-                    &mut stream,
-                    400,
-                    mcp_invalid("protocol_version_mismatch"),
-                    Some(session),
-                );
-            }
-            if stored.tool_catalog_signature != current_signature {
-                stored.tool_catalog_signature = current_signature;
-                stored.tools_list_changed_pending = true;
-            }
-            let pending = stored.tools_list_changed_pending;
-            stored.tools_list_changed_pending = false;
-            pending
+        let session_id = McpSessionId::new(session);
+        let Some(stored) = sessions.get(&session_id) else {
+            return write_mcp_http_error(
+                &mut stream,
+                404,
+                mcp_unavailable("session_not_found"),
+                None,
+            );
         };
+        if request
+            .header("mcp-protocol-version")
+            .is_some_and(|version| version != stored.protocol)
+        {
+            return write_mcp_http_error(
+                &mut stream,
+                400,
+                mcp_invalid("protocol_version_mismatch"),
+                Some(session),
+            );
+        }
+        let pending = sessions
+            .update(&session_id, |stored| {
+                if stored.tool_catalog_signature != current_signature {
+                    stored.tool_catalog_signature = current_signature;
+                    stored.tools_list_changed_pending = true;
+                }
+                let pending = stored.tools_list_changed_pending;
+                stored.tools_list_changed_pending = false;
+                pending
+            })
+            .unwrap_or(false);
         if pending {
             return write_sse_notification(
                 &mut stream,
@@ -1166,11 +1100,16 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             effective_tool_catalog_signature(&policy, mode)
         };
         let session = new_session_id();
-        {
-            let mut sessions = sessions
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if sessions.len() >= MAX_DOWNSTREAM_MCP_SESSIONS {
+        match sessions.insert_bounded(
+            SessionRecord::new(
+                session.clone(),
+                protocol.to_string(),
+                tool_catalog_signature,
+            ),
+            MAX_DOWNSTREAM_MCP_SESSIONS,
+        ) {
+            Ok(()) => {}
+            Err(SessionInsertError::Capacity) => {
                 return write_mcp_http_error(
                     &mut stream,
                     503,
@@ -1178,14 +1117,14 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     None,
                 );
             }
-            sessions.insert(
-                session.clone(),
-                McpSession {
-                    protocol: protocol.to_string(),
-                    tool_catalog_signature,
-                    tools_list_changed_pending: true,
-                },
-            );
+            Err(SessionInsertError::AlreadyExists) => {
+                return write_mcp_http_error(
+                    &mut stream,
+                    503,
+                    mcp_unavailable("session_identity_collision"),
+                    None,
+                );
+            }
         }
         return write_rpc_result(
             &mut stream,
@@ -1195,7 +1134,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 "capabilities": {"tools": {"listChanged": true}},
                 "serverInfo": {"name": "localbridge-mcp-guard", "version": format!("{}+api{}", env!("CARGO_PKG_VERSION"), AGENT_API_REVISION)}
             }),
-            Some(&session),
+            Some(session.as_str()),
         );
     }
 
@@ -1206,11 +1145,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
     let Some(session) = request.header("mcp-session-id") else {
         return write_rpc_error(&mut stream, id, -32600, "Mcp-Session-Id is required", None);
     };
-    let stored_session = sessions
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(session)
-        .cloned();
+    let session_id = McpSessionId::new(session);
+    let stored_session = sessions.get(&session_id);
     let Some(stored_session) = stored_session else {
         return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_not_found"), None);
     };
@@ -1224,10 +1160,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         effective_tool_catalog_signature(&policy, mode)
     };
     if stored_session.tool_catalog_signature != current_signature {
-        sessions
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(session);
+        sessions.remove(&session_id);
         return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_stale"), None);
     }
     if request
@@ -1242,6 +1175,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             Some(session),
         );
     }
+    let _ = sessions.update(&session_id, |_| ());
 
     if id.is_null() {
         if method == "notifications/cancelled" {
@@ -1249,70 +1183,30 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 .get("params")
                 .and_then(Value::as_object)
                 .and_then(|params| params.get("requestId"))
-                .filter(|request_id| valid_downstream_request_id(request_id))
+                .and_then(rpc_request_id_from_json)
             {
-                if cancel_local_filesystem(local_filesystem_requests, request_id) {
-                    return write_empty(&mut stream, 202, Some(session));
-                }
-                if let Some(broker_request_id) =
-                    privileged_request_id(privileged_filesystem_requests, request_id)
+                if let Some(active) =
+                    registered_request_for_transport_cancel(requests, &session_id, &request_id)
                 {
-                    let Some(privileged) = privileged else {
+                    if cancel_registered_request(&active, cancellation, privileged).is_err() {
                         return write_mcp_http_error(
                             &mut stream,
                             503,
-                            mcp_unavailable("privileged_cancellation_unavailable"),
-                            Some(session),
-                        );
-                    };
-                    if privileged
-                        .cancel_structured_filesystem(broker_request_id)
-                        .is_err()
-                    {
-                        return write_mcp_http_error(
-                            &mut stream,
-                            503,
-                            mcp_unavailable("privileged_cancellation_failed"),
+                            mcp_unavailable("cancellation_unavailable"),
                             Some(session),
                         );
                     }
-                    return write_empty(&mut stream, 202, Some(session));
-                }
-                if let Some(broker_request_id) =
-                    privileged_request_id(privileged_requests, request_id)
-                {
-                    let Some(privileged) = privileged else {
-                        return write_mcp_http_error(
-                            &mut stream,
-                            503,
-                            mcp_unavailable("privileged_cancellation_unavailable"),
-                            Some(session),
-                        );
-                    };
-                    if privileged.cancel_execute(broker_request_id).is_err() {
-                        return write_mcp_http_error(
-                            &mut stream,
-                            503,
-                            mcp_unavailable("privileged_cancellation_failed"),
-                            Some(session),
-                        );
+                    for _ in 0..2 {
+                        thread::sleep(Duration::from_millis(25));
+                        let Some(active) = registered_request_for_transport_cancel(
+                            requests,
+                            &session_id,
+                            &request_id,
+                        ) else {
+                            break;
+                        };
+                        let _ = cancel_registered_request(&active, cancellation, privileged);
                     }
-                    return write_empty(&mut stream, 202, Some(session));
-                }
-                if cancellation.cancel_request(request_id).is_err() {
-                    return write_mcp_http_error(
-                        &mut stream,
-                        503,
-                        mcp_unavailable("cancellation_unavailable"),
-                        Some(session),
-                    );
-                }
-                for _ in 0..2 {
-                    thread::sleep(Duration::from_millis(25));
-                    if !active_request_exists(active_requests, request_id) {
-                        break;
-                    }
-                    let _ = cancellation.cancel_request(request_id);
                 }
                 return write_empty(&mut stream, 202, Some(session));
             }
@@ -1397,8 +1291,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         guard,
                         privileged,
                         current_task,
-                        active_requests,
-                        privileged_requests,
+                        requests,
                         stopping,
                     },
                 );
@@ -1415,8 +1308,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         guard,
                         privileged,
                         current_task,
-                        active_requests,
-                        privileged_filesystem_requests,
+                        requests,
                         stopping,
                     },
                 ) {
@@ -1431,8 +1323,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     WorkspaceFilesystemContext {
                         guard,
                         current_task,
-                        active_requests,
-                        local_filesystem_requests,
+                        requests,
                         stopping,
                     },
                 );
@@ -1452,24 +1343,51 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         cancellation,
                         current_task,
                         task_state,
-                        active_requests,
-                        local_filesystem_requests,
+                        sessions,
+                        requests,
                         privileged,
-                        privileged_requests,
-                        privileged_filesystem_requests,
                     },
                 );
                 return finalize_special_handler_request(&request_key, session, result);
             }
-            active_requests
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(id.clone());
+            let request_key = request_key_from_json(session_id.clone(), &id)
+                .expect("validated downstream request id");
+            let controlled_public_session = command_control_public_session(name, &arguments);
+            if controlled_public_session
+                .as_ref()
+                .is_some_and(|public_session| {
+                    !sessions.owns_public_session(&session_id, public_session)
+                })
+            {
+                return write_rpc_error(
+                    &mut stream,
+                    id,
+                    -32602,
+                    "Public command session is not owned by this MCP session",
+                    Some(session),
+                );
+            }
+            let private_request_id = next_private_request_id();
+            if requests
+                .register(
+                    request_key.clone(),
+                    RequestCancellationTarget::Runtime(private_request_id.clone()),
+                )
+                .is_err()
+            {
+                return write_rpc_error(
+                    &mut stream,
+                    id,
+                    -32600,
+                    "Duplicate active request id in MCP session",
+                    Some(session),
+                );
+            }
             let mut guard = guard
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if stopping.load(Ordering::Acquire) {
-                remove_active_request(active_requests, &id);
+                requests.remove(&request_key);
                 return write_mcp_http_error(
                     &mut stream,
                     503,
@@ -1478,10 +1396,18 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 );
             }
             record_mcp_request_start(&request_diagnostic_key(&id), session, name);
-            let result = guard.call_tool(mode, name, arguments, Some(&id), |status| {
-                current_task.project(status);
-            });
-            remove_active_request(active_requests, &id);
+            let private_request_value = rpc_request_id_to_json(&private_request_id);
+            let result = guard.call_tool(
+                mode,
+                name,
+                arguments,
+                Some(&private_request_value),
+                |status| current_task.project(status),
+            );
+            requests.remove(&request_key);
+            if let Ok(result) = &result {
+                update_public_session_ownership(sessions, &session_id, name, result);
+            }
             match result {
                 Ok(mut result) => {
                     if name == "workspace_context" {
@@ -1580,11 +1506,9 @@ fn handle_task_control(
         cancellation,
         current_task,
         task_state,
-        active_requests,
-        local_filesystem_requests,
+        sessions,
+        requests,
         privileged,
-        privileged_requests,
-        privileged_filesystem_requests,
     } = context;
     {
         let policy = public_policy
@@ -1630,53 +1554,30 @@ fn handle_task_control(
             Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
         },
         "cancel" => {
-            let active = active_requests
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
-            let owner = task_state.current_owner();
-            let cancelled = cancel_task_targets(
-                &active,
-                |request_id| {
-                    if cancel_local_filesystem(local_filesystem_requests, request_id) {
-                        Ok(())
-                    } else if let Some(broker_request_id) =
-                        privileged_request_id(privileged_filesystem_requests, request_id)
-                    {
-                        privileged
-                            .ok_or(())?
-                            .cancel_structured_filesystem(broker_request_id)
-                            .map_err(|_| ())
-                    } else if let Some(broker_request_id) =
-                        privileged_request_id(privileged_requests, request_id)
-                    {
-                        privileged
-                            .ok_or(())?
-                            .cancel_execute(broker_request_id)
-                            .map_err(|_| ())
-                    } else {
-                        cancellation.cancel_request(request_id).map_err(|_| ())
-                    }
-                },
-                owner.as_ref().map(|owner| owner.session_id.as_str()),
-                |session_id| match guard.try_lock() {
-                    Ok(mut guard) => guard.cancel_public_command_session(session_id).is_ok(),
+            let session_id = McpSessionId::new(session);
+            let owned = requests.owned_by(&session_id);
+            let mut cancelled = 0u64;
+            for active in &owned {
+                if cancel_registered_request(active, cancellation, privileged).is_ok() {
+                    cancelled = cancelled.saturating_add(1);
+                }
+            }
+            for public_session in sessions.public_sessions_owned_by(&session_id) {
+                let public_cancelled = match guard.try_lock() {
+                    Ok(mut guard) => guard
+                        .cancel_public_command_session(public_session.as_str())
+                        .is_ok(),
                     Err(TryLockError::WouldBlock) => false,
                     Err(TryLockError::Poisoned(error)) => error
                         .into_inner()
-                        .cancel_public_command_session(session_id)
+                        .cancel_public_command_session(public_session.as_str())
                         .is_ok(),
-                },
-            )?;
-            let durable_cancelled = match guard.try_lock() {
-                Ok(mut guard) => guard.cancel_durable_workflow().unwrap_or(false),
-                Err(TryLockError::WouldBlock) => false,
-                Err(TryLockError::Poisoned(error)) => error
-                    .into_inner()
-                    .cancel_durable_workflow()
-                    .unwrap_or(false),
-            };
-            let cancelled = cancelled.saturating_add(u64::from(durable_cancelled));
+                };
+                if public_cancelled {
+                    cancelled = cancelled.saturating_add(1);
+                }
+            }
+            let durable_cancelled = false;
             if cancelled > 0 {
                 wait_for_task_cancel_settlement(
                     current_task,
@@ -1731,26 +1632,6 @@ fn wait_for_task_cancel_settlement(
     {
         thread::sleep(Duration::from_millis(10));
     }
-}
-
-fn cancel_task_targets(
-    active: &[Value],
-    mut cancel_active: impl FnMut(&Value) -> Result<(), ()>,
-    owner_session_id: Option<&str>,
-    mut cancel_owner_session: impl FnMut(&str) -> bool,
-) -> Result<u64, ()> {
-    let mut cancelled = 0u64;
-    for request_id in active {
-        if cancel_active(request_id).is_ok() {
-            cancelled = cancelled.saturating_add(1);
-        }
-    }
-    if let Some(session_id) = owner_session_id {
-        if cancel_owner_session(session_id) {
-            cancelled = cancelled.saturating_add(1);
-        }
-    }
-    Ok(cancelled)
 }
 
 fn task_control_snapshot_with_terminal(
@@ -2062,8 +1943,7 @@ fn handle_workspace_filesystem(
     let WorkspaceFilesystemContext {
         guard,
         current_task,
-        active_requests,
-        local_filesystem_requests,
+        requests,
         stopping,
     } = context;
     let request_key = request_diagnostic_key(&id);
@@ -2121,20 +2001,28 @@ fn handle_workspace_filesystem(
     };
 
     let cancellation = FilesystemCancellation::default();
-    active_requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push(id.clone());
-    local_filesystem_requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push((id.clone(), cancellation.clone()));
+    let registry_key = request_key_from_json(McpSessionId::new(session), &id)
+        .expect("validated downstream request id");
+    if requests
+        .register(
+            registry_key.clone(),
+            RequestCancellationTarget::WorkspaceFilesystem(cancellation.clone()),
+        )
+        .is_err()
+    {
+        return write_rpc_error(
+            stream,
+            id,
+            -32600,
+            "Duplicate active request id in MCP session",
+            Some(session),
+        );
+    }
     project_filesystem_task(current_task, kind, TaskExecutionState::Running);
 
     let result =
         run_workspace_filesystem_with_authority(workspace_authority, arguments, cancellation);
-    remove_local_filesystem_request(local_filesystem_requests, &id);
-    remove_active_request(active_requests, &id);
+    requests.remove(&registry_key);
     match result {
         Ok(result) => {
             finish_filesystem_task(current_task, kind, None);
@@ -2172,8 +2060,7 @@ fn handle_administrator_filesystem_if_needed(
         guard,
         privileged,
         current_task,
-        active_requests,
-        privileged_filesystem_requests,
+        requests,
         stopping,
     } = context;
     if mode != PermissionMode::Elevated {
@@ -2276,19 +2163,27 @@ fn handle_administrator_filesystem_if_needed(
 
     let generation = PRIVILEGED_REQUEST_GENERATION.fetch_add(1, Ordering::Relaxed);
     let broker_request_id = format!("mcp-filesystem-{generation:x}");
-    active_requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push(id.clone());
-    privileged_filesystem_requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push((id.clone(), broker_request_id.clone()));
+    let registry_key = request_key_from_json(McpSessionId::new(session), &id)
+        .expect("validated downstream request id");
+    if requests
+        .register(
+            registry_key.clone(),
+            RequestCancellationTarget::PrivilegedFilesystem(broker_request_id.clone()),
+        )
+        .is_err()
+    {
+        return Some(write_rpc_error(
+            stream,
+            id,
+            -32600,
+            "Duplicate active request id in MCP session",
+            Some(session),
+        ));
+    }
     project_filesystem_task(current_task, kind, TaskExecutionState::Running);
 
     if let Err(error) = privileged.start_structured_filesystem(broker_request_id.clone(), spec) {
-        remove_active_request(active_requests, &id);
-        remove_privileged_request(privileged_filesystem_requests, &id);
+        requests.remove(&registry_key);
         return Some(match error {
             PrivilegedExecError::GateClosed(_) => {
                 finish_filesystem_task(
@@ -2346,8 +2241,7 @@ fn handle_administrator_filesystem_if_needed(
             Err(error) => break Err(error),
         }
     };
-    remove_active_request(active_requests, &id);
-    remove_privileged_request(privileged_filesystem_requests, &id);
+    requests.remove(&registry_key);
 
     let filesystem = match filesystem {
         Ok(Ok(filesystem)) => filesystem,
@@ -2776,28 +2670,6 @@ fn elevated_exec_error_output_schema() -> Value {
     })
 }
 
-fn privileged_request_id(
-    requests: &Mutex<Vec<(Value, String)>>,
-    downstream_request_id: &Value,
-) -> Option<String> {
-    requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .iter()
-        .find(|(candidate, _)| candidate == downstream_request_id)
-        .map(|(_, broker_request_id)| broker_request_id.clone())
-}
-
-fn remove_privileged_request(
-    requests: &Mutex<Vec<(Value, String)>>,
-    downstream_request_id: &Value,
-) {
-    requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .retain(|(candidate, _)| candidate != downstream_request_id);
-}
-
 fn project_elevated_task(current_task: &CurrentTaskProjection, state: TaskExecutionState) {
     current_task.project(
         CurrentTaskStatus::project(TaskKind::ElevatedOperation, SafeTaskSummary::Omitted, state)
@@ -2900,8 +2772,7 @@ fn handle_elevated_exec(
         guard,
         privileged,
         current_task,
-        active_requests,
-        privileged_requests,
+        requests,
         stopping,
     } = context;
     let mut execution_guard = guard
@@ -2999,19 +2870,27 @@ fn handle_elevated_exec(
 
     let generation = PRIVILEGED_REQUEST_GENERATION.fetch_add(1, Ordering::Relaxed);
     let broker_request_id = format!("mcp-elevated-{generation:x}");
-    active_requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push(id.clone());
-    privileged_requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push((id.clone(), broker_request_id.clone()));
+    let registry_key = request_key_from_json(McpSessionId::new(session), &id)
+        .expect("validated downstream request id");
+    if requests
+        .register(
+            registry_key.clone(),
+            RequestCancellationTarget::PrivilegedExecution(broker_request_id.clone()),
+        )
+        .is_err()
+    {
+        return write_rpc_error(
+            stream,
+            id,
+            -32600,
+            "Duplicate active request id in MCP session",
+            Some(session),
+        );
+    }
     project_elevated_task(current_task, TaskExecutionState::Running);
 
     if let Err(error) = privileged.start_execute(broker_request_id.clone(), spec) {
-        remove_active_request(active_requests, &id);
-        remove_privileged_request(privileged_requests, &id);
+        requests.remove(&registry_key);
         return match error {
             PrivilegedExecError::GateClosed(_) => {
                 finish_elevated_task(
@@ -3053,8 +2932,7 @@ fn handle_elevated_exec(
             Err(error) => break Err(error),
         }
     };
-    remove_active_request(active_requests, &id);
-    remove_privileged_request(privileged_requests, &id);
+    requests.remove(&registry_key);
 
     let execution = match execution {
         Ok(execution) => execution,
@@ -3171,51 +3049,99 @@ fn request_id(object: &serde_json::Map<String, Value>) -> Value {
     object.get("id").cloned().unwrap_or(Value::Null)
 }
 
-fn valid_downstream_request_id(request_id: &Value) -> bool {
-    request_id.is_string()
-        || request_id
-            .as_number()
-            .is_some_and(|number| number.as_i64().is_some() || number.as_u64().is_some())
-}
-
-fn remove_active_request(active_requests: &Mutex<Vec<Value>>, request_id: &Value) {
-    active_requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .retain(|active| active != request_id);
-}
-
-fn cancel_local_filesystem(
-    requests: &Mutex<Vec<(Value, FilesystemCancellation)>>,
-    request_id: &Value,
-) -> bool {
-    let requests = requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((_, cancellation)) = requests.iter().find(|(active, _)| active == request_id) {
-        cancellation.cancel();
-        true
-    } else {
-        false
+fn rpc_request_id_from_json(value: &Value) -> Option<RpcRequestId> {
+    match value {
+        Value::String(value) => Some(RpcRequestId::String(value.clone())),
+        Value::Number(value) => value.as_i64().map(RpcRequestId::Number),
+        _ => None,
     }
 }
 
-fn remove_local_filesystem_request(
-    requests: &Mutex<Vec<(Value, FilesystemCancellation)>>,
-    request_id: &Value,
-) {
-    requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .retain(|(active, _)| active != request_id);
+fn rpc_request_id_to_json(value: &RpcRequestId) -> Value {
+    match value {
+        RpcRequestId::Number(value) => Value::from(*value),
+        RpcRequestId::String(value) => Value::String(value.clone()),
+    }
 }
 
-fn active_request_exists(active_requests: &Mutex<Vec<Value>>, request_id: &Value) -> bool {
-    active_requests
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .iter()
-        .any(|active| active == request_id)
+fn request_key_from_json(session_id: McpSessionId, request_id: &Value) -> Option<RequestKey> {
+    rpc_request_id_from_json(request_id).map(|request_id| RequestKey::new(session_id, request_id))
+}
+
+fn command_control_public_session(name: &str, arguments: &Value) -> Option<PublicSessionId> {
+    if name != "command_control" {
+        return None;
+    }
+    let action = arguments.get("action").and_then(Value::as_str)?;
+    if !matches!(action, "poll" | "write" | "kill") {
+        return None;
+    }
+    arguments
+        .get("session_id")
+        .and_then(Value::as_str)
+        .map(PublicSessionId::new)
+}
+
+fn update_public_session_ownership(
+    sessions: &SessionRegistry,
+    owner: &McpSessionId,
+    tool_name: &str,
+    result: &Value,
+) {
+    let Some(data) = result.pointer("/structuredContent/data") else {
+        return;
+    };
+    let status = data.get("status").and_then(Value::as_str);
+    if tool_name == "exec_command" && status == Some("running") {
+        if let Some(public_session) = data
+            .get("session_id")
+            .and_then(Value::as_str)
+            .map(PublicSessionId::new)
+        {
+            sessions.add_public_session(owner, public_session);
+        }
+    }
+}
+
+fn valid_downstream_request_id(request_id: &Value) -> bool {
+    rpc_request_id_from_json(request_id).is_some()
+}
+
+fn registered_request_for_transport_cancel(
+    requests: &RequestRegistry,
+    session_id: &McpSessionId,
+    request_id: &RpcRequestId,
+) -> Option<ActiveRequest> {
+    requests.get(&RequestKey::new(session_id.clone(), request_id.clone()))
+}
+
+fn next_private_request_id() -> RpcRequestId {
+    let generation = PRIVATE_REQUEST_GENERATION.fetch_add(1, Ordering::Relaxed);
+    RpcRequestId::String(format!("lb-private-{generation:x}"))
+}
+
+fn cancel_registered_request(
+    request: &ActiveRequest,
+    cancellation: &McpCancellationClient,
+    privileged: Option<&Arc<dyn PrivilegedExecution>>,
+) -> Result<(), ()> {
+    match &request.cancellation {
+        RequestCancellationTarget::Runtime(request_id) => cancellation
+            .cancel_request(&rpc_request_id_to_json(request_id))
+            .map_err(|_| ()),
+        RequestCancellationTarget::WorkspaceFilesystem(cancellation) => {
+            cancellation.cancel();
+            Ok(())
+        }
+        RequestCancellationTarget::PrivilegedExecution(broker_request_id) => privileged
+            .ok_or(())?
+            .cancel_execute(broker_request_id.clone())
+            .map_err(|_| ()),
+        RequestCancellationTarget::PrivilegedFilesystem(broker_request_id) => privileged
+            .ok_or(())?
+            .cancel_structured_filesystem(broker_request_id.clone())
+            .map_err(|_| ()),
+    }
 }
 
 #[derive(Debug)]
@@ -3326,13 +3252,16 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, HttpReadError> {
     })
 }
 
-fn new_session_id() -> String {
+fn new_session_id() -> McpSessionId {
     let generation = SESSION_GENERATION.fetch_add(1, Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    format!("lb-{:x}-{nanos:x}-{generation:x}", std::process::id())
+    McpSessionId::new(format!(
+        "lb-{:x}-{nanos:x}-{generation:x}",
+        std::process::id()
+    ))
 }
 
 fn write_rpc_result(
@@ -3641,28 +3570,6 @@ mod tests {
         assert!(response.body.is_null());
     }
 
-    #[test]
-    fn task_control_cancel_does_not_skip_owned_session_after_active_request_success() {
-        let active = vec![json!("active-a"), json!("active-b")];
-        let mut active_seen = Vec::new();
-        let mut owner_seen = Vec::new();
-        let cancelled = cancel_task_targets(
-            &active,
-            |request_id| {
-                active_seen.push(request_id.clone());
-                Ok(())
-            },
-            Some("lb-session-owned"),
-            |session_id| {
-                owner_seen.push(session_id.to_string());
-                true
-            },
-        )
-        .unwrap();
-        assert_eq!(cancelled, 3);
-        assert_eq!(active_seen, active);
-        assert_eq!(owner_seen, vec!["lb-session-owned"]);
-    }
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -4380,6 +4287,39 @@ mod tests {
                 "params":{"name":name,"arguments":arguments}
             }),
         )
+    }
+
+    #[test]
+    fn r1_transport_cancel_lookup_is_scoped_by_mcp_session() {
+        let requests = RequestRegistry::default();
+        let raw_id = RpcRequestId::Number(1);
+        let session_a = McpSessionId::new("session-a");
+        let session_b = McpSessionId::new("session-b");
+        requests
+            .register(
+                RequestKey::new(session_a.clone(), raw_id.clone()),
+                RequestCancellationTarget::Runtime(RpcRequestId::String("upstream-a".into())),
+            )
+            .unwrap();
+        requests
+            .register(
+                RequestKey::new(session_b.clone(), raw_id.clone()),
+                RequestCancellationTarget::Runtime(RpcRequestId::String("upstream-b".into())),
+            )
+            .unwrap();
+
+        let selected_a =
+            registered_request_for_transport_cancel(&requests, &session_a, &raw_id).unwrap();
+        let selected_b =
+            registered_request_for_transport_cancel(&requests, &session_b, &raw_id).unwrap();
+        assert!(matches!(
+            selected_a.cancellation,
+            RequestCancellationTarget::Runtime(RpcRequestId::String(ref value)) if value == "upstream-a"
+        ));
+        assert!(matches!(
+            selected_b.cancellation,
+            RequestCancellationTarget::Runtime(RpcRequestId::String(ref value)) if value == "upstream-b"
+        ));
     }
 
     #[test]
@@ -6700,6 +6640,264 @@ mod tests {
     }
 
     #[test]
+    fn r1_same_rpc_id_in_distinct_sessions_has_isolated_cancellation() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP listener ready");
+        let session_a = initialize(pep.port(), 801).session.expect("session A");
+        let session_b = initialize(pep.port(), 802).session.expect("session B");
+        for session in [&session_a, &session_b] {
+            assert_eq!(
+                post(
+                    pep.port(),
+                    Some(session),
+                    &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+                )
+                .status,
+                202
+            );
+        }
+
+        let port = pep.port();
+        let call_session_a = session_a.clone();
+        let call_a = thread::spawn(move || {
+            post_with_read_timeout(
+                port,
+                Some(&call_session_a),
+                &json!({
+                    "jsonrpc":"2.0",
+                    "id":1,
+                    "method":"tools/call",
+                    "params":{
+                        "name":"exec_command",
+                        "arguments":{
+                            "command":"Start-Sleep -Seconds 10",
+                            "shell":"windows_powershell",
+                            "yield_time_ms":10000,
+                            "timeout_ms":20000,
+                            "max_output_bytes":4096
+                        }
+                    }
+                }),
+                Duration::from_secs(6),
+            )
+        });
+        let running_deadline = Instant::now() + Duration::from_secs(3);
+        while !matches!(
+            pep.current_task_projection().actual_snapshot(),
+            CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
+        ) {
+            assert!(Instant::now() < running_deadline, "session A never ran");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let call_session_b = session_b.clone();
+        let call_b = thread::spawn(move || {
+            post_with_read_timeout(
+                port,
+                Some(&call_session_b),
+                &json!({
+                    "jsonrpc":"2.0",
+                    "id":1,
+                    "method":"tools/call",
+                    "params":{
+                        "name":"exec_command",
+                        "arguments":{
+                            "command":"Write-Output SESSION_B_SURVIVED",
+                            "shell":"windows_powershell",
+                            "yield_time_ms":10000,
+                            "timeout_ms":20000,
+                            "max_output_bytes":4096
+                        }
+                    }
+                }),
+                Duration::from_secs(6),
+            )
+        });
+        thread::sleep(Duration::from_millis(100));
+
+        let cancelled = post(
+            pep.port(),
+            Some(&session_a),
+            &json!({
+                "jsonrpc":"2.0",
+                "method":"notifications/cancelled",
+                "params":{"requestId":1,"reason":"R1 isolation test"}
+            }),
+        );
+        assert_eq!(cancelled.status, 202);
+        let result_a = call_a.join().expect("session A request");
+        assert_eq!(
+            result_a.body["result"]["isError"], true,
+            "{:#?}",
+            result_a.body
+        );
+        assert!(
+            matches!(
+                result_a.body["result"]["structuredContent"]["data"]["status"].as_str(),
+                Some("cancelled" | "failed")
+            ),
+            "{:#?}",
+            result_a.body
+        );
+        let result_b = call_b.join().expect("session B request");
+        assert_eq!(
+            result_b.body["result"]["structuredContent"]["data"]["status"], "completed",
+            "{:#?}",
+            result_b.body
+        );
+        assert!(
+            result_b.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .is_some_and(|output| output.contains("SESSION_B_SURVIVED")),
+            "{:#?}",
+            result_b.body
+        );
+
+        let mut coding = pep.stop().expect("PEP stop after R1 isolation test");
+        coding.stop().expect("MCP stop after R1 isolation test");
+        assert_eq!(coding.active_processes().unwrap(), 0);
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn r1_task_control_cancel_never_cancels_another_session_request() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP listener ready");
+        let session_a = initialize(pep.port(), 811).session.expect("session A");
+        let session_b = initialize(pep.port(), 812).session.expect("session B");
+        for session in [&session_a, &session_b] {
+            assert_eq!(
+                post(
+                    pep.port(),
+                    Some(session),
+                    &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+                )
+                .status,
+                202
+            );
+        }
+
+        let port = pep.port();
+        let call_session_a = session_a.clone();
+        let call_a = thread::spawn(move || {
+            post_with_read_timeout(
+                port,
+                Some(&call_session_a),
+                &json!({
+                    "jsonrpc":"2.0","id":7,"method":"tools/call",
+                    "params":{
+                        "name":"exec_command",
+                        "arguments":{
+                            "command":"Start-Sleep -Seconds 10",
+                            "shell":"windows_powershell",
+                            "yield_time_ms":10000,
+                            "timeout_ms":20000,
+                            "max_output_bytes":4096
+                        }
+                    }
+                }),
+                Duration::from_secs(6),
+            )
+        });
+        let running_deadline = Instant::now() + Duration::from_secs(3);
+        while !matches!(
+            pep.current_task_projection().actual_snapshot(),
+            CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
+        ) {
+            assert!(Instant::now() < running_deadline, "session A never ran");
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let call_session_b = session_b.clone();
+        let call_b = thread::spawn(move || {
+            post_with_read_timeout(
+                port,
+                Some(&call_session_b),
+                &json!({
+                    "jsonrpc":"2.0","id":7,"method":"tools/call",
+                    "params":{
+                        "name":"exec_command",
+                        "arguments":{
+                            "command":"Write-Output SESSION_B_NOT_CANCELLED",
+                            "shell":"windows_powershell",
+                            "yield_time_ms":10000,
+                            "timeout_ms":20000,
+                            "max_output_bytes":4096
+                        }
+                    }
+                }),
+                Duration::from_secs(6),
+            )
+        });
+        thread::sleep(Duration::from_millis(100));
+
+        let cancel = public_tool_call(
+            pep.port(),
+            &session_a,
+            8,
+            "task_control",
+            json!({"action":"cancel"}),
+        );
+        assert_eq!(
+            cancel.body["result"]["structuredContent"]["data"]["cancelled_requests"], 1,
+            "{:#?}",
+            cancel.body
+        );
+        let result_a = call_a.join().expect("session A request");
+        assert_eq!(
+            result_a.body["result"]["isError"], true,
+            "{:#?}",
+            result_a.body
+        );
+        let result_b = call_b.join().expect("session B request");
+        assert_eq!(
+            result_b.body["result"]["structuredContent"]["data"]["status"], "completed",
+            "{:#?}",
+            result_b.body
+        );
+        assert!(
+            result_b.body["result"]["structuredContent"]["data"]["output"]
+                .as_str()
+                .is_some_and(|output| output.contains("SESSION_B_NOT_CANCELLED")),
+            "{:#?}",
+            result_b.body
+        );
+
+        let mut coding = pep.stop().expect("PEP stop after task isolation test");
+        coding.stop().expect("MCP stop after task isolation test");
+        assert_eq!(coding.active_processes().unwrap(), 0);
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
     fn cancellation_reaches_actual_upstream_while_tool_call_is_running() {
         let root = repo_root();
         let workspace = temp_workspace();
@@ -7071,10 +7269,22 @@ mod tests {
             .expect("PEP listener ready");
         let initialized = initialize(pep.port(), 321);
         let session = initialized.session.expect("downstream MCP session");
+        let other_session = initialize(pep.port(), 326)
+            .session
+            .expect("other downstream MCP session");
         assert_eq!(
             post(
                 pep.port(),
                 Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&other_session),
                 &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
             )
             .status,
@@ -7104,6 +7314,19 @@ mod tests {
             .as_str()
             .expect("detached public session")
             .to_string();
+
+        let cross_session_kill = public_tool_call(
+            pep.port(),
+            &other_session,
+            327,
+            "command_control",
+            json!({"action":"kill","session_id":public_session,"wait_ms":100}),
+        );
+        assert_eq!(
+            cross_session_kill.body["error"]["code"], -32602,
+            "{:#?}",
+            cross_session_kill.body
+        );
 
         let cancel_started = Instant::now();
         let cancel = public_tool_call(

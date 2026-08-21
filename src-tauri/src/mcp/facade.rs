@@ -3874,36 +3874,6 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         aggregate
     }
 
-    pub(crate) fn cancel_durable_workflow(&mut self) -> Result<bool, FacadeError> {
-        let Some(stored) = self.adapter.load_workflow_checkpoint()? else {
-            return Ok(false);
-        };
-        let mut checkpoint: WorkflowCheckpoint =
-            serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
-        if checkpoint.completed {
-            return Ok(false);
-        }
-        if let Some(session_id) = checkpoint.current_session_id.clone() {
-            let _ = self.adapter.control_command(
-                CommandControlAction::Kill,
-                json!({"session_id":session_id,"signal":"KILL","wait_ms":1000}),
-                None,
-            );
-        }
-        if !checkpoint.is_coding_task() {
-            self.adapter.clear_workflow_checkpoint()?;
-            return Ok(true);
-        }
-        checkpoint.command_inflight = false;
-        checkpoint.current_session_id = None;
-        checkpoint.current_step = Some("cancelled".into());
-        checkpoint.next_step = None;
-        checkpoint.completed = true;
-        checkpoint.failure = Some(json!({"code":"cancelled"}));
-        persist_agent_checkpoint(&self.adapter, &checkpoint)?;
-        Ok(true)
-    }
-
     pub fn reap_command_sessions(&mut self) -> Result<(), FacadeError> {
         self.adapter.reap_command_sessions()?;
         self.reconcile_terminal_workflow_command()

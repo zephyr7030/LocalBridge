@@ -1,7 +1,9 @@
 pub mod app;
 pub mod commands;
+pub mod control_plane;
 pub mod credentials;
 pub mod diagnostics;
+pub mod domain;
 pub mod mcp;
 pub mod privilege;
 pub mod runtime;
