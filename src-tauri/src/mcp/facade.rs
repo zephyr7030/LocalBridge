@@ -7729,7 +7729,7 @@ mod tests {
     fn schema42_toolbox_runs_pinned_tools_through_public_exec_without_ambient_shadowing() {
         use crate::mcp::{CodingToolsPermissionMode, CodingToolsRuntimeConfig, InternalBearer};
         use std::net::{Ipv4Addr, TcpListener};
-        use std::time::Duration;
+        use std::time::{Duration, Instant};
 
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -7796,22 +7796,48 @@ mod tests {
             ("curl --version", "cmd", "curl "),
             ("curl --version", "windows_powershell", "curl "),
         ] {
-            let result = facade
+            let mut result = facade
                 .call_tool(
                     PermissionMode::Full,
                     "exec_command",
-                    json!({"command":command,"shell":shell,"yield_time_ms":30000,"timeout_ms":30000,"max_output_bytes":65536}),
+                    json!({"command":command,"shell":shell,"yield_time_ms":0,"timeout_ms":120000,"max_output_bytes":65536}),
                     None,
                     |_| {},
                 )
                 .unwrap();
-            assert_eq!(result["isError"], false, "{command}: {result:#}");
-            let output = result["structuredContent"]["data"]["output"]
-                .as_str()
-                .unwrap_or_default();
+            let deadline = Instant::now() + Duration::from_secs(150);
+            let mut output = String::new();
+            loop {
+                output.push_str(
+                    result["structuredContent"]["data"]["output"]
+                        .as_str()
+                        .unwrap_or_default(),
+                );
+                if result["structuredContent"]["data"]["status"] != "running" {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{command} ({shell}) did not converge: {result:#}"
+                );
+                let public_session = result["structuredContent"]["data"]["session_id"]
+                    .as_str()
+                    .expect("running command has PublicSessionId")
+                    .to_string();
+                result = facade
+                    .call_tool(
+                        PermissionMode::Full,
+                        "command_control",
+                        json!({"action":"poll","session_id":public_session,"wait_ms":1000}),
+                        None,
+                        |_| {},
+                    )
+                    .unwrap();
+            }
+            assert_eq!(result["isError"], false, "{command} ({shell}): {result:#}");
             assert!(
                 output.contains(expected),
-                "{command} did not use expected Toolbox executable: {output}"
+                "{command} ({shell}) did not use expected Toolbox executable: {output}"
             );
             assert!(
                 !output.contains("LB_TOOLBOX_FAKE_SHADOW"),

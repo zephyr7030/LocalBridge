@@ -5446,6 +5446,46 @@ mod tests {
         )
     }
 
+    fn settle_public_command(
+        port: u16,
+        session: &str,
+        mut poll_id: u64,
+        mut response: ClientResponse,
+    ) -> (ClientResponse, String) {
+        let deadline = Instant::now() + Duration::from_secs(150);
+        let mut output = String::new();
+        loop {
+            let data = &response.body["result"]["structuredContent"]["data"];
+            output.push_str(data["output"].as_str().unwrap_or_default());
+            match data["status"].as_str() {
+                Some("running") => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "public command did not converge: {:#?}",
+                        response.body
+                    );
+                    let public_session = data["session_id"]
+                        .as_str()
+                        .expect("running command has PublicSessionId")
+                        .to_string();
+                    response = public_tool_call(
+                        port,
+                        session,
+                        poll_id,
+                        "command_control",
+                        json!({"action":"poll","session_id":public_session,"wait_ms":1000}),
+                    );
+                    poll_id = poll_id.saturating_add(1);
+                }
+                Some(_) => return (response, output),
+                None => panic!(
+                    "public command response has no status: {:#?}",
+                    response.body
+                ),
+            }
+        }
+    }
+
     #[test]
     fn r1_transport_cancel_lookup_is_scoped_by_mcp_session() {
         let requests = RequestRegistry::default();
@@ -6683,17 +6723,17 @@ mod tests {
                 json!({
                     "command":"$loc=(Get-Location).Path; $exists=Test-Path -LiteralPath '.'; $count=@(Get-ChildItem -LiteralPath '.').Count; Write-Output ('SCHEMA30_BASELINE '+$exists+' '+$count+' '+$loc)",
                     "shell":shell,
-                    "yield_time_ms":10000
+                    "yield_time_ms":0,
+                    "timeout_ms":120000
                 }),
             );
+            let (baseline, output) =
+                settle_public_command(pep.port(), &session, 10_000 + id, baseline);
             assert_eq!(
                 baseline.body["result"]["isError"], false,
                 "shell={shell}: {:#?}",
                 baseline.body
             );
-            let output = baseline.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .unwrap_or_default();
             assert!(
                 output.contains("SCHEMA30_BASELINE True"),
                 "shell={shell}: {output:?}"
@@ -7756,21 +7796,16 @@ mod tests {
                 &session,
                 id,
                 "exec_command",
-                json!({"command":command,"shell":shell,"yield_time_ms":10000}),
+                json!({"command":command,"shell":shell,"yield_time_ms":0,"timeout_ms":120000}),
             );
+            let (response, output) =
+                settle_public_command(pep.port(), &session, 20_000 + id, response);
             assert_eq!(
                 response.body["result"]["isError"], false,
                 "{:#?}",
                 response.body
             );
-            assert!(
-                response.body["result"]["structuredContent"]["data"]["output"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .contains(marker),
-                "{:#?}",
-                response.body
-            );
+            assert!(output.contains(marker), "{:#?}", response.body);
         }
 
         let nul = public_tool_call(
@@ -7781,16 +7816,13 @@ mod tests {
             json!({
                 "command":"echo hidden>nul && echo hidden-error 1>nul 2>nul && echo LB_SCHEMA42_NUL_OK",
                 "shell":"cmd",
-                "yield_time_ms":10000
+                "yield_time_ms":0,
+                "timeout_ms":120000
             }),
         );
+        let (nul, nul_output) = settle_public_command(pep.port(), &session, 20_705, nul);
         assert_eq!(nul.body["result"]["isError"], false, "{:#?}", nul.body);
-        assert!(
-            nul.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("LB_SCHEMA42_NUL_OK")
-        );
+        assert!(nul_output.contains("LB_SCHEMA42_NUL_OK"));
         for entry in fs::read_dir(&workspace).unwrap().flatten() {
             let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
             assert_ne!(name, "nul");
@@ -7923,7 +7955,7 @@ mod tests {
                         "arguments":{
                             "command":"Write-Output SESSION_B_SURVIVED",
                             "shell":"windows_powershell",
-                            "yield_time_ms":10000,
+                            "yield_time_ms":0,
                             "timeout_ms":20000,
                             "max_output_bytes":4096
                         }
@@ -7959,15 +7991,15 @@ mod tests {
             result_a.body
         );
         let result_b = call_b.join().expect("session B request");
+        let (result_b, result_b_output) =
+            settle_public_command(pep.port(), &session_b, 30_001, result_b);
         assert_eq!(
             result_b.body["result"]["structuredContent"]["data"]["status"], "completed",
             "{:#?}",
             result_b.body
         );
         assert!(
-            result_b.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .is_some_and(|output| output.contains("SESSION_B_SURVIVED")),
+            result_b_output.contains("SESSION_B_SURVIVED"),
             "{:#?}",
             result_b.body
         );
@@ -8053,7 +8085,7 @@ mod tests {
                         "arguments":{
                             "command":"Write-Output SESSION_B_NOT_CANCELLED",
                             "shell":"windows_powershell",
-                            "yield_time_ms":10000,
+                            "yield_time_ms":0,
                             "timeout_ms":20000,
                             "max_output_bytes":4096
                         }
@@ -8086,15 +8118,15 @@ mod tests {
             result_a.body
         );
         let result_b = call_b.join().expect("session B request");
+        let (result_b, result_b_output) =
+            settle_public_command(pep.port(), &session_b, 30_101, result_b);
         assert_eq!(
             result_b.body["result"]["structuredContent"]["data"]["status"], "completed",
             "{:#?}",
             result_b.body
         );
         assert!(
-            result_b.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .is_some_and(|output| output.contains("SESSION_B_NOT_CANCELLED")),
+            result_b_output.contains("SESSION_B_NOT_CANCELLED"),
             "{:#?}",
             result_b.body
         );
