@@ -1,38 +1,57 @@
 # LocalBridge Agent Rules
 
-This is the root agent instruction file. Keep it small and stable; do not duplicate evolving schema/history here.
+This is the root execution instruction file. Keep it small and stable.
 
-## 1. Start from live facts
+## 1. Read live authority first
 
-- Load `AGENTS.md` first.
-- Read `PR_INDEX.json` and `PROJECT_STATE.json` to resolve the live `current_group`, `current_pr`, status, and gate state. `START_HERE.md` is an authority index/bootstrap document, not live state.
-- For the current task, read only the relevant current-PR contract in `PR_CONTRACTS.json` and the authority documents referenced by `START_HERE.md`; inspect source, tests, Git history, runtime policy, and skills only as needed.
-- Current disk code and real tests define implementation reality. `PR_CONTRACTS.json` defines current machine requirements. `PR_INDEX.json` + `PROJECT_STATE.json` define live governance state. Historical reports, old PASS/FAIL, and chat are clues only.
-- If current authoritative sources contradict each other, stop and report the conflict instead of guessing.
+Read in this order:
 
-## 2. Execute narrowly
+1. `AGENTS.md`
+2. `CONTROL_PLANE_REFACTOR_CONTRACT.json`
+3. `PROJECT_STATE.json`
+4. `docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md`
+5. Current source/tests and only the additional baseline documents needed for the active phase.
 
-- Single agent, serial execution. Work only on `current_pr` and its `writable_paths` or explicit exceptions.
-- Do not start the next PR automatically. Do not modify unrelated files, clean unknown untracked files, or stage other work.
-- Keep product changes and governance/provenance changes separate. Never fabricate review, PASS, authorization, provenance, or human approval.
-- Any command/session/operation that returns a non-terminal state must be followed to a durable terminal state before declaring completion. If it makes no bounded progress, terminate it and record the reason.
+`PR_INDEX.json`, `PR_CONTRACTS.json`, `docs/06_PR_GROUPS_AND_EXECUTION.md`, old G0-G4 review records, and old LB-PR status are legacy history only. They must never be used to resolve current work, current phase, acceptance, or writable scope.
 
-## 3. Prefer the smallest complete implementation
+Current disk code and real tests define implementation reality. The schema44 control-plane contract defines required behavior. If current live authorities contradict each other, stop and report the conflict instead of guessing.
 
-Use this order: no change if unnecessary → reuse existing code → standard library → native platform capability → already-installed dependency → minimal new implementation.
+## 2. Execute one refactor phase at a time
 
-Fix shared root causes rather than isolated symptoms. Avoid speculative abstractions, scaffolding, duplicate services, and unnecessary dependencies. Do not simplify explicit requirements, trust boundaries, security, data-loss protection, accessibility, required tests, or maintainability. Read `skills/ponytail/SKILL.md` only when deeper guidance is needed.
+The live sequence is strictly:
+
+`R1 → R2 → R3 → R4 → R5`
+
+`PROJECT_STATE.json.current_phase` is the only current-phase pointer. Single agent, serial execution. Do not start the next phase automatically after acceptance.
+
+Do not add unrelated product features while the contract freezes them. Keep product changes and governance/provenance changes separate. Never fabricate PASS, review, authorization, provenance, or human evidence.
+
+## 3. Ownership migration is the primary rule
+
+Every authoritative fact must have exactly one mutable owner.
+
+For each migrated fact use strangler migration only:
+
+`new owner → migrate readers → migrate writers → disable old writer → delete old truth`
+
+Long-lived dual-write between legacy state and new ControlPlane state is forbidden. Migrate ownership before moving files or reorganizing modules.
 
 ## 4. Preserve hard boundaries
 
-- Public API and policy fail closed.
-- Edit: structured workspace operations only; no ordinary process/Shell execution.
-- Full: structured LocalBridge path/workdir operations remain active-workspace-bound; ordinary development processes run with the current non-admin Windows token and do not imply OS-level child-process filesystem confinement.
-- Elevated: administrator capability is available only through the explicit reviewed Broker/UAC privileged route; ordinary routes remain non-admin. LocalBridge control-plane mutation remains denied.
-- Never expose secrets in plaintext. Backend owns lifecycle, permission, runtime-health, task, retry, and readiness truth; frontend is typed projection/intent only.
+- Public API and authorization fail closed.
+- Request identity is MCP-session scoped.
+- Task and Execution have stable identities and exactly one terminal outcome.
+- Cancellation affects only the declared ownership scope.
+- Accepted Work is explicitly Queued, Running, or Terminal; Mutex contention is not business state.
+- Desired, Observed, and Effective state are distinct; Effective authority/workspace is derived fail-closed.
+- UI reads revisioned ControlPlane snapshots; lock contention must never fabricate Running.
+- Transport code cannot own domain lifecycle state.
+- Core lifecycle/control-plane state must be typed Rust state, not opaque `serde_json::Value`.
 
-## 5. Verify and stop
+Existing Edit / Full / Elevated security boundaries remain in force unless the current refactor contract explicitly changes how their state is owned or derived.
 
-Run targeted tests first, then the current contract's required PR/Group gates. Static markers and historical evidence never replace real behavior tests. Update governance only when the current contract authorizes it. Once the current PR/review step reaches its required terminal state, report the result and stop.
+## 5. Verify behavior, not names
 
-The current schema/revision must always be read from `PR_CONTRACTS.json`; do not hard-code changing schema details into this file.
+Target the current phase and the contract invariants first. Concurrency, cancellation, session lifecycle, terminal convergence, recovery, and snapshot consistency require executable behavior tests; source markers or function names are not substitutes.
+
+Any command/session/operation returning a non-terminal state must be followed to a durable terminal state before completion is claimed. Once the current phase reaches its required terminal acceptance state, report and stop.

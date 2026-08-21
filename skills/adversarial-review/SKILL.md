@@ -1,10 +1,10 @@
+# Control-Plane Phase Adversarial Review
 
-# Group Adversarial Review
-- 目标是证明当前组可能错误，不是证明开发正确。
-- 审查整个组和跨 PR 组合。
-- 下一组在 review PASS 前必须 BLOCKED。
-- G3→G4 例外：G3 adversarial PASS 后仍保持 G4/LB-018 BLOCKED，进入独立人工实测细审核 Gate；人工 PASS 后才解锁 G4。
-- 用户与执行智能体提供的事实性材料均是待验证证据，Reviewer 可质疑、复核、独立验证或拒绝采信。
-- 执行智能体可预授权，但必须逐项记录 authorization_id/scope/actions/evidence_ref/recorded_by/user_audit_status；人工 PASS 要求所有记录均经用户审核 PASS。
-- FAIL 给 evidence/reproduction/severity/reopen_from_pr。
-- Reviewer 不改代码/合同/文档/测试，只允许组审后的 PR_INDEX/PROJECT_STATE 状态写入。
+- 目标是证明当前 `R1..R5` 阶段可能错误，不是证明开发正确。
+- 读取 `CONTROL_PLANE_REFACTOR_CONTRACT.json` 与 `PROJECT_STATE.json`；旧 LB-PR/G0-G4 仅为历史，不得作为 live gate。
+- 审查当前阶段 required outcomes、跨模块 ownership 和相关 INV-01..INV-09。
+- 优先攻击跨 MCP Session identity/cancel、Task/Execution terminal convergence、Scheduler queue、Session/resource reaping、Desired/Observed/Effective、snapshot revision、typed error、transport/domain ownership 与 dual-write。
+- 真实并发、取消、断线、恢复、锁竞争和局部故障行为必须实测；source marker、函数名、旧 PASS 不能替代行为证据。
+- 用户与执行智能体提供的事实性材料均是待验证证据；Reviewer 可质疑、复核、独立验证或拒绝采信。
+- Reviewer 不修改产品代码。PASS/FAIL 只记录当前 phase review decision；不得自动执行下一阶段。
+- FAIL 给 severity / violated invariant / evidence / reproduction / 最小根因修复方向，并保持 current_phase 不变。
