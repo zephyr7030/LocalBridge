@@ -5,7 +5,7 @@
   "contract_file": "CONTROL_PLANE_REFACTOR_CONTRACT.json",
   "human_authority": "docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md",
   "status": "REFACTOR_IN_PROGRESS",
-  "current_phase": "R2",
+  "current_phase": "R3",
   "implementation_started": true,
   "phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
   "phases": {
@@ -30,12 +30,27 @@
     },
     "R2": {
       "title": "Task / Execution Convergence",
-      "status": "IN_PROGRESS"
+      "status": "VERIFIED",
+      "implementation_commit": "8bac267",
+      "verification": {
+        "tests": [
+          "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1 (319 passed)",
+          "stable TaskId and exactly-once terminal outcome",
+          "multiple concurrent Execution records without a current-command slot",
+          "foreground Task Completed while detached Execution remains Running",
+          "runtime restart converges unfinished Execution to Lost"
+        ],
+        "removed_old_truth": [
+          "mcp/task_state single current_command slot",
+          "detached command keeps foreground Task Running compensation",
+          "global running-session to CurrentTask backfill"
+        ],
+        "verified_invariants": ["INV-03", "INV-05", "INV-07"]
+      }
     },
     "R3": {
       "title": "Explicit Scheduler + Session Lifecycle",
-      "status": "BLOCKED",
-      "blocked_by": "R2 verification"
+      "status": "IN_PROGRESS"
     },
     "R4": {
       "title": "Desired / Observed Convergence",
@@ -92,5 +107,5 @@
     "automatic_next_phase": true,
     "unified_final_acceptance_after": "R7"
   },
-  "next_action": "Implement and verify R2 Task / Execution Convergence, then continue serially through R7 and perform one unified final acceptance."
+  "next_action": "Implement and verify R3 Explicit Scheduler + Session Lifecycle, then continue serially through R7 and perform one unified final acceptance."
 }
