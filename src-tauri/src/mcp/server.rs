@@ -6779,17 +6779,15 @@ mod tests {
             json!({
                 "command":"Write-Output \"a|b\"; Write-Output \"a&b\"; Write-Output 'q|b'; Write-Output 'q&b'; Write-Output '中文输出✓'",
                 "shell":"windows_powershell",
-                "yield_time_ms":10000
+                "yield_time_ms":0
             }),
         );
+        let (quoted, quoted_output) = settle_public_command(pep.port(), &session, 41_000, quoted);
         assert_eq!(
             quoted.body["result"]["isError"], false,
             "{:#?}",
             quoted.body
         );
-        let quoted_output = quoted.body["result"]["structuredContent"]["data"]["output"]
-            .as_str()
-            .unwrap_or_default();
         for literal in ["a|b", "a&b", "q|b", "q&b", "中文输出✓"] {
             assert!(
                 quoted_output.contains(literal),
@@ -6805,16 +6803,17 @@ mod tests {
             json!({
                 "command":"Write-Error \"READERR 🚀\"",
                 "shell":"windows_powershell",
-                "yield_time_ms":10000
+                "yield_time_ms":0
             }),
         );
+        let (powershell_error, powershell_error_output) =
+            settle_public_command(pep.port(), &session, 42_000, powershell_error);
         assert_eq!(
             powershell_error.body["result"]["isError"], true,
             "{:#?}",
             powershell_error.body
         );
         let powershell_error_data = &powershell_error.body["result"]["structuredContent"]["data"];
-        let powershell_error_output = powershell_error_data["output"].as_str().unwrap_or_default();
         assert!(
             powershell_error_output.contains("READERR 🚀"),
             "{powershell_error_output:?}"
@@ -6872,19 +6871,18 @@ mod tests {
             json!({
                 "command":"cd /d . && echo LB_CMD_D_OK",
                 "shell":"cmd",
-                "yield_time_ms":10000
+                "yield_time_ms":0
             }),
         );
+        let (cmd_cd_switch, cmd_cd_output) =
+            settle_public_command(pep.port(), &session, 43_000, cmd_cd_switch);
         assert_eq!(
             cmd_cd_switch.body["result"]["isError"], false,
             "{:#?}",
             cmd_cd_switch.body
         );
         assert!(
-            cmd_cd_switch.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("LB_CMD_D_OK"),
+            cmd_cd_output.contains("LB_CMD_D_OK"),
             "{:#?}",
             cmd_cd_switch.body
         );
@@ -6918,20 +6916,17 @@ mod tests {
             json!({
                 "command":"Write-Output '自动中文✓'",
                 "shell":"auto",
-                "yield_time_ms":10000
+                "yield_time_ms":0
             }),
         );
+        let (auto_utf8, auto_utf8_output) =
+            settle_public_command(pep.port(), &session, 44_000, auto_utf8);
         assert_eq!(
             auto_utf8.body["result"]["isError"], false,
             "{:#?}",
             auto_utf8.body
         );
-        assert!(
-            auto_utf8.body["result"]["structuredContent"]["data"]["output"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("自动中文✓")
-        );
+        assert!(auto_utf8_output.contains("自动中文✓"));
 
         let running = public_tool_call(
             pep.port(),
