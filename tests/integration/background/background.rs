@@ -26,9 +26,9 @@ use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::process::Command;
 #[cfg(windows)]
-use std::sync::mpsc::{self, Sender};
-#[cfg(windows)]
 use std::sync::Arc;
+#[cfg(windows)]
+use std::sync::mpsc::{self, Sender};
 #[cfg(windows)]
 use std::thread::{self, JoinHandle};
 #[cfg(windows)]
@@ -144,35 +144,75 @@ fn shutdown_continues_after_each_stage_failure() {
 }
 
 #[test]
-fn projection_snapshot_cursor_cannot_advance_past_captured_state() {
-    let wake = ProjectionWake::default();
-    let worker_wake = wake.clone();
-    let (start_tx, start_rx) = std::sync::mpsc::channel();
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
+fn revision_cursor_advances_only_after_snapshot_publication() {
+    let owner = ControlPlaneSnapshotOwner::default();
+    let initial = owner.read().revision;
+    let worker_owner = owner.clone();
     let worker = std::thread::spawn(move || {
-        start_rx.recv().unwrap();
-        worker_wake.notify();
-        done_tx.send(()).unwrap();
+        worker_owner.mark_activity_stale();
     });
-    let attempts = std::cell::Cell::new(0_u8);
-
-    let (captured, revision) = wake.capture_revision(|| {
-        let attempt = attempts.get();
-        attempts.set(attempt + 1);
-        if attempt == 0 {
-            start_tx.send(()).unwrap();
-            done_rx.recv().unwrap();
-            "old-snapshot"
-        } else {
-            "new-snapshot"
-        }
-    });
-
+    let revision = owner.wait_after(initial, std::time::Duration::from_secs(1));
     worker.join().unwrap();
-    assert_eq!(captured, "new-snapshot");
-    assert_eq!(revision, 1);
-    assert_eq!(attempts.get(), 2);
-    assert_eq!(wake.wait_after(revision, std::time::Duration::from_millis(1)), 1);
+    assert_eq!(revision, initial + 1);
+    assert_eq!(owner.read().revision, revision);
+}
+
+#[test]
+fn runtime_owner_lock_contention_marks_activity_stale_without_running_compensation() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    lifecycle.publish_current_observation();
+    let ready = lifecycle.control_plane_snapshot();
+    assert!(!ready.activity.stale);
+    let _runtime_owner = lifecycle
+        .runtime
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    lifecycle.publish_current_observation();
+    let contended = lifecycle.control_plane_snapshot();
+    assert!(contended.activity.stale);
+    assert_eq!(
+        contended.activity.availability,
+        crate::control_plane::snapshot::ProjectionAvailability::TemporarilyUnavailable
+    );
+    let aggregate = contended.activity.value.unwrap();
+    assert!(aggregate.foreground_task.is_none());
+    assert!(aggregate.detached_execution.is_none());
+}
+
+#[test]
+fn snapshot_read_is_side_effect_free_and_does_not_assemble_live_state() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    lifecycle.publish_current_observation();
+    let first = lifecycle.control_plane_snapshot();
+    let second = lifecycle.control_plane_snapshot();
+    assert_eq!(second, first);
+    assert_eq!(second.revision, first.revision);
+}
+
+#[test]
+fn partial_runtime_observation_does_not_upgrade_a_stale_runtime_section() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    {
+        let _runtime_owner = lifecycle
+            .runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        lifecycle.publish_current_observation();
+    }
+    let stale = lifecycle.control_plane_snapshot();
+    assert!(stale.runtime.stale);
+
+    lifecycle.publish_local_environment_observation(true);
+    let updated = lifecycle.control_plane_snapshot();
+    assert!(updated.runtime.stale);
+    assert_eq!(updated.runtime.availability, stale.runtime.availability);
+    assert_eq!(
+        updated
+            .runtime
+            .value
+            .and_then(|runtime| runtime.local_environment_available),
+        Some(true)
+    );
 }
 
 #[test]
@@ -375,7 +415,10 @@ fn foreground_ui_ready_stage_remains_stopped_and_is_one_shot() {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
     assert!(first.is_some());
-    assert!(second.is_none(), "UI-ready startup intent must be consumable only once");
+    assert!(
+        second.is_none(),
+        "UI-ready startup intent must be consumable only once"
+    );
     assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::Stopped);
 }
 
@@ -447,7 +490,10 @@ fn stale_built_runtime_is_cleaned_and_cannot_replace_newer_generation_owner_or_s
             old_generation,
         )
         .unwrap();
-    assert_eq!(&*stale_events.lock().unwrap(), &["tunnel.stop", "lower.stop"]);
+    assert_eq!(
+        &*stale_events.lock().unwrap(),
+        &["tunnel.stop", "lower.stop"]
+    );
     assert!(!backend.runtime.lock().unwrap().is_active());
     let still_new = lifecycle.runtime_snapshot();
     assert_eq!(still_new.state, RuntimeState::StartingMcp);
@@ -485,11 +531,11 @@ fn control_plane_stop_invalidates_pending_start_without_active_owner() {
         .runtime_control_generation
         .fetch_add(1, Ordering::AcqRel)
         + 1;
-    backend.publish_starting_if_current(
-        pending_generation,
-        PathBuf::from(r"C:\pending"),
+    backend.publish_starting_if_current(pending_generation, PathBuf::from(r"C:\pending"));
+    assert_eq!(
+        lifecycle.runtime_snapshot().state,
+        RuntimeState::StartingMcp
     );
-    assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::StartingMcp);
 
     lifecycle
         .stop_runtime_for_control_plane()
@@ -509,7 +555,10 @@ fn control_plane_stop_invalidates_pending_start_without_active_owner() {
             pending_generation,
         )
         .unwrap();
-    assert_eq!(&*stale_events.lock().unwrap(), &["tunnel.stop", "lower.stop"]);
+    assert_eq!(
+        &*stale_events.lock().unwrap(),
+        &["tunnel.stop", "lower.stop"]
+    );
     assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::Stopped);
 }
 
@@ -522,11 +571,12 @@ fn manual_service_stop_invalidates_pending_start_without_active_owner() {
         .runtime_control_generation
         .fetch_add(1, Ordering::AcqRel)
         + 1;
-    backend.publish_starting_if_current(
-        pending_generation,
-        PathBuf::from(r"C:\manual-stop-pending"),
+    backend
+        .publish_starting_if_current(pending_generation, PathBuf::from(r"C:\manual-stop-pending"));
+    assert_eq!(
+        lifecycle.runtime_snapshot().state,
+        RuntimeState::StartingMcp
     );
-    assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::StartingMcp);
 
     assert_eq!(
         lifecycle.stop_services_for_manual_action(),
@@ -547,7 +597,10 @@ fn manual_service_stop_invalidates_pending_start_without_active_owner() {
             pending_generation,
         )
         .unwrap();
-    assert_eq!(&*stale_events.lock().unwrap(), &["tunnel.stop", "lower.stop"]);
+    assert_eq!(
+        &*stale_events.lock().unwrap(),
+        &["tunnel.stop", "lower.stop"]
+    );
     assert_eq!(lifecycle.runtime_snapshot().state, RuntimeState::Stopped);
 }
 
@@ -632,7 +685,9 @@ fn actual_blocked_control_plane() -> (String, Sender<()>, JoinHandle<()>) {
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
                     let mut request = [0u8; 4096];
                     let count = stream.read(&mut request).unwrap_or(0);
                     let request = String::from_utf8_lossy(&request[..count]);
@@ -721,15 +776,12 @@ fn production_tray_exit_owns_actual_adapter_and_stops_tunnel_gate_pep_mcp() {
         &health,
         TunnelId::new(ACTUAL_TUNNEL_ID).unwrap(),
     );
-    let mut driver = ProductionRuntimeDriver::new_owned(
-        config,
-        ActualAdapterCredentialStore,
-        || {
+    let mut driver =
+        ProductionRuntimeDriver::new_owned(config, ActualAdapterCredentialStore, || {
             InternalBearer::new(ACTUAL_INTERNAL_BEARER)
                 .map_err(|_| RuntimeFault::ConfigurationInvalid)
-        },
-    )
-    .with_privileged_execution(Arc::new(controller.gateway()));
+        })
+        .with_privileged_execution(Arc::new(controller.gateway()));
 
     let mut mcp = driver.start_mcp().expect("actual bundled MCP starts");
     driver

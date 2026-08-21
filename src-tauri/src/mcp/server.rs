@@ -12,20 +12,19 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
-use crate::control_plane::execution_registry::ExecutionRegistry;
 use crate::control_plane::convergence::{
     ConnectionProfile, ConvergenceSnapshot, DesiredState, DesiredStateOwner, DesiredWorkspace,
     EffectiveState, ObservedState, ServiceIntent,
 };
+use crate::control_plane::execution_registry::ExecutionRegistry;
 use crate::control_plane::request_registry::{
     ActiveRequest, RequestCancellationTarget, RequestRegistry,
 };
-use crate::control_plane::scheduler::{
-    Scheduler, SchedulerAdmissionError, SchedulerLane,
-};
+use crate::control_plane::scheduler::{Scheduler, SchedulerAdmissionError, SchedulerLane};
 use crate::control_plane::session_registry::{
     MCP_SESSION_TTL_MS, SessionInsertError, SessionReaper, SessionRecord, SessionRegistry,
 };
+use crate::control_plane::snapshot::TaskAggregate;
 use crate::control_plane::task_registry::TaskRegistry;
 use crate::diagnostics::error::{
     ErrorDiagnostic, mcp_invalid, mcp_unavailable, mcp_unknown, transport_unavailable,
@@ -33,12 +32,12 @@ use crate::diagnostics::error::{
 use crate::diagnostics::{
     record_mcp_request_error, record_mcp_request_result, record_mcp_request_start,
 };
-use crate::domain::{
-    ExecutionRecord, ExecutionState, LifecycleState, McpSessionId, PublicSessionId, RequestKey,
-    RpcRequestId, TaskId, TaskRecord, TerminalOutcome,
-};
 #[cfg(test)]
 use crate::domain::ExecutionTerminal;
+use crate::domain::{
+    ErrorCategory, ExecutionRecord, ExecutionState, LifecycleState, McpSessionId, OperationError,
+    PublicSessionId, RequestKey, RpcRequestId, TaskId, TaskRecord, TerminalOutcome,
+};
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
 use crate::privilege::{
@@ -249,9 +248,7 @@ impl RegisteredTaskProjection {
     fn project(&self, status: CurrentTaskStatus) {
         match &status {
             CurrentTaskStatus::Idle => {
-                let _ = self
-                    .tasks
-                    .finish(&self.task_id, TerminalOutcome::Completed);
+                let _ = self.tasks.finish(&self.task_id, TerminalOutcome::Completed);
             }
             CurrentTaskStatus::Active(task) => match task.state {
                 TaskExecutionState::Running => {
@@ -264,9 +261,7 @@ impl RegisteredTaskProjection {
                     let _ = self.tasks.finish(&self.task_id, TerminalOutcome::Failed);
                 }
                 TaskExecutionState::Cancelled => {
-                    let _ = self
-                        .tasks
-                        .finish(&self.task_id, TerminalOutcome::Cancelled);
+                    let _ = self.tasks.finish(&self.task_id, TerminalOutcome::Cancelled);
                 }
                 TaskExecutionState::Idle => {}
             },
@@ -409,7 +404,10 @@ impl CurrentTaskProjection {
                 CurrentTaskStatus::Active(task) => {
                     let sequence = match state.active_sequence {
                         Some(sequence)
-                            if matches!(state.latest_presentation, CurrentTaskStatus::Active(_)) =>
+                            if matches!(
+                                state.latest_presentation,
+                                CurrentTaskStatus::Active(_)
+                            ) =>
                         {
                             sequence
                         }
@@ -861,12 +859,17 @@ impl PolicyEnforcementRuntime {
                 Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
             },
         };
-        merge_control_plane_activity(
-            aggregate,
-            &self.tasks,
-            &self.executions,
-            &self.scheduler,
-        )
+        merge_control_plane_activity(aggregate, &self.tasks, &self.executions, &self.scheduler)
+    }
+
+    pub(crate) fn control_plane_activity_snapshot(&self) -> TaskAggregate {
+        TaskAggregate {
+            foreground_task: self.tasks.latest_active(),
+            detached_execution: self.executions.latest_running(),
+            last_task: self.tasks.latest_terminal(),
+            last_execution: self.executions.latest_terminal(),
+            scheduler: self.scheduler.snapshot(),
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -1548,6 +1551,15 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             );
             let lane = scheduler_lane(name, &arguments);
             if lane == SchedulerLane::Work && !effective.work_is_authorized() {
+                requests.record_error(
+                    scoped_request.clone(),
+                    OperationError::new(
+                        "RuntimeUnavailable",
+                        ErrorCategory::Unavailable,
+                        "control-plane intent has not converged",
+                        true,
+                    ),
+                );
                 return write_rpc_result(
                     &mut stream,
                     id,
@@ -1575,7 +1587,16 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                             (Some(task_id), permit)
                         }
                         Err(SchedulerAdmissionError::QueueCapacityExceeded) => {
-                            let _ = tasks.finish(&task_id, TerminalOutcome::Blocked);
+                            let error = OperationError::new(
+                                "QueueCapacityExceeded",
+                                ErrorCategory::Capacity,
+                                "work queue capacity was exceeded",
+                                true,
+                            )
+                            .for_request(scoped_request.clone());
+                            requests.record_error(scoped_request.clone(), error.clone());
+                            let _ =
+                                tasks.finish_with_error(&task_id, TerminalOutcome::Blocked, error);
                             return write_rpc_result(
                                 &mut stream,
                                 id,
@@ -1610,11 +1631,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 let task_id = scheduled_task
                     .clone()
                     .expect("elevated_exec is admitted through Work lane");
-                let registered_task = RegisteredTaskProjection::new(
-                    task_id,
-                    tasks.clone(),
-                    current_task.clone(),
-                );
+                let registered_task =
+                    RegisteredTaskProjection::new(task_id, tasks.clone(), current_task.clone());
                 let request_key = request_diagnostic_key(&id);
                 record_mcp_request_start(&request_key, session, name);
                 let result = handle_elevated_exec(
@@ -1637,11 +1655,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 let task_id = scheduled_task
                     .clone()
                     .expect("filesystem is admitted through Work lane");
-                let registered_task = RegisteredTaskProjection::new(
-                    task_id,
-                    tasks.clone(),
-                    current_task.clone(),
-                );
+                let registered_task =
+                    RegisteredTaskProjection::new(task_id, tasks.clone(), current_task.clone());
                 if let Some(result) = handle_administrator_filesystem_if_needed(
                     &mut stream,
                     id.clone(),
@@ -1737,6 +1752,15 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     Ok(guard) => guard,
                     Err(TryLockError::Poisoned(error)) => error.into_inner(),
                     Err(TryLockError::WouldBlock) => {
+                        requests.record_error(
+                            request_key.clone(),
+                            OperationError::new(
+                                "RuntimeUnavailable",
+                                ErrorCategory::Unavailable,
+                                "control lane is temporarily unavailable",
+                                true,
+                            ),
+                        );
                         requests.remove(&request_key);
                         return write_rpc_result(
                             &mut stream,
@@ -1789,6 +1813,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     current_task.project(status);
                 },
             );
+            if let Some(error) = operation_error_from_facade_result(&result) {
+                requests.record_error(request_key.clone(), error.clone());
+                if let Some(task_id) = &registered_task {
+                    let _ = tasks.finish_with_error(task_id, task_terminal_outcome(&result), error);
+                }
+            }
             requests.remove(&request_key);
             if let Some(task_id) = &registered_task {
                 let _ = tasks.finish(task_id, task_terminal_outcome(&result));
@@ -1797,10 +1827,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 if let Some(public_session) =
                     update_public_session_ownership(sessions, &session_id, name, result)
                 {
-                    let _ = guard.bind_public_command_owner(
-                        public_session.as_str(),
-                        session_id.clone(),
-                    );
+                    let _ = guard
+                        .bind_public_command_owner(public_session.as_str(), session_id.clone());
                 }
             }
             match result {
@@ -1989,10 +2017,7 @@ fn handle_task_control(
             let mut data = match guard.try_lock() {
                 Ok(guard) => guard.task_aggregate_snapshot(),
                 Err(TryLockError::WouldBlock) => {
-                    task_control_snapshot_with_terminal(
-                        &current_task.latest_snapshot(),
-                        executions,
-                    )
+                    task_control_snapshot_with_terminal(&current_task.latest_snapshot(), executions)
                 }
                 Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
             };
@@ -2255,7 +2280,8 @@ fn merge_control_plane_activity(
         .or_else(|| current_workflow.as_ref().map(workflow_activity_value));
     let terminal_execution = executions.latest_terminal();
     let terminal_task = tasks.latest_terminal();
-    let last_activity = latest_registry_activity(terminal_task.as_ref(), terminal_execution.as_ref());
+    let last_activity =
+        latest_registry_activity(terminal_task.as_ref(), terminal_execution.as_ref());
 
     if let Some(object) = aggregate.as_object_mut() {
         object.insert(
@@ -2275,10 +2301,7 @@ fn merge_control_plane_activity(
             "current_activity".into(),
             current_activity.clone().unwrap_or(Value::Null),
         );
-        object.insert(
-            "last_activity".into(),
-            last_activity.unwrap_or(Value::Null),
-        );
+        object.insert("last_activity".into(), last_activity.unwrap_or(Value::Null));
         let scheduler = scheduler.snapshot();
         object.insert(
             "scheduler".into(),
@@ -2308,9 +2331,15 @@ fn merge_control_plane_activity(
         );
         if let Some(task) = active_task {
             object.insert("task_id".into(), Value::String(task.id.to_string()));
-            object.insert("kind".into(), Value::String(activity_kind_name(task.kind).into()));
+            object.insert(
+                "kind".into(),
+                Value::String(activity_kind_name(task.kind).into()),
+            );
         } else if let Some(execution) = running_execution {
-            object.insert("task_id".into(), Value::String(execution.task_id.to_string()));
+            object.insert(
+                "task_id".into(),
+                Value::String(execution.task_id.to_string()),
+            );
             object.insert(
                 "execution_id".into(),
                 Value::String(execution.id.to_string()),
@@ -3743,6 +3772,49 @@ fn task_terminal_outcome(result: &Result<Value, FacadeCallError>) -> TerminalOut
     }
 }
 
+fn operation_error_from_facade_result(
+    result: &Result<Value, FacadeCallError>,
+) -> Option<OperationError> {
+    match result {
+        Err(FacadeCallError::Denied(_)) => Some(OperationError::new(
+            "PolicyDenied",
+            ErrorCategory::Authorization,
+            "request was denied by policy",
+            false,
+        )),
+        Ok(value) if value.get("isError").and_then(Value::as_bool) == Some(true) => {
+            let code = value
+                .pointer("/structuredContent/error/code")
+                .and_then(Value::as_str)
+                .unwrap_or("Internal");
+            let retryable = value
+                .pointer("/structuredContent/error/retryable")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let category = match code {
+                "QueueCapacityExceeded" => ErrorCategory::Capacity,
+                "WorkspaceDenied"
+                | "CapabilityDenied"
+                | "PolicyDenied"
+                | "ElevationRequired"
+                | "PrivilegedRouteUnavailable" => ErrorCategory::Authorization,
+                "ProcessTimedOut" => ErrorCategory::Timeout,
+                "RuntimeUnavailable" | "SessionUnavailable" => ErrorCategory::Unavailable,
+                "InvalidArgument" => ErrorCategory::Validation,
+                "PatchConflict" | "FileChanged" | "AmbiguousMatch" => ErrorCategory::Conflict,
+                _ => ErrorCategory::Internal,
+            };
+            Some(OperationError::new(
+                code,
+                category,
+                "request failed",
+                retryable,
+            ))
+        }
+        Ok(_) => None,
+    }
+}
+
 fn update_public_session_ownership(
     sessions: &SessionRegistry,
     owner: &McpSessionId,
@@ -4290,7 +4362,10 @@ mod tests {
         let workspace = temp_workspace();
         let store = ExecutionRegistry::open_at(workspace.join("owned-terminal.json")).unwrap();
         let a = store
-            .start(TaskId::new("workflow-a"), PublicSessionId::new("lb-session-a"))
+            .start(
+                TaskId::new("workflow-a"),
+                PublicSessionId::new("lb-session-a"),
+            )
             .unwrap();
         store
             .finish(
@@ -4306,7 +4381,10 @@ mod tests {
             )
             .unwrap();
         let b = store
-            .start(TaskId::new("direct-b"), PublicSessionId::new("lb-session-b"))
+            .start(
+                TaskId::new("direct-b"),
+                PublicSessionId::new("lb-session-b"),
+            )
             .unwrap();
         store
             .finish(
@@ -4399,9 +4477,7 @@ mod tests {
         );
         assert_eq!(foreground["current_activity"]["kind"], "read");
 
-        tasks
-            .finish(&task_b, TerminalOutcome::Completed)
-            .unwrap();
+        tasks.finish(&task_b, TerminalOutcome::Completed).unwrap();
         let restored = merge_control_plane_activity(base, &tasks, &executions, &scheduler);
         assert_eq!(
             restored["current_activity"]["execution_id"],

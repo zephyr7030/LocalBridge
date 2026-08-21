@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEv
 import { WizardFrame } from "../../components/WizardFrame";
 import { ReadinessCheck } from "../../components/ReadinessCheck";
 import { AdminModeWarning } from "../../components/AdminModeWarning";
-import { bridge, type AccessCode, type MainProjection } from "../../bridge";
+import { bridge, type AccessCode, type MainProjection, uiErrorMessage } from "../../bridge";
 import { accessText } from "../../presentation";
 import { onboardingApi, type OnboardingState } from "./api";
 import "./onboarding.css";
@@ -11,8 +11,7 @@ const KEY_HINT = "Runtime API Key 仅保存在 Windows 安全凭据中。";
 
 type Screen4CopyKey = "name" | "tunnel";
 
-const messageFrom = (value: unknown, fallback: string) =>
-  typeof value === "string" ? value : value instanceof Error ? value.message : fallback;
+const messageFrom = (value: unknown, fallback: string) => uiErrorMessage(value, fallback);
 
 export function Onboarding({ initial, onComplete, previewMode = false }: { initial: OnboardingState; onComplete: () => void; previewMode?: boolean }) {
   const viteDev = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;

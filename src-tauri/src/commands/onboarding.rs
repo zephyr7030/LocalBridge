@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
@@ -13,10 +13,11 @@ use windows_sys::Win32::UI::Shell::{
     SHGetPathFromIDListW, ShellExecuteW,
 };
 
+use super::error::{UiError, UiResult};
 use crate::app::{DesktopLifecycle, STARTUP_PROFILE_FILE_NAME, StartupProfileStore};
 use crate::commands::ui;
-use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::control_plane::convergence::ConnectionProfile;
+use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::settings::SettingsStore;
 use crate::state::RuntimeState;
 
@@ -58,13 +59,14 @@ pub struct ConnectorEndpointProjection {
 }
 
 #[tauri::command]
-pub async fn get_onboarding_state(app: AppHandle) -> Result<OnboardingState, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn get_onboarding_state(app: AppHandle) -> UiResult<OnboardingState> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<OnboardingState> {
         let lifecycle = app.state::<DesktopLifecycle>();
-        project_state(&app, &lifecycle)
+        project_state(&lifecycle)
     })
     .await
-    .map_err(|_| "首次设置状态后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.OnboardingReadJoinFailed", "首次设置状态后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
@@ -72,8 +74,8 @@ pub async fn save_onboarding_connection(
     tunnel_id: String,
     runtime_key: String,
     app: AppHandle,
-) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let app_data = app_data_dir(&app)?;
         let profile_store = StartupProfileStore::new(app_data.join(STARTUP_PROFILE_FILE_NAME));
         let mut profile = profile_store
@@ -91,7 +93,7 @@ pub async fn save_onboarding_connection(
                 .runtime_api_key_metadata()
                 .map_err(|_| "无法读取Runtime API Key状态".to_string())?;
             if !metadata.has_runtime_key {
-                return Err("请输入Runtime API Key".to_string());
+                return Err(UiError::from("请输入Runtime API Key"));
             }
             false
         } else {
@@ -116,38 +118,64 @@ pub async fn save_onboarding_connection(
             epoch = epoch.saturating_add(1);
         }
         lifecycle.set_desired_connection(Some(ConnectionProfile::new(tunnel_id, epoch)));
+        ui::refresh_settings_snapshot(&app, &lifecycle)?;
         Ok(())
     })
     .await
-    .map_err(|_| "OpenAI 连接保存后台任务异常".to_string())?
+    .map_err(|_| {
+        UiError::internal(
+            "Ui.OnboardingConnectionJoinFailed",
+            "OpenAI 连接保存后台任务异常",
+        )
+    })?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn open_openai_tunnel_settings() -> Result<(), String> {
+pub async fn open_openai_tunnel_settings() -> UiResult<()> {
     tauri::async_runtime::spawn_blocking(|| open_allowlisted_url(OPENAI_TUNNEL_SETTINGS_URL))
         .await
-        .map_err(|_| "打开 Tunnel ID 设置后台任务异常".to_string())?
+        .map_err(|_| {
+            UiError::internal(
+                "Ui.OpenTunnelSettingsJoinFailed",
+                "打开 Tunnel ID 设置后台任务异常",
+            )
+        })?
+        .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn open_openai_api_keys() -> Result<(), String> {
+pub async fn open_openai_api_keys() -> UiResult<()> {
     tauri::async_runtime::spawn_blocking(|| open_allowlisted_url(OPENAI_API_KEYS_URL))
         .await
-        .map_err(|_| "打开 Runtime API Key 设置后台任务异常".to_string())?
+        .map_err(|_| {
+            UiError::internal(
+                "Ui.OpenApiKeysJoinFailed",
+                "打开 Runtime API Key 设置后台任务异常",
+            )
+        })?
+        .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn open_chatgpt_plugins_settings() -> Result<(), String> {
+pub async fn open_chatgpt_plugins_settings() -> UiResult<()> {
     tauri::async_runtime::spawn_blocking(|| open_allowlisted_url(CHATGPT_PLUGINS_SETTINGS_URL))
         .await
-        .map_err(|_| "打开 ChatGPT插件设置后台任务异常".to_string())?
+        .map_err(|_| {
+            UiError::internal(
+                "Ui.OpenPluginsJoinFailed",
+                "打开 ChatGPT插件设置后台任务异常",
+            )
+        })?
+        .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn open_chatgpt_custom_connector_settings() -> Result<(), String> {
+pub async fn open_chatgpt_custom_connector_settings() -> UiResult<()> {
     tauri::async_runtime::spawn_blocking(|| open_allowlisted_url(CHATGPT_CUSTOM_CONNECTOR_URL))
         .await
-        .map_err(|_| "打开插件管理页后台任务异常".to_string())?
+        .map_err(|_| UiError::internal("Ui.OpenConnectorJoinFailed", "打开插件管理页后台任务异常"))?
+        .map_err(UiError::from_string)
 }
 
 #[tauri::command]
@@ -162,10 +190,11 @@ pub fn get_connector_endpoint(
 }
 
 #[tauri::command]
-pub async fn choose_onboarding_workspace_folder() -> Result<Option<String>, String> {
+pub async fn choose_onboarding_workspace_folder() -> UiResult<Option<String>> {
     tauri::async_runtime::spawn_blocking(pick_windows_workspace_folder)
         .await
-        .map_err(|_| "无法打开文件夹选择器".to_string())?
+        .map_err(|_| UiError::internal("Ui.FolderPickerJoinFailed", "无法打开文件夹选择器"))?
+        .map_err(UiError::from_string)
 }
 
 #[tauri::command]
@@ -174,9 +203,9 @@ pub async fn prepare_onboarding_project(
     project_id: Option<String>,
     selected_folder: Option<String>,
     app: AppHandle,
-) -> Result<OnboardingState, String> {
+) -> UiResult<OnboardingState> {
     ui::set_permission_mode(mode, app.clone()).await?;
-    tauri::async_runtime::spawn_blocking(move || {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<OnboardingState> {
         if let Some(folder) = selected_folder.filter(|value| !value.trim().is_empty()) {
             let lifecycle = app.state::<DesktopLifecycle>();
             ui::add_project_blocking(folder, Some(false), &app, &lifecycle)?;
@@ -184,78 +213,79 @@ pub async fn prepare_onboarding_project(
             let lifecycle = app.state::<DesktopLifecycle>();
             ui::select_project_blocking(id, &app, &lifecycle)?;
         } else {
-            return Err("请选择项目文件夹".to_string());
+            return Err(UiError::from("请选择项目文件夹"));
         }
 
         for _ in 0..120 {
             let lifecycle = app.state::<DesktopLifecycle>();
-            let current = project_state(&app, &lifecycle)?;
+            let current = project_state(&lifecycle)?;
             if current.readiness.all_ready() {
                 return Ok(current);
             }
             if matches!(lifecycle.runtime_snapshot().state, RuntimeState::Faulted(_)) {
-                return Err("本地服务启动失败，请检查启动检查状态".to_string());
+                return Err(UiError::from("本地服务启动失败，请检查启动检查状态"));
             }
             std::thread::sleep(Duration::from_millis(250));
         }
-        Err("本地服务未在预期时间内就绪，请重试".to_string())
+        Err(UiError::from("本地服务未在预期时间内就绪，请重试"))
     })
     .await
-    .map_err(|_| "项目准备后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.OnboardingProjectJoinFailed", "项目准备后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn complete_onboarding(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn complete_onboarding(app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let lifecycle = app.state::<DesktopLifecycle>();
-        let current = project_state(&app, &lifecycle)?;
+        let current = project_state(&lifecycle)?;
         if !current.readiness.all_ready() {
-            return Err("本地服务尚未全部就绪".to_string());
+            return Err(UiError::from("本地服务尚未全部就绪"));
         }
         let store = SettingsStore::new(app_data_dir(&app)?.join("settings.json"));
         let mut data = store.load().map_err(|_| "无法读取设置".to_string())?;
         data.settings.onboarding_complete = true;
         store
             .save(&data)
-            .map_err(|_| "无法保存设置完成状态".to_string())
+            .map_err(|_| "无法保存设置完成状态".to_string())?;
+        ui::refresh_settings_snapshot(&app, &lifecycle)?;
+        Ok(())
     })
     .await
-    .map_err(|_| "首次设置完成后台任务异常".to_string())?
+    .map_err(|_| {
+        UiError::internal(
+            "Ui.OnboardingCompleteJoinFailed",
+            "首次设置完成后台任务异常",
+        )
+    })?
+    .map_err(UiError::from_string)
 }
 
-fn project_state(app: &AppHandle, lifecycle: &DesktopLifecycle) -> Result<OnboardingState, String> {
-    let app_data = app_data_dir(app)?;
-    let data = SettingsStore::new(app_data.join("settings.json"))
-        .load()
-        .map_err(|_| "无法读取设置".to_string())?;
-    let tunnel_id = lifecycle.desired_state().snapshot().state.connection;
-    let connection_configured = tunnel_id.is_some();
-    let runtime_key = WindowsCredentialStore::default()
-        .read_runtime_api_key()
-        .map_err(|_| "无法读取Runtime API Key状态".to_string())?;
-    let runtime_key_saved = runtime_key.is_some();
-    let runtime_key_length = runtime_key
-        .as_ref()
-        .map(|secret| secret.expose_secret().chars().count());
+fn project_state(lifecycle: &DesktopLifecycle) -> UiResult<OnboardingState> {
+    let snapshot = lifecycle.control_plane_snapshot();
+    let settings = snapshot.settings.value.as_ref();
+    let connection = snapshot.connection.value.as_ref();
+    let runtime = snapshot.runtime.value.as_ref();
     Ok(OnboardingState {
-        complete: data.settings.onboarding_complete,
-        connection_configured,
-        runtime_key_saved,
-        runtime_key_length,
-        tunnel_id: tunnel_id.map(|value| value.tunnel_id.expose().to_owned()),
-        readiness: readiness(lifecycle),
+        complete: settings.is_some_and(|settings| settings.onboarding_complete),
+        connection_configured: connection
+            .is_some_and(|connection| connection.desired_tunnel_id.is_some()),
+        runtime_key_saved: settings.is_some_and(|settings| settings.runtime_key_saved),
+        runtime_key_length: settings.and_then(|settings| settings.runtime_key_length),
+        tunnel_id: connection.and_then(|connection| connection.desired_tunnel_id.clone()),
+        readiness: readiness(runtime),
     })
 }
 
-fn readiness(lifecycle: &DesktopLifecycle) -> OnboardingReadiness {
-    let root = production_install_root();
-    let local_environment = root.as_ref().is_ok_and(|root| {
-        root.join("runtime/python/python.exe").is_file()
-            && root
-                .join("runtime/coding-tools-mcp/coding_tools_mcp/__init__.py")
-                .is_file()
-    });
-    let state = lifecycle.runtime_snapshot().state;
+fn readiness(
+    runtime: Option<&crate::control_plane::snapshot::RuntimeProjection>,
+) -> OnboardingReadiness {
+    let local_environment = runtime
+        .and_then(|runtime| runtime.local_environment_available)
+        .unwrap_or(false);
+    let state = runtime
+        .map(|runtime| &runtime.state)
+        .unwrap_or(&RuntimeState::Stopped);
     let coding_service = matches!(
         state,
         RuntimeState::StartingTunnel | RuntimeState::WaitingTunnelReady | RuntimeState::Ready
@@ -268,30 +298,14 @@ fn readiness(lifecycle: &DesktopLifecycle) -> OnboardingReadiness {
     }
 }
 
-fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
+fn app_data_dir(app: &AppHandle) -> UiResult<PathBuf> {
+    Ok(app
+        .path()
         .app_data_dir()
-        .map_err(|_| "无法定位应用数据目录".to_string())
+        .map_err(|_| "无法定位应用数据目录".to_string())?)
 }
 
-fn production_install_root() -> Result<PathBuf, String> {
-    #[cfg(debug_assertions)]
-    {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| "无法定位本地运行环境".to_string())
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        std::env::current_exe()
-            .ok()
-            .and_then(|path| path.parent().map(Path::to_path_buf))
-            .ok_or_else(|| "无法定位本地运行环境".to_string())
-    }
-}
-
-fn open_allowlisted_url(url: &str) -> Result<(), String> {
+fn open_allowlisted_url(url: &str) -> UiResult<()> {
     if !matches!(
         url,
         OPENAI_TUNNEL_SETTINGS_URL
@@ -299,7 +313,7 @@ fn open_allowlisted_url(url: &str) -> Result<(), String> {
             | CHATGPT_PLUGINS_SETTINGS_URL
             | CHATGPT_CUSTOM_CONNECTOR_URL
     ) {
-        return Err("不允许打开此地址".to_string());
+        return Err(UiError::from("不允许打开此地址"));
     }
     let operation = wide("open");
     let target = wide(url);
@@ -314,15 +328,15 @@ fn open_allowlisted_url(url: &str) -> Result<(), String> {
         )
     };
     if result as isize <= 32 {
-        return Err("无法使用系统浏览器打开页面".to_string());
+        return Err(UiError::from("无法使用系统浏览器打开页面"));
     }
     Ok(())
 }
 
-fn pick_windows_workspace_folder() -> Result<Option<String>, String> {
+fn pick_windows_workspace_folder() -> UiResult<Option<String>> {
     let initialized = unsafe { CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32) };
     if initialized < 0 {
-        return Err("无法初始化文件夹选择器".to_string());
+        return Err(UiError::from("无法初始化文件夹选择器"));
     }
 
     let title = wide("选择项目文件夹");
@@ -360,7 +374,7 @@ fn pick_windows_workspace_folder() -> Result<Option<String>, String> {
         }
     };
     unsafe { CoUninitialize() };
-    result
+    Ok(result?)
 }
 
 fn wide(value: &str) -> Vec<u16> {
@@ -411,7 +425,10 @@ mod tests {
             }),
             (false, false)
         );
-        assert_eq!(ready(RuntimeState::Faulted(RuntimeFault::McpHealthTimeout)), (false, false));
+        assert_eq!(
+            ready(RuntimeState::Faulted(RuntimeFault::McpHealthTimeout)),
+            (false, false)
+        );
         assert_eq!(ready(RuntimeState::Stopped), (false, false));
     }
 }

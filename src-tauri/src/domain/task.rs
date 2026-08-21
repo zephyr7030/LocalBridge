@@ -1,4 +1,6 @@
-use super::{LifecycleState, McpSessionId, RequestKey, TaskId};
+use serde::{Deserialize, Serialize};
+
+use super::{LifecycleState, McpSessionId, OperationError, RequestKey, TaskId};
 
 const MAX_SAFE_SUMMARY_CHARS: usize = 160;
 const SENSITIVE_MARKERS: &[&str] = &[
@@ -81,7 +83,8 @@ fn contains_sensitive_key_value(lower: &str) -> bool {
     false
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskKind {
     ReadFile,
     SearchCode,
@@ -94,7 +97,8 @@ pub enum TaskKind {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "text", rename_all = "snake_case")]
 pub enum SafeTaskSummary {
     Omitted,
     Text(String),
@@ -131,7 +135,7 @@ impl SafeTaskSummary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub id: TaskId,
     pub owner_session: McpSessionId,
@@ -141,6 +145,7 @@ pub struct TaskRecord {
     pub lifecycle: LifecycleState,
     pub created_at_ms: u64,
     pub updated_at_ms: u64,
+    pub error: Option<OperationError>,
 }
 
 #[cfg(test)]

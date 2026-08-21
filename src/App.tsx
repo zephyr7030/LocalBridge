@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { APP_NAME } from "./appModel";
-import { bridge, type AccessCode, type MainProjection, type ProjectProjection } from "./bridge";
+import { bridge, type AccessCode, type MainProjection, type ProjectProjection, uiErrorMessage } from "./bridge";
 import { accessText, currentActivityDetail, currentActivityElapsed, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, serviceText, uiText } from "./presentation";
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { onboardingApi, type OnboardingState } from "./features/onboarding/api";
@@ -11,7 +11,7 @@ import { AdminModeWarning } from "./components/AdminModeWarning";
 import "./styles.css";
 
 type View = "main" | "settings" | "diagnostics";
-function errorText(value: unknown): string { return typeof value === "string" && value.trim() ? value : "操作未完成"; }
+function errorText(value: unknown): string { return uiErrorMessage(value, "操作未完成"); }
 
 export function App() {
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);

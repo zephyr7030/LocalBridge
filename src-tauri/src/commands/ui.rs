@@ -2,25 +2,27 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
+use super::error::{UiError, UiResult};
 use crate::app::{
     AutostartManager, DesktopLifecycle, DesktopRuntimeStartError, STARTUP_PROFILE_FILE_NAME,
     StartupProfileStore, manual_stop_services,
 };
-use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::control_plane::convergence::{
     ConnectionProfile, DesiredWorkspace, PermissionReconcileAction, RuntimeReconcileAction,
     ServiceIntent,
 };
+use crate::control_plane::snapshot::{ControlPlaneSnapshot, TaskAggregate};
+use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
+use crate::domain::{ExecutionState, LifecycleState, TerminalOutcome};
 use crate::runtime::ProductionRuntimeConfig;
 use crate::settings::{AppData, SettingsStore};
-use crate::state::{
-    LastToolTiming, PermissionMode, PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState, TaskKind,
-};
 #[cfg(test)]
 use crate::state::{CurrentTaskStatus, TaskExecutionState};
+use crate::state::{
+    PermissionMode, PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState, TaskKind,
+};
 use crate::tunnel::TunnelId;
 use crate::workspace::{WorkspaceId, WorkspaceValidator};
 
@@ -47,6 +49,16 @@ pub struct MainProjection {
     auto_start: bool,
     close_window_continue_running: bool,
     reconnect: Option<ReconnectProjection>,
+    active_faults: Vec<UiFaultProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UiFaultProjection {
+    code: String,
+    category: &'static str,
+    message: String,
+    retryable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,14 +79,21 @@ struct TaskProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct CurrentWorkflowProjection { state: &'static str }
+struct CurrentWorkflowProjection {
+    state: &'static str,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct CurrentCommandProjection { state: &'static str }
+struct CurrentCommandProjection {
+    state: &'static str,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LastCommandProjection { status: &'static str, age_ms: u64 }
+struct LastCommandProjection {
+    status: &'static str,
+    age_ms: u64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -179,9 +198,9 @@ fn admin_consent_gate() -> &'static Mutex<AdminConsentGate> {
     GATE.get_or_init(|| Mutex::new(AdminConsentGate::default()))
 }
 
-fn begin_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
+fn begin_admin_consent_challenge(challenge_id: &str) -> UiResult<()> {
     if !valid_admin_consent_challenge_id(challenge_id) {
-        return Err("管理员确认标识无效".to_string());
+        return Err(UiError::from("管理员确认标识无效"));
     }
     admin_consent_gate()
         .lock()
@@ -190,9 +209,9 @@ fn begin_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn cancel_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
+fn cancel_admin_consent_challenge(challenge_id: &str) -> UiResult<()> {
     if !valid_admin_consent_challenge_id(challenge_id) {
-        return Err("管理员确认标识无效".to_string());
+        return Err(UiError::from("管理员确认标识无效"));
     }
     admin_consent_gate()
         .lock()
@@ -201,9 +220,9 @@ fn cancel_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn confirm_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
+fn confirm_admin_consent_challenge(challenge_id: &str) -> UiResult<()> {
     if !valid_admin_consent_challenge_id(challenge_id) {
-        return Err("管理员确认标识无效".to_string());
+        return Err(UiError::from("管理员确认标识无效"));
     }
     let confirmed = admin_consent_gate()
         .lock()
@@ -212,7 +231,7 @@ fn confirm_admin_consent_challenge(challenge_id: &str) -> Result<(), String> {
     if confirmed {
         Ok(())
     } else {
-        Err("管理员确认无效或尚未完成".to_string())
+        Err(UiError::from("管理员确认无效或尚未完成"))
     }
 }
 
@@ -230,122 +249,131 @@ fn reset_admin_consent() {
         .reset();
 }
 #[tauri::command]
-pub async fn get_main_projection(app: AppHandle) -> Result<MainProjection, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn get_main_projection(app: AppHandle) -> UiResult<MainProjection> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<MainProjection> {
         let lifecycle = app.state::<DesktopLifecycle>();
-        get_main_projection_blocking(app.clone(), &lifecycle)
+        get_main_projection_blocking(&lifecycle)
     })
     .await
-    .map_err(|_| "主控状态后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ProjectionJoinFailed", "主控状态后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn wait_main_projection_change(
-    since_revision: u64,
-    app: AppHandle,
-) -> Result<u64, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn wait_main_projection_change(since_revision: u64, app: AppHandle) -> UiResult<u64> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<u64> {
         let lifecycle = app.state::<DesktopLifecycle>();
         Ok(lifecycle.wait_projection_change_after(since_revision))
     })
     .await
-    .map_err(|_| "状态唤醒后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ProjectionWaitJoinFailed", "状态唤醒后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn ui_ready(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn ui_ready(app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let lifecycle = app.state::<DesktopLifecycle>();
-        lifecycle
+        Ok(lifecycle
             .start_staged_foreground_after_ui_ready()
             .map(|_| ())
-            .map_err(|_| "无法启动后台服务".to_string())
+            .map_err(|_| "无法启动后台服务".to_string())?)
     })
     .await
-    .map_err(|_| "界面就绪后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ReadyJoinFailed", "界面就绪后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
-fn get_main_projection_blocking(
-    app: AppHandle,
-    lifecycle: &DesktopLifecycle,
-) -> Result<MainProjection, String> {
-    let (_, data) = load_app_data(&app)?;
-    let (snapshot, projection_revision) = lifecycle.runtime_snapshot_with_revision();
-    let convergence = lifecycle.convergence_snapshot();
-    let task_aggregate = lifecycle.task_aggregate_snapshot();
-    let metadata = WindowsCredentialStore::default()
-        .runtime_api_key_metadata()
-        .map_err(|_| "无法读取 Runtime API Key 状态".to_string())?;
-    let tunnel_id = convergence
-        .desired
-        .connection
-        .as_ref()
-        .map(|profile| profile.tunnel_id.expose().to_owned());
-    let active_id = convergence
-        .desired
-        .workspace
-        .as_ref()
-        .and_then(|workspace| workspace.id.as_ref())
-        .map(WorkspaceId::as_str);
-    let projects = data
-        .workspace
-        .remembered_entries()
-        .iter()
-        .map(|entry| {
-            let path = WorkspaceValidator
-                .validate(&entry.display_path)
-                .ok()
-                .filter(|validated| {
-                    entry.validated_identity.as_str() == validated.identity().as_str()
+fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainProjection> {
+    let control_plane = lifecycle.control_plane_snapshot();
+    let runtime = control_plane.runtime.value.as_ref();
+    let authority = control_plane.authority.value.as_ref();
+    let settings = control_plane.settings.value.as_ref();
+    let task_aggregate = control_plane.activity.value.as_ref();
+    let projects = settings
+        .map(|settings| {
+            settings
+                .projects
+                .iter()
+                .map(|project| ProjectProjection {
+                    id: project.id.clone(),
+                    path: project
+                        .accessible_path
+                        .clone()
+                        .unwrap_or_else(|| "项目已无法访问".to_string()),
+                    active: project.active,
                 })
-                .map(|validated| validated.execution_path().to_string_lossy().into_owned())
-                .unwrap_or_else(|| "项目已无法访问".to_string());
-            ProjectProjection {
-                id: entry.workspace_id.as_str().to_owned(),
-                path,
-                active: active_id == Some(entry.workspace_id.as_str()),
-            }
+                .collect::<Vec<_>>()
         })
-        .collect::<Vec<_>>();
+        .unwrap_or_default();
     let current_project = projects
         .iter()
         .find(|project| project.active)
         .map(|project| project.path.clone());
-    let (tunnel_service, coding_service) = service_codes(&snapshot.state);
-    let reconnect = snapshot.outage.and_then(|outage| {
-        outage
-            .user_attention_required
-            .then_some(ReconnectProjection {
-                generation: outage.generation,
-            })
-    });
+    let runtime_state = runtime
+        .map(|runtime| &runtime.state)
+        .unwrap_or(&RuntimeState::Stopped);
+    let (tunnel_service, coding_service) = service_codes(runtime_state);
+    let reconnect = runtime
+        .and_then(|runtime| runtime.outage.as_ref())
+        .and_then(|outage| {
+            outage
+                .user_attention_required
+                .then_some(ReconnectProjection {
+                    generation: outage.generation,
+                })
+        });
     Ok(MainProjection {
-        permission: permission_code(convergence.desired.permission),
-        privilege: privilege_code(&convergence.observed.broker),
-        local_environment_service: local_environment_service_code(&snapshot.state),
+        permission: permission_code(
+            authority
+                .map(|authority| authority.desired)
+                .unwrap_or(PermissionMode::Edit),
+        ),
+        privilege: authority
+            .map(|authority| privilege_code(&authority.broker))
+            .unwrap_or("off"),
+        local_environment_service: local_environment_service_code(runtime_state),
         tunnel_service,
         coding_service,
         current_project,
         projects,
-        current_task: legacy_task_projection_from_aggregate(&task_aggregate, snapshot.current_task_elapsed_ms),
-        current_workflow: current_workflow_projection(&task_aggregate),
-        current_command: current_command_projection(&task_aggregate),
-        last_command: last_command_projection(&task_aggregate),
-        last_tool: snapshot.last_tool.as_ref().map(last_tool_projection),
-        current_activity: current_activity_projection(&task_aggregate),
-        last_activity: last_activity_projection(&task_aggregate),
-        projection_revision,
-        tunnel_id,
-        runtime_key_saved: metadata.has_runtime_key,
-        auto_start: data.settings.auto_start_services,
-        close_window_continue_running: data.settings.close_window_continue_running,
+        current_task: task_aggregate.and_then(|aggregate| {
+            task_projection_from_aggregate(
+                aggregate,
+                runtime.and_then(|runtime| runtime.current_task_elapsed_ms),
+            )
+        }),
+        current_workflow: task_aggregate.and_then(current_workflow_projection),
+        current_command: task_aggregate.and_then(current_command_projection),
+        last_command: task_aggregate.and_then(last_command_projection),
+        last_tool: runtime
+            .and_then(|runtime| runtime.last_tool.as_ref())
+            .map(|last| LastToolProjection {
+                kind: task_kind_code(last.kind),
+                summary: last.summary.clone(),
+                age_ms: last.age_ms,
+            }),
+        current_activity: task_aggregate.and_then(current_activity_projection),
+        last_activity: task_aggregate.and_then(last_activity_projection),
+        projection_revision: control_plane.revision,
+        tunnel_id: control_plane
+            .connection
+            .value
+            .as_ref()
+            .and_then(|connection| connection.desired_tunnel_id.clone()),
+        runtime_key_saved: settings.is_some_and(|settings| settings.runtime_key_saved),
+        auto_start: settings.is_some_and(|settings| settings.auto_start),
+        close_window_continue_running: settings
+            .map(|settings| settings.close_window_continue_running)
+            .unwrap_or(true),
         reconnect,
+        active_faults: ui_faults(&control_plane),
     })
 }
 
 #[tauri::command]
-pub async fn set_permission_mode(mode: String, app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn set_permission_mode(mode: String, app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         if let Some(challenge_id) = mode.strip_prefix("admin-consent-begin:") {
             return begin_admin_consent_challenge(challenge_id);
         }
@@ -366,7 +394,7 @@ pub async fn set_permission_mode(mode: String, app: AppHandle) -> Result<(), Str
             && !privilege_active
             && !consume_confirmed_admin_consent()
         {
-            return Err("管理员确认尚未完成".to_string());
+            return Err(UiError::from("管理员确认尚未完成"));
         }
         let (store, mut data) = load_app_data(&app)?;
         data.settings.permission_mode = requested.into();
@@ -374,23 +402,23 @@ pub async fn set_permission_mode(mode: String, app: AppHandle) -> Result<(), Str
             .save(&data)
             .map_err(|_| "无法保存权限设置".to_string())?;
         lifecycle.set_desired_permission(requested);
-        match lifecycle.reconciliation_plan().permission {
-            PermissionReconcileAction::RequestAuthorization => {
-                if request_explicit_admin(&lifecycle).is_err() {
-                    return Err("管理员权限目标已保存，Broker 当前不可用".to_string());
-                }
-            }
-            PermissionReconcileAction::DisableBroker => {
-                lifecycle.privilege().disable().map_err(|_| {
-                    "权限目标已保存，但管理员 Broker 尚未完全关闭".to_string()
-                })?;
-            }
-            PermissionReconcileAction::None => {}
-        }
+        refresh_settings_snapshot(&app, &lifecycle)?;
+        let reconciliation = match lifecycle.reconciliation_plan().permission {
+            PermissionReconcileAction::RequestAuthorization => request_explicit_admin(&lifecycle)
+                .map_err(|_| UiError::from("管理员权限目标已保存，Broker 当前不可用")),
+            PermissionReconcileAction::DisableBroker => lifecycle
+                .privilege()
+                .disable()
+                .map_err(|_| UiError::from("权限目标已保存，但管理员 Broker 尚未完全关闭")),
+            PermissionReconcileAction::None => Ok(()),
+        };
+        lifecycle.publish_current_observation();
+        reconciliation?;
         Ok(())
     })
     .await
-    .map_err(|_| "权限设置后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.PermissionJoinFailed", "权限设置后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 fn request_explicit_admin(lifecycle: &DesktopLifecycle) -> Result<(), ()> {
@@ -407,8 +435,8 @@ fn request_explicit_admin(lifecycle: &DesktopLifecycle) -> Result<(), ()> {
 }
 
 #[tauri::command]
-pub async fn set_auto_start(enabled: bool, app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn set_auto_start(enabled: bool, app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let (store, mut data) = load_app_data(&app)?;
         let previous = data.settings.auto_start_services;
         if previous == enabled {
@@ -422,20 +450,19 @@ pub async fn set_auto_start(enabled: bool, app: AppHandle) -> Result<(), String>
         data.settings.auto_start_services = enabled;
         if store.save(&data).is_err() {
             let _ = manager.set_enabled(previous);
-            return Err("无法保存开机启动设置".to_string());
+            return Err(UiError::from("无法保存开机启动设置"));
         }
+        refresh_settings_snapshot(&app, &app.state::<DesktopLifecycle>())?;
         Ok(())
     })
     .await
-    .map_err(|_| "开机启动后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.AutostartJoinFailed", "开机启动后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn set_close_window_continue_running(
-    enabled: bool,
-    app: AppHandle,
-) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn set_close_window_continue_running(enabled: bool, app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let lifecycle = app.state::<DesktopLifecycle>();
         let (store, mut data) = load_app_data(&app)?;
         data.settings.close_window_continue_running = enabled;
@@ -443,15 +470,17 @@ pub async fn set_close_window_continue_running(
             .save(&data)
             .map_err(|_| "无法保存常规设置".to_string())?;
         lifecycle.set_close_window_continue_running(enabled);
+        refresh_settings_snapshot(&app, &lifecycle)?;
         Ok(())
     })
     .await
-    .map_err(|_| "常规设置后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.SettingsJoinFailed", "常规设置后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn save_runtime_key(value: String, app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn save_runtime_key(value: String, app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let secret =
             SecretString::new(value).map_err(|_| "Runtime API Key 格式无效".to_string())?;
         let credentials = WindowsCredentialStore::default();
@@ -468,16 +497,23 @@ pub async fn save_runtime_key(value: String, app: AppHandle) -> Result<(), Strin
             .map_err(|_| "无法安全保存 Runtime API Key".to_string())?;
         let lifecycle = app.state::<DesktopLifecycle>();
         lifecycle.mark_connection_credentials_changed();
+        refresh_settings_snapshot(&app, &lifecycle)?;
         reconnect_after_connection_change(&app, &lifecycle)?;
         Ok(())
     })
     .await
-    .map_err(|_| "Runtime API Key 保存后台任务异常".to_string())?
+    .map_err(|_| {
+        UiError::internal(
+            "Ui.RuntimeKeySaveJoinFailed",
+            "Runtime API Key 保存后台任务异常",
+        )
+    })?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn save_tunnel_id(value: String, app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn save_tunnel_id(value: String, app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let requested =
             TunnelId::new(value.trim().to_owned()).map_err(|_| "Tunnel ID 格式无效".to_string())?;
         let app_data = app_data_dir(&app)?;
@@ -511,29 +547,37 @@ pub async fn save_tunnel_id(value: String, app: AppHandle) -> Result<(), String>
         Ok(())
     })
     .await
-    .map_err(|_| "Tunnel ID 保存后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.TunnelSaveJoinFailed", "Tunnel ID 保存后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn delete_runtime_key(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn delete_runtime_key(app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let deleted = WindowsCredentialStore::default()
             .delete_runtime_api_key()
             .map_err(|_| "无法删除Runtime API Key".to_string())?;
         if deleted {
             let lifecycle = app.state::<DesktopLifecycle>();
             lifecycle.mark_connection_credentials_changed();
+            refresh_settings_snapshot(&app, &lifecycle)?;
             reconnect_after_connection_change(&app, &lifecycle)?;
         }
         Ok(())
     })
     .await
-    .map_err(|_| "Runtime API Key 删除后台任务异常".to_string())?
+    .map_err(|_| {
+        UiError::internal(
+            "Ui.RuntimeKeyDeleteJoinFailed",
+            "Runtime API Key 删除后台任务异常",
+        )
+    })?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn retry_connection(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn retry_connection(app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let lifecycle = app.state::<DesktopLifecycle>();
         lifecycle
             .manual_retry_after_attention()
@@ -541,7 +585,8 @@ pub async fn retry_connection(app: AppHandle) -> Result<(), String> {
         Ok(())
     })
     .await
-    .map_err(|_| "连接重试后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ConnectionRetryJoinFailed", "连接重试后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
@@ -549,13 +594,14 @@ pub async fn add_project(
     path: String,
     defer_activation: Option<bool>,
     app: AppHandle,
-) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+) -> UiResult<String> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<String> {
         let lifecycle = app.state::<DesktopLifecycle>();
         add_project_blocking(path, defer_activation, &app, &lifecycle)
     })
     .await
-    .map_err(|_| "项目添加后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ProjectAddJoinFailed", "项目添加后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 pub(crate) fn add_project_blocking(
@@ -563,7 +609,7 @@ pub(crate) fn add_project_blocking(
     defer_activation: Option<bool>,
     app: &AppHandle,
     lifecycle: &DesktopLifecycle,
-) -> Result<String, String> {
+) -> UiResult<String> {
     let candidate_path = PathBuf::from(path);
     let validated = WorkspaceValidator
         .validate(&candidate_path)
@@ -586,6 +632,7 @@ pub(crate) fn add_project_blocking(
         store
             .save(&data)
             .map_err(|_| "无法保存项目记录".to_string())?;
+        refresh_settings_snapshot(app, lifecycle)?;
         return Ok(id_value);
     }
     activate_project(
@@ -596,24 +643,26 @@ pub(crate) fn add_project_blocking(
         id,
         validated.execution_path(),
     )?;
+    refresh_settings_snapshot(app, lifecycle)?;
     Ok(id_value)
 }
 
 #[tauri::command]
-pub async fn select_project(id: String, app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn select_project(id: String, app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let lifecycle = app.state::<DesktopLifecycle>();
         select_project_blocking(id, &app, &lifecycle)
     })
     .await
-    .map_err(|_| "项目切换后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ProjectSelectJoinFailed", "项目切换后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 pub(crate) fn select_project_blocking(
     id: String,
     app: &AppHandle,
     lifecycle: &DesktopLifecycle,
-) -> Result<(), String> {
+) -> UiResult<()> {
     let id = WorkspaceId::from_validated(id).map_err(|_| "项目不存在".to_string())?;
     let (store, mut data) = load_app_data(app)?;
     let entry = data
@@ -626,7 +675,7 @@ pub(crate) fn select_project_blocking(
         .validate(&entry.display_path)
         .map_err(|_| "项目已无法访问".to_string())?;
     if entry.validated_identity.as_str() != validated.identity().as_str() {
-        return Err("项目身份已变化，请重新添加".to_string());
+        return Err(UiError::from("项目身份已变化，请重新添加"));
     }
     activate_project(
         app,
@@ -635,28 +684,30 @@ pub(crate) fn select_project_blocking(
         &mut data,
         id,
         validated.execution_path(),
-    )
+    )?;
+    refresh_settings_snapshot(app, lifecycle)
 }
 
 #[tauri::command]
-pub async fn remove_project(id: String, app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn remove_project(id: String, app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let lifecycle = app.state::<DesktopLifecycle>();
         remove_project_blocking(id, &app, &lifecycle)
     })
     .await
-    .map_err(|_| "项目移除后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ProjectRemoveJoinFailed", "项目移除后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 fn remove_project_blocking(
     id: String,
     app: &AppHandle,
     lifecycle: &DesktopLifecycle,
-) -> Result<(), String> {
+) -> UiResult<()> {
     let id = WorkspaceId::from_validated(id).map_err(|_| "项目不存在".to_string())?;
     let (store, mut data) = load_app_data(app)?;
     if data.workspace.registry.get(&id).is_none() {
-        return Err("项目不存在".to_string());
+        return Err(UiError::from("项目不存在"));
     }
     let was_active = data.workspace.active_workspace_id.as_ref() == Some(&id);
     if was_active {
@@ -673,6 +724,7 @@ fn remove_project_blocking(
             .stop_runtime_for_control_plane()
             .map_err(|_| "项目移除目标已保存，但旧服务尚未完全停止".to_string())?;
     }
+    refresh_settings_snapshot(app, lifecycle)?;
     Ok(())
 }
 
@@ -683,7 +735,7 @@ fn activate_project(
     data: &mut AppData,
     id: WorkspaceId,
     candidate: &Path,
-) -> Result<(), String> {
+) -> UiResult<()> {
     clear_manual_stop_for_explicit_action(app)?;
     data.workspace
         .set_active_reference(id.clone())
@@ -700,9 +752,8 @@ fn activate_project(
                 .map_err(|_| "项目切换目标已保存，运行服务仍在收敛".to_string())?;
         }
         RuntimeReconcileAction::Start => {
-            start_runtime_for_path(app, lifecycle, candidate).map_err(|_| {
-                "项目切换目标已保存，运行服务当前不可用".to_string()
-            })?;
+            start_runtime_for_path(app, lifecycle, candidate)
+                .map_err(|_| "项目切换目标已保存，运行服务当前不可用".to_string())?;
         }
         RuntimeReconcileAction::RestartConnection => {
             let config = production_runtime_config_for_path(app, candidate)?;
@@ -713,7 +764,7 @@ fn activate_project(
         }
         RuntimeReconcileAction::None => {}
         RuntimeReconcileAction::Stop | RuntimeReconcileAction::WaitForObservation => {
-            return Err("项目目标已保存，运行服务正在收敛".to_string());
+            return Err(UiError::from("项目目标已保存，运行服务正在收敛"));
         }
     }
     Ok(())
@@ -723,17 +774,17 @@ fn start_runtime_for_path(
     app: &AppHandle,
     lifecycle: &DesktopLifecycle,
     path: &Path,
-) -> Result<(), String> {
+) -> UiResult<()> {
     let config = production_runtime_config_for_path(app, path)?;
-    lifecycle
+    Ok(lifecycle
         .start_production_runtime(config)
-        .map_err(runtime_start_message)
+        .map_err(runtime_start_message)?)
 }
 
 fn production_runtime_config_for_path(
     app: &AppHandle,
     path: &Path,
-) -> Result<ProductionRuntimeConfig, String> {
+) -> UiResult<ProductionRuntimeConfig> {
     let app_data = app_data_dir(app)?;
     let profile = StartupProfileStore::new(app_data.join(STARTUP_PROFILE_FILE_NAME))
         .load()
@@ -753,7 +804,7 @@ fn production_runtime_config_for_path(
 fn production_runtime_config_for_active_workspace(
     app: &AppHandle,
     data: &AppData,
-) -> Result<ProductionRuntimeConfig, String> {
+) -> UiResult<ProductionRuntimeConfig> {
     let entry = data
         .workspace
         .active_entry()
@@ -762,7 +813,7 @@ fn production_runtime_config_for_active_workspace(
         .validate(&entry.display_path)
         .map_err(|_| "当前项目已无法访问".to_string())?;
     if entry.validated_identity.as_str() != validated.identity().as_str() {
-        return Err("项目身份已变化，请重新添加".to_string());
+        return Err(UiError::from("项目身份已变化，请重新添加"));
     }
     production_runtime_config_for_path(app, validated.execution_path())
 }
@@ -770,44 +821,44 @@ fn production_runtime_config_for_active_workspace(
 fn reconnect_after_connection_change(
     app: &AppHandle,
     lifecycle: &DesktopLifecycle,
-) -> Result<(), String> {
+) -> UiResult<()> {
     match lifecycle.reconciliation_plan().runtime {
         RuntimeReconcileAction::RestartConnection | RuntimeReconcileAction::Start => {
             let (_, data) = load_app_data(app)?;
             let config = production_runtime_config_for_active_workspace(app, &data)?;
-            lifecycle
+            Ok(lifecycle
                 .backend_handle()
                 .restart_production_runtime(config)
-                .map_err(|_| "连接设置已保存，但服务重连失败".to_string())
+                .map_err(|_| "连接设置已保存，但服务重连失败".to_string())?)
         }
-        RuntimeReconcileAction::ApplyWorkspace(_)
-        | RuntimeReconcileAction::WaitForObservation => {
-            Err("连接设置已保存，运行服务正在收敛".to_string())
+        RuntimeReconcileAction::ApplyWorkspace(_) | RuntimeReconcileAction::WaitForObservation => {
+            Err(UiError::from("连接设置已保存，运行服务正在收敛"))
         }
         RuntimeReconcileAction::None | RuntimeReconcileAction::Stop => Ok(()),
     }
 }
 
 #[tauri::command]
-pub async fn restart_services(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn restart_services(app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         clear_manual_stop_for_explicit_action(&app)?;
         let lifecycle = app.state::<DesktopLifecycle>();
         lifecycle.set_desired_services(ServiceIntent::Enabled);
         let (_, data) = load_app_data(&app)?;
         let config = production_runtime_config_for_active_workspace(&app, &data)?;
-        lifecycle
+        Ok(lifecycle
             .backend_handle()
             .restart_production_runtime(config)
-            .map_err(|_| "无法重启服务".to_string())
+            .map_err(|_| "无法重启服务".to_string())?)
     })
     .await
-    .map_err(|_| "服务重启后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ServicesRestartJoinFailed", "服务重启后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
-pub async fn stop_services(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
+pub async fn stop_services(app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let app_data = app_data_dir(&app)?;
         let lifecycle = app.state::<DesktopLifecycle>();
         let report =
@@ -816,12 +867,13 @@ pub async fn stop_services(app: AppHandle) -> Result<(), String> {
             || report.privilege_stop_failed
             || report.lower_runtime_stop_failed
         {
-            return Err("服务关闭不完整，请查看诊断".to_string());
+            return Err(UiError::from("服务关闭不完整，请查看诊断"));
         }
         Ok(())
     })
     .await
-    .map_err(|_| "服务关闭后台任务异常".to_string())?
+    .map_err(|_| UiError::internal("Ui.ServicesStopJoinFailed", "服务关闭后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 fn runtime_start_message(error: DesktopRuntimeStartError) -> String {
@@ -870,7 +922,7 @@ fn runtime_fault_message(fault: &RuntimeFault) -> &'static str {
     }
 }
 
-fn clear_manual_stop_for_explicit_action(app: &AppHandle) -> Result<(), String> {
+fn clear_manual_stop_for_explicit_action(app: &AppHandle) -> UiResult<()> {
     let app_data = app_data_dir(app)?;
     let store = StartupProfileStore::new(app_data.join(STARTUP_PROFILE_FILE_NAME));
     let mut profile = store.load().map_err(|_| "无法读取连接设置".to_string())?;
@@ -883,25 +935,62 @@ fn clear_manual_stop_for_explicit_action(app: &AppHandle) -> Result<(), String> 
     Ok(())
 }
 
-fn load_app_data(app: &AppHandle) -> Result<(SettingsStore, AppData), String> {
+fn load_app_data(app: &AppHandle) -> UiResult<(SettingsStore, AppData)> {
     let store = SettingsStore::new(app_data_dir(app)?.join("settings.json"));
     let data = store.load().map_err(|_| "无法读取设置".to_string())?;
     Ok((store, data))
 }
 
-fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map_err(|_| "无法定位应用数据目录".to_string())
+pub(crate) fn refresh_settings_snapshot(
+    app: &AppHandle,
+    lifecycle: &DesktopLifecycle,
+) -> UiResult<()> {
+    let (_, data) = load_app_data(app)?;
+    let (runtime_key_saved, runtime_key_length, error) =
+        match WindowsCredentialStore::default().read_runtime_api_key() {
+            Ok(secret) => (
+                secret.is_some(),
+                secret
+                    .as_ref()
+                    .map(|secret| secret.expose_secret().chars().count()),
+                None,
+            ),
+            Err(_) => (
+                false,
+                None,
+                Some(crate::domain::OperationError::new(
+                    "Settings.CredentialMetadataUnavailable",
+                    crate::domain::ErrorCategory::Unavailable,
+                    "Runtime credential metadata is unavailable",
+                    true,
+                )),
+            ),
+        };
+    lifecycle.publish_settings_snapshot(
+        crate::control_plane::snapshot::SettingsProjection::from_app_data(
+            &data,
+            runtime_key_saved,
+            runtime_key_length,
+        ),
+        error,
+    );
+    Ok(())
 }
 
-fn production_install_root() -> Result<PathBuf, String> {
+fn app_data_dir(app: &AppHandle) -> UiResult<PathBuf> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "无法定位应用数据目录".to_string())?)
+}
+
+fn production_install_root() -> UiResult<PathBuf> {
     #[cfg(debug_assertions)]
     {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .map(Path::to_path_buf)
-            .ok_or_else(|| "无法定位本地运行环境".to_string())
+            .ok_or_else(|| "无法定位本地运行环境".to_string())?)
     }
     #[cfg(not(debug_assertions))]
     {
@@ -928,12 +1017,12 @@ fn unix_nanos() -> u128 {
         .as_nanos()
 }
 
-fn parse_permission(value: &str) -> Result<PermissionMode, String> {
+fn parse_permission(value: &str) -> UiResult<PermissionMode> {
     match value {
         "edit" => Ok(PermissionMode::Edit),
         "full" => Ok(PermissionMode::Full),
         "admin" => Ok(PermissionMode::Elevated),
-        _ => Err("权限模式无效".to_string()),
+        _ => Err(UiError::from("权限模式无效")),
     }
 }
 fn permission_code(value: PermissionMode) -> &'static str {
@@ -988,68 +1077,177 @@ fn local_environment_service_code(state: &RuntimeState) -> &'static str {
         RuntimeState::Faulted(_) => "fault",
     }
 }
-fn last_tool_projection(last: &LastToolTiming) -> LastToolProjection {
-    LastToolProjection {
-        kind: task_kind_code(last.kind),
-        summary: last.summary.as_deref().map(str::to_owned),
-        age_ms: last.age_ms,
+fn current_workflow_projection(aggregate: &TaskAggregate) -> Option<CurrentWorkflowProjection> {
+    let task = aggregate.foreground_task.as_ref()?;
+    if task.kind != TaskKind::Other {
+        return None;
     }
-}
-fn current_workflow_projection(aggregate: &Value) -> Option<CurrentWorkflowProjection> {
-    let state=aggregate.get("current_workflow")?.get("state")?.as_str()?;
-    Some(CurrentWorkflowProjection{state:match state {"running"=>"running","waiting"=>"waiting",_=>return None}})
-}
-fn current_command_projection(aggregate: &Value) -> Option<CurrentCommandProjection> {
-    let state=aggregate.get("current_command")?.get("state")?.as_str()?;
-    Some(CurrentCommandProjection{state:match state {"running"=>"running","waiting_input"=>"waiting_input","cancelling"=>"cancelling",_=>return None}})
-}
-fn last_command_projection(aggregate: &Value) -> Option<LastCommandProjection> {
-    let terminal=aggregate.get("last_command")?; let status=terminal.get("status")?.as_str()?;
-    let status=match status {"completed"=>"completed","failed"=>"failed","cancelled"=>"cancelled","timed_out"=>"timed_out","lost"=>"lost",_=>return None};
-    let completed=terminal.get("completed_at_ms").and_then(Value::as_u64).unwrap_or(0);
-    let now=SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64;
-    Some(LastCommandProjection{status,age_ms:now.saturating_sub(completed)})
-}
-fn activity_kind_code(value: &Value) -> Option<&'static str> {
-    match value.as_str()? {
-        "read" => Some("read"), "search" => Some("search"), "modify" => Some("modify"),
-        "command" => Some("command"), "git" => Some("git"), "build" => Some("build"),
-        "test" => Some("test"), "admin" => Some("admin"), "other" => Some("other"), _ => None,
-    }
-}
-fn current_activity_projection(aggregate: &Value) -> Option<CurrentActivityProjection> {
-    let activity = aggregate.get("current_activity")?.as_object()?;
-    let kind = activity_kind_code(activity.get("kind")?)?;
-    let state = match activity.get("state")?.as_str()? {
-        "running" => "running", "waiting" => "waiting", "waiting_input" => "waiting_input",
-        "cancelling" => "cancelling", _ => return None,
-    };
-    Some(CurrentActivityProjection {
-        kind, state,
-        summary: activity.get("summary").and_then(Value::as_str).map(str::to_owned),
-        elapsed_ms: activity.get("elapsed_ms").and_then(Value::as_u64),
-        step: activity.get("step").and_then(Value::as_str).map(str::to_owned),
-        progress_current: activity.get("progress_current").and_then(Value::as_u64),
-        progress_total: activity.get("progress_total").and_then(Value::as_u64),
+    Some(CurrentWorkflowProjection {
+        state: match task.lifecycle {
+            LifecycleState::Queued => "waiting",
+            LifecycleState::Running => "running",
+            LifecycleState::Terminal(_) => return None,
+        },
     })
 }
-fn last_activity_projection(aggregate: &Value) -> Option<LastActivityProjection> {
-    let activity = aggregate.get("last_activity")?.as_object()?;
-    let kind = activity_kind_code(activity.get("kind")?)?;
-    let outcome = match activity.get("outcome")?.as_str()? {
-        "completed" => "completed", "failed" => "failed", "cancelled" => "cancelled",
-        "timed_out" => "timed_out", "lost" => "lost", _ => return None,
+
+fn current_command_projection(aggregate: &TaskAggregate) -> Option<CurrentCommandProjection> {
+    if aggregate
+        .foreground_task
+        .as_ref()
+        .is_some_and(|task| task.kind == TaskKind::ExecuteCommand)
+        || aggregate
+            .detached_execution
+            .as_ref()
+            .is_some_and(|execution| matches!(execution.state, ExecutionState::Running))
+    {
+        return Some(CurrentCommandProjection { state: "running" });
+    }
+    None
+}
+
+fn last_command_projection(aggregate: &TaskAggregate) -> Option<LastCommandProjection> {
+    let execution = aggregate.last_execution.as_ref()?;
+    let ExecutionState::Terminal(terminal) = &execution.state else {
+        return None;
     };
-    Some(LastActivityProjection {
-        kind,
-        summary: activity.get("summary").and_then(Value::as_str).map(str::to_owned),
-        outcome,
-        completed_at_ms: activity.get("completed_at_ms")?.as_u64()?,
+    Some(LastCommandProjection {
+        status: terminal_outcome_code(terminal.outcome),
+        age_ms: now_unix_ms().saturating_sub(terminal.completed_at_ms),
     })
 }
-fn legacy_task_projection_from_aggregate(aggregate:&Value, elapsed_ms:Option<u64>)->Option<TaskProjection>{
-    if let Some(command)=current_command_projection(aggregate){ return Some(TaskProjection{kind:"command",summary:None,state:match command.state{"running"=>"running","waiting_input"=>"waiting","cancelling"=>"running",_=>"running"},elapsed_ms}); }
-    current_workflow_projection(aggregate).map(|workflow|TaskProjection{kind:"other",summary:None,state:if workflow.state=="waiting"{"waiting"}else{"running"},elapsed_ms})
+
+fn current_activity_projection(aggregate: &TaskAggregate) -> Option<CurrentActivityProjection> {
+    if let Some(task) = aggregate.foreground_task.as_ref() {
+        return Some(CurrentActivityProjection {
+            kind: task_kind_code(task.kind),
+            state: match task.lifecycle {
+                LifecycleState::Queued => "waiting",
+                LifecycleState::Running => "running",
+                LifecycleState::Terminal(_) => return None,
+            },
+            summary: task.summary.as_deref().map(str::to_owned),
+            elapsed_ms: Some(now_unix_ms().saturating_sub(task.created_at_ms)),
+            step: None,
+            progress_current: None,
+            progress_total: None,
+        });
+    }
+    aggregate.detached_execution.as_ref().and_then(|execution| {
+        matches!(execution.state, ExecutionState::Running).then_some(CurrentActivityProjection {
+            kind: "command",
+            state: "running",
+            summary: None,
+            elapsed_ms: Some(now_unix_ms().saturating_sub(execution.started_at_ms)),
+            step: None,
+            progress_current: None,
+            progress_total: None,
+        })
+    })
+}
+
+fn last_activity_projection(aggregate: &TaskAggregate) -> Option<LastActivityProjection> {
+    let task = aggregate.last_task.as_ref().and_then(|task| {
+        let LifecycleState::Terminal(outcome) = task.lifecycle else {
+            return None;
+        };
+        Some(LastActivityProjection {
+            kind: task_kind_code(task.kind),
+            summary: task.summary.as_deref().map(str::to_owned),
+            outcome: terminal_outcome_code(outcome),
+            completed_at_ms: task.updated_at_ms,
+        })
+    });
+    let execution = aggregate.last_execution.as_ref().and_then(|execution| {
+        let ExecutionState::Terminal(terminal) = &execution.state else {
+            return None;
+        };
+        Some(LastActivityProjection {
+            kind: "command",
+            summary: aggregate
+                .last_task
+                .as_ref()
+                .filter(|task| task.id == execution.task_id)
+                .and_then(|task| task.summary.as_deref())
+                .map(str::to_owned),
+            outcome: terminal_outcome_code(terminal.outcome),
+            completed_at_ms: terminal.completed_at_ms,
+        })
+    });
+    match (task, execution) {
+        (Some(task), Some(execution)) if execution.completed_at_ms >= task.completed_at_ms => {
+            Some(execution)
+        }
+        (Some(task), _) => Some(task),
+        (None, execution) => execution,
+    }
+}
+
+fn task_projection_from_aggregate(
+    aggregate: &TaskAggregate,
+    elapsed_ms: Option<u64>,
+) -> Option<TaskProjection> {
+    if let Some(task) = aggregate.foreground_task.as_ref() {
+        return Some(TaskProjection {
+            kind: task_kind_code(task.kind),
+            summary: task.summary.as_deref().map(str::to_owned),
+            state: match task.lifecycle {
+                LifecycleState::Queued => "waiting",
+                LifecycleState::Running => "running",
+                LifecycleState::Terminal(TerminalOutcome::Blocked) => "blocked",
+                LifecycleState::Terminal(TerminalOutcome::Cancelled) => "cancelled",
+                LifecycleState::Terminal(_) => "failed",
+            },
+            elapsed_ms,
+        });
+    }
+    aggregate.detached_execution.as_ref().and_then(|execution| {
+        matches!(execution.state, ExecutionState::Running).then_some(TaskProjection {
+            kind: "command",
+            summary: None,
+            state: "running",
+            elapsed_ms: Some(now_unix_ms().saturating_sub(execution.started_at_ms)),
+        })
+    })
+}
+
+fn terminal_outcome_code(outcome: TerminalOutcome) -> &'static str {
+    match outcome {
+        TerminalOutcome::Completed => "completed",
+        TerminalOutcome::Failed | TerminalOutcome::Blocked => "failed",
+        TerminalOutcome::Cancelled => "cancelled",
+        TerminalOutcome::TimedOut => "timed_out",
+        TerminalOutcome::Lost => "lost",
+    }
+}
+
+fn ui_faults(snapshot: &ControlPlaneSnapshot) -> Vec<UiFaultProjection> {
+    snapshot
+        .active_faults
+        .iter()
+        .map(|fault| UiFaultProjection {
+            code: fault.error.code.clone(),
+            category: match fault.error.category {
+                crate::domain::ErrorCategory::Validation => "validation",
+                crate::domain::ErrorCategory::Authorization => "authorization",
+                crate::domain::ErrorCategory::Capacity => "capacity",
+                crate::domain::ErrorCategory::Conflict => "conflict",
+                crate::domain::ErrorCategory::Timeout => "timeout",
+                crate::domain::ErrorCategory::Unavailable => "unavailable",
+                crate::domain::ErrorCategory::Internal => "internal",
+            },
+            message: fault.error.message.clone(),
+            retryable: fault.error.retryable,
+        })
+        .collect()
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
 }
 
 #[cfg(test)]
@@ -1168,5 +1366,4 @@ mod tests {
             assert!(!message.contains("synthetic-secret"));
         }
     }
-
 }

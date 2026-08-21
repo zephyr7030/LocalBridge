@@ -1,4 +1,3 @@
-use serde_json::{Value, json};
 use std::fmt;
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
@@ -6,8 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use crate::credentials::CredentialStore;
 use crate::control_plane::convergence::{ConnectionProfile, DesiredStateOwner};
+use crate::control_plane::snapshot::TaskAggregate;
+use crate::credentials::CredentialStore;
 use crate::mcp::{
     CapabilityPolicy, CodingRuntimeHealthState, CodingToolsPermissionMode, CodingToolsRuntime,
     CodingToolsRuntimeConfig, CurrentTaskWake, InternalBearer, PolicyEnforcementError,
@@ -15,7 +15,8 @@ use crate::mcp::{
 };
 use crate::privilege::PrivilegedExecution;
 use crate::state::{
-    CurrentTaskStatus, CurrentTaskTiming, PermissionMode, RuntimeComponent, RuntimeFault, RuntimeState,
+    CurrentTaskStatus, CurrentTaskTiming, PermissionMode, RuntimeComponent, RuntimeFault,
+    RuntimeState,
 };
 use crate::tunnel::{
     ConnectorEndpoint, PreparedTunnelStart, TunnelId, TunnelRuntime, TunnelRuntimeConfig,
@@ -104,15 +105,8 @@ pub trait RuntimeDriver {
 
     fn current_task(&self, pep: &Self::Pep) -> CurrentTaskStatus;
 
-    fn task_aggregate(&self, pep: &Self::Pep) -> Value {
-        match self.current_task(pep) {
-            CurrentTaskStatus::Idle => {
-                json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null})
-            }
-            CurrentTaskStatus::Active(_) => {
-                json!({"state":"active","current_workflow":null,"current_command":{"state":"running"},"last_command":null})
-            }
-        }
+    fn task_aggregate(&self, _pep: &Self::Pep) -> TaskAggregate {
+        TaskAggregate::idle()
     }
 
     fn current_task_timing(&self, pep: &Self::Pep) -> CurrentTaskTiming {
@@ -149,7 +143,6 @@ pub trait RuntimeDriver {
     fn configure_workspace(&mut self, _workspace: PathBuf) -> Result<(), RuntimeFault> {
         Err(RuntimeFault::ConfigurationInvalid)
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,12 +245,16 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         self.current_task_timing().status
     }
 
-    pub fn task_aggregate(&self) -> Value {
+    pub fn task_aggregate(&self) -> TaskAggregate {
         self.ready
             .as_ref()
             .map(|ready| self.driver.task_aggregate(&ready.pep))
-            .or_else(|| self.recovering_pep.as_ref().map(|pep| self.driver.task_aggregate(pep)))
-            .unwrap_or_else(|| json!({"state":"idle","current_workflow":null,"current_command":null,"last_command":null}))
+            .or_else(|| {
+                self.recovering_pep
+                    .as_ref()
+                    .map(|pep| self.driver.task_aggregate(pep))
+            })
+            .unwrap_or_else(TaskAggregate::idle)
     }
 
     pub fn current_task_timing(&self) -> CurrentTaskTiming {
@@ -553,10 +550,7 @@ impl<D: RuntimeDriver> RuntimeOrchestrator<D> {
         }
     }
 
-    pub fn switch_workspace_to(
-        &mut self,
-        candidate: &Path,
-    ) -> Result<(), WorkspaceSwitchError> {
+    pub fn switch_workspace_to(&mut self, candidate: &Path) -> Result<(), WorkspaceSwitchError> {
         if candidate.as_os_str().is_empty() {
             return Err(WorkspaceSwitchError {
                 candidate_fault: RuntimeFault::WorkspaceInvalid,
@@ -1401,9 +1395,7 @@ where
                 PermissionMode::Edit,
                 Arc::clone(wake),
             ),
-            (None, None) => {
-                PolicyEnforcementRuntime::start(mcp, policy, PermissionMode::Edit)
-            }
+            (None, None) => PolicyEnforcementRuntime::start(mcp, policy, PermissionMode::Edit),
         }
         .map_err(policy_runtime_fault)
     }
@@ -1503,8 +1495,8 @@ where
         pep.current_task_projection().timing_snapshot()
     }
 
-    fn task_aggregate(&self, pep: &Self::Pep) -> Value {
-        pep.task_aggregate_snapshot()
+    fn task_aggregate(&self, pep: &Self::Pep) -> TaskAggregate {
+        pep.control_plane_activity_snapshot()
     }
 
     fn connector_endpoint(&self, tunnel: &Self::Tunnel) -> Option<ConnectorEndpoint> {
@@ -1560,7 +1552,6 @@ where
         self.config.workspace = workspace;
         Ok(())
     }
-
 }
 
 fn available_loopback_port() -> Result<u16, RuntimeFault> {

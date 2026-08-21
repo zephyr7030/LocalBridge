@@ -2,6 +2,8 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
+use serde::{Deserialize, Serialize};
+
 use crate::domain::{McpSessionId, TaskId};
 
 pub(crate) const MAX_WORK_QUEUE: usize = 32;
@@ -21,14 +23,27 @@ pub(crate) enum SchedulerAdmissionError {
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SchedulerSnapshot {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SchedulerSnapshot {
     pub observation_active: usize,
     pub control_active: usize,
     pub work_running: usize,
     pub work_queued: usize,
     pub work_capacity: usize,
     pub rejected_total: u64,
+}
+
+impl SchedulerSnapshot {
+    pub(crate) const fn idle() -> Self {
+        Self {
+            observation_active: 0,
+            control_active: 0,
+            work_running: 0,
+            work_queued: 0,
+            work_capacity: MAX_WORK_QUEUE,
+            rejected_total: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

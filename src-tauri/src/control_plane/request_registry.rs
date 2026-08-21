@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use crate::domain::{McpSessionId, RequestKey, RpcRequestId};
+use crate::domain::{McpSessionId, OperationError, RequestKey, RpcRequestId};
 use crate::mcp::filesystem_service::FilesystemCancellation;
 
 #[derive(Debug, Clone)]
@@ -24,7 +24,15 @@ pub(crate) enum RequestRegistryError {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct RequestRegistry(Arc<Mutex<HashMap<RequestKey, ActiveRequest>>>);
+pub(crate) struct RequestRegistry(Arc<Mutex<RequestRegistryState>>);
+
+#[derive(Debug, Default)]
+struct RequestRegistryState {
+    active: HashMap<RequestKey, ActiveRequest>,
+    errors: VecDeque<(RequestKey, OperationError)>,
+}
+
+const MAX_RETAINED_REQUEST_ERRORS: usize = 256;
 
 impl RequestRegistry {
     pub(crate) fn register(
@@ -32,14 +40,16 @@ impl RequestRegistry {
         key: RequestKey,
         cancellation: RequestCancellationTarget,
     ) -> Result<(), RequestRegistryError> {
-        let mut requests = self
+        let mut state = self
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if requests.contains_key(&key) {
+        if state.active.contains_key(&key) {
             return Err(RequestRegistryError::AlreadyActive);
         }
-        requests.insert(key.clone(), ActiveRequest { key, cancellation });
+        state
+            .active
+            .insert(key.clone(), ActiveRequest { key, cancellation });
         Ok(())
     }
 
@@ -47,6 +57,7 @@ impl RequestRegistry {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
             .remove(key)
     }
 
@@ -54,6 +65,7 @@ impl RequestRegistry {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
             .get(key)
             .cloned()
     }
@@ -63,6 +75,7 @@ impl RequestRegistry {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
             .contains_key(key)
     }
 
@@ -70,6 +83,7 @@ impl RequestRegistry {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
             .values()
             .filter(|request| &request.key.session_id == session_id)
             .cloned()
@@ -80,9 +94,35 @@ impl RequestRegistry {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
             .values()
             .cloned()
             .collect()
+    }
+
+    pub(crate) fn record_error(&self, key: RequestKey, error: OperationError) {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state
+            .errors
+            .push_back((key.clone(), error.for_request(key)));
+        while state.errors.len() > MAX_RETAINED_REQUEST_ERRORS {
+            state.errors.pop_front();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn latest_error(&self, key: &RequestKey) -> Option<OperationError> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .errors
+            .iter()
+            .rev()
+            .find(|(candidate, _)| candidate == key)
+            .map(|(_, error)| error.clone())
     }
 }
 
@@ -136,5 +176,24 @@ mod tests {
             active.cancellation,
             RequestCancellationTarget::Runtime(RpcRequestId::Number(101))
         ));
+    }
+
+    #[test]
+    fn request_error_history_keeps_the_scoped_request_key() {
+        let registry = RequestRegistry::default();
+        let request = key("a", 4);
+        registry.record_error(
+            request.clone(),
+            OperationError::new(
+                "Request.Unavailable",
+                crate::domain::ErrorCategory::Unavailable,
+                "unavailable",
+                true,
+            ),
+        );
+        assert_eq!(
+            registry.latest_error(&request).unwrap().request,
+            Some(request)
+        );
     }
 }

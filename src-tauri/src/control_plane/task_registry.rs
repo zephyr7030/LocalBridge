@@ -48,6 +48,7 @@ impl TaskRegistry {
             lifecycle: LifecycleState::Queued,
             created_at_ms: now,
             updated_at_ms: now,
+            error: None,
         };
         let mut state = self
             .0
@@ -99,6 +100,36 @@ impl TaskRegistry {
             LifecycleState::Queued | LifecycleState::Running => {
                 task.lifecycle = LifecycleState::Terminal(outcome);
                 task.updated_at_ms = now_unix_ms();
+                trim_terminal_history(&mut state);
+                Ok(())
+            }
+            LifecycleState::Terminal(existing) if existing == outcome => Ok(()),
+            LifecycleState::Terminal(existing) => Err(TaskTransitionError::AlreadyTerminal {
+                task_id: task_id.clone(),
+                outcome: existing,
+            }),
+        }
+    }
+
+    pub(crate) fn finish_with_error(
+        &self,
+        task_id: &TaskId,
+        outcome: TerminalOutcome,
+        error: crate::domain::OperationError,
+    ) -> Result<(), TaskTransitionError> {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let task = state
+            .tasks
+            .get_mut(task_id)
+            .ok_or_else(|| TaskTransitionError::UnknownTask(task_id.clone()))?;
+        match task.lifecycle {
+            LifecycleState::Queued | LifecycleState::Running => {
+                task.lifecycle = LifecycleState::Terminal(outcome);
+                task.updated_at_ms = now_unix_ms();
+                task.error = Some(error.for_task(task_id.clone()));
                 trim_terminal_history(&mut state);
                 Ok(())
             }
@@ -243,5 +274,25 @@ mod tests {
                 outcome: TerminalOutcome::Cancelled,
             })
         );
+    }
+
+    #[test]
+    fn failed_task_retains_typed_operation_error() {
+        let registry = TaskRegistry::default();
+        let task_id = queue_task(&registry);
+        registry
+            .finish_with_error(
+                &task_id,
+                TerminalOutcome::Failed,
+                crate::domain::OperationError::new(
+                    "Task.Failed",
+                    crate::domain::ErrorCategory::Internal,
+                    "task failed",
+                    false,
+                ),
+            )
+            .unwrap();
+        let task = registry.get(&task_id).unwrap();
+        assert_eq!(task.error.unwrap().task_id, Some(task_id));
     }
 }

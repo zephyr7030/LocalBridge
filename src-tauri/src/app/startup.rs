@@ -1,11 +1,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::settings::{SettingsStore, SettingsStoreError};
-use crate::state::{PermissionMode, PrivilegeFault};
 use crate::control_plane::convergence::{
     ConnectionProfile, DesiredState, DesiredWorkspace, ServiceIntent,
 };
+use crate::control_plane::snapshot::SettingsProjection;
+#[cfg(windows)]
+use crate::credentials::{CredentialStore, WindowsCredentialStore};
+use crate::domain::{ErrorCategory, OperationError};
+use crate::settings::{SettingsStore, SettingsStoreError};
+use crate::state::{PermissionMode, PrivilegeFault};
 use crate::workspace::{WorkspaceRegistryError, WorkspaceValidator};
 
 use super::{
@@ -77,6 +81,33 @@ pub fn configure_desktop_startup(
         .load()
         .map_err(DesktopStartupError::Settings)?;
     lifecycle.set_close_window_continue_running(data.settings.close_window_continue_running);
+    #[cfg(windows)]
+    let (runtime_key_saved, runtime_key_length, settings_error) =
+        match WindowsCredentialStore::default().read_runtime_api_key() {
+            Ok(secret) => (
+                secret.is_some(),
+                secret
+                    .as_ref()
+                    .map(|secret| secret.expose_secret().chars().count()),
+                None,
+            ),
+            Err(_) => (
+                false,
+                None,
+                Some(OperationError::new(
+                    "Settings.CredentialMetadataUnavailable",
+                    ErrorCategory::Unavailable,
+                    "Runtime credential metadata is unavailable",
+                    true,
+                )),
+            ),
+        };
+    #[cfg(not(windows))]
+    let (runtime_key_saved, runtime_key_length, settings_error) = (false, None, None);
+    lifecycle.publish_settings_snapshot(
+        SettingsProjection::from_app_data(&data, runtime_key_saved, runtime_key_length),
+        settings_error,
+    );
     let profile_store = StartupProfileStore::new(app_data_dir.join(STARTUP_PROFILE_FILE_NAME));
     let profile = profile_store.load().map_err(DesktopStartupError::Profile)?;
 
@@ -85,10 +116,7 @@ pub fn configure_desktop_startup(
         .resolve_active(&WorkspaceValidator)
         .map_err(DesktopStartupError::Workspace)?
         .map(|workspace| {
-            DesiredWorkspace::new(
-                workspace.workspace_id,
-                workspace.validated.execution_path(),
-            )
+            DesiredWorkspace::new(workspace.workspace_id, workspace.validated.execution_path())
         });
     let desired_connection = profile
         .validated_tunnel_id()
@@ -101,6 +129,13 @@ pub fn configure_desktop_startup(
         services: ServiceIntent::Disabled,
         connection: desired_connection,
     });
+    let install_root = production_install_root()?;
+    lifecycle.publish_local_environment_observation(
+        install_root.join("runtime/python/python.exe").is_file()
+            && install_root
+                .join("runtime/coding-tools-mcp/coding_tools_mcp/__init__.py")
+                .is_file(),
+    );
 
     AutostartManager::for_current_executable()
         .map_err(DesktopStartupError::Autostart)?
@@ -114,7 +149,7 @@ pub fn configure_desktop_startup(
         startup_mode,
         &data,
         &profile,
-        production_install_root()?,
+        install_root,
     )? {
         Ok(config) => config,
         Err(suppression) => return Ok(DesktopStartupOutcome::ServicesSuppressed(suppression)),
@@ -137,10 +172,9 @@ fn restore_privilege_preference(
     lifecycle: &DesktopLifecycle,
 ) -> Result<(), DesktopStartupError> {
     if permission_mode == PermissionMode::Elevated {
-        lifecycle
-            .privilege()
-            .request_without_uac()
-            .map_err(DesktopStartupError::Privilege)?;
+        let result = lifecycle.privilege().request_without_uac();
+        lifecycle.publish_current_observation();
+        result.map_err(DesktopStartupError::Privilege)?;
     }
     Ok(())
 }
