@@ -12,11 +12,12 @@ use sha2::{Digest, Sha256};
 
 use crate::domain::{
     ExecutionId, ExecutionRecord, ExecutionState, ExecutionTerminal, McpSessionId, PublicSessionId,
-    TaskId, TerminalOutcome,
+    RuntimeCommandHandle, TaskId, TerminalOutcome,
 };
 
+use super::resource_lifecycle::{MAX_ACTIVE_EXECUTIONS, MAX_TERMINAL_EXECUTIONS};
+
 const EXECUTION_STATE_VERSION: u32 = 2;
-const MAX_TERMINAL_EXECUTIONS: usize = 64;
 const MAX_OUTPUT_REFS: usize = 4;
 const MAX_STABLE_TOKEN: usize = 128;
 static EXECUTION_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -90,6 +91,7 @@ pub(crate) struct ExecutionRegistry(Arc<Mutex<ExecutionRegistryInner>>);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ExecutionRegistryError {
     Storage(&'static str),
+    CapacityExceeded,
     UnknownExecution(ExecutionId),
     PublicSessionCollision(PublicSessionId),
     OwnerConflict {
@@ -97,6 +99,7 @@ pub(crate) enum ExecutionRegistryError {
         existing: McpSessionId,
         attempted: McpSessionId,
     },
+    RuntimeHandleCollision(RuntimeCommandHandle),
     AlreadyTerminal {
         execution_id: ExecutionId,
         outcome: TerminalOutcome,
@@ -107,6 +110,7 @@ impl fmt::Display for ExecutionRegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Storage(operation) => write!(f, "execution registry {operation} failed"),
+            Self::CapacityExceeded => f.write_str("execution registry capacity exceeded"),
             Self::UnknownExecution(id) => write!(f, "unknown execution {id}"),
             Self::PublicSessionCollision(id) => write!(f, "public session collision {id}"),
             Self::OwnerConflict {
@@ -117,6 +121,9 @@ impl fmt::Display for ExecutionRegistryError {
                 f,
                 "execution {execution_id} is owned by {existing}, not {attempted}"
             ),
+            Self::RuntimeHandleCollision(handle) => {
+                write!(f, "runtime command handle collision {}", handle.as_str())
+            }
             Self::AlreadyTerminal {
                 execution_id,
                 outcome,
@@ -185,6 +192,15 @@ impl ExecutionRegistry {
             if state
                 .executions
                 .iter()
+                .filter(|execution| !execution.state.is_terminal())
+                .count()
+                >= MAX_ACTIVE_EXECUTIONS
+            {
+                return Err(ExecutionRegistryError::CapacityExceeded);
+            }
+            if state
+                .executions
+                .iter()
                 .any(|execution| execution.public_session_id == public_session_id)
             {
                 return Err(ExecutionRegistryError::PublicSessionCollision(
@@ -196,6 +212,7 @@ impl ExecutionRegistry {
                 task_id,
                 public_session_id,
                 owner_session: None,
+                runtime_handle: None,
                 state: ExecutionState::Running,
                 started_at_ms: now_unix_ms(),
             });
@@ -228,6 +245,37 @@ impl ExecutionRegistry {
             }
             execution.owner_session = Some(owner);
             Ok(())
+        })
+    }
+
+    pub(crate) fn bind_runtime_handle(
+        &self,
+        execution_id: &ExecutionId,
+        handle: RuntimeCommandHandle,
+    ) -> Result<(), ExecutionRegistryError> {
+        self.transact("bind_runtime_handle", |state| {
+            if state.executions.iter().any(|execution| {
+                &execution.id != execution_id
+                    && execution.runtime_handle.as_ref() == Some(&handle)
+                    && !execution.state.is_terminal()
+            }) {
+                return Err(ExecutionRegistryError::RuntimeHandleCollision(handle));
+            }
+            let execution = state
+                .executions
+                .iter_mut()
+                .find(|execution| &execution.id == execution_id)
+                .ok_or_else(|| ExecutionRegistryError::UnknownExecution(execution_id.clone()))?;
+            match &execution.runtime_handle {
+                Some(existing) if existing == &handle => Ok(()),
+                Some(existing) => Err(ExecutionRegistryError::RuntimeHandleCollision(
+                    existing.clone(),
+                )),
+                None => {
+                    execution.runtime_handle = Some(handle);
+                    Ok(())
+                }
+            }
         })
     }
 
@@ -294,6 +342,21 @@ impl ExecutionRegistry {
             .executions
             .iter()
             .filter(|execution| matches!(execution.state, ExecutionState::Running))
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn running_owned_by(&self, owner: &McpSessionId) -> Vec<ExecutionRecord> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .state
+            .executions
+            .iter()
+            .filter(|execution| {
+                matches!(execution.state, ExecutionState::Running)
+                    && execution.owner_session.as_ref() == Some(owner)
+            })
             .cloned()
             .collect()
     }
@@ -373,6 +436,7 @@ fn migrate_legacy_state(legacy: LegacyTaskState) -> PersistedExecutionState {
             task_id: TaskId::new(terminal.owner.task_id),
             public_session_id: PublicSessionId::new(terminal.owner.session_id),
             owner_session: None,
+            runtime_handle: None,
             state: ExecutionState::Terminal(sanitize_terminal(ExecutionTerminal {
                 outcome: match terminal.status {
                     LegacyTerminalStatus::Completed => TerminalOutcome::Completed,
@@ -400,6 +464,7 @@ fn migrate_legacy_state(legacy: LegacyTaskState) -> PersistedExecutionState {
                 task_id: TaskId::new(current.owner.task_id),
                 public_session_id: PublicSessionId::new(current.owner.session_id),
                 owner_session: None,
+                runtime_handle: None,
                 state: ExecutionState::Terminal(lost_terminal()),
                 started_at_ms: current.started_at_ms,
             });
@@ -637,6 +702,40 @@ mod tests {
     }
 
     #[test]
+    fn active_execution_capacity_is_bounded_and_terminal_capacity_is_reusable() {
+        let path = temp_path("active-capacity");
+        let registry = ExecutionRegistry::open_at(path.clone()).unwrap();
+        let mut executions = Vec::new();
+        for index in 0..MAX_ACTIVE_EXECUTIONS {
+            executions.push(
+                registry
+                    .start(
+                        TaskId::new(format!("task-{index}")),
+                        PublicSessionId::new(format!("session-{index}")),
+                    )
+                    .unwrap(),
+            );
+        }
+        assert_eq!(
+            registry.start(
+                TaskId::new("overflow-task"),
+                PublicSessionId::new("overflow-session"),
+            ),
+            Err(ExecutionRegistryError::CapacityExceeded)
+        );
+        registry
+            .finish(&executions[0], terminal(TerminalOutcome::Completed))
+            .unwrap();
+        registry
+            .start(
+                TaskId::new("replacement-task"),
+                PublicSessionId::new("replacement-session"),
+            )
+            .unwrap();
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn execution_owner_cannot_be_rebound_to_another_mcp_session() {
         let path = temp_path("owner");
         let registry = ExecutionRegistry::open_at(path.clone()).unwrap();
@@ -650,6 +749,43 @@ mod tests {
             registry.bind_owner(&execution, McpSessionId::new("mcp-b")),
             Err(ExecutionRegistryError::OwnerConflict { .. })
         ));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn runtime_command_handle_has_one_execution_owner() {
+        let path = temp_path("runtime-handle-owner");
+        let registry = ExecutionRegistry::open_at(path.clone()).unwrap();
+        let first = registry
+            .start(TaskId::new("task-a"), PublicSessionId::new("public-a"))
+            .unwrap();
+        let second = registry
+            .start(TaskId::new("task-b"), PublicSessionId::new("public-b"))
+            .unwrap();
+        let handle = RuntimeCommandHandle::new("runtime-session");
+
+        registry
+            .bind_runtime_handle(&first, handle.clone())
+            .unwrap();
+        registry
+            .bind_runtime_handle(&first, handle.clone())
+            .unwrap();
+        assert_eq!(
+            registry.bind_runtime_handle(&second, handle.clone()),
+            Err(ExecutionRegistryError::RuntimeHandleCollision(handle))
+        );
+        let record = registry
+            .execution_for_public_session(&PublicSessionId::new("public-a"))
+            .unwrap();
+        assert_eq!(
+            record.runtime_handle.as_ref().unwrap().as_str(),
+            "runtime-session"
+        );
+        assert!(
+            !serde_json::to_string(&record)
+                .unwrap()
+                .contains("runtime-session")
+        );
         let _ = fs::remove_file(path);
     }
 }

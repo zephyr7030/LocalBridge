@@ -186,6 +186,28 @@ impl Scheduler {
         cancelled_tasks
     }
 
+    pub(crate) fn cancel_queued_task(&self, owner: &McpSessionId, task_id: &TaskId) -> bool {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(index) = state
+            .queue
+            .iter()
+            .position(|queued| &queued.owner_session == owner && &queued.task_id == task_id)
+        else {
+            return false;
+        };
+        let queued = state
+            .queue
+            .remove(index)
+            .expect("located queued work remains present");
+        state.cancelled.insert(queued.ticket);
+        self.0.changed.notify_all();
+        true
+    }
+
     pub(crate) fn snapshot(&self) -> SchedulerSnapshot {
         let state = self
             .0
@@ -320,6 +342,38 @@ mod tests {
             Err(SchedulerAdmissionError::Cancelled)
         ));
         drop(first);
+    }
+
+    #[test]
+    fn cancelling_one_task_never_cancels_a_sibling_task() {
+        let scheduler = Scheduler::default();
+        let first = scheduler
+            .admit_work(McpSessionId::new("running"), TaskId::new("running"))
+            .unwrap();
+        let queued_scheduler = scheduler.clone();
+        let queued_a = thread::spawn(move || {
+            queued_scheduler.admit_work(McpSessionId::new("owner"), TaskId::new("a"))
+        });
+        while scheduler.snapshot().work_queued != 1 {
+            thread::yield_now();
+        }
+        let queued_scheduler = scheduler.clone();
+        let queued_b = thread::spawn(move || {
+            queued_scheduler.admit_work(McpSessionId::new("owner"), TaskId::new("b"))
+        });
+        while scheduler.snapshot().work_queued != 2 {
+            thread::yield_now();
+        }
+
+        assert!(scheduler.cancel_queued_task(&McpSessionId::new("owner"), &TaskId::new("a")));
+        assert_eq!(scheduler.snapshot().work_queued, 1);
+        assert!(matches!(
+            queued_a.join().unwrap(),
+            Err(SchedulerAdmissionError::Cancelled)
+        ));
+
+        drop(first);
+        assert!(queued_b.join().unwrap().is_ok());
     }
 
     #[test]

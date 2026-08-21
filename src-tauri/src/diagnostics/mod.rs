@@ -18,11 +18,13 @@ pub mod error;
 
 pub const DIAGNOSTICS_SCHEMA_VERSION: u32 = 1;
 static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-const RECENT_EVENT_LIMIT: usize = 8;
+pub(crate) const RECENT_DIAGNOSTIC_EVENT_LIMIT: usize = 8;
+const RECENT_EVENT_LIMIT: usize = RECENT_DIAGNOSTIC_EVENT_LIMIT;
 static RECENT_USER_EVENTS: OnceLock<Mutex<VecDeque<DiagnosticEvent>>> = OnceLock::new();
 static RECENT_USER_OBSERVATIONS: OnceLock<Mutex<RecentUserObservationState>> = OnceLock::new();
-const REQUEST_DIAGNOSTIC_LIMIT: usize = 16;
-const ACTIVE_REQUEST_DIAGNOSTIC_LIMIT: usize = 32;
+pub(crate) const REQUEST_DIAGNOSTIC_LIMIT: usize = 16;
+pub(crate) const MAX_ACTIVE_DIAGNOSTIC_REQUESTS: usize = 32;
+const ACTIVE_REQUEST_DIAGNOSTIC_LIMIT: usize = MAX_ACTIVE_DIAGNOSTIC_REQUESTS;
 static REQUEST_DIAGNOSTICS: OnceLock<Mutex<RequestDiagnosticState>> = OnceLock::new();
 static MCP_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -309,10 +311,7 @@ enum RecentEventSource {
     Broker,
 }
 
-fn record_recent_transition(
-    source: RecentEventSource,
-    event: Option<(DiagnosticLevel, String)>,
-) {
+fn record_recent_transition(source: RecentEventSource, event: Option<(DiagnosticLevel, String)>) {
     let mut observations = RECENT_USER_OBSERVATIONS
         .get_or_init(|| Mutex::new(RecentUserObservationState::default()))
         .lock()
@@ -376,12 +375,16 @@ pub fn record_runtime_user_events(
 
     let broker = broker_diagnostics(privilege);
     let broker_event = match broker.state {
-        BrokerDiagnosticState::Active => Some((DiagnosticLevel::Ok, "管理员权限：已启用".to_string())),
+        BrokerDiagnosticState::Active => {
+            Some((DiagnosticLevel::Ok, "管理员权限：已启用".to_string()))
+        }
         BrokerDiagnosticState::Requested | BrokerDiagnosticState::Awaiting => Some((
             DiagnosticLevel::Warning,
             format!("管理员权限：{}", broker_state_label(broker.state)),
         )),
-        BrokerDiagnosticState::Fault => Some((DiagnosticLevel::Error, "管理员权限：故障".to_string())),
+        BrokerDiagnosticState::Fault => {
+            Some((DiagnosticLevel::Error, "管理员权限：故障".to_string()))
+        }
         BrokerDiagnosticState::Off => None,
     };
     record_recent_transition(RecentEventSource::Broker, broker_event);
@@ -584,19 +587,13 @@ pub fn record_mcp_request_result(request_key: &str, connection_id: &str, result:
     let diagnostic = result
         .pointer("/structuredContent/error")
         .unwrap_or(&Value::Null);
-    let top = result
-        .pointer("/structuredContent")
-        .unwrap_or(&Value::Null);
+    let top = result.pointer("/structuredContent").unwrap_or(&Value::Null);
     let field = |name: &str| diagnostic.get(name).or_else(|| top.get(name));
     let error_code = field("error_code")
         .and_then(Value::as_str)
         .map(str::to_owned);
-    let phase = field("phase")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let cause = field("cause")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    let phase = field("phase").and_then(Value::as_str).map(str::to_owned);
+    let cause = field("cause").and_then(Value::as_str).map(str::to_owned);
     let http_status = field("http_status")
         .and_then(Value::as_u64)
         .and_then(|value| u16::try_from(value).ok());

@@ -1,6 +1,6 @@
 #[cfg(test)]
 use std::collections::HashMap;
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
@@ -33,11 +33,10 @@ use crate::diagnostics::error::{
 use crate::diagnostics::{
     record_mcp_request_error, record_mcp_request_result, record_mcp_request_start,
 };
-#[cfg(test)]
-use crate::domain::ExecutionTerminal;
 use crate::domain::{
-    ErrorCategory, ExecutionRecord, ExecutionState, LifecycleState, McpSessionId, OperationError,
-    PublicSessionId, RequestKey, RpcRequestId, TaskId, TaskRecord, TerminalOutcome,
+    ErrorCategory, ExecutionRecord, ExecutionState, ExecutionTerminal, LifecycleState,
+    McpSessionId, OperationError, PublicSessionId, RequestKey, RpcRequestId, TaskId, TaskRecord,
+    TerminalOutcome,
 };
 #[cfg(test)]
 use crate::privilege::PrivilegedFilesystemResult;
@@ -127,7 +126,6 @@ struct TaskControlContext<'a> {
     executions: &'a ExecutionRegistry,
     tasks: &'a TaskRegistry,
     scheduler: &'a Scheduler,
-    sessions: &'a SessionRegistry,
     requests: &'a RequestRegistry,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
 }
@@ -1697,7 +1695,6 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         executions,
                         tasks,
                         scheduler,
-                        sessions,
                         requests,
                         privileged,
                     },
@@ -1709,7 +1706,11 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             if controlled_public_session
                 .as_ref()
                 .is_some_and(|public_session| {
-                    !sessions.owns_public_session(&session_id, public_session)
+                    executions
+                        .execution_for_public_session(public_session)
+                        .and_then(|execution| execution.owner_session)
+                        .as_ref()
+                        != Some(&session_id)
                 })
             {
                 return write_rpc_error(
@@ -1817,9 +1818,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 let _ = tasks.finish(task_id, task_terminal_outcome(&result));
             }
             if let Ok(result) = &result {
-                if let Some(public_session) =
-                    update_public_session_ownership(sessions, &session_id, name, result)
-                {
+                if let Some(public_session) = public_session_from_result(name, result) {
                     let _ = guard
                         .bind_public_command_owner(public_session.as_str(), session_id.clone());
                 }
@@ -1924,7 +1923,6 @@ fn handle_task_control(
         executions,
         tasks,
         scheduler,
-        sessions,
         requests,
         privileged,
     } = context;
@@ -1973,40 +1971,68 @@ fn handle_task_control(
         },
         "cancel" => {
             let session_id = McpSessionId::new(session);
-            let queued_tasks = scheduler.cancel_queued_by_session(&session_id);
-            for task_id in &queued_tasks {
-                let _ = tasks.finish(task_id, TerminalOutcome::Cancelled);
-            }
-            let owned = requests.owned_by(&session_id);
+            let requested = match cancel_task_id_argument(&arguments) {
+                Ok(requested) => requested,
+                Err(error) => {
+                    return write_rpc_result(stream, id, error.to_mcp_result(), Some(session));
+                }
+            };
+            let candidates = cancellable_task_ids(tasks, executions, &session_id);
+            let selected = match select_cancellable_task(requested, candidates) {
+                Ok(selected) => selected,
+                Err(error) => {
+                    return write_rpc_result(stream, id, error.to_mcp_result(), Some(session));
+                }
+            };
             let mut cancelled = 0u64;
-            for active in &owned {
-                if cancel_registered_request(active, cancellation, privileged).is_ok() {
+            let mut queued_cancelled = false;
+            if let Some(task_id) = &selected {
+                queued_cancelled = scheduler.cancel_queued_task(&session_id, task_id);
+                if queued_cancelled {
+                    let _ = tasks.finish(task_id, TerminalOutcome::Cancelled);
+                }
+                if let Some(task) = tasks.get(task_id)
+                    && let Some(active) = requests.get(&task.request)
+                    && cancel_registered_request(&active, cancellation, privileged).is_ok()
+                {
                     cancelled = cancelled.saturating_add(1);
                 }
-            }
-            for public_session in sessions.public_sessions_owned_by(&session_id) {
-                let public_cancelled = match guard.try_lock() {
-                    Ok(mut guard) => guard
-                        .cancel_public_command_session(public_session.as_str())
-                        .is_ok(),
-                    Err(TryLockError::WouldBlock) => false,
-                    Err(TryLockError::Poisoned(error)) => error
-                        .into_inner()
-                        .cancel_public_command_session(public_session.as_str())
-                        .is_ok(),
-                };
-                if public_cancelled {
-                    cancelled = cancelled.saturating_add(1);
+                for execution in executions
+                    .running_owned_by(&session_id)
+                    .into_iter()
+                    .filter(|execution| &execution.task_id == task_id)
+                {
+                    let runtime_cancelled =
+                        execution.runtime_handle.as_ref().is_some_and(|handle| {
+                            cancellation
+                                .kill_command_session(handle.as_str(), 1_000)
+                                .ok()
+                                .and_then(runtime_cancellation_terminal)
+                                .is_some_and(|terminal| {
+                                    let _ = executions.finish(&execution.id, terminal);
+                                    true
+                                })
+                        });
+                    if runtime_cancelled {
+                        cancelled = cancelled.saturating_add(1);
+                    }
                 }
             }
-            let durable_cancelled = false;
-            if cancelled > 0 {
-                wait_for_task_cancel_settlement(
-                    current_task,
-                    executions,
-                    Duration::from_millis(1_500),
-                );
+            if queued_cancelled || cancelled > 0 {
+                if let Some(task_id) = &selected {
+                    wait_for_task_cancel_settlement(
+                        tasks,
+                        executions,
+                        task_id,
+                        Duration::from_millis(1_500),
+                    );
+                }
             }
+            let durable_cancelled = selected.as_ref().is_some_and(|task_id| {
+                tasks.get(task_id).is_some_and(|task| {
+                    task.lifecycle == LifecycleState::Terminal(TerminalOutcome::Cancelled)
+                })
+            });
             let mut data = match guard.try_lock() {
                 Ok(guard) => guard.task_aggregate_snapshot(),
                 Err(TryLockError::WouldBlock) => {
@@ -2018,7 +2044,7 @@ fn handle_task_control(
                 object.insert("cancelled_requests".into(), Value::from(cancelled));
                 object.insert(
                     "cancelled_queued_tasks".into(),
-                    Value::from(queued_tasks.len() as u64),
+                    Value::from(u64::from(queued_cancelled)),
                 );
                 object.insert(
                     "durable_task_cancelled".into(),
@@ -2047,17 +2073,109 @@ fn handle_task_control(
 }
 
 fn wait_for_task_cancel_settlement(
-    current_task: &CurrentTaskProjection,
+    tasks: &TaskRegistry,
     executions: &ExecutionRegistry,
+    task_id: &TaskId,
     max_wait: Duration,
 ) {
     let deadline = Instant::now() + max_wait;
-    while (!matches!(current_task.latest_snapshot(), CurrentTaskStatus::Idle)
-        || !executions.running().is_empty())
-        && Instant::now() < deadline
-    {
+    while task_is_cancellable(tasks, executions, task_id) && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn cancel_task_id_argument(arguments: &Value) -> Result<Option<TaskId>, FacadeError> {
+    match arguments.get("task_id") {
+        None => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => {
+            Ok(Some(TaskId::new(value.clone())))
+        }
+        Some(_) => Err(FacadeError::new(
+            FacadeErrorCode::InvalidArgument,
+            "task_id 必须是非空字符串",
+            false,
+        )),
+    }
+}
+
+fn cancellable_task_ids(
+    tasks: &TaskRegistry,
+    executions: &ExecutionRegistry,
+    owner: &McpSessionId,
+) -> BTreeSet<TaskId> {
+    tasks
+        .active_owned_by(owner)
+        .into_iter()
+        .map(|task| task.id)
+        .chain(
+            executions
+                .running_owned_by(owner)
+                .into_iter()
+                .map(|execution| execution.task_id),
+        )
+        .collect()
+}
+
+fn select_cancellable_task(
+    requested: Option<TaskId>,
+    candidates: BTreeSet<TaskId>,
+) -> Result<Option<TaskId>, FacadeError> {
+    if let Some(task_id) = requested {
+        return if candidates.contains(&task_id) {
+            Ok(Some(task_id))
+        } else {
+            Err(FacadeError::new(
+                FacadeErrorCode::TaskNotOwned,
+                "任务不属于当前 MCP Session 或已终止",
+                false,
+            ))
+        };
+    }
+    match candidates.len() {
+        0 => Ok(None),
+        1 => Ok(candidates.into_iter().next()),
+        _ => Err(FacadeError::new(
+            FacadeErrorCode::TaskIdRequired,
+            "当前 MCP Session 有多个可取消任务，请指定 task_id",
+            false,
+        )),
+    }
+}
+
+fn task_is_cancellable(
+    tasks: &TaskRegistry,
+    executions: &ExecutionRegistry,
+    task_id: &TaskId,
+) -> bool {
+    tasks
+        .get(task_id)
+        .is_some_and(|task| !task.lifecycle.is_terminal())
+        || executions
+            .running()
+            .iter()
+            .any(|execution| &execution.task_id == task_id)
+}
+
+fn runtime_cancellation_terminal(result: Value) -> Option<ExecutionTerminal> {
+    if result.get("isError").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    let structured = result.get("structuredContent")?;
+    let status = structured.get("status").and_then(Value::as_str)?;
+    if !matches!(status, "killed" | "terminated" | "cancelled") {
+        return None;
+    }
+    Some(ExecutionTerminal {
+        outcome: TerminalOutcome::Cancelled,
+        exit_code: structured.get("exit_code").and_then(Value::as_i64),
+        signal: structured
+            .get("signal")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        output_refs: Vec::new(),
+        error_code: Some("ProcessCancelled".to_string()),
+        completed_at_ms: unix_time_ms(),
+    })
 }
 
 fn task_control_snapshot_with_terminal(
@@ -3802,12 +3920,7 @@ fn operation_error_from_facade_result(
     }
 }
 
-fn update_public_session_ownership(
-    sessions: &SessionRegistry,
-    owner: &McpSessionId,
-    tool_name: &str,
-    result: &Value,
-) -> Option<PublicSessionId> {
+fn public_session_from_result(tool_name: &str, result: &Value) -> Option<PublicSessionId> {
     let data = result.pointer("/structuredContent/data")?;
     if tool_name == "exec_command" {
         if let Some(public_session) = data
@@ -3815,7 +3928,6 @@ fn update_public_session_ownership(
             .and_then(Value::as_str)
             .map(PublicSessionId::new)
         {
-            sessions.add_public_session(owner, public_session.clone());
             return Some(public_session);
         }
     }
@@ -4169,6 +4281,38 @@ fn write_response(
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_cancel_selection_is_explicit_and_session_local() {
+        let task_a = TaskId::new("task-a");
+        let task_b = TaskId::new("task-b");
+        let candidates = BTreeSet::from([task_a.clone(), task_b.clone()]);
+
+        assert_eq!(
+            select_cancellable_task(None, candidates.clone())
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::TaskIdRequired
+        );
+        assert_eq!(
+            select_cancellable_task(Some(TaskId::new("foreign")), candidates.clone())
+                .unwrap_err()
+                .code,
+            FacadeErrorCode::TaskNotOwned
+        );
+        assert_eq!(
+            select_cancellable_task(Some(task_a.clone()), candidates).unwrap(),
+            Some(task_a.clone())
+        );
+        assert_eq!(
+            select_cancellable_task(None, BTreeSet::from([task_a.clone()])).unwrap(),
+            Some(task_a)
+        );
+        assert_eq!(
+            select_cancellable_task(None, BTreeSet::new()).unwrap(),
+            None
+        );
+    }
 
     fn http_read_error(raw: &[u8]) -> HttpReadError {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();

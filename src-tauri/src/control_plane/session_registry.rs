@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::{McpSessionId, McpSessionState, PublicSessionId, RequestKey, TaskId};
+use crate::domain::{McpSessionId, McpSessionState, RequestKey, TaskId};
 
-pub(crate) const MCP_SESSION_TTL_MS: u64 = 5 * 60 * 1_000;
+pub(crate) use super::resource_lifecycle::MCP_SESSION_TTL_MS;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionRecord {
@@ -18,7 +18,6 @@ pub(crate) struct SessionRecord {
     pub last_seen_ms: u64,
     pub owned_requests: HashSet<RequestKey>,
     pub owned_tasks: HashSet<TaskId>,
-    pub owned_public_sessions: HashSet<PublicSessionId>,
 }
 
 impl SessionRecord {
@@ -34,7 +33,6 @@ impl SessionRecord {
             last_seen_ms: now,
             owned_requests: HashSet::new(),
             owned_tasks: HashSet::new(),
-            owned_public_sessions: HashSet::new(),
         }
     }
 
@@ -149,32 +147,6 @@ impl SessionRegistry {
             .unwrap_or(false)
     }
 
-    pub(crate) fn add_public_session(
-        &self,
-        owner: &McpSessionId,
-        public_session_id: PublicSessionId,
-    ) -> bool {
-        self.update(owner, |session| {
-            session.owned_public_sessions.insert(public_session_id)
-        })
-        .unwrap_or(false)
-    }
-
-    pub(crate) fn owns_public_session(
-        &self,
-        owner: &McpSessionId,
-        public_session_id: &PublicSessionId,
-    ) -> bool {
-        self.get(owner)
-            .is_some_and(|session| session.owned_public_sessions.contains(public_session_id))
-    }
-
-    pub(crate) fn public_sessions_owned_by(&self, owner: &McpSessionId) -> Vec<PublicSessionId> {
-        self.get(owner)
-            .map(|session| session.owned_public_sessions.into_iter().collect())
-            .unwrap_or_default()
-    }
-
     pub(crate) fn update<R>(
         &self,
         id: &McpSessionId,
@@ -282,25 +254,6 @@ mod tests {
             Err(SessionInsertError::Capacity)
         );
         assert!(registry.get(&McpSessionId::new("session-b")).is_none());
-    }
-
-    #[test]
-    fn public_session_ownership_is_scoped_by_mcp_session() {
-        let registry = SessionRegistry::default();
-        let owner_a = McpSessionId::new("session-a");
-        let owner_b = McpSessionId::new("session-b");
-        let public = PublicSessionId::new("public-1");
-        registry
-            .insert_bounded(record("session-a", "v1", "catalog"), 64)
-            .unwrap();
-        registry
-            .insert_bounded(record("session-b", "v1", "catalog"), 64)
-            .unwrap();
-
-        assert!(registry.add_public_session(&owner_a, public.clone()));
-        assert!(registry.owns_public_session(&owner_a, &public));
-        assert!(!registry.owns_public_session(&owner_b, &public));
-        assert!(registry.public_sessions_owned_by(&owner_b).is_empty());
     }
 
     #[test]

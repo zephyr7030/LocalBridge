@@ -8,7 +8,8 @@ use crate::domain::{
     TerminalOutcome,
 };
 
-const MAX_RETAINED_TASKS: usize = 256;
+use super::resource_lifecycle::MAX_RETAINED_TASKS;
+
 static TASK_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,7 +142,6 @@ impl TaskRegistry {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn get(&self, task_id: &TaskId) -> Option<TaskRecord> {
         self.0
             .lock()
@@ -149,6 +149,17 @@ impl TaskRegistry {
             .tasks
             .get(task_id)
             .cloned()
+    }
+
+    pub(crate) fn active_owned_by(&self, owner: &McpSessionId) -> Vec<TaskRecord> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .tasks
+            .values()
+            .filter(|task| &task.owner_session == owner && !task.lifecycle.is_terminal())
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn latest_active(&self) -> Option<TaskRecord> {

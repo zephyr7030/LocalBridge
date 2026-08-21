@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use crate::domain::{McpSessionId, OperationError, RequestKey, RpcRequestId};
 use crate::filesystem::service::FilesystemCancellation;
 
+use super::resource_lifecycle::MAX_RETAINED_REQUEST_ERRORS;
+
 #[derive(Debug, Clone)]
 pub(crate) enum RequestCancellationTarget {
     Runtime(RpcRequestId),
@@ -31,8 +33,6 @@ struct RequestRegistryState {
     active: HashMap<RequestKey, ActiveRequest>,
     errors: VecDeque<(RequestKey, OperationError)>,
 }
-
-const MAX_RETAINED_REQUEST_ERRORS: usize = 256;
 
 impl RequestRegistry {
     pub(crate) fn register(

@@ -7,7 +7,7 @@ pub mod task;
 pub mod update;
 
 pub use error::{ErrorCategory, FaultSource, OperationError, PersistentFault};
-pub use execution::{ExecutionRecord, ExecutionState, ExecutionTerminal};
+pub use execution::{ExecutionRecord, ExecutionState, ExecutionTerminal, RuntimeCommandHandle};
 pub use identity::{ExecutionId, McpSessionId, PublicSessionId, RequestKey, RpcRequestId, TaskId};
 pub use lifecycle::{LifecycleState, TerminalOutcome};
 pub use session::McpSessionState;

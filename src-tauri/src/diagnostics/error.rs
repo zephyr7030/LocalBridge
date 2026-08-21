@@ -61,8 +61,17 @@ pub struct ErrorDiagnostic {
 }
 
 impl ErrorDiagnostic {
-    pub fn new(error_code: DiagnosticErrorCode, phase: DiagnosticPhase, cause: impl Into<String>) -> Self {
-        Self { error_code, phase, cause: cause.into(), http_status: None }
+    pub fn new(
+        error_code: DiagnosticErrorCode,
+        phase: DiagnosticPhase,
+        cause: impl Into<String>,
+    ) -> Self {
+        Self {
+            error_code,
+            phase,
+            cause: cause.into(),
+            http_status: None,
+        }
     }
 
     pub fn with_http_status(mut self, status: u16) -> Self {
@@ -82,35 +91,99 @@ impl ErrorDiagnostic {
 
 pub fn from_canonical_code(code: &str) -> ErrorDiagnostic {
     match code {
-        "InvalidArgument" | "NotFound" | "InvalidShellSyntax" | "FileChanged" | "PatchConflict" | "AmbiguousMatch" =>
-            ErrorDiagnostic::new(DiagnosticErrorCode::InvalidRequest, DiagnosticPhase::Tool, canonical_cause(code)),
-        "WorkspaceDenied" | "CapabilityDenied" | "PolicyDenied" | "PrivilegedRouteUnavailable" | "ElevationRequired" =>
-            ErrorDiagnostic::new(DiagnosticErrorCode::Denied, DiagnosticPhase::Policy, canonical_cause(code)),
-        "ProcessTimedOut" => ErrorDiagnostic::new(DiagnosticErrorCode::Timeout, DiagnosticPhase::Process, "process_timed_out"),
-        "ProcessCancelled" => ErrorDiagnostic::new(DiagnosticErrorCode::Cancelled, DiagnosticPhase::Process, "process_cancelled"),
-        "ProcessFailed" => ErrorDiagnostic::new(DiagnosticErrorCode::ExecutionFailed, DiagnosticPhase::Process, "process_failed"),
-        "SessionUnavailable" => ErrorDiagnostic::new(DiagnosticErrorCode::Unavailable, DiagnosticPhase::Process, "session_unavailable"),
-        "RuntimeProtocolMismatch" => ErrorDiagnostic::new(DiagnosticErrorCode::Unavailable, DiagnosticPhase::Mcp, "protocol_mismatch"),
-        "RuntimeUnavailable" | "CapabilityUnavailable" | "RuntimeCapabilityMismatch" =>
-            ErrorDiagnostic::new(DiagnosticErrorCode::Unavailable, DiagnosticPhase::Runtime, canonical_cause(code)),
-        "OutputTruncated" => ErrorDiagnostic::new(DiagnosticErrorCode::ExecutionFailed, DiagnosticPhase::Tool, "output_truncated"),
-        "Internal" => ErrorDiagnostic::new(DiagnosticErrorCode::Unknown, DiagnosticPhase::Unknown, "internal"),
-        other => ErrorDiagnostic::new(DiagnosticErrorCode::Unknown, DiagnosticPhase::Unknown, format!("unmapped_{}", other.to_ascii_lowercase())),
+        "InvalidArgument" | "NotFound" | "TaskIdRequired" | "InvalidShellSyntax"
+        | "FileChanged" | "PatchConflict" | "AmbiguousMatch" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::InvalidRequest,
+            DiagnosticPhase::Tool,
+            canonical_cause(code),
+        ),
+        "WorkspaceDenied"
+        | "CapabilityDenied"
+        | "PolicyDenied"
+        | "TaskNotOwned"
+        | "PrivilegedRouteUnavailable"
+        | "ElevationRequired" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Denied,
+            DiagnosticPhase::Policy,
+            canonical_cause(code),
+        ),
+        "ProcessTimedOut" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Timeout,
+            DiagnosticPhase::Process,
+            "process_timed_out",
+        ),
+        "ProcessCancelled" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Cancelled,
+            DiagnosticPhase::Process,
+            "process_cancelled",
+        ),
+        "ProcessFailed" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::ExecutionFailed,
+            DiagnosticPhase::Process,
+            "process_failed",
+        ),
+        "SessionUnavailable" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Unavailable,
+            DiagnosticPhase::Process,
+            "session_unavailable",
+        ),
+        "RuntimeProtocolMismatch" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Unavailable,
+            DiagnosticPhase::Mcp,
+            "protocol_mismatch",
+        ),
+        "RuntimeUnavailable" | "CapabilityUnavailable" | "RuntimeCapabilityMismatch" => {
+            ErrorDiagnostic::new(
+                DiagnosticErrorCode::Unavailable,
+                DiagnosticPhase::Runtime,
+                canonical_cause(code),
+            )
+        }
+        "OutputTruncated" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::ExecutionFailed,
+            DiagnosticPhase::Tool,
+            "output_truncated",
+        ),
+        "Internal" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Unknown,
+            DiagnosticPhase::Unknown,
+            "internal",
+        ),
+        other => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Unknown,
+            DiagnosticPhase::Unknown,
+            format!("unmapped_{}", other.to_ascii_lowercase()),
+        ),
     }
 }
 
-pub fn transport_unavailable(cause: impl Into<String>, http_status: Option<u16>) -> ErrorDiagnostic {
-    let mut diagnostic = ErrorDiagnostic::new(DiagnosticErrorCode::Unavailable, DiagnosticPhase::Transport, cause);
+pub fn transport_unavailable(
+    cause: impl Into<String>,
+    http_status: Option<u16>,
+) -> ErrorDiagnostic {
+    let mut diagnostic = ErrorDiagnostic::new(
+        DiagnosticErrorCode::Unavailable,
+        DiagnosticPhase::Transport,
+        cause,
+    );
     diagnostic.http_status = http_status;
     diagnostic
 }
 
 pub fn mcp_invalid(cause: impl Into<String>) -> ErrorDiagnostic {
-    ErrorDiagnostic::new(DiagnosticErrorCode::InvalidRequest, DiagnosticPhase::Mcp, cause)
+    ErrorDiagnostic::new(
+        DiagnosticErrorCode::InvalidRequest,
+        DiagnosticPhase::Mcp,
+        cause,
+    )
 }
 
 pub fn mcp_unavailable(cause: impl Into<String>) -> ErrorDiagnostic {
-    ErrorDiagnostic::new(DiagnosticErrorCode::Unavailable, DiagnosticPhase::Mcp, cause)
+    ErrorDiagnostic::new(
+        DiagnosticErrorCode::Unavailable,
+        DiagnosticPhase::Mcp,
+        cause,
+    )
 }
 
 pub fn mcp_unknown(cause: impl Into<String>) -> ErrorDiagnostic {

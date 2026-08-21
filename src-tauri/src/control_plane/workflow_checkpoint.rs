@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::ffi::c_void;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
@@ -7,10 +8,55 @@ use std::ptr::{null, null_mut};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::resource_lifecycle::MAX_CHECKPOINT_PLAINTEXT_BYTES;
+
 const CHECKPOINT_VERSION: u32 = 2;
 const LEGACY_CHECKPOINT_VERSION: u32 = 1;
-const MAX_CHECKPOINT_PLAINTEXT_BYTES: usize = 262_144;
 const MAX_CHECKPOINT_CIPHERTEXT_BYTES: usize = 524_288;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkflowCheckpointError {
+    LocationUnavailable,
+    EncodeFailed,
+    SizeExceeded,
+    ProtectionFailed,
+    ParentUnavailable,
+    CreateDirectoryFailed,
+    WriteFailed,
+    CommitFailed,
+    ReadFailed,
+    CiphertextInvalid,
+    DecodeFailed,
+    InvalidIdentity,
+    DeleteFailed,
+    #[cfg(not(windows))]
+    PlatformUnavailable,
+}
+
+impl fmt::Display for WorkflowCheckpointError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let code = match self {
+            Self::LocationUnavailable => "workflow_checkpoint_location_unavailable",
+            Self::EncodeFailed => "workflow_checkpoint_encode_failed",
+            Self::SizeExceeded => "workflow_checkpoint_size_exceeded",
+            Self::ProtectionFailed => "workflow_checkpoint_protection_failed",
+            Self::ParentUnavailable => "workflow_checkpoint_parent_unavailable",
+            Self::CreateDirectoryFailed => "workflow_checkpoint_directory_create_failed",
+            Self::WriteFailed => "workflow_checkpoint_write_failed",
+            Self::CommitFailed => "workflow_checkpoint_commit_failed",
+            Self::ReadFailed => "workflow_checkpoint_read_failed",
+            Self::CiphertextInvalid => "workflow_checkpoint_ciphertext_invalid",
+            Self::DecodeFailed => "workflow_checkpoint_decode_failed",
+            Self::InvalidIdentity => "workflow_checkpoint_identity_invalid",
+            Self::DeleteFailed => "workflow_checkpoint_delete_failed",
+            #[cfg(not(windows))]
+            Self::PlatformUnavailable => "workflow_checkpoint_platform_unavailable",
+        };
+        formatter.write_str(code)
+    }
+}
+
+impl std::error::Error for WorkflowCheckpointError {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -174,11 +220,11 @@ pub(crate) struct WorkflowCheckpointStore {
 }
 
 impl WorkflowCheckpointStore {
-    pub(crate) fn for_workspace(workspace: &Path) -> Result<Self, String> {
+    pub(crate) fn for_workspace(workspace: &Path) -> Result<Self, WorkflowCheckpointError> {
         let root = std::env::var_os("LOCALAPPDATA")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
-            .ok_or_else(|| "LOCALAPPDATA unavailable".to_string())?;
+            .ok_or(WorkflowCheckpointError::LocationUnavailable)?;
         let mut hasher = Sha256::new();
         hasher.update(
             workspace
@@ -195,44 +241,48 @@ impl WorkflowCheckpointStore {
         })
     }
 
-    pub(crate) fn save(&self, checkpoint: &WorkflowCheckpoint) -> Result<(), String> {
-        let plain = serde_json::to_vec(checkpoint).map_err(|_| "checkpoint serialize failed")?;
+    pub(crate) fn save(
+        &self,
+        checkpoint: &WorkflowCheckpoint,
+    ) -> Result<(), WorkflowCheckpointError> {
+        let plain =
+            serde_json::to_vec(checkpoint).map_err(|_| WorkflowCheckpointError::EncodeFailed)?;
         if plain.len() > MAX_CHECKPOINT_PLAINTEXT_BYTES {
-            return Err("workflow checkpoint exceeds bounded size".into());
+            return Err(WorkflowCheckpointError::SizeExceeded);
         }
         let protected = protect_user_data(&plain)?;
         let Some(parent) = self.path.parent() else {
-            return Err("checkpoint parent unavailable".into());
+            return Err(WorkflowCheckpointError::ParentUnavailable);
         };
-        fs::create_dir_all(parent).map_err(|_| "checkpoint directory create failed")?;
+        fs::create_dir_all(parent).map_err(|_| WorkflowCheckpointError::CreateDirectoryFailed)?;
         let tmp = self.path.with_extension("tmp");
-        fs::write(&tmp, protected).map_err(|_| "checkpoint temporary write failed")?;
+        fs::write(&tmp, protected).map_err(|_| WorkflowCheckpointError::WriteFailed)?;
         atomic_replace(&tmp, &self.path)?;
         Ok(())
     }
 
-    pub(crate) fn load(&self) -> Result<Option<WorkflowCheckpoint>, String> {
+    pub(crate) fn load(&self) -> Result<Option<WorkflowCheckpoint>, WorkflowCheckpointError> {
         let bytes = match fs::read(&self.path) {
             Ok(bytes) => bytes,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(_) => return Err("checkpoint read failed".into()),
+            Err(_) => return Err(WorkflowCheckpointError::ReadFailed),
         };
         if bytes.is_empty() || bytes.len() > MAX_CHECKPOINT_CIPHERTEXT_BYTES {
-            return Err("checkpoint ciphertext invalid".into());
+            return Err(WorkflowCheckpointError::CiphertextInvalid);
         }
         let plain = unprotect_user_data(&bytes)?;
         if plain.len() > MAX_CHECKPOINT_PLAINTEXT_BYTES {
-            return Err("checkpoint plaintext exceeds bounded size".into());
+            return Err(WorkflowCheckpointError::SizeExceeded);
         }
         let mut checkpoint: WorkflowCheckpoint =
-            serde_json::from_slice(&plain).map_err(|_| "checkpoint decode failed")?;
+            serde_json::from_slice(&plain).map_err(|_| WorkflowCheckpointError::DecodeFailed)?;
         if checkpoint.workflow_id.is_empty()
             || !matches!(
                 checkpoint.version,
                 LEGACY_CHECKPOINT_VERSION | CHECKPOINT_VERSION
             )
         {
-            return Err("checkpoint version or identity invalid".into());
+            return Err(WorkflowCheckpointError::InvalidIdentity);
         }
         if checkpoint.version == LEGACY_CHECKPOINT_VERSION {
             checkpoint.version = CHECKPOINT_VERSION;
@@ -255,11 +305,11 @@ impl WorkflowCheckpointStore {
         Ok(Some(checkpoint))
     }
 
-    pub(crate) fn clear(&self) -> Result<(), String> {
+    pub(crate) fn clear(&self) -> Result<(), WorkflowCheckpointError> {
         match fs::remove_file(&self.path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(_) => Err("checkpoint delete failed".into()),
+            Err(_) => Err(WorkflowCheckpointError::DeleteFailed),
         }
     }
 
@@ -275,9 +325,8 @@ impl WorkflowCheckpointStore {
 }
 
 #[cfg(windows)]
-fn atomic_replace(source: &Path, destination: &Path) -> Result<(), String> {
+fn atomic_replace(source: &Path, destination: &Path) -> Result<(), WorkflowCheckpointError> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::Storage::FileSystem::{
         MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
@@ -300,21 +349,18 @@ fn atomic_replace(source: &Path, destination: &Path) -> Result<(), String> {
         )
     };
     if moved == 0 {
-        return Err(format!("checkpoint commit failed: {}", unsafe {
-            GetLastError()
-        }));
+        return Err(WorkflowCheckpointError::CommitFailed);
     }
     Ok(())
 }
 
 #[cfg(not(windows))]
-fn atomic_replace(_source: &Path, _destination: &Path) -> Result<(), String> {
-    Err("workflow checkpoint persistence requires Windows atomic replace".into())
+fn atomic_replace(_source: &Path, _destination: &Path) -> Result<(), WorkflowCheckpointError> {
+    Err(WorkflowCheckpointError::PlatformUnavailable)
 }
 
 #[cfg(windows)]
-fn protect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
-    use windows_sys::Win32::Foundation::GetLastError;
+fn protect_user_data(input: &[u8]) -> Result<Vec<u8>, WorkflowCheckpointError> {
     use windows_sys::Win32::Security::Cryptography::{
         CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData,
     };
@@ -339,9 +385,7 @@ fn protect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
         )
     };
     if ok == 0 || output.pbData.is_null() {
-        return Err(format!("CryptProtectData failed: {}", unsafe {
-            GetLastError()
-        }));
+        return Err(WorkflowCheckpointError::ProtectionFailed);
     }
     let protected =
         unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
@@ -350,8 +394,7 @@ fn protect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(windows)]
-fn unprotect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
-    use windows_sys::Win32::Foundation::GetLastError;
+fn unprotect_user_data(input: &[u8]) -> Result<Vec<u8>, WorkflowCheckpointError> {
     use windows_sys::Win32::Security::Cryptography::{
         CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData,
     };
@@ -376,9 +419,7 @@ fn unprotect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
         )
     };
     if ok == 0 || output.pbData.is_null() {
-        return Err(format!("CryptUnprotectData failed: {}", unsafe {
-            GetLastError()
-        }));
+        return Err(WorkflowCheckpointError::ProtectionFailed);
     }
     let plain =
         unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
@@ -398,13 +439,13 @@ unsafe fn local_free(memory: *mut c_void) {
 }
 
 #[cfg(not(windows))]
-fn protect_user_data(_input: &[u8]) -> Result<Vec<u8>, String> {
-    Err("workflow checkpoint persistence requires Windows DPAPI".into())
+fn protect_user_data(_input: &[u8]) -> Result<Vec<u8>, WorkflowCheckpointError> {
+    Err(WorkflowCheckpointError::PlatformUnavailable)
 }
 
 #[cfg(not(windows))]
-fn unprotect_user_data(_input: &[u8]) -> Result<Vec<u8>, String> {
-    Err("workflow checkpoint persistence requires Windows DPAPI".into())
+fn unprotect_user_data(_input: &[u8]) -> Result<Vec<u8>, WorkflowCheckpointError> {
+    Err(WorkflowCheckpointError::PlatformUnavailable)
 }
 
 #[cfg(all(test, windows))]

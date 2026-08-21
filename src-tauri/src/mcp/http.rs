@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -12,6 +12,7 @@ use super::runtime::{CodingToolsRuntimeError, InternalBearer};
 const PROTOCOL_VERSION: &str = "2025-11-25";
 const MAX_HTTP_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 static HEALTH_REQUEST_ID: AtomicU64 = AtomicU64::new(1_000_000);
+static CONTROL_REQUEST_ID: AtomicI64 = AtomicI64::new(-1);
 
 pub(crate) struct McpSession {
     port: u16,
@@ -89,6 +90,34 @@ impl McpCancellationClient {
         } else {
             Err(CodingToolsRuntimeError::HttpStatus(response.status))
         }
+    }
+
+    pub(crate) fn kill_command_session(
+        &self,
+        runtime_session_id: &str,
+        wait_ms: u64,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        if runtime_session_id.is_empty() {
+            return Err(CodingToolsRuntimeError::ProtocolMismatch);
+        }
+        let request_id = CONTROL_REQUEST_ID.fetch_sub(1, Ordering::Relaxed);
+        let mut session = McpSession {
+            port: self.port,
+            bearer: Arc::clone(&self.bearer),
+            session_id: Some(Arc::clone(&self.session_id)),
+            next_id: 1,
+        };
+        session.call_tool_with_request_id_and_timeout(
+            "kill_session",
+            json!({
+                "session_id":runtime_session_id,
+                "signal":"KILL",
+                "wait_ms":wait_ms.min(30_000),
+                "verbosity":"full"
+            }),
+            &Value::from(request_id),
+            Duration::from_millis(wait_ms.min(30_000).saturating_add(1_000)),
+        )
     }
 }
 

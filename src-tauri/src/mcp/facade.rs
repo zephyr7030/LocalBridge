@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fmt;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -15,9 +15,12 @@ use crate::diagnostics::error::{
     transport_unavailable,
 };
 use crate::domain::{
-    ExecutionId, ExecutionState, ExecutionTerminal, McpSessionId, PublicSessionId, TaskId,
-    TerminalOutcome,
+    ExecutionId, ExecutionState, ExecutionTerminal, McpSessionId, PublicSessionId,
+    RuntimeCommandHandle, TaskId, TerminalOutcome,
 };
+#[cfg(test)]
+use crate::execution::output_handles::MAX_LOCAL_RETAINED_OUTPUT_HANDLES;
+use crate::execution::output_handles::OutputHandleRegistry;
 use crate::state::{
     Capability, CurrentTaskStatus, PermissionMode, RuntimeFault, SafeTaskSummary,
     TaskExecutionState, TaskKind,
@@ -79,6 +82,8 @@ pub enum FacadeErrorCode {
     ProcessTimedOut,
     ProcessCancelled,
     QueueCapacityExceeded,
+    TaskIdRequired,
+    TaskNotOwned,
     SessionUnavailable,
     OutputTruncated,
     RuntimeUnavailable,
@@ -106,6 +111,8 @@ impl FacadeErrorCode {
             Self::ProcessTimedOut => "ProcessTimedOut",
             Self::ProcessCancelled => "ProcessCancelled",
             Self::QueueCapacityExceeded => "QueueCapacityExceeded",
+            Self::TaskIdRequired => "TaskIdRequired",
+            Self::TaskNotOwned => "TaskNotOwned",
             Self::SessionUnavailable => "SessionUnavailable",
             Self::OutputTruncated => "OutputTruncated",
             Self::RuntimeUnavailable => "RuntimeUnavailable",
@@ -124,7 +131,7 @@ impl FacadeErrorCode {
     const fn safe_rule_category(self) -> &'static str {
         match self {
             Self::WorkspaceDenied => "workspace_boundary",
-            Self::PolicyDenied | Self::CapabilityDenied => "policy",
+            Self::PolicyDenied | Self::CapabilityDenied | Self::TaskNotOwned => "policy",
             Self::InvalidShellSyntax => "shell_syntax",
             Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => "privileged_route",
             Self::RuntimeUnavailable
@@ -138,7 +145,9 @@ impl FacadeErrorCode {
             | Self::SessionUnavailable
             | Self::OutputTruncated => "command_runtime",
             Self::FileChanged | Self::PatchConflict | Self::AmbiguousMatch => "edit_conflict",
-            Self::InvalidArgument | Self::NotFound | Self::Internal => "request",
+            Self::InvalidArgument | Self::NotFound | Self::TaskIdRequired | Self::Internal => {
+                "request"
+            }
         }
     }
 
@@ -161,6 +170,8 @@ impl FacadeErrorCode {
             Self::ProcessTimedOut => "提高 timeout_ms 或缩小单次任务",
             Self::ProcessCancelled => "重新发起命令",
             Self::QueueCapacityExceeded => "等待其他任务完成后重试",
+            Self::TaskIdRequired => "指定当前 MCP Session 拥有的 task_id",
+            Self::TaskNotOwned => "使用当前 MCP Session 拥有且尚未终止的 task_id",
             Self::SessionUnavailable => "重新执行命令以创建新会话",
             Self::OutputTruncated => {
                 "若返回 output_ref 则分页读取；否则提高 max_bytes 或 resize 后重试"
@@ -430,10 +441,13 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "task_control" => (
-            "Control the current LocalBridge task using stable task actions.",
+            "Read or cancel LocalBridge tasks within the current MCP session.",
             json!({
                 "type":"object",
-                "properties":{"action":{"type":"string","enum":["get","cancel"]}},
+                "properties":{
+                    "action":{"type":"string","enum":["get","cancel"]},
+                    "task_id":{"type":"string","minLength":1,"description":"Optional for cancel only. Required when this MCP session owns more than one cancellable task."}
+                },
                 "required":["action"],
                 "additionalProperties":false
             }),
@@ -763,7 +777,7 @@ pub(crate) fn public_error_output_schema() -> Value {
             "code":{"type":"string","enum":[
                 "InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied",
                 "InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
-                "ProcessCancelled","QueueCapacityExceeded","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
+                "ProcessCancelled","QueueCapacityExceeded","TaskIdRequired","TaskNotOwned","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
                 "RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"
             ]},
             "error_code":{"type":"string","enum":["InvalidRequest","Unavailable","Denied","Timeout","Cancelled","ExecutionFailed","Unknown"]},
@@ -1361,7 +1375,6 @@ pub trait WorkspaceRuntimeAdapter {
 }
 
 static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
-const MAX_LOCAL_RETAINED_OUTPUT_HANDLES: usize = 8;
 
 fn next_public_handle(prefix: &str) -> String {
     let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
@@ -1376,26 +1389,14 @@ fn next_public_handle(prefix: &str) -> String {
 struct PublicCommandSession {
     execution_id: ExecutionId,
     started_at: Instant,
-    private_session_id: Option<String>,
-    terminal_payload: Option<Value>,
     pending_output: String,
     stderr_protocol_buffer: String,
-}
-
-#[derive(Debug, Clone)]
-struct PublicOutputHandle {
-    private_output_ref: Option<String>,
-    local_stream: Option<String>,
-    local_content: Option<String>,
 }
 
 #[derive(Debug, Default)]
 struct PublicCommandSessions {
     sessions: HashMap<String, PublicCommandSession>,
-    private_sessions: HashMap<String, String>,
-    outputs: HashMap<String, PublicOutputHandle>,
-    private_outputs: HashMap<String, String>,
-    local_outputs: VecDeque<String>,
+    outputs: OutputHandleRegistry,
 }
 
 impl PublicCommandSessions {
@@ -1414,8 +1415,6 @@ impl PublicCommandSessions {
             PublicCommandSession {
                 execution_id,
                 started_at: Instant::now(),
-                private_session_id: None,
-                terminal_payload: None,
                 pending_output: String::new(),
                 stderr_protocol_buffer: String::new(),
             },
@@ -1424,71 +1423,52 @@ impl PublicCommandSessions {
     }
 
     fn bind_private_session(
-        &mut self,
+        &self,
+        executions: &ExecutionRegistry,
         public_session_id: &str,
         private_session_id: &str,
     ) -> Result<(), FacadeError> {
-        if self
-            .private_sessions
-            .get(private_session_id)
-            .is_some_and(|existing| existing != public_session_id)
-        {
-            return Err(command_state_internal_error());
-        }
-        let session = self
+        let execution_id = self
             .sessions
-            .get_mut(public_session_id)
+            .get(public_session_id)
+            .map(|session| session.execution_id.clone())
             .ok_or_else(session_unavailable)?;
-        if session
-            .private_session_id
-            .as_deref()
-            .is_some_and(|existing| existing != private_session_id)
-        {
-            return Err(command_state_internal_error());
-        }
-        session.private_session_id = Some(private_session_id.to_string());
-        self.private_sessions.insert(
-            private_session_id.to_string(),
-            public_session_id.to_string(),
-        );
-        Ok(())
+        executions
+            .bind_runtime_handle(
+                &execution_id,
+                RuntimeCommandHandle::new(private_session_id.to_string()),
+            )
+            .map_err(normalize_execution_registry_error)
     }
 
-    fn public_output_for_private(&mut self, private_output_ref: &str) -> String {
-        if let Some(public) = self.private_outputs.get(private_output_ref) {
-            return public.clone();
-        }
-        let public = next_public_handle("lb-output");
-        self.private_outputs
-            .insert(private_output_ref.to_string(), public.clone());
-        self.outputs.insert(
-            public.clone(),
-            PublicOutputHandle {
-                private_output_ref: Some(private_output_ref.to_string()),
-                local_stream: None,
-                local_content: None,
-            },
-        );
-        public
+    fn public_output_for_private(
+        &mut self,
+        private_output_ref: &str,
+        owner_public_session_id: &str,
+    ) -> String {
+        self.outputs
+            .public_for_private(private_output_ref, owner_public_session_id)
     }
 
     fn retain_local_output(&mut self, stream: &str, content: String) -> String {
-        while self.local_outputs.len() >= MAX_LOCAL_RETAINED_OUTPUT_HANDLES {
-            if let Some(expired) = self.local_outputs.pop_front() {
-                self.outputs.remove(&expired);
-            }
+        self.outputs.retain_local(stream, content)
+    }
+
+    fn reap_expired_mappings(&mut self, executions: &ExecutionRegistry) {
+        let expired_sessions = self
+            .sessions
+            .keys()
+            .filter(|public| {
+                executions
+                    .execution_for_public_session(&PublicSessionId::new((*public).clone()))
+                    .is_none()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for public in &expired_sessions {
+            self.sessions.remove(public);
         }
-        let public = next_public_handle("lb-output");
-        self.outputs.insert(
-            public.clone(),
-            PublicOutputHandle {
-                private_output_ref: None,
-                local_stream: Some(stream.to_string()),
-                local_content: Some(content),
-            },
-        );
-        self.local_outputs.push_back(public.clone());
-        public
+        self.outputs.reap_owned_by(&expired_sessions);
     }
 
     fn stable_metadata(
@@ -1510,27 +1490,24 @@ impl PublicCommandSessions {
         ))
     }
 
-    fn terminal(&self, public_session_id: &str) -> Option<Value> {
-        self.sessions
-            .get(public_session_id)
-            .and_then(|session| session.terminal_payload.clone())
-    }
-
-    fn private_session(&self, public_session_id: &str) -> Option<String> {
-        self.sessions
-            .get(public_session_id)
-            .and_then(|session| session.private_session_id.clone())
+    fn private_session(
+        &self,
+        executions: &ExecutionRegistry,
+        public_session_id: &str,
+    ) -> Option<String> {
+        self.sessions.get(public_session_id)?;
+        executions
+            .execution_for_public_session(&PublicSessionId::new(public_session_id))
+            .and_then(|execution| execution.runtime_handle)
+            .map(|handle| handle.as_str().to_string())
     }
 
     fn private_output(&self, public_output_ref: &str) -> Option<String> {
-        self.outputs
-            .get(public_output_ref)
-            .and_then(|output| output.private_output_ref.clone())
+        self.outputs.private(public_output_ref)
     }
 
     fn local_output(&self, public_output_ref: &str) -> Option<(String, String)> {
-        let output = self.outputs.get(public_output_ref)?;
-        Some((output.local_stream.clone()?, output.local_content.clone()?))
+        self.outputs.local(public_output_ref)
     }
 
     fn mark_terminal(
@@ -1549,11 +1526,6 @@ impl PublicCommandSessions {
             Ok(()) => {}
             Err(ExecutionRegistryError::AlreadyTerminal { .. }) => return Ok(()),
             Err(error) => return Err(normalize_execution_registry_error(error)),
-        }
-        if let Some(session) = self.sessions.get_mut(public_session_id) {
-            if session.terminal_payload.is_none() {
-                session.terminal_payload = Some(command_result_with_output(result, String::new()));
-            }
         }
         Ok(())
     }
@@ -1583,16 +1555,12 @@ impl PublicCommandSessions {
             .unwrap_or_default()
     }
 
-    fn terminal_with_pending(&mut self, public_session_id: &str) -> Option<Value> {
-        let terminal = self.terminal(public_session_id)?;
+    fn terminal_with_pending(&mut self, public_session_id: &str, terminal: Value) -> Value {
         let pending = self.take_pending(public_session_id);
-        Some(command_result_with_output(terminal, pending))
+        command_result_with_output(terminal, pending)
     }
 
     fn running_with_pending(&mut self, public_session_id: &str) -> Option<Value> {
-        if self.terminal(public_session_id).is_some() {
-            return None;
-        }
         let pending = self.take_pending(public_session_id);
         (!pending.is_empty()).then(|| {
             stable_success(
@@ -1642,11 +1610,11 @@ impl PublicCommandSessions {
                     .execution_for_public_session(&PublicSessionId::new((*public).clone()))
                     .is_some_and(|execution| !execution.state.is_terminal())
             })
-            .filter_map(|(public, session)| {
-                session
-                    .private_session_id
-                    .as_ref()
-                    .map(|private| (public.clone(), private.clone()))
+            .filter_map(|(public, _)| {
+                executions
+                    .execution_for_public_session(&PublicSessionId::new(public))
+                    .and_then(|execution| execution.runtime_handle)
+                    .map(|handle| (public.clone(), handle.as_str().to_string()))
             })
             .collect()
     }
@@ -2299,8 +2267,11 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 .and_then(|object| object.get("session_id"))
                 .and_then(Value::as_str)
             {
-                self.public_commands
-                    .bind_private_session(&public_session_id, private_session_id)?;
+                self.public_commands.bind_private_session(
+                    &self.executions,
+                    &public_session_id,
+                    private_session_id,
+                )?;
             }
             self.normalize_command_result(&raw, &public_session_id, None)
         })();
@@ -2380,11 +2351,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
 
         let public_session_id = required_string(object, "session_id")?.to_string();
         if action == CommandControlAction::Poll {
-            if let Some(terminal) = self
-                .public_commands
-                .terminal_with_pending(&public_session_id)
-            {
-                return Ok(terminal);
+            if let Some(terminal) = self.durable_command_terminal(&public_session_id) {
+                return Ok(self
+                    .public_commands
+                    .terminal_with_pending(&public_session_id, terminal));
             }
             if let Some(running) = self
                 .public_commands
@@ -2392,12 +2362,12 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             {
                 return Ok(running);
             }
-        } else if self.public_commands.terminal(&public_session_id).is_some() {
+        } else if self.durable_command_terminal(&public_session_id).is_some() {
             return Err(session_unavailable());
         }
         let private_session_id = self
             .public_commands
-            .private_session(&public_session_id)
+            .private_session(&self.executions, &public_session_id)
             .ok_or_else(session_unavailable)?;
         let mut private = Map::new();
         private.insert("session_id".into(), Value::String(private_session_id));
@@ -2686,6 +2656,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
     }
 
     fn reap_command_sessions(&mut self) -> Result<(), FacadeError> {
+        self.public_commands.reap_expired_mappings(&self.executions);
         match self.runtime.root_is_running() {
             Ok(true) => {}
             Ok(false) | Err(_) => {
@@ -2893,7 +2864,7 @@ impl CodingToolsRuntimeAdapter {
         }
         let output = self.safe_command_output_for_session(raw, public_session_id);
         data.insert("output".into(), Value::String(output));
-        self.map_private_output_refs(structured, &mut data);
+        self.map_private_output_refs(structured, &mut data, public_session_id);
 
         let successful_kill_data = (action == Some(CommandControlAction::Kill)
             && public_status == "cancelled")
@@ -3045,6 +3016,7 @@ impl CodingToolsRuntimeAdapter {
         &mut self,
         structured: Option<&Map<String, Value>>,
         data: &mut Map<String, Value>,
+        public_session_id: &str,
     ) {
         let Some(structured) = structured else {
             return;
@@ -3052,7 +3024,10 @@ impl CodingToolsRuntimeAdapter {
         if let Some(private) = structured.get("output_ref").and_then(Value::as_str) {
             data.insert(
                 "output_ref".into(),
-                Value::String(self.public_commands.public_output_for_private(private)),
+                Value::String(
+                    self.public_commands
+                        .public_output_for_private(private, public_session_id),
+                ),
             );
         }
         if let Some(private_refs) = structured.get("output_refs").and_then(Value::as_object) {
@@ -3061,7 +3036,10 @@ impl CodingToolsRuntimeAdapter {
                 if let Some(private) = private_refs.get(stream).and_then(Value::as_str) {
                     public_refs.insert(
                         stream.into(),
-                        Value::String(self.public_commands.public_output_for_private(private)),
+                        Value::String(
+                            self.public_commands
+                                .public_output_for_private(private, public_session_id),
+                        ),
                     );
                 }
             }
@@ -3339,8 +3317,15 @@ fn execution_terminal_from_result(result: &Value) -> ExecutionTerminal {
     }
 }
 
-fn normalize_execution_registry_error(_error: ExecutionRegistryError) -> FacadeError {
-    command_state_internal_error()
+fn normalize_execution_registry_error(error: ExecutionRegistryError) -> FacadeError {
+    match error {
+        ExecutionRegistryError::CapacityExceeded => FacadeError::new(
+            FacadeErrorCode::QueueCapacityExceeded,
+            "执行容量已满，请等待已有命令结束后重试",
+            true,
+        ),
+        _ => command_state_internal_error(),
+    }
 }
 
 fn unix_time_ms() -> u64 {
@@ -3712,17 +3697,6 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
 
     pub(crate) fn validate_workspace_identity(&self) -> Result<(), FacadeError> {
         self.adapter.validate_workspace_identity()
-    }
-
-    pub(crate) fn cancel_public_command_session(
-        &mut self,
-        session_id: &str,
-    ) -> Result<Value, FacadeError> {
-        self.adapter.control_command(
-            CommandControlAction::Kill,
-            json!({"session_id":session_id,"signal":"KILL","wait_ms":1000}),
-            None,
-        )
     }
 
     pub(crate) fn bind_public_command_owner(
@@ -7891,7 +7865,9 @@ mod tests {
         private: &str,
     ) -> String {
         let public = sessions.start_session(task_state, None).unwrap();
-        sessions.bind_private_session(&public, private).unwrap();
+        sessions
+            .bind_private_session(task_state, &public, private)
+            .unwrap();
         public
     }
 
@@ -9633,7 +9609,8 @@ mod tests {
         let mut sessions = PublicCommandSessions::default();
         let public_session =
             bind_test_session(&mut sessions, &task_state, "PRIVATE_SESSION_SECRET");
-        let public_output = sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET");
+        let public_output =
+            sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET", &public_session);
         assert!(public_session.starts_with("lb-session-"));
         assert!(public_output.starts_with("lb-output-"));
         assert_ne!(public_session, "PRIVATE_SESSION_SECRET");
@@ -9643,7 +9620,7 @@ mod tests {
     #[test]
     fn local_retained_output_handles_are_fifo_bounded_without_evicting_private_handles() {
         let mut sessions = PublicCommandSessions::default();
-        let private = sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET");
+        let private = sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET", "session-a");
         let first = sessions.retain_local_output("stdout", "first".into());
         let mut latest = String::new();
         for index in 1..=MAX_LOCAL_RETAINED_OUTPUT_HANDLES {
@@ -9651,10 +9628,6 @@ mod tests {
         }
 
         assert!(sessions.local_output(&first).is_none());
-        assert_eq!(
-            sessions.local_outputs.len(),
-            MAX_LOCAL_RETAINED_OUTPUT_HANDLES
-        );
         assert_eq!(
             sessions.private_output(&private).as_deref(),
             Some("PRIVATE_OUTPUT_SECRET")
@@ -9666,6 +9639,28 @@ mod tests {
                 format!("retained-{MAX_LOCAL_RETAINED_OUTPUT_HANDLES}")
             ))
         );
+    }
+
+    #[test]
+    fn command_adapter_mappings_reap_when_the_execution_owner_reaps() {
+        let executions = test_task_state("mapping-reap");
+        let mut sessions = PublicCommandSessions::default();
+        let public = "expired-public-session".to_string();
+        sessions.sessions.insert(
+            public.clone(),
+            PublicCommandSession {
+                execution_id: ExecutionId::new("expired-execution"),
+                started_at: Instant::now(),
+                pending_output: String::new(),
+                stderr_protocol_buffer: String::new(),
+            },
+        );
+        let output = sessions.public_output_for_private("expired-private-output", &public);
+
+        sessions.reap_expired_mappings(&executions);
+
+        assert!(!sessions.sessions.contains_key(&public));
+        assert!(sessions.private_output(&output).is_none());
     }
 
     #[test]
@@ -10130,22 +10125,30 @@ mod tests {
                 &task_state,
             )
             .unwrap();
-        let terminal = sessions
-            .terminal(&public)
-            .expect("completed terminal snapshot");
-        assert_eq!(terminal["isError"], false);
-        assert_eq!(terminal["structuredContent"]["data"]["status"], "completed");
-        assert_eq!(terminal["structuredContent"]["data"]["output"], "");
+        let terminal = task_state
+            .execution_for_public_session(&PublicSessionId::new(public.clone()))
+            .expect("completed execution remains authoritative");
+        assert!(matches!(
+            terminal.state,
+            ExecutionState::Terminal(ExecutionTerminal {
+                outcome: TerminalOutcome::Completed,
+                ..
+            })
+        ));
 
         let lost = bind_test_session(&mut sessions, &task_state, "PRIVATE_LOST");
         sessions.mark_all_running_lost(&task_state).unwrap();
         assert!(task_state.running().is_empty());
-        let terminal = sessions.terminal(&lost).expect("lost terminal snapshot");
-        assert_eq!(terminal["isError"], true);
-        assert_eq!(
-            terminal["structuredContent"]["error"]["code"],
-            "SessionUnavailable"
-        );
+        let terminal = task_state
+            .execution_for_public_session(&PublicSessionId::new(lost))
+            .expect("lost execution remains authoritative");
+        assert!(matches!(
+            terminal.state,
+            ExecutionState::Terminal(ExecutionTerminal {
+                outcome: TerminalOutcome::Lost,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -10164,23 +10167,20 @@ mod tests {
         assert!(sessions.running_with_pending(&public).is_none());
 
         sessions.append_pending(&public, "tail\n");
+        let terminal_response = stable_command_error(
+            FacadeErrorCode::ProcessCancelled,
+            "命令已取消",
+            Map::from_iter([
+                ("status".into(), Value::String("cancelled".into())),
+                ("output".into(), Value::String("private-final".into())),
+            ]),
+        );
         sessions
-            .mark_terminal(
-                &public,
-                stable_command_error(
-                    FacadeErrorCode::ProcessCancelled,
-                    "命令已取消",
-                    Map::from_iter([
-                        ("status".into(), Value::String("cancelled".into())),
-                        ("output".into(), Value::String("private-final".into())),
-                    ]),
-                ),
-                &task_state,
-            )
+            .mark_terminal(&public, terminal_response.clone(), &task_state)
             .unwrap();
-        let terminal = sessions.terminal_with_pending(&public).unwrap();
+        let terminal = sessions.terminal_with_pending(&public, terminal_response.clone());
         assert_eq!(terminal["structuredContent"]["data"]["output"], "tail\n");
-        let replay = sessions.terminal_with_pending(&public).unwrap();
+        let replay = sessions.terminal_with_pending(&public, terminal_response);
         assert_eq!(replay["structuredContent"]["data"]["output"], "");
         assert_eq!(
             replay["structuredContent"]["error"]["code"],

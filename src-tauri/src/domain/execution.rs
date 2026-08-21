@@ -1,6 +1,27 @@
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use super::{ExecutionId, McpSessionId, PublicSessionId, TaskId, TerminalOutcome};
+
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RuntimeCommandHandle(String);
+
+impl RuntimeCommandHandle {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for RuntimeCommandHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RuntimeCommandHandle(<redacted>)")
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionTerminal {
@@ -32,6 +53,8 @@ pub struct ExecutionRecord {
     pub task_id: TaskId,
     pub public_session_id: PublicSessionId,
     pub owner_session: Option<McpSessionId>,
+    #[serde(skip)]
+    pub runtime_handle: Option<RuntimeCommandHandle>,
     pub state: ExecutionState,
     pub started_at_ms: u64,
 }

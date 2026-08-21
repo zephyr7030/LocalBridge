@@ -15,6 +15,8 @@ use super::{
 };
 use super::{ExecutionCancel, run_elevated_exec};
 
+pub(crate) const MAX_ACTIVE_BROKER_REQUESTS: usize = 32;
+
 struct ActiveExecution {
     cancel: ExecutionCancel,
     result: mpsc::Receiver<Result<ElevatedExecResult, super::execution::ExecutionError>>,
@@ -25,6 +27,51 @@ struct ActiveStructuredFilesystem {
     result: mpsc::Receiver<
         Result<super::AdministratorFilesystemResult, super::AdministratorFilesystemErrorCode>,
     >,
+}
+
+#[derive(Default)]
+struct BrokerRequestOwner {
+    executions: HashMap<String, ActiveExecution>,
+    structured_filesystems: HashMap<String, ActiveStructuredFilesystem>,
+}
+
+impl BrokerRequestOwner {
+    fn contains(&self, request_id: &str) -> bool {
+        self.executions.contains_key(request_id)
+            || self.structured_filesystems.contains_key(request_id)
+    }
+
+    fn len(&self) -> usize {
+        self.executions.len() + self.structured_filesystems.len()
+    }
+
+    fn cancel_all(&self) {
+        for execution in self.executions.values() {
+            execution.cancel.cancel();
+        }
+        for filesystem in self.structured_filesystems.values() {
+            filesystem.cancel.cancel();
+        }
+    }
+}
+
+impl Drop for BrokerRequestOwner {
+    fn drop(&mut self) {
+        self.cancel_all();
+    }
+}
+
+fn broker_request_admission(
+    duplicate: bool,
+    active_requests: usize,
+) -> Result<(), BrokerRejectCode> {
+    if duplicate {
+        Err(BrokerRejectCode::DuplicateRequest)
+    } else if active_requests >= MAX_ACTIVE_BROKER_REQUESTS {
+        Err(BrokerRejectCode::CapacityExceeded)
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,8 +158,7 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
     };
     pipe.write_frame(&encode_frame(&ready)?)?;
     let mut session = BrokerSession::new(args.generation, hello.session_nonce)?;
-    let mut executions = HashMap::<String, ActiveExecution>::new();
-    let mut structured_filesystems = HashMap::<String, ActiveStructuredFilesystem>::new();
+    let mut owned = BrokerRequestOwner::default();
 
     loop {
         let payload = pipe.read_frame()?;
@@ -132,12 +178,7 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
         let response = match envelope.request {
             BrokerRequest::Ping => BrokerResponse::Pong,
             BrokerRequest::Shutdown => {
-                for execution in executions.values() {
-                    execution.cancel.cancel();
-                }
-                for filesystem in structured_filesystems.values() {
-                    filesystem.cancel.cancel();
-                }
+                owned.cancel_all();
                 BrokerResponse::ShutdownAck
             }
             BrokerRequest::StartExec { request_id, spec } => {
@@ -145,27 +186,24 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                     BrokerResponse::Rejected {
                         code: BrokerRejectCode::Malformed,
                     }
+                } else if let Err(code) =
+                    broker_request_admission(owned.contains(&request_id), owned.len())
+                {
+                    BrokerResponse::Rejected { code }
                 } else {
-                    match executions.entry(request_id) {
-                        std::collections::hash_map::Entry::Vacant(entry) => {
-                            let cancel = ExecutionCancel::default();
-                            let worker_cancel = cancel.clone();
-                            let (tx, rx) = mpsc::channel();
-                            thread::Builder::new()
-                                .name("localbridge-elevated-exec".into())
-                                .spawn(move || {
-                                    let _ = tx.send(run_elevated_exec(spec, worker_cancel));
-                                })
-                                .map_err(|_| BrokerRunError::UnexpectedResponse)?;
-                            entry.insert(ActiveExecution { cancel, result: rx });
-                            BrokerResponse::ExecAccepted
-                        }
-                        std::collections::hash_map::Entry::Occupied(_) => {
-                            BrokerResponse::Rejected {
-                                code: BrokerRejectCode::DuplicateRequest,
-                            }
-                        }
-                    }
+                    let cancel = ExecutionCancel::default();
+                    let worker_cancel = cancel.clone();
+                    let (tx, rx) = mpsc::channel();
+                    thread::Builder::new()
+                        .name("localbridge-elevated-exec".into())
+                        .spawn(move || {
+                            let _ = tx.send(run_elevated_exec(spec, worker_cancel));
+                        })
+                        .map_err(|_| BrokerRunError::UnexpectedResponse)?;
+                    owned
+                        .executions
+                        .insert(request_id, ActiveExecution { cancel, result: rx });
+                    BrokerResponse::ExecAccepted
                 }
             }
             BrokerRequest::PollExec { request_id } => {
@@ -173,16 +211,16 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                     BrokerResponse::Rejected {
                         code: BrokerRejectCode::Malformed,
                     }
-                } else if let Some(execution) = executions.get(&request_id) {
+                } else if let Some(execution) = owned.executions.get(&request_id) {
                     match execution.result.try_recv() {
                         Ok(Ok(execution_result)) => {
-                            executions.remove(&request_id);
+                            owned.executions.remove(&request_id);
                             BrokerResponse::ExecCompleted {
                                 execution: execution_result,
                             }
                         }
                         Ok(Err(_)) | Err(TryRecvError::Disconnected) => {
-                            executions.remove(&request_id);
+                            owned.executions.remove(&request_id);
                             BrokerResponse::Rejected {
                                 code: BrokerRejectCode::ExecutionFailed,
                             }
@@ -200,7 +238,7 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                     BrokerResponse::Rejected {
                         code: BrokerRejectCode::Malformed,
                     }
-                } else if let Some(execution) = executions.get(&request_id) {
+                } else if let Some(execution) = owned.executions.get(&request_id) {
                     execution.cancel.cancel();
                     BrokerResponse::CancelAck
                 } else {
@@ -242,12 +280,10 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                     BrokerResponse::Rejected {
                         code: BrokerRejectCode::Malformed,
                     }
-                } else if executions.contains_key(&request_id)
-                    || structured_filesystems.contains_key(&request_id)
+                } else if let Err(code) =
+                    broker_request_admission(owned.contains(&request_id), owned.len())
                 {
-                    BrokerResponse::Rejected {
-                        code: BrokerRejectCode::DuplicateRequest,
-                    }
+                    BrokerResponse::Rejected { code }
                 } else {
                     let cancel = FilesystemCancellation::default();
                     let worker_cancel = cancel.clone();
@@ -261,7 +297,7 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                             ));
                         })
                         .map_err(|_| BrokerRunError::UnexpectedResponse)?;
-                    structured_filesystems.insert(
+                    owned.structured_filesystems.insert(
                         request_id,
                         ActiveStructuredFilesystem { cancel, result: rx },
                     );
@@ -273,20 +309,20 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                     BrokerResponse::Rejected {
                         code: BrokerRejectCode::Malformed,
                     }
-                } else if let Some(filesystem) = structured_filesystems.get(&request_id) {
+                } else if let Some(filesystem) = owned.structured_filesystems.get(&request_id) {
                     match filesystem.result.try_recv() {
                         Ok(Ok(filesystem_result)) => {
-                            structured_filesystems.remove(&request_id);
+                            owned.structured_filesystems.remove(&request_id);
                             BrokerResponse::StructuredFilesystemCompleted {
                                 filesystem: filesystem_result,
                             }
                         }
                         Ok(Err(code)) => {
-                            structured_filesystems.remove(&request_id);
+                            owned.structured_filesystems.remove(&request_id);
                             BrokerResponse::StructuredFilesystemFailed { code }
                         }
                         Err(TryRecvError::Disconnected) => {
-                            structured_filesystems.remove(&request_id);
+                            owned.structured_filesystems.remove(&request_id);
                             BrokerResponse::Rejected {
                                 code: BrokerRejectCode::ExecutionFailed,
                             }
@@ -304,7 +340,7 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
                     BrokerResponse::Rejected {
                         code: BrokerRejectCode::Malformed,
                     }
-                } else if let Some(filesystem) = structured_filesystems.get(&request_id) {
+                } else if let Some(filesystem) = owned.structured_filesystems.get(&request_id) {
                     filesystem.cancel.cancel();
                     BrokerResponse::CancelAck
                 } else {
@@ -557,6 +593,22 @@ mod tests {
                 "x"
             ])
             .is_err()
+        );
+    }
+
+    #[test]
+    fn broker_request_admission_is_cross_kind_unique_and_bounded() {
+        assert_eq!(
+            broker_request_admission(true, 0),
+            Err(BrokerRejectCode::DuplicateRequest)
+        );
+        assert_eq!(
+            broker_request_admission(false, MAX_ACTIVE_BROKER_REQUESTS),
+            Err(BrokerRejectCode::CapacityExceeded)
+        );
+        assert_eq!(
+            broker_request_admission(false, MAX_ACTIVE_BROKER_REQUESTS - 1),
+            Ok(())
         );
     }
 }

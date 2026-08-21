@@ -121,6 +121,7 @@ pub enum BrokerRejectCode {
     Malformed,
     Oversized,
     DuplicateRequest,
+    CapacityExceeded,
     RequestNotFound,
     ExecutionFailed,
 }
