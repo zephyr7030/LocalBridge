@@ -644,10 +644,12 @@ impl NamedPipeServer {
     pub fn create() -> Result<Self, PrivilegeIpcError> {
         let mut suffix = [0u8; 16];
         fill_random(&mut suffix)?;
-        let suffix = suffix
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
+        use std::fmt::Write as _;
+        let mut suffix_text = String::with_capacity(suffix.len() * 2);
+        for byte in &suffix {
+            write!(&mut suffix_text, "{byte:02x}").expect("writing to String cannot fail");
+        }
+        let suffix = suffix_text;
         let name = format!(r"\\.\pipe\LocalBridge-Privileged-{suffix}");
         let current_user_sid = current_user_sid_string()?;
         let sddl = current_user_pipe_sddl(&current_user_sid);

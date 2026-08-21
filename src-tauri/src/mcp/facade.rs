@@ -3662,7 +3662,24 @@ fn ordinary_workspace_paths_match(expected: &Path, actual: &str) -> bool {
     let actual = normalize(actual);
     #[cfg(windows)]
     {
-        expected.eq_ignore_ascii_case(&actual)
+        if expected.eq_ignore_ascii_case(&actual) {
+            return true;
+        }
+        let Ok(expected_authority) = PathAuthority::active_workspace(Path::new(&expected)) else {
+            return false;
+        };
+        let Ok(actual_authority) = PathAuthority::active_workspace(Path::new(&actual)) else {
+            return false;
+        };
+        match (
+            expected_authority.workspace_identity_token(),
+            actual_authority.workspace_identity_token(),
+        ) {
+            (Some(expected_identity), Some(actual_identity)) => {
+                expected_identity == actual_identity
+            }
+            _ => false,
+        }
     }
     #[cfg(not(windows))]
     {
@@ -10197,6 +10214,64 @@ mod tests {
                 .code,
             FacadeErrorCode::RuntimeCapabilityMismatch
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn workspace_probe_accepts_ntfs_short_path_alias_for_same_directory_object() {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+
+        fn short_path(path: &Path) -> Option<PathBuf> {
+            let wide = path
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let needed = unsafe { GetShortPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0) };
+            if needed == 0 {
+                return None;
+            }
+            let mut buffer = vec![0u16; needed as usize];
+            let written = unsafe {
+                GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32)
+            };
+            if written == 0 {
+                return None;
+            }
+            buffer.truncate(written as usize);
+            Some(PathBuf::from(OsString::from_wide(&buffer)))
+        }
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "LocalBridge Workspace Identity Alias Probe {} {nonce}",
+            std::process::id()
+        ));
+        let other = root.with_extension("other");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+
+        if let Some(short) = short_path(&root) {
+            if short != root {
+                assert!(ordinary_workspace_paths_match(
+                    &root,
+                    &short.to_string_lossy()
+                ));
+                assert!(!ordinary_workspace_paths_match(
+                    &other,
+                    &short.to_string_lossy()
+                ));
+            }
+        }
+
+        std::fs::remove_dir_all(&root).unwrap();
+        std::fs::remove_dir_all(&other).unwrap();
     }
 
     #[test]

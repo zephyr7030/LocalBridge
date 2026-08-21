@@ -255,8 +255,19 @@ impl CommandTaskStateStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn latest_terminal_for_task(&self, task_id: &str) -> Option<TerminalCommandSnapshot> {
-        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).state.terminal_commands.iter().rev().find(|terminal| terminal.owner.task_id == task_id).cloned()
+    pub(crate) fn latest_terminal_for_task(
+        &self,
+        task_id: &str,
+    ) -> Option<TerminalCommandSnapshot> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .state
+            .terminal_commands
+            .iter()
+            .rev()
+            .find(|terminal| terminal.owner.task_id == task_id)
+            .cloned()
     }
 
     pub(crate) fn terminal_for_session(&self, session_id: &str) -> Option<TerminalCommandSnapshot> {
@@ -358,10 +369,11 @@ fn default_task_state_path(workspace: &Path) -> PathBuf {
     #[cfg(windows)]
     normalized.make_ascii_lowercase();
     let digest = Sha256::digest(normalized.as_bytes());
-    let key = digest[..16]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    use std::fmt::Write as _;
+    let mut key = String::with_capacity(32);
+    for byte in &digest[..16] {
+        write!(&mut key, "{byte:02x}").expect("writing to String cannot fail");
+    }
     base.join("LocalBridge")
         .join("task-state")
         .join(format!("workspace-{key}.json"))

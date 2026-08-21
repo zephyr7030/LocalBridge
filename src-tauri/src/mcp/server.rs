@@ -5931,10 +5931,7 @@ mod tests {
         assert_eq!(durable["cancelled"], true);
         assert_eq!(durable["error_code"], "ProcessCancelled");
         assert!(
-            serde_json::to_string(durable)
-                .unwrap()
-                .find("PRIVATE_")
-                .is_none(),
+            !serde_json::to_string(durable).unwrap().contains("PRIVATE_"),
             "schema29 durable terminal task-state leaked a private handle: {durable:#?}"
         );
 
