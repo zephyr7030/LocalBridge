@@ -4,7 +4,7 @@
   "governance_model": "refactor_phases",
   "contract_file": "CONTROL_PLANE_REFACTOR_CONTRACT.json",
   "human_authority": "docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md",
-  "status": "READY_FOR_UNIFIED_ACCEPTANCE",
+  "status": "SCHEMA44_ACCEPTED",
   "current_phase": "R7",
   "implementation_started": true,
   "phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
@@ -203,5 +203,32 @@
     "automatic_next_phase": true,
     "unified_final_acceptance_after": "R7"
   },
-  "next_action": "Perform the unified schema44 acceptance and publish the architecture migration report."
+  "unified_acceptance": {
+    "status": "VERIFIED",
+    "accepted_at": "2026-08-21",
+    "hardening_commits": ["818f186", "c89d474"],
+    "architecture_report": "docs/07_SCHEMA44_ARCHITECTURE_MIGRATION_REPORT.md",
+    "verification": {
+      "rust": "351 library tests plus all non-ignored migration/integration/policy/privilege/packaging tests passed",
+      "ignored": "3 process helper entry points and 1 explicit UAC test",
+      "clippy": "all targets passed with -D warnings",
+      "frontend": "11 tests passed",
+      "build": "production frontend build passed",
+      "runtime_manifest": "PASS",
+      "ui_language": "PASS",
+      "schema44_residue": "PASS"
+    },
+    "verified_invariants": [
+      "INV-01",
+      "INV-02",
+      "INV-03",
+      "INV-04",
+      "INV-05",
+      "INV-06",
+      "INV-07",
+      "INV-08",
+      "INV-09"
+    ]
+  },
+  "next_action": "Maintain the accepted schema44 single-owner control plane; treat new product work as a separate contract."
 }
