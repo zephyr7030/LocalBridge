@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "product": "LocalBridge",
+  "version": "0.1.1",
+  "status": "PASS",
+  "decision": "PASS",
+  "kind": "human_manual_release_acceptance",
+  "manual_acceptance": {
+    "source": "user_manual_test",
+    "evidence_ref": "conversation:2026-08-21:user-explicit-lb019-manual-validation-pass",
+    "disposition": "accepted",
+    "scope": "LB-019 clean-machine, reboot, live connector, UAC and release-host acceptance as explicitly reported PASS by the user",
+    "independent_review_provenance_fabricated": false
+  },
+  "accepted_candidate": {
+    "source_commit": "1fc08350a42a7694008b6350b7f78dcde2e0382f",
+    "installer": "release-artifacts/LB-019PRE/LocalBridge_0.1.1_x64-setup.exe",
+    "bytes": 21096960,
+    "sha256": "18c6e70813d54732f209e41d117c0ef0fd1954a8ebd0389f67b0dac50b3dfdfd"
+  },
+  "public_ci": {
+    "run_id": 32443831183,
+    "status": "completed",
+    "conclusion": "success",
+    "public_source_head": "b7b7c88cc5373c6c26e70c090c3e76fdb556745b",
+    "url": "https://github.com/zephyr7030/LocalBridge/actions/runs/32443831183"
+  },
+  "governance_verification": {
+    "g4_human_gate": "PASS",
+    "architecture_command": "npm run verify:architecture",
+    "architecture_result": "EXPECTED_FAIL_EXISTING_OVERRIDE_MODEL_GAP",
+    "architecture_finding": "ARCH-024: PR_INDEX.json:G2->G3",
+    "reason": "The explicit schema43 G2 generation40/G3 generation24 human override accepted on 2026-08-20 is represented in dedicated override fields, while the legacy ARCH-024 transition rule recognizes only independent-adversarial review_status=PASS. No independent review provenance is fabricated to silence the rule."
+  },
+  "github_release": {
+    "tag": "v0.1.1",
+    "tag_commit": "b7b7c88cc5373c6c26e70c090c3e76fdb556745b",
+    "url": "https://github.com/zephyr7030/LocalBridge/releases/tag/v0.1.1",
+    "published_at_utc": "2026-08-21T04:01:39Z",
+    "draft": false,
+    "prerelease": false,
+    "latest": true,
+    "asset": {
+      "name": "LocalBridge_0.1.1_x64-setup.exe",
+      "bytes": 21096960,
+      "digest": "sha256:18c6e70813d54732f209e41d117c0ef0fd1954a8ebd0389f67b0dac50b3dfdfd"
+    }
+  }
+}

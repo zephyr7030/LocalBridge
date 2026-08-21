@@ -1,0 +1,28 @@
+﻿{
+    "schema":  1,
+    "product":  "LocalBridge",
+    "version":  "0.1.1",
+    "installed_executable":  "C:\\Program Files\\LocalBridge\\LocalBridge.exe",
+    "sanitized_path":  "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0;C:\\WINDOWS\\System32;C:\\WINDOWS",
+    "bundled_python_path":  "C:\\Program Files\\LocalBridge\\runtime\\python\\python.exe",
+    "bundled_tunnel_path":  "C:\\Program Files\\LocalBridge\\runtime\\tunnel-client\\tunnel-client.exe",
+    "python_version":  "Python 3.12.10",
+    "tunnel_version":  "0.0.11+8d55683eeef80bc5e360d95abf4692454fafc615 (git sha: 8d55683eeef80bc5e360d95abf4692454fafc615)",
+    "ready_before_crash":  true,
+    "old_tunnel_pid":  231676,
+    "new_tunnel_pid":  217160,
+    "tunnel_pid_changed":  true,
+    "ready_after_crash":  true,
+    "pep_ports_before":  [
+                             62340
+                         ],
+    "pep_ports_after":  [
+                            62340
+                        ],
+    "pep_listener_continuity":  true,
+    "ambient_node_or_codex_before":  0,
+    "ambient_node_or_codex_after":  0,
+    "reboot_exercised":  false,
+    "interactive_uac_exercised":  false,
+    "recorded_at_utc":  "2026-08-20T15:57:18.7041531Z"
+}

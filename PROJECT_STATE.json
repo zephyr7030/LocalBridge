@@ -1,6 +1,6 @@
 {
   "schema_version": 18,
-  "phase": "RELEASE_ACCEPTANCE",
+  "phase": "STABLE",
   "current_pr": "LB-019",
   "architecture_frozen_candidate": false,
   "product_name_finalized": false,
@@ -32,9 +32,7 @@
     "Main window is fixed at 780x620, cannot be resized or maximized, uses no native Windows decorations, and has exactly one custom chrome layer bound edge-to-edge to the native client area",
     "First-run onboarding is a full-page single-content layout inside the custom chrome content area, not a centered floating card/modal inside an otherwise empty canvas"
   ],
-  "known_blockers": [
-    "LB-019 clean-machine/reboot/live release acceptance remains to be executed"
-  ],
+  "known_blockers": [],
   "known_risks": [
     "Upstream coding-tools-mcp public release differs from GPT-WebCodex vendored version",
     "Full mode process execution has current Windows user OS permissions",
@@ -6347,7 +6345,7 @@
       "LB-019 clean-machine/reboot E2E",
       "publish final GitHub v0.1.1 only after LB-019 PASS"
     ],
-    "lb019_status": "IN_PROGRESS",
+    "lb019_status": "PASS",
     "implementation_started": true,
     "g2_generation_38_consumed": true,
     "g2_generation_39_consumed": true,
@@ -6481,5 +6479,60 @@
     "independent_review_provenance_fabricated": false,
     "accepted_product_head": "619439b4394800505981bab025552e938c936611",
     "next_pr": "LB-019"
+  },
+  "lb019_final_release_acceptance_2026_08_21": {
+    "status": "PASS",
+    "decision": "PASS",
+    "kind": "human_manual_release_acceptance",
+    "version": "0.1.1",
+    "user_evidence_ref": "conversation:2026-08-21:user-explicit-lb019-manual-validation-pass",
+    "manual_acceptance": {
+      "source": "user_manual_test",
+      "disposition": "accepted",
+      "scope": "LB-019 clean-machine, reboot, live connector, UAC and release-host acceptance as explicitly reported PASS by the user",
+      "independent_review_provenance_fabricated": false
+    },
+    "accepted_candidate": {
+      "source_commit": "1fc08350a42a7694008b6350b7f78dcde2e0382f",
+      "installer_file": "LocalBridge_0.1.1_x64-setup.exe",
+      "installer_bytes": 21096960,
+      "installer_sha256": "18c6e70813d54732f209e41d117c0ef0fd1954a8ebd0389f67b0dac50b3dfdfd"
+    },
+    "public_ci": {
+      "run_id": 32443831183,
+      "status": "completed",
+      "conclusion": "success",
+      "public_source_head": "b7b7c88cc5373c6c26e70c090c3e76fdb556745b",
+      "url": "https://github.com/zephyr7030/LocalBridge/actions/runs/32443831183"
+    },
+    "governance_verification": {
+      "g4_human_gate": "PASS",
+      "architecture_command": "npm run verify:architecture",
+      "architecture_result": "EXPECTED_FAIL_EXISTING_OVERRIDE_MODEL_GAP",
+      "architecture_finding": "ARCH-024: PR_INDEX.json:G2->G3",
+      "reason": "The explicit schema43 G2 generation40/G3 generation24 human override accepted on 2026-08-20 is represented in dedicated override fields, while the legacy ARCH-024 transition rule recognizes only independent-adversarial review_status=PASS. No independent review provenance is fabricated to silence the rule.",
+      "new_g4_review_provenance_finding": false
+    },
+    "github_release": {
+      "tag": "v0.1.1",
+      "tag_commit": "b7b7c88cc5373c6c26e70c090c3e76fdb556745b",
+      "url": "https://github.com/zephyr7030/LocalBridge/releases/tag/v0.1.1",
+      "published_at_utc": "2026-08-21T04:01:39Z",
+      "draft": false,
+      "prerelease": false,
+      "latest": true,
+      "asset_digest": "sha256:18c6e70813d54732f209e41d117c0ef0fd1954a8ebd0389f67b0dac50b3dfdfd",
+      "asset_bytes": 21096960
+    },
+    "evidence": [
+      "User explicitly reported manual validation PASS for the current LB-019 release candidate.",
+      "GitHub Actions run 32443831183 completed successfully on the published fresh-history source head b7b7c88cc5373c6c26e70c090c3e76fdb556745b.",
+      "The accepted local installer SHA256 and size match release-provenance.json exactly.",
+      "Published GitHub Release v0.1.1 is neither draft nor prerelease and its uploaded installer digest and size exactly match the accepted local installer.",
+      "The v0.1.1 tag resolves to the same public source head used by the successful CI run.",
+      "The G4 human-gate verifier passes; the full architecture verifier retains only the pre-existing ARCH-024 G2-to-G3 finding because its legacy transition rule does not model the explicit schema43 human override."
+    ],
+    "g4_complete": true,
+    "next_action": "None; v0.1.1 stable release is published."
   }
 }

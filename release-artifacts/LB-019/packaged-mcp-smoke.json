@@ -1,0 +1,29 @@
+﻿{
+    "schema":  1,
+    "product":  "LocalBridge",
+    "version":  "0.1.1",
+    "installed_executable":  "C:\\Program Files\\LocalBridge\\LocalBridge.exe",
+    "pep_port":  59136,
+    "protocol_version":  "2025-11-25",
+    "server_name":  "localbridge-mcp-guard",
+    "tools_list_contains_filesystem":  true,
+    "advertised_tool_count":  10,
+    "workspace":  "D:\\project",
+    "filesystem_actions_passed":  [
+                                      "write",
+                                      "stat",
+                                      "read",
+                                      "list",
+                                      "search",
+                                      "hash",
+                                      "copy",
+                                      "move",
+                                      "delete"
+                                  ],
+    "all_nine_filesystem_actions_passed":  true,
+    "content_sha256":  "b80db204ac65ca66e896b79adbee2b514dd207f08a4df9d6cc82f16415078c88",
+    "packaged_loopback_mcp":  true,
+    "real_chatgpt_connector_ui_call":  false,
+    "secret_material_recorded":  false,
+    "recorded_at_utc":  "2026-08-20T15:55:45.7917652Z"
+}

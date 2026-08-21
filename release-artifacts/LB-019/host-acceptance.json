@@ -1,0 +1,86 @@
+﻿{
+    "schema":  1,
+    "product":  "LocalBridge",
+    "version":  "0.1.1",
+    "candidate_source_commit":  "619439b4394800505981bab025552e938c936611",
+    "installer":  {
+                      "path":  "D:\\project\\LocalBridge\\release-artifacts\\LB-019PRE\\LocalBridge_0.1.1_x64-setup.exe",
+                      "sha256":  "621d5ccd25333bffe8f324974e36590ad18f66953be9a2b608dc4af4096f6df4",
+                      "bytes":  21098137
+                  },
+    "install_root":  "C:\\Program Files\\LocalBridge",
+    "uninstall_version":  "0.1.1",
+    "foreground_launch":  {
+                              "pid":  232276,
+                              "integrity_rid":  "0x2000",
+                              "integrity":  "Medium",
+                              "main_window_handle":  921720
+                          },
+    "runtime_manifest_exact_match":  true,
+    "programdata_root_absent":  true,
+    "persistent_temp_executable_absent":  true,
+    "process_tree":  [
+                         {
+                             "pid":  232276,
+                             "parent_pid":  154996,
+                             "name":  "localbridge.exe",
+                             "path":  "C:\\Program Files\\LocalBridge\\localbridge.exe"
+                         },
+                         {
+                             "pid":  229372,
+                             "parent_pid":  232276,
+                             "name":  "msedgewebview2.exe",
+                             "path":  "C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\151.0.4129.93\\msedgewebview2.exe"
+                         },
+                         {
+                             "pid":  83736,
+                             "parent_pid":  229372,
+                             "name":  "msedgewebview2.exe",
+                             "path":  "C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\151.0.4129.93\\msedgewebview2.exe"
+                         },
+                         {
+                             "pid":  230288,
+                             "parent_pid":  229372,
+                             "name":  "msedgewebview2.exe",
+                             "path":  "C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\151.0.4129.93\\msedgewebview2.exe"
+                         },
+                         {
+                             "pid":  214216,
+                             "parent_pid":  229372,
+                             "name":  "msedgewebview2.exe",
+                             "path":  "C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\151.0.4129.93\\msedgewebview2.exe"
+                         },
+                         {
+                             "pid":  232316,
+                             "parent_pid":  229372,
+                             "name":  "msedgewebview2.exe",
+                             "path":  "C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\151.0.4129.93\\msedgewebview2.exe"
+                         },
+                         {
+                             "pid":  221968,
+                             "parent_pid":  229372,
+                             "name":  "msedgewebview2.exe",
+                             "path":  "C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\151.0.4129.93\\msedgewebview2.exe"
+                         },
+                         {
+                             "pid":  155292,
+                             "parent_pid":  232276,
+                             "name":  "python.exe",
+                             "path":  "C:\\Program Files\\LocalBridge\\runtime\\python\\python.exe"
+                         },
+                         {
+                             "pid":  231448,
+                             "parent_pid":  155292,
+                             "name":  "conhost.exe",
+                             "path":  "C:\\WINDOWS\\system32\\conhost.exe"
+                         }
+                     ],
+    "exclusions":  [
+                       "clean-machine OS image",
+                       "actual reboot",
+                       "real ChatGPT connector call",
+                       "interactive UAC/Broker activation",
+                       "uninstall"
+                   ],
+    "recorded_at_utc":  "2026-08-20T15:43:28.8761147Z"
+}

@@ -295,7 +295,17 @@
         "LB-019PRE"
       ],
       "gate": "G4",
-      "status": "IN_PROGRESS"
+      "status": "PASS",
+      "acceptance": {
+        "kind": "human_manual_release_acceptance",
+        "evidence_ref": "conversation:2026-08-21:user-explicit-lb019-manual-validation-pass",
+        "github_ci_run": 32443831183,
+        "github_ci_head": "b7b7c88cc5373c6c26e70c090c3e76fdb556745b",
+        "release_tag": "v0.1.1",
+        "release_url": "https://github.com/zephyr7030/LocalBridge/releases/tag/v0.1.1",
+        "installer_sha256": "18c6e70813d54732f209e41d117c0ef0fd1954a8ebd0389f67b0dac50b3dfdfd",
+        "independent_review_provenance_fabricated": false
+      }
     }
   ],
   "groups": [
@@ -565,9 +575,16 @@
         "LB-019PRE",
         "LB-019"
       ],
-      "status": "IN_PROGRESS",
+      "status": "PASS",
       "review_status": "BLOCKED",
-      "review_generation": 0
+      "review_generation": 0,
+      "terminal_acceptance": {
+        "kind": "human_manual_release_acceptance",
+        "evidence_ref": "conversation:2026-08-21:user-explicit-lb019-manual-validation-pass",
+        "github_ci_run": 32443831183,
+        "release_tag": "v0.1.1",
+        "independent_review_provenance_fabricated": false
+      }
     }
   ],
   "current_pr": "LB-019",
