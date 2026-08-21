@@ -1,10 +1,16 @@
 use super::*;
 use crate::state::{SafeTaskSummary, TaskExecutionState, TaskKind};
+#[cfg(windows)]
+use crate::mcp::{InternalBearer, ProductionRuntimeConfig, ProductionRuntimeDriver};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 #[cfg(windows)]
-use crate::credentials::{CredentialMetadata, CredentialStoreError, SecretString};
+use crate::credentials::{
+    CredentialMetadata, CredentialStore, CredentialStoreError, SecretString,
+};
+#[cfg(windows)]
+use crate::tunnel::TunnelId;
 #[cfg(windows)]
 use std::fs;
 #[cfg(windows)]

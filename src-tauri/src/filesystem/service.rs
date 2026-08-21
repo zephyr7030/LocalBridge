@@ -12,8 +12,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 #[cfg(windows)]
-use super::path_authority::ValidatedPathHandle;
-use super::path_authority::{PathAuthority, PathAuthorityError, PathAuthorityScope};
+use crate::workspace::path_authority::ValidatedPathHandle;
+use crate::workspace::path_authority::{PathAuthorityError, PathAuthorityScope, WorkspaceResolver};
 
 #[cfg(windows)]
 #[derive(Debug)]
@@ -159,17 +159,19 @@ impl Default for FilesystemSearchOptions {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FilesystemService {
-    authority: PathAuthority,
+    authority: WorkspaceResolver,
     cancellation: FilesystemCancellation,
 }
 
 impl FilesystemService {
     #[cfg(test)]
     pub(crate) fn active_workspace(root: &Path) -> Result<Self, FilesystemError> {
-        Self::from_authority(PathAuthority::active_workspace(root).map_err(map_path_error)?)
+        Self::from_authority(
+            crate::workspace::WorkspaceResolver::active_workspace(root).map_err(map_path_error)?,
+        )
     }
 
-    pub(crate) fn from_authority(authority: PathAuthority) -> Result<Self, FilesystemError> {
+    pub(crate) fn from_authority(authority: WorkspaceResolver) -> Result<Self, FilesystemError> {
         if authority.scope() != PathAuthorityScope::ActiveWorkspace {
             return Err(FilesystemError::InvalidArgument);
         }
@@ -182,7 +184,7 @@ impl FilesystemService {
 
     pub(crate) fn broker_administrator() -> Self {
         Self {
-            authority: PathAuthority::broker_administrator(),
+            authority: WorkspaceResolver::broker_administrator(),
             cancellation: FilesystemCancellation::default(),
         }
     }

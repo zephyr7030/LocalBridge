@@ -17,6 +17,7 @@ use crate::control_plane::convergence::{
     EffectiveState, ObservedState, ServiceIntent,
 };
 use crate::control_plane::execution_registry::ExecutionRegistry;
+use crate::control_plane::owner::ControlPlane;
 use crate::control_plane::request_registry::{
     ActiveRequest, RequestCancellationTarget, RequestRegistry,
 };
@@ -58,12 +59,13 @@ use super::facade::{
     public_error_output_schema, public_safe_summary, public_task_kind, public_tools_for_policy,
     run_workspace_filesystem_with_authority, stable_success, validate_workspace_context_probe,
 };
-use super::filesystem_service::FilesystemCancellation;
 use super::http::{McpCancellationClient, McpHealthClient};
-use super::path_authority::PathAuthority;
-use super::policy::{CapabilityPolicy, explicit_control_plane_reference};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
-use super::shell::{ShellExecutionSpec, ShellExecutor, ShellSelector};
+use crate::execution::policy::CapabilityPolicy;
+use crate::execution::shell::{ShellExecutionSpec, ShellExecutor, ShellSelector};
+use crate::filesystem::policy::FilesystemPathPolicy;
+use crate::filesystem::service::FilesystemCancellation;
+use crate::workspace::path_authority::WorkspaceResolver;
 
 const CURRENT_PROTOCOL_VERSION: &str = "2025-11-25";
 const COMPATIBLE_PROTOCOL_VERSION: &str = "2025-06-18";
@@ -134,14 +136,10 @@ struct ServeContext {
     guard: Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
     cancellation: McpCancellationClient,
-    desired_state: DesiredStateOwner,
+    control_plane: ControlPlane,
     observed_workspace: PathBuf,
     observed_connection: Option<ConnectionProfile>,
     current_task: CurrentTaskProjection,
-    executions: ExecutionRegistry,
-    tasks: TaskRegistry,
-    scheduler: Scheduler,
-    sessions: SessionRegistry,
     privileged: Option<Arc<dyn PrivilegedExecution>>,
     shutdown: mpsc::Receiver<()>,
 }
@@ -606,11 +604,8 @@ impl std::error::Error for PolicyEnforcementError {}
 
 pub struct PolicyEnforcementRuntime {
     port: u16,
-    desired_state: DesiredStateOwner,
+    control_plane: ControlPlane,
     current_task: CurrentTaskProjection,
-    executions: ExecutionRegistry,
-    tasks: TaskRegistry,
-    scheduler: Scheduler,
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
     health_client: McpHealthClient,
@@ -735,23 +730,6 @@ impl PolicyEnforcementRuntime {
         let health_client = coding_runtime
             .health_client()
             .map_err(|_| PolicyEnforcementError::UpstreamHealthUnavailable)?;
-        let guard = AgentFacade::from_coding_runtime(coding_runtime, policy)
-            .map_err(|_| PolicyEnforcementError::UpstreamFacadeNegotiationFailed)?;
-        let executions = guard.execution_registry();
-        let runtime_executions = executions.clone();
-        let tasks = TaskRegistry::default();
-        let runtime_tasks = tasks.clone();
-        let scheduler = Scheduler::default();
-        let runtime_scheduler = scheduler.clone();
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-            .map_err(|_| PolicyEnforcementError::BindFailed)?;
-        listener
-            .set_nonblocking(true)
-            .map_err(|_| PolicyEnforcementError::BindFailed)?;
-        let port = listener
-            .local_addr()
-            .map_err(|_| PolicyEnforcementError::BindFailed)?
-            .port();
         let desired_state = desired_state.unwrap_or_else(|| {
             let owner = DesiredStateOwner::default();
             owner.replace(DesiredState {
@@ -762,13 +740,28 @@ impl PolicyEnforcementRuntime {
             });
             owner
         });
+        let control_plane = ControlPlane::for_workspace(desired_state, &health_workspace)
+            .map_err(|_| PolicyEnforcementError::UpstreamFacadeNegotiationFailed)?;
+        let guard = AgentFacade::from_coding_runtime_with_executions(
+            coding_runtime,
+            policy,
+            control_plane.executions(),
+        )
+        .map_err(|_| PolicyEnforcementError::UpstreamFacadeNegotiationFailed)?;
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .map_err(|_| PolicyEnforcementError::BindFailed)?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|_| PolicyEnforcementError::BindFailed)?;
+        let port = listener
+            .local_addr()
+            .map_err(|_| PolicyEnforcementError::BindFailed)?
+            .port();
+        let thread_control_plane = control_plane.clone();
         let current_task = CurrentTaskProjection::new(wake);
-        let sessions = SessionRegistry::default();
-        let thread_desired = desired_state.clone();
         let thread_workspace = health_workspace.clone();
         let thread_connection = observed_connection.clone();
         let thread_task = current_task.clone();
-        let thread_sessions = sessions.clone();
         let (shutdown_tx, shutdown_rx) = mpsc::channel();
         let guard = Arc::new(Mutex::new(guard));
         let thread_guard = Arc::clone(&guard);
@@ -782,14 +775,10 @@ impl PolicyEnforcementRuntime {
                         guard: thread_guard,
                         public_policy: thread_policy,
                         cancellation,
-                        desired_state: thread_desired,
+                        control_plane: thread_control_plane,
                         observed_workspace: thread_workspace,
                         observed_connection: thread_connection,
                         current_task: thread_task,
-                        executions,
-                        tasks,
-                        scheduler,
-                        sessions: thread_sessions,
                         privileged,
                         shutdown: shutdown_rx,
                     },
@@ -798,11 +787,8 @@ impl PolicyEnforcementRuntime {
             .map_err(|_| PolicyEnforcementError::ThreadSpawnFailed)?;
         Ok(Self {
             port,
-            desired_state,
+            control_plane,
             current_task,
-            executions: runtime_executions,
-            tasks: runtime_tasks,
-            scheduler: runtime_scheduler,
             guard: Some(guard),
             public_policy,
             health_client,
@@ -821,7 +807,7 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn set_permission_mode(&self, mode: PermissionMode) {
-        self.desired_state.set_permission(mode);
+        self.control_plane.desired().set_permission(mode);
     }
 
     pub fn replace_policy(&self, policy: CapabilityPolicy) -> Result<(), PolicyEnforcementError> {
@@ -845,30 +831,36 @@ impl PolicyEnforcementRuntime {
     }
 
     pub fn task_aggregate_snapshot(&self) -> Value {
+        let executions = self.control_plane.executions();
         let aggregate = match self.guard.as_ref() {
             None => task_control_snapshot_with_terminal(
                 &self.current_task.latest_snapshot(),
-                &self.executions,
+                &executions,
             ),
             Some(guard) => match guard.try_lock() {
                 Ok(guard) => guard.task_aggregate_snapshot(),
                 Err(TryLockError::WouldBlock) => task_control_snapshot_with_terminal(
                     &self.current_task.latest_snapshot(),
-                    &self.executions,
+                    &executions,
                 ),
                 Err(TryLockError::Poisoned(error)) => error.into_inner().task_aggregate_snapshot(),
             },
         };
-        merge_control_plane_activity(aggregate, &self.tasks, &self.executions, &self.scheduler)
+        merge_control_plane_activity(
+            aggregate,
+            &self.control_plane.tasks(),
+            &executions,
+            &self.control_plane.scheduler(),
+        )
     }
 
     pub(crate) fn control_plane_activity_snapshot(&self) -> TaskAggregate {
         TaskAggregate {
-            foreground_task: self.tasks.latest_active(),
-            detached_execution: self.executions.latest_running(),
-            last_task: self.tasks.latest_terminal(),
-            last_execution: self.executions.latest_terminal(),
-            scheduler: self.scheduler.snapshot(),
+            foreground_task: self.control_plane.tasks().latest_active(),
+            detached_execution: self.control_plane.executions().latest_running(),
+            last_task: self.control_plane.tasks().latest_terminal(),
+            last_execution: self.control_plane.executions().latest_terminal(),
+            scheduler: self.control_plane.scheduler().snapshot(),
         }
     }
 
@@ -978,19 +970,20 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         guard,
         public_policy,
         cancellation,
-        desired_state,
+        control_plane,
         observed_workspace,
         observed_connection,
         current_task,
-        executions,
-        tasks,
-        scheduler,
-        sessions,
         privileged,
         shutdown,
     } = context;
-    let requests = RequestRegistry::default();
-    let session_reaper = SessionReaper::new(sessions.clone(), MCP_SESSION_TTL_MS);
+    let desired_state = control_plane.desired();
+    let requests = control_plane.requests();
+    let executions = control_plane.executions();
+    let tasks = control_plane.tasks();
+    let scheduler = control_plane.scheduler();
+    let sessions = control_plane.sessions();
+    let session_reaper = control_plane.session_reaper(MCP_SESSION_TTL_MS);
     let stopping = Arc::new(AtomicBool::new(false));
     let mut workers = Vec::<JoinHandle<()>>::new();
     let mut next_session_reap = Instant::now();
@@ -2962,7 +2955,7 @@ fn handle_administrator_filesystem_if_needed(
 
 fn administrator_filesystem_spec(
     workspace: &Path,
-    authority: &PathAuthority,
+    authority: &WorkspaceResolver,
     request: &FilesystemRequest,
 ) -> Result<Option<AdministratorFilesystemSpec>, FacadeError> {
     let mut outside = false;
@@ -3035,7 +3028,7 @@ fn administrator_filesystem_spec(
         .map(|path| administrator_absolute_path(authority, path))
         .transpose()?;
     for candidate in [&path, &source, &destination].into_iter().flatten() {
-        if explicit_control_plane_reference(candidate) {
+        if !FilesystemPathPolicy::allows(candidate) {
             return Err(FacadeError::new(
                 FacadeErrorCode::PolicyDenied,
                 "LocalBridge 控制面路径禁止通过文件系统工具修改",
@@ -3117,7 +3110,7 @@ fn administrator_filesystem_spec(
 }
 
 fn validate_workspace_side_path(
-    authority: &PathAuthority,
+    authority: &WorkspaceResolver,
     path: &str,
     allow_missing_leaf: bool,
 ) -> Result<bool, FacadeError> {
@@ -3127,20 +3120,14 @@ fn validate_workspace_side_path(
     {
         return Ok(false);
     }
-    if allow_missing_leaf {
-        authority
-            .resolve_missing_leaf(path)
-            .map_err(normalize_path_authority_error)?;
-    } else {
-        authority
-            .resolve_existing(path)
-            .map_err(normalize_path_authority_error)?;
-    }
+    authority
+        .resolve_workspace_path(Some(path), ".", allow_missing_leaf)
+        .map_err(normalize_path_authority_error)?;
     Ok(true)
 }
 
 fn administrator_absolute_path(
-    authority: &PathAuthority,
+    authority: &WorkspaceResolver,
     path: &str,
 ) -> Result<String, FacadeError> {
     let absolute = if Path::new(path).is_absolute() {
@@ -3414,7 +3401,7 @@ fn handle_elevated_exec(
         let denied = FacadeDenied {
             reason: decision
                 .deny_reason
-                .unwrap_or(super::policy::DenyReason::PrivilegedRouteNotAvailable),
+                .unwrap_or(crate::execution::policy::DenyReason::PrivilegedRouteNotAvailable),
             capability: decision.descriptor.capability,
         };
         return write_rpc_result(stream, id, denied.to_mcp_result(), Some(session));
@@ -5265,7 +5252,8 @@ mod tests {
             .session
             .expect("downstream MCP session");
 
-        pep.desired_state
+        pep.control_plane
+            .desired()
             .set_workspace(Some(DesiredWorkspace::for_runtime_path(&workspace_b)));
         let denied = public_tool_call(
             pep.port(),
@@ -5275,8 +5263,8 @@ mod tests {
             json!({"action":"read_file","path":"probe.txt"}),
         );
         assert_tool_error(&denied, "RuntimeUnavailable");
-        assert_eq!(pep.scheduler.snapshot().work_running, 0);
-        assert_eq!(pep.scheduler.snapshot().work_queued, 0);
+        assert_eq!(pep.control_plane.scheduler().snapshot().work_running, 0);
+        assert_eq!(pep.control_plane.scheduler().snapshot().work_queued, 0);
 
         let _coding = pep.stop().unwrap();
         let _ = fs::remove_dir_all(workspace_a);
@@ -6078,7 +6066,10 @@ mod tests {
             "foreground Task must finish after exec_command returns"
         );
         assert!(matches!(
-            pep.tasks.latest_terminal().map(|task| task.lifecycle),
+            pep.control_plane
+                .tasks()
+                .latest_terminal()
+                .map(|task| task.lifecycle),
             Some(LifecycleState::Terminal(TerminalOutcome::Completed))
         ));
         let detached = pep.task_aggregate_snapshot();
@@ -7685,7 +7676,7 @@ mod tests {
             )
         });
         thread::sleep(Duration::from_millis(100));
-        let queued = pep.scheduler.snapshot();
+        let queued = pep.control_plane.scheduler().snapshot();
         assert_eq!(queued.work_running, 1);
         assert_eq!(queued.work_queued, 1, "session B did not enter Work FIFO");
 
@@ -8434,7 +8425,7 @@ mod tests {
         );
 
         let secret = "LB012_SYNTHETIC_PEP_SECRET";
-        let reviewed_program = super::super::policy::reviewed_elevated_program()
+        let reviewed_program = crate::execution::policy::reviewed_elevated_program()
             .expect("reviewed Windows diagnostic exists")
             .to_string_lossy()
             .into_owned();
@@ -9086,7 +9077,7 @@ mod tests {
             );
         }
 
-        let reviewed_program = super::super::policy::reviewed_elevated_program()
+        let reviewed_program = crate::execution::policy::reviewed_elevated_program()
             .expect("trusted System32 diagnostic exists")
             .to_string_lossy()
             .into_owned();

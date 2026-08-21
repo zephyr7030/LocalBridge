@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::git_adapter::changed_paths_with_authority;
-use super::path_authority::{PathAuthority, PathAuthorityError};
+use crate::workspace::git_adapter::changed_paths_with_authority;
+use crate::workspace::path_authority::{PathAuthorityError, WorkspaceResolver};
 
 const MAX_MANIFESTS: usize = 24;
 const MAX_MANIFEST_DEPTH: usize = 4;
@@ -23,7 +23,7 @@ pub(crate) struct VerificationStep {
 
 #[derive(Debug, Clone)]
 pub(crate) struct VerificationPlanner {
-    authority: PathAuthority,
+    authority: WorkspaceResolver,
     project_root: PathBuf,
     instruction_paths: Vec<PathBuf>,
     changed_files: Vec<String>,
@@ -32,12 +32,12 @@ pub(crate) struct VerificationPlanner {
 impl VerificationPlanner {
     #[cfg(test)]
     pub(crate) fn new(workspace: &Path, project_path: &str) -> Result<Self, PathAuthorityError> {
-        let authority = PathAuthority::active_workspace(workspace)?;
+        let authority = crate::workspace::WorkspaceResolver::active_workspace(workspace)?;
         Self::with_authority(authority, project_path)
     }
 
     pub(crate) fn with_authority(
-        authority: PathAuthority,
+        authority: WorkspaceResolver,
         project_path: &str,
     ) -> Result<Self, PathAuthorityError> {
         let project_root = authority.resolve_existing(project_path)?;

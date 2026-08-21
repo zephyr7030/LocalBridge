@@ -1,10 +1,10 @@
+use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 const CHECKPOINT_VERSION: u32 = 2;
@@ -12,11 +12,47 @@ const LEGACY_CHECKPOINT_VERSION: u32 = 1;
 const MAX_CHECKPOINT_PLAINTEXT_BYTES: usize = 262_144;
 const MAX_CHECKPOINT_CIPHERTEXT_BYTES: usize = 524_288;
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum WorkflowDatum {
+    Null(()),
+    Boolean(bool),
+    Signed(i64),
+    Unsigned(u64),
+    Float(f64),
+    Text(String),
+    Array(Vec<WorkflowDatum>),
+    Object(BTreeMap<String, WorkflowDatum>),
+}
+
+impl WorkflowDatum {
+    pub(crate) fn get(&self, key: &str) -> Option<&Self> {
+        match self {
+            Self::Object(object) => object.get(key),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Text(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_object(&self) -> Option<&BTreeMap<String, WorkflowDatum>> {
+        match self {
+            Self::Object(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct WorkflowCheckpoint {
     pub version: u32,
     pub workflow_id: String,
-    pub arguments: Value,
+    pub arguments: WorkflowDatum,
     #[serde(default)]
     pub redacted_stdin_command_indices: Vec<usize>,
     #[serde(default)]
@@ -28,41 +64,42 @@ pub(crate) struct WorkflowCheckpoint {
     #[serde(default)]
     pub next_step: Option<String>,
     #[serde(default)]
-    pub files_read: Vec<Value>,
+    pub files_read: Vec<WorkflowDatum>,
     #[serde(default)]
     pub modified_files: Vec<String>,
     #[serde(default)]
-    pub commands: Vec<Value>,
+    pub commands: Vec<WorkflowDatum>,
     #[serde(default)]
-    pub test_results: Vec<Value>,
+    pub test_results: Vec<WorkflowDatum>,
     #[serde(default)]
-    pub build_results: Vec<Value>,
+    pub build_results: Vec<WorkflowDatum>,
     #[serde(default)]
-    pub failure: Option<Value>,
+    pub failure: Option<WorkflowDatum>,
     #[serde(default)]
     pub output_refs: Vec<String>,
     #[serde(default)]
-    pub git_before: Option<Value>,
+    pub git_before: Option<WorkflowDatum>,
     #[serde(default)]
-    pub git_after: Option<Value>,
+    pub git_after: Option<WorkflowDatum>,
     #[serde(default)]
-    pub verification_plan: Vec<Value>,
+    pub verification_plan: Vec<WorkflowDatum>,
     #[serde(default)]
     pub completed: bool,
     pub directory_index: usize,
-    pub directory_results: Vec<Value>,
+    pub directory_results: Vec<WorkflowDatum>,
     pub directory_inflight: bool,
     pub patch_applied: bool,
     pub patch_inflight: bool,
     pub command_index: usize,
     pub command_inflight: bool,
     pub current_session_id: Option<String>,
-    pub command_results: Vec<Value>,
+    pub command_results: Vec<WorkflowDatum>,
 }
 
 impl WorkflowCheckpoint {
-    pub(crate) fn new(workflow_id: String, arguments: Value) -> Self {
-        let (arguments, redacted_stdin_command_indices) = sanitize_checkpoint_arguments(arguments);
+    pub(crate) fn new(workflow_id: String, arguments: impl Into<WorkflowDatum>) -> Self {
+        let (arguments, redacted_stdin_command_indices) =
+            sanitize_checkpoint_arguments(arguments.into());
         Self {
             version: CHECKPOINT_VERSION,
             workflow_id,
@@ -97,7 +134,7 @@ impl WorkflowCheckpoint {
 
     pub(crate) fn new_coding(
         workflow_id: String,
-        arguments: Value,
+        arguments: impl Into<WorkflowDatum>,
         objective: String,
     ) -> Self {
         let mut checkpoint = Self::new(workflow_id, arguments);
@@ -113,12 +150,18 @@ impl WorkflowCheckpoint {
     }
 }
 
-fn sanitize_checkpoint_arguments(mut arguments: Value) -> (Value, Vec<usize>) {
+fn sanitize_checkpoint_arguments(mut arguments: WorkflowDatum) -> (WorkflowDatum, Vec<usize>) {
     let mut redacted = Vec::new();
-    if let Some(commands) = arguments.get_mut("commands").and_then(Value::as_array_mut) {
+    let commands = match &mut arguments {
+        WorkflowDatum::Object(arguments) => arguments.get_mut("commands"),
+        _ => None,
+    };
+    if let Some(WorkflowDatum::Array(commands)) = commands {
         for (index, command) in commands.iter_mut().enumerate() {
-            if let Some(object) = command.as_object_mut() {
-                if object.remove("stdin").is_some() { redacted.push(index); }
+            if let WorkflowDatum::Object(object) = command {
+                if object.remove("stdin").is_some() {
+                    redacted.push(index);
+                }
             }
         }
     }
@@ -137,7 +180,12 @@ impl WorkflowCheckpointStore {
             .map(PathBuf::from)
             .ok_or_else(|| "LOCALAPPDATA unavailable".to_string())?;
         let mut hasher = Sha256::new();
-        hasher.update(workspace.to_string_lossy().replace('/', "\\").to_ascii_lowercase());
+        hasher.update(
+            workspace
+                .to_string_lossy()
+                .replace('/', "\\")
+                .to_ascii_lowercase(),
+        );
         let identity = format!("{:x}", hasher.finalize());
         Ok(Self {
             path: root
@@ -179,7 +227,10 @@ impl WorkflowCheckpointStore {
         let mut checkpoint: WorkflowCheckpoint =
             serde_json::from_slice(&plain).map_err(|_| "checkpoint decode failed")?;
         if checkpoint.workflow_id.is_empty()
-            || !matches!(checkpoint.version, LEGACY_CHECKPOINT_VERSION | CHECKPOINT_VERSION)
+            || !matches!(
+                checkpoint.version,
+                LEGACY_CHECKPOINT_VERSION | CHECKPOINT_VERSION
+            )
         {
             return Err("checkpoint version or identity invalid".into());
         }
@@ -188,13 +239,15 @@ impl WorkflowCheckpointStore {
             checkpoint.objective = checkpoint
                 .arguments
                 .get("objective")
-                .and_then(Value::as_str)
+                .and_then(WorkflowDatum::as_str)
                 .map(str::to_string);
         }
         let (arguments, newly_redacted) = sanitize_checkpoint_arguments(checkpoint.arguments);
         checkpoint.arguments = arguments;
         if !newly_redacted.is_empty() {
-            checkpoint.redacted_stdin_command_indices.extend(newly_redacted);
+            checkpoint
+                .redacted_stdin_command_indices
+                .extend(newly_redacted);
             checkpoint.redacted_stdin_command_indices.sort_unstable();
             checkpoint.redacted_stdin_command_indices.dedup();
             self.save(&checkpoint)?;
@@ -247,7 +300,9 @@ fn atomic_replace(source: &Path, destination: &Path) -> Result<(), String> {
         )
     };
     if moved == 0 {
-        return Err(format!("checkpoint commit failed: {}", unsafe { GetLastError() }));
+        return Err(format!("checkpoint commit failed: {}", unsafe {
+            GetLastError()
+        }));
     }
     Ok(())
 }
@@ -268,7 +323,10 @@ fn protect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
         cbData: input.len() as u32,
         pbData: input.as_ptr() as *mut u8,
     };
-    let mut output = CRYPT_INTEGER_BLOB { cbData: 0, pbData: null_mut() };
+    let mut output = CRYPT_INTEGER_BLOB {
+        cbData: 0,
+        pbData: null_mut(),
+    };
     let ok = unsafe {
         CryptProtectData(
             &input_blob,
@@ -281,11 +339,12 @@ fn protect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
         )
     };
     if ok == 0 || output.pbData.is_null() {
-        return Err(format!("CryptProtectData failed: {}", unsafe { GetLastError() }));
+        return Err(format!("CryptProtectData failed: {}", unsafe {
+            GetLastError()
+        }));
     }
-    let protected = unsafe {
-        std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec()
-    };
+    let protected =
+        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
     unsafe { local_free(output.pbData.cast()) };
     Ok(protected)
 }
@@ -301,7 +360,10 @@ fn unprotect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
         cbData: input.len() as u32,
         pbData: input.as_ptr() as *mut u8,
     };
-    let mut output = CRYPT_INTEGER_BLOB { cbData: 0, pbData: null_mut() };
+    let mut output = CRYPT_INTEGER_BLOB {
+        cbData: 0,
+        pbData: null_mut(),
+    };
     let ok = unsafe {
         CryptUnprotectData(
             &input_blob,
@@ -314,11 +376,12 @@ fn unprotect_user_data(input: &[u8]) -> Result<Vec<u8>, String> {
         )
     };
     if ok == 0 || output.pbData.is_null() {
-        return Err(format!("CryptUnprotectData failed: {}", unsafe { GetLastError() }));
+        return Err(format!("CryptUnprotectData failed: {}", unsafe {
+            GetLastError()
+        }));
     }
-    let plain = unsafe {
-        std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec()
-    };
+    let plain =
+        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
     unsafe { local_free(output.pbData.cast()) };
     Ok(plain)
 }
@@ -376,13 +439,28 @@ mod tests {
         checkpoint.patch_applied = true;
         checkpoint.command_index = 1;
         assert_eq!(checkpoint.redacted_stdin_command_indices, vec![0]);
-        assert!(checkpoint.arguments.pointer("/commands/0/stdin").is_none());
-        assert!(!serde_json::to_string(&checkpoint).unwrap().contains("SECRET_STDIN_SENTINEL"));
+        assert!(
+            serde_json::to_value(&checkpoint.arguments)
+                .unwrap()
+                .pointer("/commands/0/stdin")
+                .is_none()
+        );
+        assert!(
+            !serde_json::to_string(&checkpoint)
+                .unwrap()
+                .contains("SECRET_STDIN_SENTINEL")
+        );
         store.save(&checkpoint).unwrap();
 
         let raw = fs::read(store.path_for_test()).unwrap();
-        assert!(!raw.windows(b"SECRET_PATCH_SENTINEL".len()).any(|window| window == b"SECRET_PATCH_SENTINEL"));
-        assert!(!raw.windows(b"SECRET_COMMAND_SENTINEL".len()).any(|window| window == b"SECRET_COMMAND_SENTINEL"));
+        assert!(
+            !raw.windows(b"SECRET_PATCH_SENTINEL".len())
+                .any(|window| window == b"SECRET_PATCH_SENTINEL")
+        );
+        assert!(
+            !raw.windows(b"SECRET_COMMAND_SENTINEL".len())
+                .any(|window| window == b"SECRET_COMMAND_SENTINEL")
+        );
 
         let reopened = WorkflowCheckpointStore::open_at(path.clone());
         let loaded = reopened.load().unwrap().expect("durable checkpoint");
@@ -405,17 +483,27 @@ mod tests {
             json!({"action":"bugfix","objective":"repair durable task"}),
             "repair durable task".into(),
         );
-        checkpoint.files_read.push(json!({"path":"src/a.rs","start_line":1,"end_line":4,"content_sha256":"a".repeat(64)}));
+        checkpoint.files_read.push(
+            json!({"path":"src/a.rs","start_line":1,"end_line":4,"content_sha256":"a".repeat(64)})
+                .into(),
+        );
         checkpoint.modified_files.push("src/a.rs".into());
-        checkpoint.commands.push(json!({"command":"cargo test","source":"verification_plan"}));
-        checkpoint.test_results.push(json!({"command":"cargo test","status":"passed"}));
-        checkpoint.git_before = Some(json!({"clean":true}));
+        checkpoint
+            .commands
+            .push(json!({"command":"cargo test","source":"verification_plan"}).into());
+        checkpoint
+            .test_results
+            .push(json!({"command":"cargo test","status":"passed"}).into());
+        checkpoint.git_before = Some(json!({"clean":true}).into());
         checkpoint.current_step = Some("verify".into());
         checkpoint.next_step = Some("persist".into());
         store.save(&checkpoint).unwrap();
 
         let raw = fs::read(store.path_for_test()).unwrap();
-        assert!(!raw.windows(b"repair durable task".len()).any(|window| window == b"repair durable task"));
+        assert!(
+            !raw.windows(b"repair durable task".len())
+                .any(|window| window == b"repair durable task")
+        );
         let loaded = store.load().unwrap().unwrap();
         assert!(loaded.is_coding_task());
         assert_eq!(loaded.objective.as_deref(), Some("repair durable task"));

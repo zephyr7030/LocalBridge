@@ -3,9 +3,9 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
-use super::context_service::sha256_hex;
-use super::filesystem_service::{FilesystemError, FilesystemService};
-use super::path_authority::PathAuthority;
+use super::service::{FilesystemError, FilesystemService};
+use crate::workspace::context::sha256_hex;
+use crate::workspace::path_authority::WorkspaceResolver;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CodingEditError {
@@ -41,12 +41,12 @@ enum PatchOperation {
 impl CodingEditService {
     #[cfg(test)]
     pub(crate) fn new(workspace: &Path) -> Result<Self, CodingEditError> {
-        let authority =
-            PathAuthority::active_workspace(workspace).map_err(|_| CodingEditError::InvalidPath)?;
+        let authority = crate::workspace::WorkspaceResolver::active_workspace(workspace)
+            .map_err(|_| CodingEditError::InvalidPath)?;
         Self::with_authority(authority)
     }
 
-    pub(crate) fn with_authority(authority: PathAuthority) -> Result<Self, CodingEditError> {
+    pub(crate) fn with_authority(authority: WorkspaceResolver) -> Result<Self, CodingEditError> {
         Ok(Self {
             filesystem: FilesystemService::from_authority(authority)
                 .map_err(map_filesystem_error)?,
@@ -257,7 +257,7 @@ impl CodingEditService {
 
     fn read_file(&self, path: &str) -> Result<Vec<u8>, CodingEditError> {
         self.filesystem
-            .read_bytes_bounded(path, super::filesystem_service::MAX_INTERNAL_FILE_BYTES)
+            .read_bytes_bounded(path, super::service::MAX_INTERNAL_FILE_BYTES)
             .map_err(map_filesystem_error)
     }
 
@@ -554,8 +554,6 @@ mod tests {
 
     #[test]
     fn shared_filesystem_blocks_deterministic_coding_edit_ancestor_swap() {
-        use super::super::path_authority::PathAuthority;
-
         fn create_junction(link: &Path, target: &Path) {
             let output = std::process::Command::new("cmd")
                 .args(["/d", "/c", "mklink", "/J"])
@@ -581,7 +579,7 @@ mod tests {
         fs::write(parent.join("a.txt"), b"inside\n").unwrap();
         fs::write(outside_parent.join("a.txt"), b"outside\n").unwrap();
 
-        let authority = PathAuthority::active_workspace(&root).unwrap();
+        let authority = crate::workspace::WorkspaceResolver::active_workspace(&root).unwrap();
         let checked = authority.resolve_existing("safe/parent/a.txt").unwrap();
         fs::rename(&safe, &displaced).unwrap();
         create_junction(&safe, &outside);

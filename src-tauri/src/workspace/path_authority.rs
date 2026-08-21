@@ -52,7 +52,7 @@ pub(crate) struct WorkspaceLifetimePin {
 #[cfg(windows)]
 impl WorkspaceLifetimePin {
     pub(crate) fn validate_current(&self) -> Result<(), PathAuthorityError> {
-        let current = PathAuthority::active_workspace(&self.execution_root)?;
+        let current = WorkspaceResolver::active_workspace(&self.execution_root)?;
         let canonical_root = current
             .canonical_root
             .as_ref()
@@ -82,7 +82,7 @@ impl WorkspaceLifetimePin {
 }
 
 #[derive(Debug, Clone)]
-pub struct PathAuthority {
+pub struct WorkspaceResolver {
     scope: PathAuthorityScope,
     execution_root: Option<PathBuf>,
     canonical_root: Option<PathBuf>,
@@ -139,7 +139,7 @@ impl Drop for ValidatedPathHandle {
     }
 }
 
-impl PathAuthority {
+impl WorkspaceResolver {
     pub fn active_workspace(root: &Path) -> Result<Self, PathAuthorityError> {
         if !root.is_absolute() || is_verbatim_path(root) || !root.is_dir() {
             return Err(PathAuthorityError::InvalidPath);
@@ -379,6 +379,33 @@ impl PathAuthority {
         self.allows_canonical(&resolved)
             .then_some(resolved)
             .ok_or(PathAuthorityError::OutsideAuthority)
+    }
+
+    pub fn resolve_workspace_path(
+        &self,
+        raw: Option<&str>,
+        default_cwd: &str,
+        allow_missing_leaf: bool,
+    ) -> Result<PathBuf, PathAuthorityError> {
+        if self.scope != PathAuthorityScope::ActiveWorkspace {
+            return Err(PathAuthorityError::InvalidPath);
+        }
+        let default_cwd = if default_cwd.trim().is_empty() {
+            "."
+        } else {
+            default_cwd
+        };
+        let selected = match raw.filter(|value| !value.trim().is_empty()) {
+            Some(value) if Path::new(value).is_absolute() => PathBuf::from(value),
+            Some(value) => Path::new(default_cwd).join(value),
+            None => PathBuf::from(default_cwd),
+        };
+        let selected = selected.to_str().ok_or(PathAuthorityError::InvalidPath)?;
+        if allow_missing_leaf {
+            self.resolve_missing_leaf(selected)
+        } else {
+            self.resolve_existing(selected)
+        }
     }
 
     pub fn revalidate_opened_path(&self, path: &Path) -> Result<PathBuf, PathAuthorityError> {
@@ -786,7 +813,7 @@ mod tests {
         std::fs::write(workspace.join("inside.txt"), b"inside").unwrap();
         std::fs::write(outside.join("outside.txt"), b"outside").unwrap();
 
-        let authority = PathAuthority::active_workspace(&workspace).unwrap();
+        let authority = WorkspaceResolver::active_workspace(&workspace).unwrap();
         let canonical_workspace = std::fs::canonicalize(&workspace).unwrap();
         let canonical_inside = std::fs::canonicalize(workspace.join("inside.txt")).unwrap();
         let canonical_outside = std::fs::canonicalize(outside.join("outside.txt")).unwrap();
@@ -830,6 +857,43 @@ mod tests {
     }
 
     #[test]
+    fn workspace_resolver_unifies_absolute_relative_and_default_cwd_inputs() {
+        let root = temp_root();
+        let workspace = root.join("workspace");
+        let nested = workspace.join("nested");
+        let file = nested.join("inside.txt");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(&file, b"inside").unwrap();
+
+        let resolver = WorkspaceResolver::active_workspace(&workspace).unwrap();
+        let expected = ordinary_path(&std::fs::canonicalize(&file).unwrap()).unwrap();
+        assert_eq!(
+            resolver
+                .resolve_workspace_path(Some("inside.txt"), "nested", false)
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            resolver
+                .resolve_workspace_path(Some(file.to_string_lossy().as_ref()), ".", false)
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            resolver
+                .resolve_workspace_path(None, "nested", false)
+                .unwrap(),
+            ordinary_path(&std::fs::canonicalize(&nested).unwrap()).unwrap()
+        );
+        assert_eq!(
+            resolver.resolve_workspace_path(Some("../outside"), "nested", false),
+            Err(PathAuthorityError::InvalidPath)
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn active_workspace_rejects_regular_file_hard_link_aliases() {
         use windows_sys::Win32::Storage::FileSystem::FILE_GENERIC_READ;
 
@@ -843,13 +907,13 @@ mod tests {
         std::fs::write(&outside_file, b"outside").unwrap();
         std::fs::hard_link(&outside_file, &workspace_alias).unwrap();
 
-        let authority = PathAuthority::active_workspace(&workspace).unwrap();
+        let authority = WorkspaceResolver::active_workspace(&workspace).unwrap();
         assert!(matches!(
             authority.open_validated_handle(&workspace_alias, FILE_GENERIC_READ),
             Err(PathAuthorityError::OutsideAuthority)
         ));
 
-        let broker = PathAuthority::broker_administrator();
+        let broker = WorkspaceResolver::broker_administrator();
         assert!(
             broker
                 .open_validated_handle(&workspace_alias, FILE_GENERIC_READ)
@@ -865,7 +929,7 @@ mod tests {
         let workspace = root.join("workspace");
         let displaced = root.join("workspace-old");
         std::fs::create_dir(&workspace).unwrap();
-        let pin = PathAuthority::pin_active_workspace_lifetime(&workspace).unwrap();
+        let pin = WorkspaceResolver::pin_active_workspace_lifetime(&workspace).unwrap();
         assert_eq!(pin.validate_current(), Ok(()));
         std::fs::rename(&workspace, &displaced).unwrap();
         std::fs::create_dir(&workspace).unwrap();
@@ -885,7 +949,7 @@ mod tests {
         let root = temp_root();
         let target = root.join("outside.txt");
         std::fs::write(&target, b"outside").unwrap();
-        let authority = PathAuthority::broker_administrator();
+        let authority = WorkspaceResolver::broker_administrator();
         assert_eq!(authority.scope(), PathAuthorityScope::BrokerAdministrator);
         assert_eq!(
             authority.input_path("relative.txt"),

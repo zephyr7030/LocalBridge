@@ -21,7 +21,9 @@ use crate::diagnostics::{
 };
 use crate::domain::{ErrorCategory, FaultSource, OperationError, PersistentFault};
 #[cfg(windows)]
-use crate::mcp::{CurrentTaskWake, InternalBearer};
+use crate::mcp::{
+    CurrentTaskWake, InternalBearer, ProductionRuntimeConfig, ProductionRuntimeDriver,
+};
 use crate::privilege::PrivilegeController;
 #[cfg(windows)]
 use crate::privilege::{SESSION_NONCE_BYTES, random_session_nonce};
@@ -31,7 +33,6 @@ use crate::runtime::{
     RuntimeOutage, SystemRecoveryClock, WorkspaceSwitchError,
 };
 #[cfg(windows)]
-use crate::runtime::{ProductionRuntimeConfig, ProductionRuntimeDriver};
 use crate::state::{
     CurrentTaskStatus, LastToolTiming, PermissionMode, PrivilegeState, RuntimeComponent,
     RuntimeFault, RuntimeState,

@@ -654,13 +654,18 @@ mod tests {
 
         assert!(monitored.monitor_once().is_none());
         let outage = monitored.runtime().active_outage().unwrap().clone();
-        monitored.recovery_clock_mut().advance(Duration::from_secs(1));
+        monitored
+            .recovery_clock_mut()
+            .advance(Duration::from_secs(1));
         let mut observed = Vec::new();
         let outcome = monitored
             .monitor_once_with_observer(&mut |event| observed.push(event))
             .expect("attempt one recovers");
 
-        assert!(matches!(outcome, RecoveryOutcome::Recovered { attempt: 1, .. }));
+        assert!(matches!(
+            outcome,
+            RecoveryOutcome::Recovered { attempt: 1, .. }
+        ));
         assert_eq!(monitored.runtime().state(), &RuntimeState::Ready);
         assert_eq!(observed.len(), 2);
         assert!(matches!(

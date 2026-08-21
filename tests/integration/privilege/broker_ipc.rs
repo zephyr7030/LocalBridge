@@ -10,9 +10,10 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use localbridge_lib::mcp::{
-    CapabilityPolicy, CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,
-    InternalBearer, PolicyEnforcementRuntime,
+    CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig, InternalBearer,
+    PolicyEnforcementRuntime,
 };
+use localbridge_lib::execution::CapabilityPolicy;
 use localbridge_lib::privilege::{
     AdministratorFilesystemAction, AdministratorFilesystemErrorCode, AdministratorFilesystemSortBy,
     AdministratorFilesystemSortOrder, AdministratorFilesystemSpec, BROKER_PROTOCOL_VERSION,

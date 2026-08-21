@@ -1,7 +1,7 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
-use crate::mcp::filesystem_service::{
+use crate::filesystem::service::{
     FilesystemCancellation, FilesystemError, FilesystemMutationResult, FilesystemSearchOptions,
     FilesystemService,
 };
@@ -321,7 +321,7 @@ pub(crate) fn run_administrator_filesystem_with_cancellation(
 
 fn administrator_workspace_guards(
     spec: &AdministratorFilesystemSpec,
-) -> Result<Vec<crate::mcp::filesystem_service::WorkspacePathGuard>, AdministratorFilesystemErrorCode>
+) -> Result<Vec<crate::filesystem::service::WorkspacePathGuard>, AdministratorFilesystemErrorCode>
 {
     let Some(root) = spec.workspace_root.as_deref() else {
         return Ok(Vec::new());
@@ -330,7 +330,7 @@ fn administrator_workspace_guards(
         .workspace_identity
         .as_deref()
         .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?;
-    let authority = crate::mcp::PathAuthority::active_workspace(std::path::Path::new(root))
+    let authority = crate::workspace::WorkspaceResolver::active_workspace(std::path::Path::new(root))
         .map_err(|_| AdministratorFilesystemErrorCode::OutsideAuthority)?;
     authority
         .matches_workspace_identity_token(identity)
@@ -394,7 +394,7 @@ fn administrator_filesystem_error(error: FilesystemError) -> AdministratorFilesy
 }
 
 fn administrator_entry(
-    entry: crate::mcp::filesystem_service::FilesystemEntry,
+    entry: crate::filesystem::service::FilesystemEntry,
 ) -> AdministratorFilesystemEntry {
     AdministratorFilesystemEntry {
         path: entry.path,
@@ -613,7 +613,7 @@ mod tests {
         fs::create_dir_all(&outside).unwrap();
         fs::write(safe.join("source.txt"), b"inside").unwrap();
         fs::write(outside.join("source.txt"), b"outside").unwrap();
-        let workspace_identity = crate::mcp::PathAuthority::active_workspace(&workspace)
+        let workspace_identity = crate::workspace::WorkspaceResolver::active_workspace(&workspace)
             .unwrap()
             .workspace_identity_token()
             .unwrap();

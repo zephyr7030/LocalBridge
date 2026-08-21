@@ -11,11 +11,11 @@ use crate::runtime::{
 use crate::state::RuntimeFault;
 
 use super::bundle::verify_bundle;
-use super::git_adapter::handle_git_tool_with_authority;
 use super::http::{
     McpCancellationClient, McpHealthClient, McpSession, unauthenticated_initialize_status,
 };
-use super::path_authority::PathAuthority;
+use crate::workspace::git_adapter::handle_git_tool_with_authority;
+use crate::workspace::path_authority::WorkspaceResolver;
 
 const LOOPBACK_HOST: &str = "127.0.0.1";
 
@@ -51,7 +51,7 @@ impl CodingToolsRuntimeConfig {
         permission_mode: CodingToolsPermissionMode,
     ) -> Self {
         let workspace = workspace.into();
-        let workspace_identity = PathAuthority::active_workspace(&workspace)
+        let workspace_identity = crate::workspace::WorkspaceResolver::active_workspace(&workspace)
             .ok()
             .and_then(|authority| authority.workspace_identity_token());
         Self {
@@ -190,7 +190,7 @@ pub struct CodingToolsRuntime {
     session: McpSession,
     port: u16,
     workspace: PathBuf,
-    workspace_authority: PathAuthority,
+    workspace_authority: WorkspaceResolver,
     install_root: PathBuf,
 }
 
@@ -310,7 +310,7 @@ impl CodingToolsRuntime {
         &self.workspace
     }
 
-    pub(crate) fn workspace_authority(&self) -> PathAuthority {
+    pub(crate) fn workspace_authority(&self) -> WorkspaceResolver {
         self.workspace_authority.clone()
     }
 
@@ -478,12 +478,12 @@ fn validate_workspace(workspace: &Path) -> Result<(), CodingToolsRuntimeError> {
 
 fn validated_workspace_authority(
     config: &CodingToolsRuntimeConfig,
-) -> Result<PathAuthority, CodingToolsRuntimeError> {
+) -> Result<WorkspaceResolver, CodingToolsRuntimeError> {
     if is_verbatim_workspace_path(&config.workspace) {
         return Err(CodingToolsRuntimeError::InvalidConfiguration);
     }
     validate_workspace(&config.workspace)?;
-    let authority = PathAuthority::active_workspace(&config.workspace)
+    let authority = crate::workspace::WorkspaceResolver::active_workspace(&config.workspace)
         .map_err(|_| CodingToolsRuntimeError::InvalidConfiguration)?;
     let expected_identity = config
         .workspace_identity
@@ -543,10 +543,11 @@ mod tests {
 
         fs::rename(&workspace, &displaced).unwrap();
         fs::create_dir(&workspace).unwrap();
-        let replacement_identity = PathAuthority::active_workspace(&workspace)
-            .unwrap()
-            .workspace_identity_token()
-            .unwrap();
+        let replacement_identity =
+            crate::workspace::WorkspaceResolver::active_workspace(&workspace)
+                .unwrap()
+                .workspace_identity_token()
+                .unwrap();
         assert_ne!(original_identity, replacement_identity);
         assert!(matches!(
             validated_workspace_authority(&config),

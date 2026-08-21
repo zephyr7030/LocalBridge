@@ -16,7 +16,7 @@ use crate::control_plane::convergence::{
 use crate::control_plane::snapshot::{ControlPlaneSnapshot, TaskAggregate};
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::domain::{ExecutionState, LifecycleState, TerminalOutcome};
-use crate::runtime::ProductionRuntimeConfig;
+use crate::mcp::ProductionRuntimeConfig;
 use crate::settings::{AppData, SettingsStore};
 #[cfg(test)]
 use crate::state::{CurrentTaskStatus, TaskExecutionState};

@@ -7,9 +7,10 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use localbridge_lib::mcp::{
-    CapabilityPolicy, CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,
-    CodingToolsRuntimeError, DenyReason, GuardError, InternalBearer, McpGuard, ToolCallRequest,
+    CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,
+    CodingToolsRuntimeError, GuardError, InternalBearer, McpGuard, ToolCallRequest,
 };
+use localbridge_lib::execution::{CapabilityPolicy, DenyReason};
 use localbridge_lib::state::{CurrentTaskStatus, PermissionMode};
 use serde_json::json;
 

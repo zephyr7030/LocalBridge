@@ -82,17 +82,26 @@ impl ToolboxResolver {
         let bin_dir = if packaged_bin.is_dir() {
             packaged_bin
         } else {
-            install_root.join("src-tauri").join("target").join("toolbox-stage").join("bin")
+            install_root
+                .join("src-tauri")
+                .join("target")
+                .join("toolbox-stage")
+                .join("bin")
         };
         #[cfg(not(debug_assertions))]
         let bin_dir = packaged_bin;
-        let system32_dir = std::env::var_os("SystemRoot").map(PathBuf::from).map(|path| path.join("System32"));
+        let system32_dir = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .map(|path| path.join("System32"));
         let curl_path = system32_dir.as_ref().map(|path| path.join("curl.exe"));
         Self {
             aria2c: bundled_availability(&bin_dir.join("aria2c.exe"), ARIA2C_SHA256),
             seven_zip: bundled_availability(&bin_dir.join("7z.exe"), SEVEN_ZIP_SHA256),
             jq: bundled_availability(&bin_dir.join("jq.exe"), JQ_SHA256),
-            curl: curl_path.as_deref().map(curl_availability).unwrap_or(Availability::Missing),
+            curl: curl_path
+                .as_deref()
+                .map(curl_availability)
+                .unwrap_or(Availability::Missing),
             bin_dir,
             system32_dir,
         }
@@ -133,7 +142,10 @@ impl ToolboxResolver {
         let mut quote = None;
         let mut escaped = false;
         while cursor < command.len() {
-            let ch = command[cursor..].chars().next().expect("cursor is on a character boundary");
+            let ch = command[cursor..]
+                .chars()
+                .next()
+                .expect("cursor is on a character boundary");
             if command_target {
                 if ch.is_whitespace() {
                     output.push(ch);
@@ -255,7 +267,8 @@ fn curl_availability(path: &Path) -> Availability {
         return Availability::CapabilityMissing;
     };
     let args = [OsString::from("--version")];
-    let Ok(result) = run_bounded_command(path, &args, cwd, Duration::from_secs(2), 32 * 1024) else {
+    let Ok(result) = run_bounded_command(path, &args, cwd, Duration::from_secs(2), 32 * 1024)
+    else {
         return Availability::CapabilityMissing;
     };
     if result.exit_code != 0 || result.timed_out || result.truncated {
@@ -344,11 +357,21 @@ mod tests {
     #[test]
     fn trusted_targets_are_rewritten_without_touching_inert_arguments() {
         let resolver = ready();
-        let cmd = resolver.rewrite_command(ResolvedShellKind::Cmd, "echo jq && jq . a.json | aria2c.exe --version").unwrap();
+        let cmd = resolver
+            .rewrite_command(
+                ResolvedShellKind::Cmd,
+                "echo jq && jq . a.json | aria2c.exe --version",
+            )
+            .unwrap();
         assert!(cmd.contains("echo jq"));
         assert!(cmd.contains(r#""C:\LocalBridge\runtime\toolbox\bin\jq.exe""#));
         assert!(cmd.contains(r#""C:\LocalBridge\runtime\toolbox\bin\aria2c.exe""#));
-        let powershell = resolver.rewrite_command(ResolvedShellKind::WindowsPowerShell, "curl --version | jq .").unwrap();
+        let powershell = resolver
+            .rewrite_command(
+                ResolvedShellKind::WindowsPowerShell,
+                "curl --version | jq .",
+            )
+            .unwrap();
         assert!(powershell.starts_with(r"& 'C:\Windows\System32\curl.exe'"));
         assert!(powershell.contains(r"| & 'C:\LocalBridge\runtime\toolbox\bin\jq.exe'"));
     }
@@ -379,10 +402,14 @@ mod tests {
     fn curl_capability_failure_is_typed_and_bundled_missing_is_runtime_unavailable() {
         let mut resolver = ready();
         resolver.curl = Availability::CapabilityMissing;
-        let curl = resolver.rewrite_command(ResolvedShellKind::Cmd, "curl --version").unwrap_err();
+        let curl = resolver
+            .rewrite_command(ResolvedShellKind::Cmd, "curl --version")
+            .unwrap_err();
         assert_eq!(curl.kind, ToolboxErrorKind::CapabilityUnavailable);
         resolver.aria2c = Availability::Missing;
-        let aria = resolver.rewrite_command(ResolvedShellKind::Cmd, "aria2c.exe --version").unwrap_err();
+        let aria = resolver
+            .rewrite_command(ResolvedShellKind::Cmd, "aria2c.exe --version")
+            .unwrap_err();
         assert_eq!(aria.kind, ToolboxErrorKind::RuntimeUnavailable);
     }
 }

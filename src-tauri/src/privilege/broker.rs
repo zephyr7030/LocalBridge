@@ -3,7 +3,7 @@ use std::fmt;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 
-use crate::mcp::filesystem_service::FilesystemCancellation;
+use crate::filesystem::service::FilesystemCancellation;
 
 use super::protocol::is_valid_broker_pipe_name;
 use super::{

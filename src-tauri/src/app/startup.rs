@@ -17,7 +17,7 @@ use super::{
     STARTUP_PROFILE_FILE_NAME, ShutdownReport, StartupMode, StartupProfile, StartupProfileError,
     StartupProfileStore,
 };
-use crate::runtime::ProductionRuntimeConfig;
+use crate::mcp::ProductionRuntimeConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupSuppression {

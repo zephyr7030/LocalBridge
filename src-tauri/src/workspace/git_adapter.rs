@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use crate::runtime::run_bounded_command;
 use crate::workspace::WorkspaceValidator;
 
-use super::path_authority::{PathAuthority, PathAuthorityError};
+use super::path_authority::{PathAuthorityError, WorkspaceResolver};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
@@ -18,7 +18,7 @@ const DEFAULT_MAX_LINES: usize = 2_000;
 
 #[cfg(test)]
 pub(crate) fn handle_git_tool(workspace: &Path, name: &str, arguments: &Value) -> Option<Value> {
-    let authority = match PathAuthority::active_workspace(workspace) {
+    let authority = match crate::workspace::WorkspaceResolver::active_workspace(workspace) {
         Ok(authority) => authority,
         Err(error) => return Some(resolve_error(authority_error(error))),
     };
@@ -26,7 +26,7 @@ pub(crate) fn handle_git_tool(workspace: &Path, name: &str, arguments: &Value) -
 }
 
 pub(crate) fn handle_git_tool_with_authority(
-    authority: &PathAuthority,
+    authority: &WorkspaceResolver,
     name: &str,
     arguments: &Value,
 ) -> Option<Value> {
@@ -51,7 +51,7 @@ pub(crate) fn handle_git_tool_with_authority(
 }
 
 pub(crate) fn changed_paths_with_authority(
-    authority: &PathAuthority,
+    authority: &WorkspaceResolver,
     path: &str,
 ) -> Result<Vec<String>, String> {
     let result = handle_git_tool_with_authority(
@@ -108,17 +108,18 @@ struct ResolvedRepositoryLocation {
 }
 
 pub(crate) struct GitRepositoryResolver {
-    authority: PathAuthority,
+    authority: WorkspaceResolver,
 }
 
 impl GitRepositoryResolver {
     #[cfg(test)]
     fn new(workspace: &Path) -> Result<Self, ResolveError> {
-        let authority = PathAuthority::active_workspace(workspace).map_err(authority_error)?;
+        let authority = crate::workspace::WorkspaceResolver::active_workspace(workspace)
+            .map_err(authority_error)?;
         Ok(Self::from_authority(authority))
     }
 
-    fn from_authority(authority: PathAuthority) -> Self {
+    fn from_authority(authority: WorkspaceResolver) -> Self {
         Self { authority }
     }
 
@@ -269,7 +270,7 @@ fn nearest_existing_ancestor(
 fn validate_git_marker(
     marker: &Path,
     repository: &Path,
-    authority: &PathAuthority,
+    authority: &WorkspaceResolver,
 ) -> Result<(), ResolveError> {
     let metadata = fs::symlink_metadata(marker).map_err(|_| ResolveError::InvalidRepository)?;
     if metadata.file_type().is_symlink() {
@@ -1277,7 +1278,7 @@ mod tests {
         ));
 
         let broker_resolver =
-            GitRepositoryResolver::from_authority(PathAuthority::broker_administrator());
+            GitRepositoryResolver::from_authority(WorkspaceResolver::broker_administrator());
         let location = broker_resolver
             .resolve_existing(outside_repo.to_string_lossy().as_ref())
             .unwrap();

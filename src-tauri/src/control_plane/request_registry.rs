@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::domain::{McpSessionId, OperationError, RequestKey, RpcRequestId};
-use crate::mcp::filesystem_service::FilesystemCancellation;
+use crate::filesystem::service::FilesystemCancellation;
 
 #[derive(Debug, Clone)]
 pub(crate) enum RequestCancellationTarget {

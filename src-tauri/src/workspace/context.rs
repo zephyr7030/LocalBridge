@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::filesystem_service::FilesystemService;
-use super::path_authority::{PathAuthority, PathAuthorityError};
+use super::path_authority::{PathAuthorityError, WorkspaceResolver};
+use crate::filesystem::service::FilesystemService;
 
 const MAX_CANDIDATE_FILES: usize = 96;
 const MAX_DISCOVERY_FILES: usize = 512;
@@ -17,7 +17,7 @@ const MAX_RANGE_LINES: usize = 9;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ContextService {
-    authority: PathAuthority,
+    authority: WorkspaceResolver,
     filesystem: FilesystemService,
     project_root: PathBuf,
 }
@@ -25,12 +25,12 @@ pub(crate) struct ContextService {
 impl ContextService {
     #[cfg(test)]
     pub(crate) fn new(workspace: &Path, project_path: &str) -> Result<Self, PathAuthorityError> {
-        let authority = PathAuthority::active_workspace(workspace)?;
+        let authority = crate::workspace::WorkspaceResolver::active_workspace(workspace)?;
         Self::with_authority(authority, project_path)
     }
 
     pub(crate) fn with_authority(
-        authority: PathAuthority,
+        authority: WorkspaceResolver,
         project_path: &str,
     ) -> Result<Self, PathAuthorityError> {
         let filesystem = FilesystemService::from_authority(authority.clone())

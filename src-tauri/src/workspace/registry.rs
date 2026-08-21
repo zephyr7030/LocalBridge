@@ -101,7 +101,6 @@ impl WorkspaceEntry {
         }
         Ok(())
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

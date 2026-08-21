@@ -4,6 +4,8 @@ pub mod control_plane;
 pub mod credentials;
 pub mod diagnostics;
 pub mod domain;
+pub mod execution;
+pub mod filesystem;
 pub mod mcp;
 pub mod privilege;
 pub mod runtime;

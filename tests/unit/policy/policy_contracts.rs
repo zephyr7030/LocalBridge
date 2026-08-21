@@ -1,4 +1,5 @@
-use localbridge_lib::mcp::{CapabilityPolicy, DenyReason, ToolCallRequest};
+use localbridge_lib::execution::{CapabilityPolicy, DenyReason};
+use localbridge_lib::mcp::ToolCallRequest;
 use localbridge_lib::state::{Capability, PermissionMode};
 use serde_json::json;
 
@@ -514,7 +515,7 @@ fn schema34_static_workspace_scripts_are_ordinary_but_dynamic_resolution_stays_r
 #[test]
 fn elevated_exec_review_consumes_real_program_args_and_workdir() {
     let policy = policy();
-    let program = localbridge_lib::mcp::reviewed_elevated_program()
+    let program = localbridge_lib::execution::reviewed_elevated_program()
         .expect("Windows reviewed elevated diagnostic must exist");
     let allowed = ToolCallRequest::new(
         "elevated_exec",

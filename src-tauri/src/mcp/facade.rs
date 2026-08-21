@@ -23,23 +23,33 @@ use crate::state::{
     TaskExecutionState, TaskKind,
 };
 
-use super::context_service::ContextService;
-use super::edit_service::{CodingEditError, CodingEditService};
-use super::filesystem_service::{
-    FilesystemCancellation, FilesystemError, FilesystemSearchOptions, FilesystemService,
-};
-use super::path_authority::{
-    PathAuthority, PathAuthorityError, WorkspaceLifetimePin, workspace_input_path_valid,
-    workspace_relative_path_valid,
-};
-use super::policy::{CapabilityPolicy, DenyReason, PolicyDecision, static_workspace_script_target};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
-use super::shell::{
+use crate::control_plane::workflow_checkpoint::{
+    WorkflowCheckpoint, WorkflowCheckpointStore, WorkflowDatum,
+};
+use crate::execution::policy::{
+    CapabilityPolicy, DenyReason, PolicyDecision, static_workspace_script_target,
+};
+use crate::execution::shell::{
     ResolvedShellKind, ShellExecutionSpec, ShellExecutor, ShellResolveError, ShellSelector,
 };
-use super::toolbox::{ToolboxError, ToolboxErrorKind, ToolboxResolver};
-use super::verification_planner::VerificationPlanner;
-use super::workflow_checkpoint::{WorkflowCheckpoint, WorkflowCheckpointStore};
+use crate::execution::toolbox::{ToolboxError, ToolboxErrorKind, ToolboxResolver};
+use crate::execution::verification::VerificationPlanner;
+use crate::filesystem::edit::{CodingEditError, CodingEditService};
+use crate::filesystem::service::{
+    FilesystemCancellation, FilesystemError, FilesystemSearchOptions, FilesystemService,
+};
+use crate::workspace::context::ContextService;
+use crate::workspace::path_authority::{
+    PathAuthorityError, WorkspaceLifetimePin, WorkspaceResolver, workspace_input_path_valid,
+    workspace_relative_path_valid,
+};
+
+impl From<Value> for WorkflowDatum {
+    fn from(value: Value) -> Self {
+        serde_json::from_value(value).expect("JSON transport value maps to WorkflowDatum")
+    }
+}
 
 pub const AGENT_API_VERSION: u32 = 1;
 pub const AGENT_API_REVISION: u32 = 43;
@@ -1395,9 +1405,7 @@ impl PublicCommandSessions {
         owner_task_id: Option<String>,
     ) -> Result<String, FacadeError> {
         let public = next_public_handle("lb-session");
-        let task_id = TaskId::new(
-            owner_task_id.unwrap_or_else(|| next_public_handle("lb-task")),
-        );
+        let task_id = TaskId::new(owner_task_id.unwrap_or_else(|| next_public_handle("lb-task")));
         let execution_id = executions
             .start(task_id, PublicSessionId::new(public.clone()))
             .map_err(normalize_execution_registry_error)?;
@@ -1489,8 +1497,8 @@ impl PublicCommandSessions {
         public_session_id: &str,
     ) -> Option<(String, String, u64)> {
         let session = self.sessions.get(public_session_id)?;
-        let execution = executions
-            .execution_for_public_session(&PublicSessionId::new(public_session_id))?;
+        let execution =
+            executions.execution_for_public_session(&PublicSessionId::new(public_session_id))?;
         Some((
             execution.task_id.to_string(),
             execution.id.to_string(),
@@ -1544,8 +1552,7 @@ impl PublicCommandSessions {
         }
         if let Some(session) = self.sessions.get_mut(public_session_id) {
             if session.terminal_payload.is_none() {
-                session.terminal_payload =
-                    Some(command_result_with_output(result, String::new()));
+                session.terminal_payload = Some(command_result_with_output(result, String::new()));
             }
         }
         Ok(())
@@ -1610,10 +1617,7 @@ impl PublicCommandSessions {
         drain_public_stderr_protocol_buffer(&mut session.stderr_protocol_buffer)
     }
 
-    fn mark_all_running_lost(
-        &mut self,
-        executions: &ExecutionRegistry,
-    ) -> Result<(), FacadeError> {
+    fn mark_all_running_lost(&mut self, executions: &ExecutionRegistry) -> Result<(), FacadeError> {
         let running = self
             .sessions
             .iter()
@@ -1655,7 +1659,7 @@ impl PublicCommandSessions {
 pub struct CodingToolsRuntimeAdapter {
     runtime: CodingToolsRuntime,
     workspace: PathBuf,
-    workspace_authority: PathAuthority,
+    workspace_authority: WorkspaceResolver,
     workspace_lifetime_pin: WorkspaceLifetimePin,
     shell_executor: ShellExecutor,
     toolbox: ToolboxResolver,
@@ -1668,20 +1672,21 @@ pub struct CodingToolsRuntimeAdapter {
 }
 
 impl CodingToolsRuntimeAdapter {
-    fn new(runtime: CodingToolsRuntime) -> Result<Self, FacadeError> {
+    fn new_with_executions(
+        runtime: CodingToolsRuntime,
+        executions: ExecutionRegistry,
+    ) -> Result<Self, FacadeError> {
         let workspace = runtime.workspace().to_path_buf();
         let workspace_authority = runtime.workspace_authority();
         workspace_authority
             .input_path(".")
             .map_err(normalize_path_authority_error)?;
-        let workspace_lifetime_pin = PathAuthority::pin_active_workspace_lifetime(&workspace)
+        let workspace_lifetime_pin = WorkspaceResolver::pin_active_workspace_lifetime(&workspace)
             .map_err(normalize_path_authority_error)?;
         workspace_authority
             .input_path(".")
             .map_err(normalize_path_authority_error)?;
         let toolbox = ToolboxResolver::probe(runtime.install_root());
-        let executions = ExecutionRegistry::for_workspace(&workspace)
-            .map_err(normalize_execution_registry_error)?;
         let workflow_checkpoint = WorkflowCheckpointStore::for_workspace(&workspace)
             .map_err(workflow_checkpoint_error)?;
         Ok(Self {
@@ -1698,10 +1703,6 @@ impl CodingToolsRuntimeAdapter {
             cached_project_discovery: None,
             pending_runtime_fault: None,
         })
-    }
-
-    pub(crate) fn execution_registry(&self) -> ExecutionRegistry {
-        self.executions.clone()
     }
 
     pub fn into_runtime(self) -> CodingToolsRuntime {
@@ -1775,7 +1776,7 @@ impl CodingToolsRuntimeAdapter {
 
     fn resolve_existing_workspace_path(&self, relative: &str) -> Result<PathBuf, FacadeError> {
         self.workspace_authority
-            .resolve_existing(relative)
+            .resolve_workspace_path(Some(relative), ".", false)
             .map_err(normalize_path_authority_error)
     }
 
@@ -1813,51 +1814,13 @@ impl CodingToolsRuntimeAdapter {
         raw: &str,
         allow_missing_leaf: bool,
     ) -> Result<String, FacadeError> {
-        let authority = &self.workspace_authority;
-        match authority.resolve_existing(raw) {
-            Ok(resolved) => authority
-                .display_path(&resolved)
-                .map_err(normalize_path_authority_error),
-            Err(PathAuthorityError::NotFound) if allow_missing_leaf => {
-                let candidate = authority
-                    .input_path(raw)
-                    .map_err(normalize_path_authority_error)?;
-                let parent = candidate.parent().ok_or_else(invalid_argument)?;
-                let canonical_parent = std::fs::canonicalize(parent).map_err(|_| {
-                    FacadeError::new(FacadeErrorCode::NotFound, "父目录不存在", false)
-                })?;
-                if !authority.allows_canonical(&canonical_parent) || !canonical_parent.is_dir() {
-                    return Err(FacadeError::new(
-                        FacadeErrorCode::WorkspaceDenied,
-                        "路径越出当前工作区",
-                        false,
-                    ));
-                }
-                let name = candidate
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(invalid_argument)?;
-                let parent = authority
-                    .display_path(&canonical_parent)
-                    .map_err(normalize_path_authority_error)?;
-                let relative = if parent == "." {
-                    name.to_string()
-                } else {
-                    format!("{parent}/{name}")
-                };
-                workspace_relative_path_valid(&relative)
-                    .then_some(relative)
-                    .ok_or_else(|| {
-                        FacadeError::new(
-                            FacadeErrorCode::WorkspaceDenied,
-                            "路径越出当前工作区",
-                            false,
-                        )
-                    })
-            }
-            Err(error) => Err(normalize_path_authority_error(error)),
-        }
+        let resolved = self
+            .workspace_authority
+            .resolve_workspace_path(Some(raw), ".", allow_missing_leaf)
+            .map_err(normalize_path_authority_error)?;
+        self.workspace_authority
+            .display_path(&resolved)
+            .map_err(normalize_path_authority_error)
     }
 
     fn validate_static_workspace_script(
@@ -2802,7 +2765,10 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         };
         let mut data = Map::new();
         data.insert("session_id".into(), Value::String(session_id.to_string()));
-        data.insert("execution_id".into(), Value::String(execution.id.to_string()));
+        data.insert(
+            "execution_id".into(),
+            Value::String(execution.id.to_string()),
+        );
         data.insert(
             "status".into(),
             Value::String(terminal.outcome.as_str().to_string()),
@@ -3360,9 +3326,11 @@ fn execution_terminal_from_result(result: &Value) -> ExecutionTerminal {
     }
     ExecutionTerminal {
         outcome: status,
-        exit_code: data.and_then(|value| value.get("exit_code"))
+        exit_code: data
+            .and_then(|value| value.get("exit_code"))
             .and_then(Value::as_i64),
-        signal: data.and_then(|value| value.get("signal"))
+        signal: data
+            .and_then(|value| value.get("signal"))
             .and_then(Value::as_str)
             .map(str::to_string),
         output_refs,
@@ -3532,7 +3500,7 @@ pub(crate) fn validate_workspace_context_probe(
 
 fn compact_project_discovery(
     workspace: &Path,
-    authority: &PathAuthority,
+    authority: &WorkspaceResolver,
     default_cwd: &str,
     git_status: Option<&Value>,
     runtime: &Value,
@@ -3692,10 +3660,14 @@ fn ordinary_workspace_paths_match(expected: &Path, actual: &str) -> bool {
         if expected.eq_ignore_ascii_case(&actual) {
             return true;
         }
-        let Ok(expected_authority) = PathAuthority::active_workspace(Path::new(&expected)) else {
+        let Ok(expected_authority) =
+            crate::workspace::WorkspaceResolver::active_workspace(Path::new(&expected))
+        else {
             return false;
         };
-        let Ok(actual_authority) = PathAuthority::active_workspace(Path::new(&actual)) else {
+        let Ok(actual_authority) =
+            crate::workspace::WorkspaceResolver::active_workspace(Path::new(&actual))
+        else {
             return false;
         };
         match (
@@ -3721,23 +3693,20 @@ pub struct AgentFacade<A = CodingToolsRuntimeAdapter> {
 }
 
 impl AgentFacade<CodingToolsRuntimeAdapter> {
-    pub fn from_coding_runtime(
+    pub(crate) fn from_coding_runtime_with_executions(
         runtime: CodingToolsRuntime,
         policy: CapabilityPolicy,
+        executions: ExecutionRegistry,
     ) -> Result<Self, FacadeError> {
-        let adapter = CodingToolsRuntimeAdapter::new(runtime)?;
+        let adapter = CodingToolsRuntimeAdapter::new_with_executions(runtime, executions)?;
         Self::with_adapter(adapter, policy)
-    }
-
-    pub(crate) fn execution_registry(&self) -> ExecutionRegistry {
-        self.adapter.execution_registry()
     }
 
     pub(crate) fn workspace_path(&self) -> &Path {
         &self.adapter.workspace
     }
 
-    pub(crate) fn workspace_authority(&self) -> PathAuthority {
+    pub(crate) fn workspace_authority(&self) -> WorkspaceResolver {
         self.adapter.workspace_authority.clone()
     }
 
@@ -3950,7 +3919,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         match status {
             "completed" => {
                 checkpoint.command_index = checkpoint.command_index.saturating_add(1);
-                checkpoint.command_results.push(data);
+                checkpoint.command_results.push(data.into());
                 checkpoint.failure = None;
                 if checkpoint.is_coding_task() {
                     checkpoint.current_step = Some("verify".into());
@@ -3968,7 +3937,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.current_step = Some("cancelled".into());
                 checkpoint.next_step = None;
                 checkpoint.completed = true;
-                checkpoint.failure = Some(json!({"code":"cancelled","status":status}));
+                checkpoint.failure = Some(json!({"code":"cancelled","status":status}).into());
             }
             "failed" | "timed_out" | "lost" => {
                 checkpoint.current_step = Some("failed".into());
@@ -3977,7 +3946,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.failure = Some(json!({
                     "code":if status == "lost" { "SessionUnavailable" } else { "command_terminal" },
                     "status":status
-                }));
+                }).into());
             }
             _ => return Ok(()),
         }
@@ -4385,8 +4354,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         && !checkpoint.completed
                         && checkpoint.next_step.as_deref() == Some("edit")
                     {
-                        let original = object_args(&checkpoint.arguments)?;
-                        let original_action = required_string(original, "action")?;
+                        let original = workflow_object_args(&checkpoint.arguments)?;
+                        let original_action = required_string(&original, "action")?;
                         let same_objective = object
                             .get("objective")
                             .and_then(Value::as_str)
@@ -4571,7 +4540,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             if let Some(checkpoint) = checkpoint.as_mut() {
                 checkpoint.directory_inflight = false;
                 checkpoint.directory_index = index + 1;
-                checkpoint.directory_results.push(result);
+                checkpoint.directory_results.push(result.into());
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
         }
@@ -4735,7 +4704,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.command_inflight = false;
                 checkpoint.current_session_id = None;
                 checkpoint.command_index = index + 1;
-                checkpoint.command_results.push(data);
+                checkpoint.command_results.push(data.into());
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
         }
@@ -4819,9 +4788,16 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     .get("files_read")
                     .and_then(Value::as_array)
                     .cloned()
-                    .unwrap_or_default();
-                checkpoint.git_before = Some(stable_data(&git_before));
-                checkpoint.verification_plan = verification_plan.clone();
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
+                checkpoint.git_before = Some(stable_data(&git_before).into());
+                checkpoint.verification_plan = verification_plan
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
                 checkpoint.current_step = Some("prepare".into());
                 checkpoint.next_step = Some("edit".into());
                 persist_agent_checkpoint(&self.adapter, &checkpoint)?;
@@ -4887,7 +4863,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     Ok(modified_files) => modified_files,
                     Err(error) => {
                         checkpoint.patch_inflight = false;
-                        checkpoint.failure = Some(json!({"code":error.code.as_str()}));
+                        checkpoint.failure = Some(json!({"code":error.code.as_str()}).into());
                         persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                         return Err(error);
                     }
@@ -4952,7 +4928,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         false,
                     ));
                 }
-                let original = object_args(&checkpoint.arguments)?;
+                let original = workflow_object_args(&checkpoint.arguments)?;
                 let project_path = original.get("path").and_then(Value::as_str).unwrap_or(".");
                 let project = self.adapter.project_context(project_path)?;
                 let selected_path = project
@@ -4961,8 +4937,12 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     .ok_or_else(command_state_internal_error)?
                     .to_string();
                 if entering_verify {
-                    checkpoint.verification_plan =
-                        self.adapter.coding_verification_plan(&selected_path)?;
+                    checkpoint.verification_plan = self
+                        .adapter
+                        .coding_verification_plan(&selected_path)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect();
                     checkpoint.commands = checkpoint.verification_plan.clone();
                 }
                 checkpoint.current_step = Some("verify".into());
@@ -4974,12 +4954,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     let step = checkpoint.verification_plan[index]
                         .as_object()
                         .ok_or_else(command_state_internal_error)?;
-                    let command = required_string(step, "command")?;
-                    let shell: ShellSelector = serde_json::from_value(
+                    let command = required_workflow_string(step, "command")?;
+                    let shell: ShellSelector = serde_json::from_value(workflow_value(
                         step.get("shell")
-                            .cloned()
-                            .unwrap_or_else(|| Value::String("cmd".into())),
-                    )
+                            .unwrap_or(&WorkflowDatum::Text("cmd".into())),
+                    )?)
                     .map_err(|_| invalid_argument())?;
                     checkpoint.command_inflight = true;
                     checkpoint.current_session_id = None;
@@ -5007,11 +4986,12 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                                 checkpoint.current_step = Some("cancelled".into());
                                 checkpoint.next_step = None;
                                 checkpoint.completed = true;
-                                checkpoint.failure = Some(json!({"code":"cancelled"}));
+                                checkpoint.failure = Some(json!({"code":"cancelled"}).into());
                             } else {
                                 checkpoint.current_step = Some("verify".into());
                                 checkpoint.next_step = Some("verify".into());
-                                checkpoint.failure = Some(json!({"code":error.code.as_str()}));
+                                checkpoint.failure =
+                                    Some(json!({"code":error.code.as_str()}).into());
                             }
                             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                             return Err(error);
@@ -5020,7 +5000,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     if result.get("isError").and_then(Value::as_bool) == Some(true) {
                         checkpoint.command_inflight = false;
                         checkpoint.failure =
-                            Some(json!({"code":"verification_failed","step":index}));
+                            Some(json!({"code":"verification_failed","step":index}).into());
                         checkpoint.next_step = Some("verify".into());
                         persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                         return Ok(result);
@@ -5051,18 +5031,18 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     checkpoint.command_inflight = false;
                     checkpoint.current_session_id = None;
                     checkpoint.command_index = index + 1;
-                    checkpoint.command_results.push(data.clone());
+                    checkpoint.command_results.push(data.clone().into());
                     let evidence = json!({
-                        "kind":step.get("kind").and_then(Value::as_str).unwrap_or("project_gate"),
+                        "kind":step.get("kind").and_then(WorkflowDatum::as_str).unwrap_or("project_gate"),
                         "command":command,
                         "status":data.get("status").cloned().unwrap_or_else(|| Value::String("completed".into())),
                         "exit_code":data.get("exit_code").cloned().unwrap_or(Value::Null),
                         "output_ref":data.get("output_ref").cloned().unwrap_or(Value::Null)
                     });
                     if command.contains("build") {
-                        checkpoint.build_results.push(evidence);
+                        checkpoint.build_results.push(evidence.into());
                     } else {
-                        checkpoint.test_results.push(evidence);
+                        checkpoint.test_results.push(evidence.into());
                     }
                     persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                 }
@@ -5089,7 +5069,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     || checkpoint.command_index != checkpoint.verification_plan.len()
                     || checkpoint.command_results.len() != checkpoint.verification_plan.len()
                     || checkpoint.command_results.iter().any(|result| {
-                        result.get("status").and_then(Value::as_str) != Some("completed")
+                        result.get("status").and_then(WorkflowDatum::as_str) != Some("completed")
                     })
                 {
                     return Err(FacadeError::new(
@@ -5099,7 +5079,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     ));
                 }
                 if !checkpoint.completed {
-                    let original = object_args(&checkpoint.arguments)?;
+                    let original = workflow_object_args(&checkpoint.arguments)?;
                     let project_path = original.get("path").and_then(Value::as_str).unwrap_or(".");
                     let project = self.adapter.project_context(project_path)?;
                     let selected_path = project
@@ -5111,7 +5091,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         json!({"path":selected_path}),
                         request_id,
                     )?;
-                    checkpoint.git_after = Some(stable_data(&git_after));
+                    checkpoint.git_after = Some(stable_data(&git_after).into());
                     checkpoint.current_step = Some("persist".into());
                     checkpoint.next_step = None;
                     checkpoint.completed = true;
@@ -5146,7 +5126,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 false,
             ));
         }
-        let original = object_args(&checkpoint.arguments)?;
+        let original = workflow_object_args(&checkpoint.arguments)?;
         if original.get("action").and_then(Value::as_str) != Some(action) {
             return Err(invalid_argument());
         }
@@ -5224,7 +5204,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.command_inflight = false;
                 checkpoint.current_session_id = None;
                 checkpoint.command_index = checkpoint.command_index.saturating_add(1);
-                checkpoint.command_results.push(data.clone());
+                checkpoint.command_results.push(data.clone().into());
                 if let Some(output_ref) = data.get("output_ref").and_then(Value::as_str) {
                     if !checkpoint
                         .output_refs
@@ -5256,7 +5236,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     .unwrap_or("failed");
                 checkpoint.command_inflight = false;
                 checkpoint.current_session_id = None;
-                checkpoint.failure = Some(json!({"code":"verification_terminal","status":status}));
+                checkpoint.failure =
+                    Some(json!({"code":"verification_terminal","status":status}).into());
                 checkpoint.current_step = Some("verify".into());
                 checkpoint.next_step = Some("verify".into());
                 persist_agent_checkpoint(&self.adapter, &checkpoint)?;
@@ -5284,14 +5265,15 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         })?;
         let mut checkpoint: WorkflowCheckpoint =
             serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
-        let original = object_args(&checkpoint.arguments)?;
-        let action = required_string(original, "action")?;
+        let original = workflow_object_args(&checkpoint.arguments)?;
+        let action = required_string(&original, "action")?;
         if action == "resume" {
             return Err(invalid_argument());
         }
+        let policy_arguments = workflow_value(&checkpoint.arguments)?;
         if !self
             .policy
-            .decide_public(mode, "agent_workflow", &checkpoint.arguments)
+            .decide_public(mode, "agent_workflow", &policy_arguments)
             .allowed
         {
             return Err(FacadeError::new(
@@ -5378,7 +5360,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             .and_then(Value::as_str)
             .ok_or_else(|| FacadeError::new(FacadeErrorCode::Internal, "项目上下文无效", false))?
             .to_string();
-        let directory_changes = parse_directory_changes(original)?;
+        let directory_changes = parse_directory_changes(&original)?;
         let commands = original
             .get("commands")
             .map(|value| value.as_array().ok_or_else(invalid_argument))
@@ -5457,7 +5439,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     checkpoint.command_inflight = false;
                     checkpoint.current_session_id = None;
                     checkpoint.command_index = checkpoint.command_index.saturating_add(1);
-                    checkpoint.command_results.push(data);
+                    checkpoint.command_results.push(data.into());
                     persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                 }
                 _ => {
@@ -5499,7 +5481,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 .apply_directory_change(directory_action, directory_path)?;
             checkpoint.directory_inflight = false;
             checkpoint.directory_index = index + 1;
-            checkpoint.directory_results.push(result);
+            checkpoint.directory_results.push(result.into());
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
         }
 
@@ -5610,7 +5592,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.current_session_id = Some(session_id.to_string());
                 persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                 let mut commands = checkpoint.command_results.clone();
-                commands.push(data);
+                commands.push(data.into());
                 return Ok(stable_success(
                     json!({
                         "action":"resume",
@@ -5630,7 +5612,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             checkpoint.command_inflight = false;
             checkpoint.current_session_id = None;
             checkpoint.command_index = index + 1;
-            checkpoint.command_results.push(data);
+            checkpoint.command_results.push(data.into());
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
         }
 
@@ -6226,6 +6208,17 @@ fn object_args(value: &Value) -> Result<&Map<String, Value>, FacadeError> {
     value.as_object().ok_or_else(invalid_argument)
 }
 
+fn workflow_value(value: &WorkflowDatum) -> Result<Value, FacadeError> {
+    serde_json::to_value(value).map_err(|_| workflow_checkpoint_error("workflow mapping failed"))
+}
+
+fn workflow_object_args(value: &WorkflowDatum) -> Result<Map<String, Value>, FacadeError> {
+    workflow_value(value)?
+        .as_object()
+        .cloned()
+        .ok_or_else(invalid_argument)
+}
+
 fn ensure_checkpoint_slot_available<A: WorkspaceRuntimeAdapter>(
     adapter: &A,
 ) -> Result<(), FacadeError> {
@@ -6249,13 +6242,17 @@ fn ensure_coding_git_baseline<A: WorkspaceRuntimeAdapter>(
     checkpoint: &WorkflowCheckpoint,
     request_id: Option<&Value>,
 ) -> Result<(), FacadeError> {
-    let Some(saved) = checkpoint.git_before.as_ref().and_then(Value::as_object) else {
+    let Some(saved_datum) = checkpoint.git_before.as_ref() else {
+        return Ok(());
+    };
+    let saved_value = workflow_value(saved_datum)?;
+    let Some(saved) = saved_value.as_object() else {
         return Ok(());
     };
     if saved.get("is_repo").and_then(Value::as_bool) != Some(true) {
         return Ok(());
     }
-    let original = object_args(&checkpoint.arguments)?;
+    let original = workflow_object_args(&checkpoint.arguments)?;
     let project_path = original.get("path").and_then(Value::as_str).unwrap_or(".");
     let project = adapter.project_context(project_path)?;
     let selected_path = project
@@ -6304,7 +6301,7 @@ fn terminalize_legacy_checkpoint_failure<A: WorkspaceRuntimeAdapter>(
     checkpoint.patch_inflight = false;
     checkpoint.command_inflight = false;
     checkpoint.current_session_id = None;
-    checkpoint.failure = Some(json!({"code":code,"status":"failed"}));
+    checkpoint.failure = Some(json!({"code":code,"status":"failed"}).into());
     persist_agent_checkpoint(adapter, checkpoint)
 }
 
@@ -6316,14 +6313,14 @@ fn expected_files_from_checkpoint(checkpoint: &WorkflowCheckpoint) -> Map<String
         };
         let Some(path) = object
             .get("path")
-            .and_then(Value::as_str)
+            .and_then(WorkflowDatum::as_str)
             .filter(|value| !value.is_empty())
         else {
             continue;
         };
         let Some(identity) = object
             .get("content_sha256")
-            .and_then(Value::as_str)
+            .and_then(WorkflowDatum::as_str)
             .filter(|value| {
                 value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
             })
@@ -6346,6 +6343,17 @@ fn required_string<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a 
     object
         .get(key)
         .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(invalid_argument)
+}
+
+fn required_workflow_string<'a>(
+    object: &'a std::collections::BTreeMap<String, WorkflowDatum>,
+    key: &str,
+) -> Result<&'a str, FacadeError> {
+    object
+        .get(key)
+        .and_then(WorkflowDatum::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(invalid_argument)
 }
@@ -6634,13 +6642,13 @@ pub(crate) fn parse_filesystem_request(
 
 #[cfg(test)]
 fn run_workspace_filesystem(workspace: &Path, arguments: Value) -> Result<Value, FacadeError> {
-    let authority =
-        PathAuthority::active_workspace(workspace).map_err(normalize_path_authority_error)?;
+    let authority = crate::workspace::WorkspaceResolver::active_workspace(workspace)
+        .map_err(normalize_path_authority_error)?;
     run_workspace_filesystem_with_authority(authority, arguments, FilesystemCancellation::default())
 }
 
 pub(crate) fn run_workspace_filesystem_with_authority(
-    authority: PathAuthority,
+    authority: WorkspaceResolver,
     arguments: Value,
     cancellation: FilesystemCancellation,
 ) -> Result<Value, FacadeError> {
@@ -7136,7 +7144,7 @@ fn session_unavailable() -> FacadeError {
 fn coding_checkpoint_result(checkpoint: &WorkflowCheckpoint, state: &str, text: &str) -> Value {
     stable_success(
         json!({
-            "action":checkpoint.arguments.get("action").and_then(Value::as_str),
+            "action":checkpoint.arguments.get("action").and_then(WorkflowDatum::as_str),
             "phase":checkpoint.current_step,
             "workflow_id":checkpoint.workflow_id,
             "task_id":checkpoint.workflow_id,
@@ -7801,7 +7809,10 @@ mod tests {
             Duration::from_secs(10),
         )
         .expect("bundled coding runtime for Toolbox acceptance");
-        let mut facade = AgentFacade::from_coding_runtime(runtime, policy()).unwrap();
+        let executions = ExecutionRegistry::for_workspace(runtime.workspace()).unwrap();
+        let mut facade =
+            AgentFacade::from_coding_runtime_with_executions(runtime, policy(), executions)
+                .unwrap();
         assert_eq!(
             facade.public_tools(PermissionMode::Full)["tools"]
                 .as_array()
@@ -8418,8 +8429,12 @@ mod tests {
             assert!(!stored.patch_inflight, "{stage}");
             assert!(!stored.command_inflight, "{stage}");
             assert_eq!(
-                stored.failure.as_ref().unwrap()["status"],
-                "failed",
+                stored
+                    .failure
+                    .as_ref()
+                    .and_then(|failure| failure.get("status"))
+                    .and_then(WorkflowDatum::as_str),
+                Some("failed"),
                 "{stage}"
             );
             assert_eq!(facade.task_aggregate_snapshot()["state"], "idle", "{stage}");
@@ -8469,7 +8484,14 @@ mod tests {
         assert!(stored.next_step.is_none());
         assert!(stored.current_session_id.is_none());
         assert!(!stored.command_inflight);
-        assert_eq!(stored.failure.as_ref().unwrap()["status"], "lost");
+        assert_eq!(
+            stored
+                .failure
+                .as_ref()
+                .and_then(|failure| failure.get("status"))
+                .and_then(WorkflowDatum::as_str),
+            Some("lost")
+        );
         let aggregate = facade.task_aggregate_snapshot();
         assert_eq!(aggregate["state"], "idle");
         assert!(aggregate["current_workflow"].is_null());
@@ -8980,7 +9002,8 @@ mod tests {
             json!({"action":"bugfix","path":"."}),
             "existing".into(),
         );
-        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}));
+        c.git_before =
+            Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}).into());
         *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
         let mut f = AgentFacade::with_adapter(
             ResumeAdapter {
@@ -9019,7 +9042,7 @@ mod tests {
             json!({"action":"bugfix","path":"."}),
             "stale".into(),
         );
-        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-OLD"}));
+        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-OLD"}).into());
         *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
         *state.git_head.lock().unwrap() = "HEAD-NEW".into();
         let mut f = AgentFacade::with_adapter(
@@ -9056,7 +9079,8 @@ mod tests {
             json!({"action":"bugfix","path":"."}),
             "context".into(),
         );
-        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}));
+        c.git_before =
+            Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}).into());
         *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
         let mut f = AgentFacade::with_adapter(
             ResumeAdapter {

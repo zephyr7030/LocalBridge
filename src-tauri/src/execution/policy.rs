@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
 
+use crate::filesystem::policy::FilesystemPathPolicy;
 use crate::privilege::{
     ElevatedExecSpec, MAX_ELEVATED_OUTPUT_BYTES, MAX_ELEVATED_STRING_BYTES,
     MAX_ELEVATED_TIMEOUT_MS, PrivilegedFilesystemSpec,
@@ -2718,11 +2719,11 @@ fn reviewed_administrator_filesystem(arguments: &Value) -> bool {
         return false;
     };
     spec.validate().is_ok()
-        && !explicit_control_plane_reference(&spec.path)
+        && FilesystemPathPolicy::allows(&spec.path)
         && !spec
             .destination
             .as_deref()
-            .is_some_and(explicit_control_plane_reference)
+            .is_some_and(|path| !FilesystemPathPolicy::allows(path))
 }
 
 pub(crate) fn explicit_control_plane_reference(value: &str) -> bool {

@@ -44,7 +44,10 @@ impl std::fmt::Debug for McpHealthClient {
 }
 
 impl McpHealthClient {
-    pub(crate) fn probe_default_cwd(&self, timeout: Duration) -> Result<Value, CodingToolsRuntimeError> {
+    pub(crate) fn probe_default_cwd(
+        &self,
+        timeout: Duration,
+    ) -> Result<Value, CodingToolsRuntimeError> {
         let request_id = HEALTH_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         let mut session = McpSession {
             port: self.port,
@@ -55,7 +58,6 @@ impl McpHealthClient {
         session.call_tool_with_timeout("get_default_cwd", json!({}), timeout)
     }
 }
-
 
 impl std::fmt::Debug for McpCancellationClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

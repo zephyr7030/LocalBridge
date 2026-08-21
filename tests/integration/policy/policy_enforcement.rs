@@ -2,9 +2,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use localbridge_lib::mcp::{
-    CapabilityPolicy, CodingToolsRuntimeError, DenyReason, GuardError, GuardRuntime, McpGuard,
-    ToolCallRequest,
+    CodingToolsRuntimeError, GuardError, GuardRuntime, McpGuard, ToolCallRequest,
 };
+use localbridge_lib::execution::{CapabilityPolicy, DenyReason};
 use localbridge_lib::state::{
     Capability, CurrentTask, CurrentTaskStatus, PermissionMode, SafeTaskSummary, TaskExecutionState,
 };

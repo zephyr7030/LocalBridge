@@ -6,10 +6,9 @@ use crate::state::{
     Capability, CurrentTaskStatus, PermissionMode, SafeTaskSummary, TaskExecutionState, TaskKind,
 };
 
-use super::policy::{
-    CapabilityPolicy, DenyReason, PolicyDecision, ToolDescriptor, shell_invocation_requires_review,
-};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
+use crate::execution::policy::{CapabilityPolicy, DenyReason, PolicyDecision, ToolDescriptor};
+use crate::execution::shell_policy::{ShellExecutionPolicy, ShellPolicyDecision};
 
 pub trait GuardRuntime {
     fn raw_list_tools(&mut self) -> Result<Value, CodingToolsRuntimeError>;
@@ -241,7 +240,7 @@ fn effective_indirect_capabilities(request: &ToolCallRequest) -> Vec<Capability>
         if let Some(command) = string_argument(&request.arguments, &["cmd", "command"]) {
             let shell = string_argument(&request.arguments, &["shell"])
                 .unwrap_or_else(|| "auto".to_string());
-            if shell_invocation_requires_review(&shell, &command) {
+            if ShellExecutionPolicy::evaluate(&shell, &command) == ShellPolicyDecision::Review {
                 capabilities.push(Capability::PrivilegedExternalRuntime);
             }
         }
