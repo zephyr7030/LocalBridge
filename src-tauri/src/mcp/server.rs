@@ -2266,12 +2266,8 @@ fn direct_command_control_during_work(
         }
     };
     let Some(object) = arguments.as_object() else {
-        return FacadeError::new(
-            FacadeErrorCode::InvalidArgument,
-            "命令控制参数无效",
-            false,
-        )
-        .to_mcp_result();
+        return FacadeError::new(FacadeErrorCode::InvalidArgument, "命令控制参数无效", false)
+            .to_mcp_result();
     };
     let allowed = match action {
         CommandControlAction::Poll => &["action", "session_id", "wait_ms"][..],
@@ -2279,12 +2275,8 @@ fn direct_command_control_during_work(
         CommandControlAction::Kill => &["action", "session_id", "signal", "wait_ms"][..],
     };
     if object.keys().any(|key| !allowed.contains(&key.as_str())) {
-        return FacadeError::new(
-            FacadeErrorCode::InvalidArgument,
-            "命令控制参数无效",
-            false,
-        )
-        .to_mcp_result();
+        return FacadeError::new(FacadeErrorCode::InvalidArgument, "命令控制参数无效", false)
+            .to_mcp_result();
     }
     let signal = if action == CommandControlAction::Kill {
         match object.get("signal").and_then(Value::as_str) {
@@ -2331,16 +2323,12 @@ fn direct_command_control_during_work(
         Ok(result) => result,
         Err(error) => {
             let (code, message, retryable) = match error {
-                CommandControlError::InvalidRequest => (
-                    FacadeErrorCode::InvalidArgument,
-                    "命令控制参数无效",
-                    false,
-                ),
-                CommandControlError::SessionUnavailable => (
-                    FacadeErrorCode::SessionUnavailable,
-                    "命令会话不可用",
-                    false,
-                ),
+                CommandControlError::InvalidRequest => {
+                    (FacadeErrorCode::InvalidArgument, "命令控制参数无效", false)
+                }
+                CommandControlError::SessionUnavailable => {
+                    (FacadeErrorCode::SessionUnavailable, "命令会话不可用", false)
+                }
                 CommandControlError::RuntimeUnavailable => (
                     FacadeErrorCode::RuntimeUnavailable,
                     "命令控制通道不可用",
@@ -2386,10 +2374,7 @@ fn direct_command_result_to_mcp(
         "session_id".into(),
         Value::String(result.public_session_id.as_str().to_string()),
     );
-    data.insert(
-        "task_id".into(),
-        Value::String(result.task_id.to_string()),
-    );
+    data.insert("task_id".into(), Value::String(result.task_id.to_string()));
     data.insert("output".into(), Value::String(output));
     data.insert("elapsed_ms".into(), Value::from(result.elapsed_ms));
     if let Some(exit_code) = result.exit_code {
@@ -2411,9 +2396,7 @@ fn direct_command_result_to_mcp(
 
     match result.status {
         RuntimeCommandStatus::Running => stable_success(Value::Object(data), "Command running"),
-        RuntimeCommandStatus::Completed => {
-            stable_success(Value::Object(data), "Command completed")
-        }
+        RuntimeCommandStatus::Completed => stable_success(Value::Object(data), "Command completed"),
         RuntimeCommandStatus::Cancelled if action == CommandControlAction::Kill => {
             stable_success(Value::Object(data), "Command cancelled")
         }
