@@ -6,11 +6,18 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+use crate::control_plane::command_control::{
+    CommandControlAction, CommandKillSignal, RuntimeCommandControl, RuntimeCommandControlError,
+    RuntimeCommandObservation, RuntimeCommandRequest, RuntimeCommandStatus,
+};
+use crate::domain::RpcRequestId;
+
 use super::bundle::CODING_TOOLS_VERSION;
 use super::runtime::{CodingToolsRuntimeError, InternalBearer};
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
 const MAX_HTTP_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+const COMMAND_CONTROL_TRANSPORT_HEADROOM_MS: u64 = 2_000;
 static HEALTH_REQUEST_ID: AtomicU64 = AtomicU64::new(1_000_000);
 static CONTROL_REQUEST_ID: AtomicI64 = AtomicI64::new(-1);
 
@@ -97,10 +104,76 @@ impl McpCancellationClient {
         runtime_session_id: &str,
         wait_ms: u64,
     ) -> Result<Value, CodingToolsRuntimeError> {
+        self.control_command_session(runtime_session_id, "kill", None, wait_ms)
+    }
+
+    pub(crate) fn control_command_session(
+        &self,
+        runtime_session_id: &str,
+        action: &str,
+        chars: Option<&str>,
+        wait_ms: u64,
+    ) -> Result<Value, CodingToolsRuntimeError> {
+        let request_id = Value::from(CONTROL_REQUEST_ID.fetch_sub(1, Ordering::Relaxed));
+        self.control_command_session_with_request_id(
+            runtime_session_id,
+            action,
+            chars,
+            (action == "kill").then_some("KILL"),
+            wait_ms,
+            &request_id,
+        )
+    }
+
+    pub(crate) fn control_command_session_with_request_id(
+        &self,
+        runtime_session_id: &str,
+        action: &str,
+        chars: Option<&str>,
+        signal: Option<&str>,
+        wait_ms: u64,
+        request_id: &Value,
+    ) -> Result<Value, CodingToolsRuntimeError> {
         if runtime_session_id.is_empty() {
             return Err(CodingToolsRuntimeError::ProtocolMismatch);
         }
-        let request_id = CONTROL_REQUEST_ID.fetch_sub(1, Ordering::Relaxed);
+        let (tool, arguments) = match action {
+            "poll" => (
+                "write_stdin",
+                json!({
+                    "session_id":runtime_session_id,
+                    "chars":"",
+                    "yield_time_ms":wait_ms.min(30_000),
+                    "max_output_bytes":65_536,
+                    "verbosity":"full"
+                }),
+            ),
+            "write" => {
+                let chars = chars
+                    .filter(|value| !value.is_empty())
+                    .ok_or(CodingToolsRuntimeError::ProtocolMismatch)?;
+                (
+                    "write_stdin",
+                    json!({
+                        "session_id":runtime_session_id,
+                        "chars":chars,
+                        "yield_time_ms":wait_ms.min(30_000),
+                        "max_output_bytes":65_536,
+                        "verbosity":"full"
+                    }),
+                )
+            }
+            "kill" => (
+                "kill_session",
+                json!({
+                    "session_id":runtime_session_id,
+                    "signal":signal.unwrap_or("TERM"),
+                    "wait_ms":wait_ms.min(30_000),
+                    "verbosity":"full"
+                }),
+            ),
+            _ => return Err(CodingToolsRuntimeError::ProtocolMismatch),
+        };
         let mut session = McpSession {
             port: self.port,
             bearer: Arc::clone(&self.bearer),
@@ -108,16 +181,104 @@ impl McpCancellationClient {
             next_id: 1,
         };
         session.call_tool_with_request_id_and_timeout(
-            "kill_session",
-            json!({
-                "session_id":runtime_session_id,
-                "signal":"KILL",
-                "wait_ms":wait_ms.min(30_000),
-                "verbosity":"full"
-            }),
-            &Value::from(request_id),
-            Duration::from_millis(wait_ms.min(30_000).saturating_add(1_000)),
+            tool,
+            arguments,
+            request_id,
+            Duration::from_millis(
+                wait_ms
+                    .min(30_000)
+                    .saturating_add(COMMAND_CONTROL_TRANSPORT_HEADROOM_MS),
+            ),
         )
+    }
+}
+
+impl RuntimeCommandControl for McpCancellationClient {
+    fn control_command(
+        &self,
+        request: &RuntimeCommandRequest,
+    ) -> Result<RuntimeCommandObservation, RuntimeCommandControlError> {
+        let action = match request.action {
+            CommandControlAction::Poll => "poll",
+            CommandControlAction::Write => "write",
+            CommandControlAction::Kill => "kill",
+        };
+        let request_id = match &request.request_id {
+            RpcRequestId::Number(value) => Value::from(*value),
+            RpcRequestId::String(value) => Value::String(value.clone()),
+        };
+        let raw = self
+            .control_command_session_with_request_id(
+                &request.runtime_handle,
+                action,
+                request.chars.as_deref(),
+                request.signal.map(CommandKillSignal::as_str),
+                request.wait_ms,
+                &request_id,
+            )
+            .map_err(map_command_transport_error)?;
+        if raw.get("isError").and_then(Value::as_bool) == Some(true) {
+            return Err(RuntimeCommandControlError::SessionUnavailable);
+        }
+        let structured = raw
+            .get("structuredContent")
+            .and_then(Value::as_object)
+            .ok_or(RuntimeCommandControlError::CapabilityMismatch)?;
+        let private_status = structured
+            .get("status")
+            .and_then(Value::as_str)
+            .ok_or(RuntimeCommandControlError::CapabilityMismatch)?;
+        let exit_code = structured.get("exit_code").and_then(Value::as_i64);
+        let timed_out = structured
+            .get("timed_out")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let status = if timed_out || private_status == "timeout" {
+            RuntimeCommandStatus::TimedOut
+        } else {
+            match private_status {
+                "running" | "terminating" => RuntimeCommandStatus::Running,
+                "terminated" | "killed" | "cancelled" => RuntimeCommandStatus::Cancelled,
+                "exited" if exit_code.is_some_and(|code| code != 0) => {
+                    RuntimeCommandStatus::Failed
+                }
+                "exited" => RuntimeCommandStatus::Completed,
+                _ => RuntimeCommandStatus::Lost,
+            }
+        };
+        Ok(RuntimeCommandObservation {
+            status,
+            exit_code,
+            signal: structured
+                .get("signal")
+                .or_else(|| structured.get("signal_sent"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            stdout: structured
+                .get("stdout")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            stderr: structured
+                .get("stderr")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            truncated: structured.get("truncated").and_then(Value::as_bool),
+        })
+    }
+}
+
+fn map_command_transport_error(error: CodingToolsRuntimeError) -> RuntimeCommandControlError {
+    match error {
+        CodingToolsRuntimeError::ProtocolMismatch => RuntimeCommandControlError::InvalidRequest,
+        CodingToolsRuntimeError::UpstreamRpcError => {
+            RuntimeCommandControlError::CapabilityMismatch
+        }
+        CodingToolsRuntimeError::HttpStatus(404) => {
+            RuntimeCommandControlError::SessionUnavailable
+        }
+        _ => RuntimeCommandControlError::Unavailable,
     }
 }
 

@@ -70,6 +70,7 @@ for (const relative of [
 }
 
 forbidTree("src-tauri/src", /terminal_payload/, "parallel public-session terminal truth remains");
+forbidTree("src-tauri/src", /\bcancel_all\b/, "unscoped cancel-all operation remains");
 forbidTree("src-tauri/src", /HashMap\s*<\s*RpcRequestId/, "global bare request-id registry remains");
 forbidTree(
   "src-tauri/src",
@@ -118,6 +119,11 @@ requireText(
   "src-tauri/src/control_plane/execution_registry.rs",
   /PreserveTerminalAndMarkUnfinishedLost|lost_terminal\(\)/,
   "execution restart recovery does not converge unfinished work to Lost",
+);
+requireText(
+  "src-tauri/src/mcp/server.rs",
+  /command_control_kill_is_not_blocked_by_unrelated_foreground_work/,
+  "command control has no executable proof that Work cannot block Control",
 );
 
 if (failures.length > 0) {

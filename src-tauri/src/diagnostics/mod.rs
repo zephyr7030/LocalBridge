@@ -725,6 +725,18 @@ pub(crate) fn active_request_diagnostics_for_test() -> usize {
 }
 
 #[cfg(test)]
+pub(crate) fn request_diagnostic_active_for_test(
+    request_key: &str,
+    connection_id: &str,
+) -> bool {
+    request_diagnostic_log()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .active_requests
+        .contains_key(&mcp_active_key(request_key, connection_id))
+}
+
+#[cfg(test)]
 pub(crate) fn reset_recent_user_events_for_test() {
     recent_event_log()
         .lock()

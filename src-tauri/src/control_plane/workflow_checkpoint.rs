@@ -194,6 +194,25 @@ impl WorkflowCheckpoint {
     pub(crate) fn is_coding_task(&self) -> bool {
         self.coding_profile.as_deref() == Some("coding-agent-v1")
     }
+
+    pub(crate) fn settle_command_kill(&mut self, public_session_id: &str) -> bool {
+        if self.completed || self.current_session_id.as_deref() != Some(public_session_id) {
+            return false;
+        }
+        self.current_session_id = None;
+        self.command_inflight = false;
+        if self.next_step.is_none() {
+            self.next_step = Some(
+                if self.is_coding_task() {
+                    "verify"
+                } else {
+                    "resume"
+                }
+                .into(),
+            );
+        }
+        true
+    }
 }
 
 fn sanitize_checkpoint_arguments(mut arguments: WorkflowDatum) -> (WorkflowDatum, Vec<usize>) {
@@ -311,6 +330,20 @@ impl WorkflowCheckpointStore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(_) => Err(WorkflowCheckpointError::DeleteFailed),
         }
+    }
+
+    pub(crate) fn settle_command_kill(
+        &self,
+        public_session_id: &str,
+    ) -> Result<bool, WorkflowCheckpointError> {
+        let Some(mut checkpoint) = self.load()? else {
+            return Ok(false);
+        };
+        if !checkpoint.settle_command_kill(public_session_id) {
+            return Ok(false);
+        }
+        self.save(&checkpoint)?;
+        Ok(true)
     }
 
     #[cfg(test)]

@@ -12,6 +12,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
 
+use crate::control_plane::command_control::{
+    CommandControlAction, CommandControlError, CommandControlRequest, CommandControlResult,
+    CommandKillSignal, RuntimeCommandStatus, control_command_during_work,
+};
 use crate::control_plane::convergence::{
     ConnectionProfile, ConvergenceSnapshot, DesiredState, DesiredStateOwner, DesiredWorkspace,
     EffectiveState, ObservedState, ServiceIntent,
@@ -27,6 +31,7 @@ use crate::control_plane::session_registry::{
 };
 use crate::control_plane::snapshot::TaskAggregate;
 use crate::control_plane::task_registry::TaskRegistry;
+use crate::control_plane::workflow_checkpoint::WorkflowCheckpointStore;
 use crate::diagnostics::error::{
     ErrorDiagnostic, mcp_invalid, mcp_unavailable, mcp_unknown, transport_unavailable,
 };
@@ -55,8 +60,9 @@ use super::facade::{
     AGENT_API_REVISION, AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter,
     FacadeCallError, FacadeDenied, FacadeError, FacadeErrorCode, FilesystemAction,
     FilesystemRequest, normalize_path_authority_error, parse_filesystem_request,
-    public_error_output_schema, public_safe_summary, public_task_kind, public_tools_for_policy,
-    run_workspace_filesystem_with_authority, stable_success, validate_workspace_context_probe,
+    public_command_stderr, public_error_output_schema, public_safe_summary, public_task_kind,
+    public_tools_for_policy, run_workspace_filesystem_with_authority, stable_command_error,
+    stable_success, validate_workspace_context_probe,
 };
 use super::http::{McpCancellationClient, McpHealthClient};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
@@ -126,6 +132,7 @@ struct TaskControlContext<'a> {
     executions: &'a ExecutionRegistry,
     tasks: &'a TaskRegistry,
     scheduler: &'a Scheduler,
+    observed_workspace: &'a Path,
     requests: &'a RequestRegistry,
     privileged: Option<&'a Arc<dyn PrivilegedExecution>>,
 }
@@ -1695,6 +1702,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         executions,
                         tasks,
                         scheduler,
+                        observed_workspace,
                         requests,
                         privileged,
                     },
@@ -1746,6 +1754,40 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     Ok(guard) => guard,
                     Err(TryLockError::Poisoned(error)) => error.into_inner(),
                     Err(TryLockError::WouldBlock) => {
+                        if name == "command_control"
+                            && let Some(public_session) = controlled_public_session.as_ref()
+                        {
+                            record_mcp_request_start(&request_diagnostic_key(&id), session, name);
+                            let decision = public_policy
+                                .read()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .decide_public(mode, name, &arguments);
+                            let result = if decision.allowed {
+                                direct_command_control_during_work(
+                                    &arguments,
+                                    public_session,
+                                    executions,
+                                    cancellation,
+                                    observed_workspace,
+                                    private_request_id.clone(),
+                                )
+                            } else {
+                                FacadeDenied {
+                                    reason: decision
+                                        .deny_reason
+                                        .expect("denied command_control decision contains reason"),
+                                    capability: decision.descriptor.capability,
+                                }
+                                .to_mcp_result()
+                            };
+                            if let Some(error) =
+                                operation_error_from_facade_result(&Ok(result.clone()))
+                            {
+                                requests.record_error(request_key.clone(), error);
+                            }
+                            requests.remove(&request_key);
+                            return write_rpc_result(&mut stream, id, result, Some(session));
+                        }
                         requests.record_error(
                             request_key.clone(),
                             OperationError::new(
@@ -1923,6 +1965,7 @@ fn handle_task_control(
         executions,
         tasks,
         scheduler,
+        observed_workspace,
         requests,
         privileged,
     } = context;
@@ -1971,6 +2014,8 @@ fn handle_task_control(
         },
         "cancel" => {
             let session_id = McpSessionId::new(session);
+            let control_request = request_key_from_json(session_id.clone(), &id)
+                .expect("validated task_control request id");
             let requested = match cancel_task_id_argument(&arguments) {
                 Ok(requested) => requested,
                 Err(error) => {
@@ -2014,6 +2059,22 @@ fn handle_task_control(
                                 })
                         });
                     if runtime_cancelled {
+                        if WorkflowCheckpointStore::for_workspace(observed_workspace)
+                            .and_then(|store| {
+                                store.settle_command_kill(execution.public_session_id.as_str())
+                            })
+                            .is_err()
+                        {
+                            requests.record_error(
+                                control_request.clone(),
+                                OperationError::new(
+                                    "WorkflowCheckpointUnavailable",
+                                    ErrorCategory::Unavailable,
+                                    "workflow checkpoint could not settle after cancellation",
+                                    true,
+                                ),
+                            );
+                        }
                         cancelled = cancelled.saturating_add(1);
                     }
                 }
@@ -2176,6 +2237,194 @@ fn runtime_cancellation_terminal(result: Value) -> Option<ExecutionTerminal> {
         error_code: Some("ProcessCancelled".to_string()),
         completed_at_ms: unix_time_ms(),
     })
+}
+
+fn direct_command_control_during_work(
+    arguments: &Value,
+    public_session_id: &PublicSessionId,
+    executions: &ExecutionRegistry,
+    cancellation: &McpCancellationClient,
+    workspace: &Path,
+    private_request_id: RpcRequestId,
+) -> Value {
+    let action = match arguments.get("action").and_then(Value::as_str) {
+        Some("poll") => CommandControlAction::Poll,
+        Some("write") => CommandControlAction::Write,
+        Some("kill") => CommandControlAction::Kill,
+        _ => {
+            return FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "command_control action 无效",
+                false,
+            )
+            .to_mcp_result();
+        }
+    };
+    let Some(object) = arguments.as_object() else {
+        return FacadeError::new(
+            FacadeErrorCode::InvalidArgument,
+            "命令控制参数无效",
+            false,
+        )
+        .to_mcp_result();
+    };
+    let allowed = match action {
+        CommandControlAction::Poll => &["action", "session_id", "wait_ms"][..],
+        CommandControlAction::Write => &["action", "session_id", "chars", "wait_ms"][..],
+        CommandControlAction::Kill => &["action", "session_id", "signal", "wait_ms"][..],
+    };
+    if object.keys().any(|key| !allowed.contains(&key.as_str())) {
+        return FacadeError::new(
+            FacadeErrorCode::InvalidArgument,
+            "命令控制参数无效",
+            false,
+        )
+        .to_mcp_result();
+    }
+    let signal = if action == CommandControlAction::Kill {
+        match object.get("signal").and_then(Value::as_str) {
+            None | Some("TERM") => Some(CommandKillSignal::Term),
+            Some("KILL") => Some(CommandKillSignal::Kill),
+            Some("INT") => Some(CommandKillSignal::Interrupt),
+            Some(_) => {
+                return FacadeError::new(
+                    FacadeErrorCode::InvalidArgument,
+                    "命令终止信号无效",
+                    false,
+                )
+                .to_mcp_result();
+            }
+        }
+    } else {
+        None
+    };
+    let wait_ms = arguments
+        .get("wait_ms")
+        .and_then(Value::as_u64)
+        .unwrap_or(if action == CommandControlAction::Kill {
+            5_000
+        } else {
+            0
+        })
+        .min(30_000);
+    let result = match control_command_during_work(
+        CommandControlRequest {
+            action,
+            chars: arguments
+                .get("chars")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            signal,
+            wait_ms,
+            request_id: private_request_id,
+            public_session_id: public_session_id.clone(),
+        },
+        executions,
+        cancellation,
+        workspace,
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            let (code, message, retryable) = match error {
+                CommandControlError::InvalidRequest => (
+                    FacadeErrorCode::InvalidArgument,
+                    "命令控制参数无效",
+                    false,
+                ),
+                CommandControlError::SessionUnavailable => (
+                    FacadeErrorCode::SessionUnavailable,
+                    "命令会话不可用",
+                    false,
+                ),
+                CommandControlError::RuntimeUnavailable => (
+                    FacadeErrorCode::RuntimeUnavailable,
+                    "命令控制通道不可用",
+                    true,
+                ),
+                CommandControlError::RuntimeCapabilityMismatch => (
+                    FacadeErrorCode::RuntimeCapabilityMismatch,
+                    "命令控制响应无效",
+                    false,
+                ),
+                CommandControlError::ExecutionConflict => (
+                    FacadeErrorCode::SessionUnavailable,
+                    "命令终态发生冲突",
+                    false,
+                ),
+            };
+            return FacadeError::new(code, message, retryable).to_mcp_result();
+        }
+    };
+    direct_command_result_to_mcp(result, action)
+}
+
+fn direct_command_result_to_mcp(
+    result: CommandControlResult,
+    action: CommandControlAction,
+) -> Value {
+    let stderr = public_command_stderr(&result.stderr);
+    let output = [result.stdout.as_str(), stderr.as_str()]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(if result.stdout.is_empty() || stderr.is_empty() {
+            ""
+        } else {
+            "\n"
+        });
+    let mut data = Map::new();
+    data.insert(
+        "status".into(),
+        Value::String(result.status.as_str().into()),
+    );
+    data.insert(
+        "session_id".into(),
+        Value::String(result.public_session_id.as_str().to_string()),
+    );
+    data.insert(
+        "task_id".into(),
+        Value::String(result.task_id.to_string()),
+    );
+    data.insert("output".into(), Value::String(output));
+    data.insert("elapsed_ms".into(), Value::from(result.elapsed_ms));
+    if let Some(exit_code) = result.exit_code {
+        data.insert("exit_code".into(), Value::from(exit_code));
+    }
+    if let Some(signal) = result.signal {
+        data.insert("signal".into(), Value::String(signal));
+    }
+    if let Some(truncated) = result.truncated {
+        data.insert("truncated".into(), Value::Bool(truncated));
+    }
+    if !result.checkpoint_settled {
+        return stable_command_error(
+            FacadeErrorCode::RuntimeUnavailable,
+            "命令已终止，但工作流恢复状态不可用",
+            data,
+        );
+    }
+
+    match result.status {
+        RuntimeCommandStatus::Running => stable_success(Value::Object(data), "Command running"),
+        RuntimeCommandStatus::Completed => {
+            stable_success(Value::Object(data), "Command completed")
+        }
+        RuntimeCommandStatus::Cancelled if action == CommandControlAction::Kill => {
+            stable_success(Value::Object(data), "Command cancelled")
+        }
+        RuntimeCommandStatus::Cancelled => {
+            stable_command_error(FacadeErrorCode::ProcessCancelled, "Command cancelled", data)
+        }
+        RuntimeCommandStatus::TimedOut => {
+            stable_command_error(FacadeErrorCode::ProcessTimedOut, "Command timed out", data)
+        }
+        RuntimeCommandStatus::Failed => {
+            stable_command_error(FacadeErrorCode::ProcessFailed, "Command failed", data)
+        }
+        RuntimeCommandStatus::Lost => {
+            stable_command_error(FacadeErrorCode::SessionUnavailable, "Command lost", data)
+        }
+    }
 }
 
 fn task_control_snapshot_with_terminal(
@@ -5576,13 +5825,16 @@ mod tests {
         let invalid_task_control =
             public_tool_call(pep.port(), &session, 6999, "task_control", json!({}));
         assert_ne!(invalid_task_control.body, Value::Null);
-        assert_eq!(crate::diagnostics::active_request_diagnostics_for_test(), 0);
+        assert!(!crate::diagnostics::request_diagnostic_active_for_test(
+            "6999", &session
+        ));
         let task_events = crate::diagnostics::request_diagnostics_for_test();
         let task_start = task_events
             .iter()
             .find(|event| {
                 event.kind == crate::diagnostics::RequestDiagnosticKind::Start
                     && event.tool == "task_control"
+                    && event.connection_id == session
             })
             .expect("task_control missing-action start diagnostic");
         let task_end = task_events
@@ -5590,6 +5842,7 @@ mod tests {
             .find(|event| {
                 event.kind == crate::diagnostics::RequestDiagnosticKind::End
                     && event.tool == "task_control"
+                    && event.connection_id == session
             })
             .expect("task_control missing-action end diagnostic");
         assert_eq!(task_start.request_id, task_end.request_id);
@@ -7971,6 +8224,161 @@ mod tests {
 
         let mut coding = pep.stop().expect("PEP stop after cancellation");
         coding.stop().expect("MCP Job stop after cancellation");
+        assert_eq!(coding.active_processes().unwrap(), 0);
+        drop(coding);
+        cleanup_test_directory(&workspace);
+    }
+
+    #[test]
+    fn command_control_kill_is_not_blocked_by_unrelated_foreground_work() {
+        let root = repo_root();
+        let workspace = temp_workspace();
+        let coding = CodingToolsRuntime::start(
+            CodingToolsRuntimeConfig::new(
+                &root,
+                &workspace,
+                free_port(),
+                CodingToolsPermissionMode::Trusted,
+            ),
+            InternalBearer::new(SYNTHETIC_BEARER).unwrap(),
+            Duration::from_secs(10),
+        )
+        .expect("bundled MCP ready");
+        let pep = PolicyEnforcementRuntime::start(coding, policy(&root), PermissionMode::Full)
+            .expect("PEP listener ready");
+        let owner = initialize(pep.port(), 340).session.expect("owner session");
+        let worker = initialize(pep.port(), 341).session.expect("worker session");
+        for session in [&owner, &worker] {
+            assert_eq!(
+                post(
+                    pep.port(),
+                    Some(session),
+                    &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+                )
+                .status,
+                202
+            );
+        }
+
+        let detached = public_tool_call(
+            pep.port(),
+            &owner,
+            342,
+            "exec_command",
+            json!({
+                "command":"Start-Sleep -Seconds 10",
+                "shell":"windows_powershell",
+                "yield_time_ms":0,
+                "timeout_ms":20000,
+                "max_output_bytes":4096
+            }),
+        );
+        assert_eq!(
+            detached.body["result"]["structuredContent"]["data"]["status"], "running",
+            "{:#?}",
+            detached.body
+        );
+        let public_session = detached.body["result"]["structuredContent"]["data"]["session_id"]
+            .as_str()
+            .expect("detached public session")
+            .to_string();
+
+        let port = pep.port();
+        let worker_session = worker.clone();
+        let foreground = thread::spawn(move || {
+            post_with_read_timeout(
+                port,
+                Some(&worker_session),
+                &json!({
+                    "jsonrpc":"2.0","id":343,"method":"tools/call",
+                    "params":{
+                        "name":"exec_command",
+                        "arguments":{
+                            "command":"Start-Sleep -Seconds 10",
+                            "shell":"windows_powershell",
+                            "yield_time_ms":10000,
+                            "timeout_ms":20000,
+                            "max_output_bytes":4096
+                        }
+                    }
+                }),
+                Duration::from_secs(6),
+            )
+        });
+        let running_deadline = Instant::now() + Duration::from_secs(3);
+        while pep.control_plane.scheduler().snapshot().work_running != 1 {
+            assert!(
+                Instant::now() < running_deadline,
+                "foreground work never acquired its explicit scheduler slot"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let poll_started = Instant::now();
+        let polled = public_tool_call(
+            pep.port(),
+            &owner,
+            344,
+            "command_control",
+            json!({"action":"poll","session_id":public_session,"wait_ms":0}),
+        );
+        assert!(
+            poll_started.elapsed() < Duration::from_secs(2),
+            "command_control poll waited behind unrelated Work"
+        );
+        assert_eq!(
+            polled.body["result"]["structuredContent"]["data"]["status"], "running",
+            "{:#?}",
+            polled.body
+        );
+
+        let kill_started = Instant::now();
+        let killed = public_tool_call(
+            pep.port(),
+            &owner,
+            345,
+            "command_control",
+            json!({"action":"kill","session_id":public_session,"signal":"KILL","wait_ms":100}),
+        );
+        assert!(
+            kill_started.elapsed() < Duration::from_secs(2),
+            "command_control kill waited behind unrelated Work"
+        );
+        assert_eq!(
+            killed.body["result"]["structuredContent"]["data"]["status"], "cancelled",
+            "{:#?}",
+            killed.body
+        );
+
+        let replay = public_tool_call(
+            pep.port(),
+            &owner,
+            346,
+            "command_control",
+            json!({"action":"poll","session_id":public_session,"wait_ms":0}),
+        );
+        assert_eq!(
+            replay.body["result"]["structuredContent"]["data"]["status"], "cancelled",
+            "{:#?}",
+            replay.body
+        );
+
+        let cancel_worker = public_tool_call(
+            pep.port(),
+            &worker,
+            347,
+            "task_control",
+            json!({"action":"cancel"}),
+        );
+        assert_eq!(
+            cancel_worker.body["result"]["structuredContent"]["data"]["cancelled_requests"], 1,
+            "{:#?}",
+            cancel_worker.body
+        );
+        let _ = foreground.join().expect("foreground worker response");
+
+        let mut coding = pep.stop().expect("PEP stop after control-lane test");
+        coding.stop().expect("MCP stop after control-lane test");
         assert_eq!(coding.active_processes().unwrap(), 0);
         drop(coding);
         cleanup_test_directory(&workspace);

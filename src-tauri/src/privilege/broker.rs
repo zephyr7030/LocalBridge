@@ -45,7 +45,7 @@ impl BrokerRequestOwner {
         self.executions.len() + self.structured_filesystems.len()
     }
 
-    fn cancel_all(&self) {
+    fn cancel_owned(&self) {
         for execution in self.executions.values() {
             execution.cancel.cancel();
         }
@@ -57,7 +57,7 @@ impl BrokerRequestOwner {
 
 impl Drop for BrokerRequestOwner {
     fn drop(&mut self) {
-        self.cancel_all();
+        self.cancel_owned();
     }
 }
 
@@ -178,7 +178,7 @@ pub fn run_broker_process(args: BrokerProcessArgs) -> Result<(), BrokerRunError>
         let response = match envelope.request {
             BrokerRequest::Ping => BrokerResponse::Pong,
             BrokerRequest::Shutdown => {
-                owned.cancel_all();
+                owned.cancel_owned();
                 BrokerResponse::ShutdownAck
             }
             BrokerRequest::StartExec { request_id, spec } => {

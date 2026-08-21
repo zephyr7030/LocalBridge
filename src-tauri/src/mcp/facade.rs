@@ -431,7 +431,7 @@ fn public_tool_schema(name: &str) -> Value {
                     "output_ref":{"type":"string","minLength":1,"description":"Required for read."},
                     "chars":{"type":"string","minLength":1,"description":"Required for write."},
                     "signal":{"type":"string","enum":["TERM","KILL","INT"],"description":"Optional kill signal; defaults to TERM."},
-                    "wait_ms":{"type":"integer","minimum":0,"maximum":30000,"description":"Server-side wait target for poll/write/kill. Under a responsive local runtime LocalBridge returns within wait_ms plus at most 1000ms transport headroom; the budget is end-to-end and is not reset per socket stage."},
+                    "wait_ms":{"type":"integer","minimum":0,"maximum":30000,"description":"Server-side wait target for poll/write/kill. Under a responsive local runtime LocalBridge returns within wait_ms plus at most 2000ms transport headroom; the budget is end-to-end and is not reset per socket stage."},
                     "stream":{"type":"string","enum":["stdout","stderr"],"description":"Optional read stream."},
                     "offset":{"type":"integer","minimum":0,"description":"Optional read byte offset."},
                     "limit":{"type":"integer","minimum":1,"maximum":1048576,"description":"Optional read byte limit."}
@@ -2911,17 +2911,9 @@ impl CodingToolsRuntimeAdapter {
     }
 
     fn mark_owner_workflow_waiting_after_kill(&self, session_id: &str) -> Result<(), FacadeError> {
-        let Some(stored) = self
-            .workflow_checkpoint
-            .load()
-            .map_err(workflow_checkpoint_error)?
-        else {
-            return Ok(());
-        };
-        let mut checkpoint = stored;
-        settle_checkpoint_after_command_kill(&mut checkpoint, session_id);
         self.workflow_checkpoint
-            .save(&checkpoint)
+            .settle_command_kill(session_id)
+            .map(|_| ())
             .map_err(workflow_checkpoint_error)
     }
 
@@ -3154,24 +3146,6 @@ fn document_range_was_truncated(
     limited_end < requested_actual_end
 }
 
-fn settle_checkpoint_after_command_kill(checkpoint: &mut WorkflowCheckpoint, session_id: &str) {
-    if checkpoint.completed || checkpoint.current_session_id.as_deref() != Some(session_id) {
-        return;
-    }
-    checkpoint.current_session_id = None;
-    checkpoint.command_inflight = false;
-    if checkpoint.next_step.is_none() {
-        checkpoint.next_step = Some(
-            if checkpoint.is_coding_task() {
-                "verify"
-            } else {
-                "resume"
-            }
-            .into(),
-        );
-    }
-}
-
 fn command_summary(status: &str) -> &'static str {
     match status {
         "running" => "Command running",
@@ -3353,7 +3327,7 @@ fn command_transport_timeout(wait_ms: u64) -> std::time::Duration {
 }
 
 fn command_control_transport_timeout(wait_ms: u64) -> std::time::Duration {
-    std::time::Duration::from_millis(wait_ms.min(30_000).saturating_add(1_000))
+    std::time::Duration::from_millis(wait_ms.min(30_000).saturating_add(2_000))
 }
 
 fn validate_private_command_result_semantics(
@@ -7181,7 +7155,11 @@ fn stable_data(value: &Value) -> Value {
         .unwrap_or(Value::Null)
 }
 
-fn stable_command_error(code: FacadeErrorCode, message: &str, data: Map<String, Value>) -> Value {
+pub(crate) fn stable_command_error(
+    code: FacadeErrorCode,
+    message: &str,
+    data: Map<String, Value>,
+) -> Value {
     let diagnostic = from_canonical_code(code.as_str());
     json!({
         "content":[{"type":"text","text":message}],
@@ -7264,7 +7242,7 @@ fn safe_command_output(raw: &Value) -> String {
     String::new()
 }
 
-fn public_command_stderr(stderr: &str) -> String {
+pub(crate) fn public_command_stderr(stderr: &str) -> String {
     if !looks_like_clixml_protocol(stderr) {
         return stderr.to_string();
     }
@@ -8645,7 +8623,7 @@ mod tests {
         checkpoint.current_session_id = Some("s1".into());
         checkpoint.command_inflight = true;
         checkpoint.next_step = None;
-        settle_checkpoint_after_command_kill(&mut checkpoint, "s1");
+        checkpoint.settle_command_kill("s1");
         assert!(checkpoint.current_session_id.is_none());
         assert!(!checkpoint.command_inflight);
         assert_eq!(checkpoint.next_step.as_deref(), Some("verify"));
@@ -9153,10 +9131,10 @@ mod tests {
         let wait = control["inputSchema"]["properties"]["wait_ms"]["description"]
             .as_str()
             .unwrap_or_default();
-        assert!(wait.contains("1000ms") && wait.contains("end-to-end"));
+        assert!(wait.contains("2000ms") && wait.contains("end-to-end"));
         assert_eq!(
             command_control_transport_timeout(500),
-            std::time::Duration::from_millis(1500)
+            std::time::Duration::from_millis(2500)
         );
     }
 
