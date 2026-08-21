@@ -1,0 +1,13 @@
+{
+  "schema_version": 2,
+  "settings": {
+    "permission_mode": "Edit",
+    "auto_start_services": false,
+    "onboarding_complete": false
+  },
+  "workspace": {
+    "workspace_id": "legacy-unvalidated",
+    "display_path": "D:\\project\\needs-confirmation",
+    "last_opened_at": 50
+  }
+}

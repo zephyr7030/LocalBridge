@@ -1,0 +1,36 @@
+# Local machine / agent state
+.coding-tools/
+
+# Dependencies and build output
+node_modules/
+dist/
+src-tauri/target/
+
+# Local release evidence and generated public snapshots
+release-artifacts/preflight/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+
+# Logs, diagnostics, dumps, temp files
+*.log
+*.dmp
+*.dump
+*.core
+*.tmp
+*.temp
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+tests/artifacts/
+src-tauri/gen/

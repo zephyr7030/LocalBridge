@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+      - run: npm ci
+      - run: cargo fetch --manifest-path src-tauri/Cargo.toml --locked
+      - run: node scripts/public-release/preflight.mjs format-check
+      - run: node tests/integration/release-preflight/public_release.test.mjs
+      - run: node scripts/public-release/preflight.mjs verify-license
+      - run: npm test
+      - run: npm run build
+      - run: node scripts/prepare-lb018-resources.mjs
+      - name: Verify bundled tools on fresh Windows runner
+        shell: pwsh
+        run: |
+          $commands = @(
+            { & "src-tauri/target/toolbox-stage/bin/aria2c.exe" --version | Out-Null },
+            { & "src-tauri/target/toolbox-stage/bin/7z.exe" | Out-Null },
+            { & "src-tauri/target/toolbox-stage/bin/jq.exe" --version | Out-Null },
+            { & "$env:SystemRoot/System32/curl.exe" --version | Out-Null },
+            { & "$env:ComSpec" /d /c "exit 0" },
+            { & "$env:SystemRoot/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -Command "exit 0" }
+          )
+          foreach ($command in $commands) {
+            & $command
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+
+      # Real bundled-runtime process/loopback E2E is exercised by release host acceptance; hosted runner process startup latency is not deterministic.
+      - name: Run deterministic Rust tests on hosted runner
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1 --skip schema42_toolbox_runs_pinned_tools_through_public_exec_without_ambient_shadowing --skip downstream_mcp_sessions_coexist_and_same_catalog_policy_replacement_preserves_them --skip full_cmd_rmdir_workspace_cleanup_executes_through_actual_bundled_runtime --skip schema27_public_facade_runtime_semantics_are_real_end_to_end --skip schema28_public_runtime_behavior_is_real_end_to_end --skip absolute_and_relative_active_workspace_paths_are_equivalent --skip schema40_health_probe_remains_authenticated_while_facade_lock_is_held --skip schema40_real_root_process_alive_but_mcp_unresponsive_is_not_ready --skip actual_bundled_mcp_is_reached_only_through_loopback_policy_server --skip schema34_full_executes_static_workspace_scripts_and_rejects_traversal_before_launch --skip cancellation_reaches_actual_upstream_while_tool_call_is_running --skip task_control_cancel_reaches_running_call_without_waiting_for_facade_execution_lock --skip edit_task_control_cancel_reaches_running_filesystem_hash --skip task_control_cancel_owns_detached_public_command_session --skip public_timeout_converges_without_windows_ctrl_break_debug_mode --skip elevated_exec_is_broker_only_mode_gated_cancelable_and_secret_safe --skip schema43_filesystem_routes_outside_workspace_only_through_active_broker --skip typed_administrator_process_shell_and_filesystem_routes_are_broker_only --skip actual_process_command_line_never_contains_runtime_secret_and_job_stop_drains
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - run: node node_modules/@tauri-apps/cli/tauri.js build --bundles nsis
