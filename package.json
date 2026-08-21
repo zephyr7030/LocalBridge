@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build --config vite.config.ts",
     "toolbox:prepare": "node scripts/prepare-toolbox.mjs",
     "test": "vitest run",
+    "test:ci": "node scripts/test/ci-gate.mjs",
+    "test:ci:list": "node scripts/test/ci-gate.mjs --list",
     "verify:architecture": "node scripts/verify-architecture/index.mjs",
     "verify:architecture:activation": "node scripts/verify-architecture/activation.test.mjs",
     "verify:architecture:pr-scoped": "node scripts/verify-architecture/pr-scoped.test.mjs",

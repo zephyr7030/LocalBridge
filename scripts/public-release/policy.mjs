@@ -58,6 +58,7 @@ const PUBLIC_PREFIXES = [
   "src-tauri/",
   "runtime/",
   "scripts/public-release/",
+  "scripts/test/",
   "tests/",
 ];
 
