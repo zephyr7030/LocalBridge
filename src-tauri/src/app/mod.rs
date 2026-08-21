@@ -6,6 +6,7 @@ mod single_instance;
 #[cfg(windows)]
 mod startup;
 mod startup_profile;
+mod update;
 
 #[cfg(windows)]
 pub use autostart::{
@@ -27,3 +28,4 @@ pub use startup_profile::{
     STARTUP_PROFILE_FILE_NAME, STARTUP_PROFILE_SCHEMA_VERSION, StartupProfile, StartupProfileError,
     StartupProfileStore,
 };
+pub use update::{GitHubReleaseSource, ReleaseSource, UpdateChecker, UpdateFetchError};

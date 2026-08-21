@@ -6,4 +6,5 @@ pub(crate) mod scheduler;
 pub(crate) mod session_registry;
 pub(crate) mod snapshot;
 pub(crate) mod task_registry;
+pub mod update;
 pub(crate) mod workflow_checkpoint;

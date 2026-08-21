@@ -4,6 +4,7 @@ use localbridge_lib::app::{
     DesktopLifecycle, SingleInstanceAcquire, SingleInstanceGuard, StartupMode,
     configure_desktop_startup,
 };
+use localbridge_lib::domain::UpdateCheckTrigger;
 use localbridge_lib::privilege::PrivilegeController;
 use localbridge_lib::tray::{
     MAIN_WINDOW_LABEL, ensure_main_window, install_tray, sync_main_webview_to_client,
@@ -39,6 +40,7 @@ fn main() {
             let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
             let app_data_dir = app.path().app_data_dir()?;
             let _startup = configure_desktop_startup(&app_data_dir, startup_mode, &lifecycle)?;
+            let _ = lifecycle.start_update_check(UpdateCheckTrigger::Startup);
             app.manage(lifecycle);
             install_tray(app.handle())?;
             let wake_app = app.handle().clone();

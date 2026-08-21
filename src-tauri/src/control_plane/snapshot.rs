@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{ExecutionRecord, PersistentFault, TaskRecord};
+use crate::domain::{ExecutionRecord, PersistentFault, TaskRecord, UpdateLifecycle};
 use crate::settings::AppData;
 use crate::state::{PermissionMode, PrivilegeState, RuntimeState, TaskKind};
 use crate::workspace::WorkspaceValidator;
@@ -218,6 +218,7 @@ pub struct ControlPlaneSnapshot {
     pub connection: ProjectionSection<ConnectionProjection>,
     pub settings: ProjectionSection<SettingsProjection>,
     pub activity: ProjectionSection<TaskAggregate>,
+    pub update: ProjectionSection<UpdateLifecycle>,
     pub active_faults: Vec<PersistentFault>,
 }
 
@@ -233,6 +234,7 @@ impl Default for ControlPlaneSnapshot {
             connection: ProjectionSection::unavailable(),
             settings: ProjectionSection::unavailable(),
             activity: ProjectionSection::unavailable(),
+            update: ProjectionSection::unavailable(),
             active_faults: Vec::new(),
         }
     }
@@ -247,6 +249,7 @@ pub struct SnapshotDraft {
     pub connection: ProjectionSection<ConnectionProjection>,
     pub settings: ProjectionSection<SettingsProjection>,
     pub activity: ProjectionSection<TaskAggregate>,
+    pub update: ProjectionSection<UpdateLifecycle>,
     pub active_faults: Vec<PersistentFault>,
 }
 
@@ -291,6 +294,7 @@ impl ControlPlaneSnapshotOwner {
             && state.current.connection == draft.connection
             && state.current.settings == draft.settings
             && state.current.activity == draft.activity
+            && state.current.update == draft.update
             && state.current.active_faults == draft.active_faults
         {
             return state.current.clone();
@@ -305,6 +309,7 @@ impl ControlPlaneSnapshotOwner {
             connection: draft.connection,
             settings: draft.settings,
             activity: draft.activity,
+            update: draft.update,
             active_faults: draft.active_faults,
         };
         state.current = next.clone();
@@ -322,6 +327,25 @@ impl ControlPlaneSnapshotOwner {
             connection: previous.connection,
             settings: previous.settings,
             activity: ProjectionSection::stale(previous.activity.value),
+            update: previous.update,
+            active_faults: previous.active_faults,
+        })
+    }
+
+    pub fn publish_update(
+        &self,
+        update: ProjectionSection<UpdateLifecycle>,
+    ) -> ControlPlaneSnapshot {
+        let previous = self.read();
+        self.publish(SnapshotDraft {
+            runtime: previous.runtime,
+            authority: previous.authority,
+            scheduler: previous.scheduler,
+            workspace: previous.workspace,
+            connection: previous.connection,
+            settings: previous.settings,
+            activity: previous.activity,
+            update,
             active_faults: previous.active_faults,
         })
     }
@@ -362,6 +386,10 @@ mod tests {
             connection: ProjectionSection::unavailable(),
             settings,
             activity: ProjectionSection::ready(TaskAggregate::idle()),
+            update: ProjectionSection::ready(UpdateLifecycle::SourceUnavailable {
+                current_version: crate::domain::ProductVersion::current(),
+                reason: "test".into(),
+            }),
             active_faults: Vec::new(),
         }
     }
@@ -379,6 +407,32 @@ mod tests {
         assert_eq!(second.revision, first.revision + 1);
         assert!(!first.settings.value.unwrap().auto_start);
         assert!(second.settings.value.unwrap().auto_start);
+    }
+
+    #[test]
+    fn update_publication_advances_one_revision_and_preserves_every_other_section() {
+        let owner = ControlPlaneSnapshotOwner::default();
+        let first = owner.publish(draft(ProjectionSection::ready(SettingsProjection {
+            auto_start: true,
+            ..SettingsProjection::default()
+        })));
+        let update = UpdateLifecycle::Idle {
+            current_version: crate::domain::ProductVersion::parse("1.2.3").unwrap(),
+            releases_url: "https://github.com/owner/repo/releases".into(),
+        };
+
+        let second = owner.publish_update(ProjectionSection::ready(update.clone()));
+
+        assert_eq!(second.revision, first.revision + 1);
+        assert_eq!(second.runtime, first.runtime);
+        assert_eq!(second.authority, first.authority);
+        assert_eq!(second.scheduler, first.scheduler);
+        assert_eq!(second.workspace, first.workspace);
+        assert_eq!(second.connection, first.connection);
+        assert_eq!(second.settings, first.settings);
+        assert_eq!(second.activity, first.activity);
+        assert_eq!(second.active_faults, first.active_faults);
+        assert_eq!(second.update, ProjectionSection::ready(update));
     }
 
     #[test]

@@ -3808,9 +3808,7 @@ fn update_public_session_ownership(
     tool_name: &str,
     result: &Value,
 ) -> Option<PublicSessionId> {
-    let Some(data) = result.pointer("/structuredContent/data") else {
-        return None;
-    };
+    let data = result.pointer("/structuredContent/data")?;
     if tool_name == "exec_command" {
         if let Some(public_session) = data
             .get("session_id")

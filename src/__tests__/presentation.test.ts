@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, privilegeText, serviceVisualState, taskText } from "../presentation";
+import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, privilegeText, serviceVisualState, taskText, updateStatusText } from "../presentation";
 
 describe("LB-015 presentation", () => {
   it("maps frozen Chinese wording", () => {
@@ -39,6 +39,13 @@ describe("LB-015 presentation", () => {
     const last = { kind: "git" as const, summary: "status", outcome: "completed" as const, completedAtMs: 1 };
     expect(lastActivityAction(last)).toBe("Git 操作");
     expect(lastActivityOutcome(last)).toBe("成功");
+  });
+  it("renders typed update lifecycle without guessing availability", () => {
+    const base = { currentVersion: "1.0.0", latestVersion: null, releaseUrl: "https://github.com/owner/repo/releases", operationId: null, attempt: null, retryable: true };
+    expect(updateStatusText({ ...base, state: "checking" })).toContain("正在检查更新");
+    expect(updateStatusText({ ...base, state: "current" })).toContain("已是最新版本");
+    expect(updateStatusText({ ...base, state: "available", latestVersion: "1.1.0" })).toBe("发现新版本 1.1.0");
+    expect(updateStatusText({ ...base, state: "source_unavailable", releaseUrl: null, retryable: false })).toContain("发布源不可用");
   });
 
 });

@@ -22,7 +22,9 @@ export interface ReconnectProjection { generation: number }
 export type UiErrorCategory = "validation" | "authorization" | "capacity" | "conflict" | "timeout" | "unavailable" | "internal";
 export interface UiError { code: string; category: UiErrorCategory; message: string; retryable: boolean; operationId: string | null; sessionId: string | null; requestId: number | string | null; taskId: string | null }
 export interface UiFaultProjection { code: string; category: UiErrorCategory; message: string; retryable: boolean }
-export interface MainProjection { permission: AccessCode; privilege: PrivilegeCode; localEnvironmentService: ServiceCode; tunnelService: ServiceCode; codingService: ServiceCode; currentProject: string | null; projects: ProjectProjection[]; currentTask: TaskProjection | null; currentWorkflow: CurrentWorkflowProjection | null; currentCommand: CurrentCommandProjection | null; lastCommand: LastCommandProjection | null; lastTool: LastToolProjection | null; currentActivity: CurrentActivityProjection | null; lastActivity: LastActivityProjection | null; projectionRevision: number; tunnelId: string | null; runtimeKeySaved: boolean; autoStart: boolean; closeWindowContinueRunning: boolean; reconnect: ReconnectProjection | null; activeFaults: UiFaultProjection[]; }
+export type UpdateStateCode = "source_unavailable" | "idle" | "checking" | "current" | "available" | "failed";
+export interface UpdateProjection { state: UpdateStateCode; currentVersion: string; latestVersion: string | null; releaseUrl: string | null; operationId: string | null; attempt: number | null; retryable: boolean }
+export interface MainProjection { permission: AccessCode; privilege: PrivilegeCode; localEnvironmentService: ServiceCode; tunnelService: ServiceCode; codingService: ServiceCode; currentProject: string | null; projects: ProjectProjection[]; currentTask: TaskProjection | null; currentWorkflow: CurrentWorkflowProjection | null; currentCommand: CurrentCommandProjection | null; lastCommand: LastCommandProjection | null; lastTool: LastToolProjection | null; currentActivity: CurrentActivityProjection | null; lastActivity: LastActivityProjection | null; projectionRevision: number; tunnelId: string | null; runtimeKeySaved: boolean; autoStart: boolean; closeWindowContinueRunning: boolean; reconnect: ReconnectProjection | null; update: UpdateProjection; activeFaults: UiFaultProjection[]; }
 export function uiErrorMessage(value: unknown, fallback: string): string {
   if (typeof value === "object" && value !== null && "message" in value && typeof value.message === "string" && value.message.trim()) return value.message;
   if (value instanceof Error && value.message.trim()) return value.message;
@@ -45,4 +47,6 @@ export const bridge = {
   removeProject: (id: string) => invoke<void>("remove_project", { id }),
   restartServices: () => invoke<void>("restart_services"),
   stopServices: () => invoke<void>("stop_services"),
+  retryUpdateCheck: () => invoke<void>("retry_update_check"),
+  openGitHubReleases: () => invoke<void>("open_github_releases"),
 };

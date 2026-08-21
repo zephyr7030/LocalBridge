@@ -14,12 +14,16 @@ use crate::control_plane::snapshot::{
     EffectiveAvailability, LastToolProjection, OutageProjection, ProjectionSection,
     RuntimeProjection, SettingsProjection, SnapshotDraft, TaskAggregate, WorkspaceProjection,
 };
+use crate::control_plane::update::{UpdateStartError, UpdateStateOwner};
 #[cfg(windows)]
 use crate::credentials::WindowsCredentialStore;
 use crate::diagnostics::{
     DiagnosticsOutageInput, record_recovery_attempt_event, record_runtime_user_events,
 };
-use crate::domain::{ErrorCategory, FaultSource, OperationError, PersistentFault};
+use crate::domain::{
+    ErrorCategory, FaultSource, GitHubRepository, OperationError, PersistentFault,
+    UpdateCheckTrigger, UpdateLifecycle,
+};
 #[cfg(windows)]
 use crate::mcp::{
     CurrentTaskWake, InternalBearer, ProductionRuntimeConfig, ProductionRuntimeDriver,
@@ -39,6 +43,8 @@ use crate::state::{
 };
 use crate::tunnel::ConnectorEndpoint;
 use std::path::{Path, PathBuf};
+
+use super::update::UpdateChecker;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupMode {
@@ -433,6 +439,7 @@ pub struct DesktopLifecycle {
     runtime_snapshot_cache: Arc<RwLock<DesktopRuntimeSnapshot>>,
     runtime_control_generation: Arc<AtomicU64>,
     snapshot_owner: ControlPlaneSnapshotOwner,
+    update_checker: UpdateChecker,
     #[cfg(windows)]
     foreground_start_pending: Arc<Mutex<Option<ProductionRuntimeConfig>>>,
     close_window_continue_running: Arc<AtomicBool>,
@@ -607,6 +614,7 @@ fn publish_control_plane_observation(
         connection,
         settings: previous.settings,
         activity,
+        update: previous.update,
         active_faults,
     })
 }
@@ -661,6 +669,14 @@ impl DesktopLifecycle {
         let runtime_snapshot_cache = Arc::new(RwLock::new(DesktopRuntimeSnapshot::inactive()));
         let runtime_control_generation = Arc::new(AtomicU64::new(0));
         let snapshot_owner = ControlPlaneSnapshotOwner::default();
+        let update_owner = UpdateStateOwner::default();
+        let update_snapshot_owner = snapshot_owner.clone();
+        update_owner
+            .bind_publisher(Arc::new(move |state| {
+                update_snapshot_owner.publish_update(ProjectionSection::ready(state));
+            }))
+            .expect("update snapshot publisher must have one binding");
+        let update_checker = UpdateChecker::production(update_owner);
         #[cfg(windows)]
         let foreground_start_pending = Arc::new(Mutex::new(None));
         let close_window_continue_running = Arc::new(AtomicBool::new(true));
@@ -718,6 +734,7 @@ impl DesktopLifecycle {
             runtime_snapshot_cache,
             runtime_control_generation,
             snapshot_owner,
+            update_checker,
             #[cfg(windows)]
             foreground_start_pending,
             close_window_continue_running,
@@ -730,6 +747,18 @@ impl DesktopLifecycle {
 
     pub fn privilege(&self) -> &PrivilegeController {
         &self.privilege
+    }
+
+    pub fn update_lifecycle(&self) -> UpdateLifecycle {
+        self.update_checker.owner().snapshot()
+    }
+
+    pub fn update_repository(&self) -> Option<GitHubRepository> {
+        self.update_checker.owner().repository()
+    }
+
+    pub fn start_update_check(&self, trigger: UpdateCheckTrigger) -> Result<(), UpdateStartError> {
+        self.update_checker.start(trigger)
     }
 
     pub fn desired_state(&self) -> DesiredStateOwner {
@@ -837,6 +866,7 @@ impl DesktopLifecycle {
             connection: previous.connection,
             settings,
             activity: previous.activity,
+            update: previous.update,
             active_faults,
         })
     }
@@ -859,6 +889,7 @@ impl DesktopLifecycle {
             connection: previous.connection,
             settings: previous.settings,
             activity: previous.activity,
+            update: previous.update,
             active_faults: previous.active_faults,
         })
     }

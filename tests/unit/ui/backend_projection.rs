@@ -102,6 +102,15 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
         auto_start: true,
         close_window_continue_running: true,
         reconnect: None,
+        update: UpdateProjection {
+            state: "current",
+            current_version: "0.1.1".into(),
+            latest_version: None,
+            release_url: Some("https://github.com/owner/repo/releases".into()),
+            operation_id: Some("update-1".into()),
+            attempt: None,
+            retryable: true,
+        },
         active_faults: vec![],
     })
     .unwrap();

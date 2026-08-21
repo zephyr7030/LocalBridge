@@ -35,6 +35,8 @@ macro_rules! localbridge_invoke_handler {
             commands::ui::remove_project,
             commands::ui::restart_services,
             commands::ui::stop_services,
+            commands::ui::retry_update_check,
+            commands::ui::open_github_releases,
             commands::onboarding::get_onboarding_state,
             commands::onboarding::save_onboarding_connection,
             commands::onboarding::open_openai_tunnel_settings,

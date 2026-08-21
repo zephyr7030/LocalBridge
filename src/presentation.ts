@@ -1,4 +1,4 @@
-import type { AccessCode, CurrentActivityProjection, LastActivityProjection, LastToolProjection, PrivilegeCode, ServiceCode, TaskProjection } from "./bridge";
+import type { AccessCode, CurrentActivityProjection, LastActivityProjection, LastToolProjection, PrivilegeCode, ServiceCode, TaskProjection, UpdateProjection } from "./bridge";
 export const uiText = { dashboard: "主控界面", settings: "设置", diagnostics: "诊断" } as const;
 export const accessText: Record<AccessCode, string> = { edit: "编辑模式", full: "完整模式", admin: "管理员模式" };
 export const privilegeText: Record<PrivilegeCode, string> = { off: "未启用", requested: "等待授权", awaiting: "等待系统授权", active: "已启用", fault: "故障" };
@@ -33,3 +33,14 @@ export function currentActivityDetail(activity: CurrentActivityProjection | null
 export function currentActivityElapsed(activity: CurrentActivityProjection | null): string | null { return activity?.state === "running" && activity.elapsedMs != null ? formatElapsed(activity.elapsedMs) : null; }
 export function lastActivityAction(activity: LastActivityProjection): string { return activityKindText[activity.kind]; }
 export function lastActivityOutcome(activity: LastActivityProjection): string { return lastCommandStatusText[activity.outcome]; }
+export function updateStatusText(update: UpdateProjection | null): string {
+  if (!update) return "正在读取版本";
+  switch (update.state) {
+    case "source_unavailable": return `当前版本 ${update.currentVersion} · 发布源不可用`;
+    case "idle": return `当前版本 ${update.currentVersion} · 尚未检查`;
+    case "checking": return `当前版本 ${update.currentVersion} · 正在检查更新`;
+    case "current": return `当前版本 ${update.currentVersion} · 已是最新版本`;
+    case "available": return `发现新版本 ${update.latestVersion ?? ""}`.trim();
+    case "failed": return `当前版本 ${update.currentVersion} · 检查失败`;
+  }
+}

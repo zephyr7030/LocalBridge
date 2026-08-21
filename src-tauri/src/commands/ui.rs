@@ -14,8 +14,12 @@ use crate::control_plane::convergence::{
     ServiceIntent,
 };
 use crate::control_plane::snapshot::{ControlPlaneSnapshot, TaskAggregate};
+use crate::control_plane::update::UpdateStartError;
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
-use crate::domain::{ExecutionState, LifecycleState, TerminalOutcome};
+use crate::domain::{
+    ErrorCategory, ExecutionState, LifecycleState, OperationError, TerminalOutcome,
+    UpdateCheckTrigger, UpdateLifecycle,
+};
 use crate::mcp::ProductionRuntimeConfig;
 use crate::settings::{AppData, SettingsStore};
 #[cfg(test)]
@@ -25,6 +29,7 @@ use crate::state::{
 };
 use crate::tunnel::TunnelId;
 use crate::workspace::{WorkspaceId, WorkspaceValidator};
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,7 +54,20 @@ pub struct MainProjection {
     auto_start: bool,
     close_window_continue_running: bool,
     reconnect: Option<ReconnectProjection>,
+    update: UpdateProjection,
     active_faults: Vec<UiFaultProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProjection {
+    state: &'static str,
+    current_version: String,
+    latest_version: Option<String>,
+    release_url: Option<String>,
+    operation_id: Option<String>,
+    attempt: Option<u8>,
+    retryable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -367,8 +385,51 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
             .map(|settings| settings.close_window_continue_running)
             .unwrap_or(true),
         reconnect,
+        update: update_projection(control_plane.update.value.as_ref()),
         active_faults: ui_faults(&control_plane),
     })
+}
+
+#[tauri::command]
+pub async fn retry_update_check(app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<DesktopLifecycle>()
+            .start_update_check(UpdateCheckTrigger::Manual)
+            .map_err(update_start_error)
+    })
+    .await
+    .map_err(|_| UiError::internal("Update.JoinFailed", "更新检查后台任务异常"))?
+}
+
+#[tauri::command]
+pub async fn open_github_releases(app: AppHandle) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let lifecycle = app.state::<DesktopLifecycle>();
+        let repository = lifecycle.update_repository().ok_or_else(|| {
+            UiError::from(OperationError::new(
+                "Update.SourceUnavailable",
+                ErrorCategory::Unavailable,
+                "当前构建未包含 GitHub 发布源",
+                false,
+            ))
+        })?;
+        let release_url = lifecycle
+            .update_lifecycle()
+            .release_url()
+            .map(str::to_owned)
+            .unwrap_or_else(|| repository.releases_url());
+        if !repository.owns_release_url(&release_url) {
+            return Err(UiError::from(OperationError::new(
+                "Update.ReleaseLinkDenied",
+                ErrorCategory::Authorization,
+                "发布页面不属于当前构建的 GitHub 仓库",
+                false,
+            )));
+        }
+        open_system_url(&release_url)
+    })
+    .await
+    .map_err(|_| UiError::internal("Update.OpenJoinFailed", "打开发布页面后台任务异常"))?
 }
 
 #[tauri::command]
@@ -1240,6 +1301,157 @@ fn ui_faults(snapshot: &ControlPlaneSnapshot) -> Vec<UiFaultProjection> {
             retryable: fault.error.retryable,
         })
         .collect()
+}
+
+fn update_projection(state: Option<&UpdateLifecycle>) -> UpdateProjection {
+    let Some(state) = state else {
+        return UpdateProjection {
+            state: "source_unavailable",
+            current_version: env!("CARGO_PKG_VERSION").to_owned(),
+            latest_version: None,
+            release_url: None,
+            operation_id: None,
+            attempt: None,
+            retryable: false,
+        };
+    };
+    match state {
+        UpdateLifecycle::SourceUnavailable {
+            current_version, ..
+        } => UpdateProjection {
+            state: "source_unavailable",
+            current_version: current_version.to_string(),
+            latest_version: None,
+            release_url: None,
+            operation_id: None,
+            attempt: None,
+            retryable: false,
+        },
+        UpdateLifecycle::Idle {
+            current_version,
+            releases_url,
+        } => UpdateProjection {
+            state: "idle",
+            current_version: current_version.to_string(),
+            latest_version: None,
+            release_url: Some(releases_url.clone()),
+            operation_id: None,
+            attempt: None,
+            retryable: true,
+        },
+        UpdateLifecycle::Checking {
+            current_version,
+            releases_url,
+            operation_id,
+            attempt,
+            ..
+        } => UpdateProjection {
+            state: "checking",
+            current_version: current_version.to_string(),
+            latest_version: None,
+            release_url: Some(releases_url.clone()),
+            operation_id: Some(operation_id.clone()),
+            attempt: Some(*attempt),
+            retryable: false,
+        },
+        UpdateLifecycle::Current {
+            current_version,
+            releases_url,
+            operation_id,
+            ..
+        } => UpdateProjection {
+            state: "current",
+            current_version: current_version.to_string(),
+            latest_version: None,
+            release_url: Some(releases_url.clone()),
+            operation_id: Some(operation_id.clone()),
+            attempt: None,
+            retryable: true,
+        },
+        UpdateLifecycle::Available {
+            current_version,
+            latest_version,
+            release_url,
+            operation_id,
+            ..
+        } => UpdateProjection {
+            state: "available",
+            current_version: current_version.to_string(),
+            latest_version: Some(latest_version.to_string()),
+            release_url: Some(release_url.clone()),
+            operation_id: Some(operation_id.clone()),
+            attempt: None,
+            retryable: true,
+        },
+        UpdateLifecycle::Failed {
+            current_version,
+            releases_url,
+            operation_id,
+            attempts,
+            error,
+            ..
+        } => UpdateProjection {
+            state: "failed",
+            current_version: current_version.to_string(),
+            latest_version: None,
+            release_url: Some(releases_url.clone()),
+            operation_id: Some(operation_id.clone()),
+            attempt: Some(*attempts),
+            retryable: error.retryable,
+        },
+    }
+}
+
+fn update_start_error(error: UpdateStartError) -> UiError {
+    let operation = match error {
+        UpdateStartError::SourceUnavailable => OperationError::new(
+            "Update.SourceUnavailable",
+            ErrorCategory::Unavailable,
+            "当前构建未包含 GitHub 发布源",
+            false,
+        ),
+        UpdateStartError::AlreadyChecking => OperationError::new(
+            "Update.AlreadyChecking",
+            ErrorCategory::Conflict,
+            "更新检查正在进行",
+            false,
+        ),
+        UpdateStartError::ThreadSpawnFailed => OperationError::new(
+            "Update.StartFailed",
+            ErrorCategory::Unavailable,
+            "无法启动更新检查",
+            true,
+        ),
+    };
+    UiError::from(operation)
+}
+
+fn open_system_url(url: &str) -> UiResult<()> {
+    let operation = wide("open");
+    let target = wide(url);
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    if result as isize <= 32 {
+        return Err(UiError::from(OperationError::new(
+            "Update.OpenFailed",
+            ErrorCategory::Unavailable,
+            "无法使用系统浏览器打开发布页面",
+            true,
+        )));
+    }
+    Ok(())
+}
+
+fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 fn now_unix_ms() -> u64 {

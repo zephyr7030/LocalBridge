@@ -3,8 +3,12 @@ use serde::Serialize;
 use crate::domain::{ErrorCategory, OperationError, RpcRequestId, TaskId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct UiError(Box<UiErrorFields>);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UiError {
+pub struct UiErrorFields {
     pub code: String,
     pub category: ErrorCategory,
     pub message: String,
@@ -19,7 +23,7 @@ pub type UiResult<T> = Result<T, UiError>;
 
 impl UiError {
     pub fn internal(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
+        Self(Box::new(UiErrorFields {
             code: code.into(),
             category: ErrorCategory::Internal,
             message: message.into(),
@@ -28,7 +32,7 @@ impl UiError {
             session_id: None,
             request_id: None,
             task_id: None,
-        }
+        }))
     }
 
     pub fn from_string(error: impl Into<Self>) -> Self {
@@ -44,7 +48,7 @@ impl From<OperationError> for UiError {
                 Some(request.request_id),
             )
         });
-        Self {
+        Self(Box::new(UiErrorFields {
             code: error.code,
             category: error.category,
             message: error.message,
@@ -53,7 +57,15 @@ impl From<OperationError> for UiError {
             session_id,
             request_id,
             task_id: error.task_id,
-        }
+        }))
+    }
+}
+
+impl std::ops::Deref for UiError {
+    type Target = UiErrorFields;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -89,5 +101,14 @@ mod tests {
         let ui = UiError::from(error);
         assert_eq!(ui.session_id.as_deref(), Some("session-a"));
         assert_eq!(ui.request_id, Some(RpcRequestId::Number(4)));
+    }
+
+    #[test]
+    fn ui_error_envelope_remains_small_without_changing_its_typed_payload() {
+        assert!(std::mem::size_of::<UiError>() <= 2 * std::mem::size_of::<usize>());
+        let error = UiError::internal("Ui.Test", "test");
+        let json = serde_json::to_value(error).unwrap();
+        assert_eq!(json["code"], "Ui.Test");
+        assert_eq!(json["category"], "internal");
     }
 }
