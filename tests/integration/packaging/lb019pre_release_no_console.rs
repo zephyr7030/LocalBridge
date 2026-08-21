@@ -54,7 +54,7 @@ fn free_port() -> u16 {
 
 fn visible_descendant_windows(root_pid: u32) -> Vec<String> {
     let script = format!(
-        "$all=Get-CimInstance Win32_Process; $ids=@({root_pid}); $out=@(); for($i=0;$i -lt 5;$i++){{ $next=@(); foreach($id in $ids){{ foreach($p in $all | Where-Object {{$_.ParentProcessId -eq $id}}){{ $gp=Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue; if($gp -and $gp.MainWindowHandle -ne 0){{ $out += ($p.ProcessId.ToString()+'|'+$p.Name+'|'+$gp.MainWindowHandle.ToString()) }}; $next += $p.ProcessId }} }}; $ids=$next }}; $out"
+        "$all=Get-CimInstance Win32_Process; $root=$all | Where-Object {{$_.ProcessId -eq {root_pid}}} | Select-Object -First 1; $frontier=@($root); $out=@(); for($i=0;$i -lt 5;$i++){{ $next=@(); foreach($parent in $frontier){{ foreach($p in $all | Where-Object {{$_.ParentProcessId -eq $parent.ProcessId -and $_.CreationDate -ge $parent.CreationDate}}){{ $gp=Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue; if($gp -and $gp.MainWindowHandle -ne 0){{ $out += ($p.ProcessId.ToString()+'|'+$p.Name+'|'+$gp.MainWindowHandle.ToString()) }}; $next += $p }} }}; $frontier=$next }}; $out"
     );
     let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-Command", &script])
