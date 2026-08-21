@@ -4,7 +4,7 @@
   "governance_model": "refactor_phases",
   "contract_file": "CONTROL_PLANE_REFACTOR_CONTRACT.json",
   "human_authority": "docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md",
-  "status": "REFACTOR_IN_PROGRESS",
+  "status": "READY_FOR_UNIFIED_ACCEPTANCE",
   "current_phase": "R7",
   "implementation_started": true,
   "phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
@@ -141,7 +141,32 @@
     },
     "R7": {
       "title": "Product Lifecycle",
-      "status": "IN_PROGRESS"
+      "status": "VERIFIED",
+      "implementation_commit": "7c14cac",
+      "verification": {
+        "tests": [
+          "cargo test --manifest-path src-tauri/Cargo.toml -- --test-threads=1 (340 library tests plus all migration/integration/policy/privilege/packaging tests passed; 4 explicit existing ignores)",
+          "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+          "npm test (11 passed)",
+          "npm run build",
+          "npm run verify:runtime-manifest",
+          "npm run verify:ui-language",
+          "startup update check returns before a blocked release source and later reaches one terminal outcome",
+          "retryable release discovery is bounded to two attempts",
+          "update-only publication advances one snapshot revision and preserves every other section"
+        ],
+        "removed_old_truth": [
+          "no prior mutable update truth existed, so the new lifecycle was introduced without a compatibility mirror or dual-write",
+          "untyped version and release URL handling at the UI boundary",
+          "large inline UI error payload layout across command Result boundaries"
+        ],
+        "verified_invariants": [
+          "INV-01",
+          "INV-06",
+          "INV-07",
+          "INV-09"
+        ]
+      }
     }
   },
   "baseline_release": {
@@ -178,5 +203,5 @@
     "automatic_next_phase": true,
     "unified_final_acceptance_after": "R7"
   },
-  "next_action": "Implement and verify R7 Product Lifecycle, then perform the unified schema44 acceptance and publish the architecture migration report."
+  "next_action": "Perform the unified schema44 acceptance and publish the architecture migration report."
 }
