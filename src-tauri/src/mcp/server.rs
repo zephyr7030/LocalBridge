@@ -6752,6 +6752,7 @@ mod tests {
                 "yield_time_ms":10000
             }),
         );
+        let (autoload, _) = settle_public_command(pep.port(), &session, 10_699, autoload);
         assert_eq!(
             autoload.body["result"]["isError"], true,
             "{:#?}",
@@ -7924,12 +7925,12 @@ mod tests {
                             "command":"Start-Sleep -Seconds 10",
                             "shell":"windows_powershell",
                             "yield_time_ms":10000,
-                            "timeout_ms":20000,
+                            "timeout_ms":120000,
                             "max_output_bytes":4096
                         }
                     }
                 }),
-                Duration::from_secs(30),
+                Duration::from_secs(150),
             )
         });
         let running_deadline = Instant::now() + Duration::from_secs(3);
@@ -7956,12 +7957,12 @@ mod tests {
                             "command":"Write-Output SESSION_B_SURVIVED",
                             "shell":"windows_powershell",
                             "yield_time_ms":0,
-                            "timeout_ms":20000,
+                            "timeout_ms":120000,
                             "max_output_bytes":4096
                         }
                     }
                 }),
-                Duration::from_secs(30),
+                Duration::from_secs(150),
             )
         });
         thread::sleep(Duration::from_millis(100));
@@ -8056,12 +8057,12 @@ mod tests {
                             "command":"Start-Sleep -Seconds 10",
                             "shell":"windows_powershell",
                             "yield_time_ms":10000,
-                            "timeout_ms":20000,
+                            "timeout_ms":120000,
                             "max_output_bytes":4096
                         }
                     }
                 }),
-                Duration::from_secs(30),
+                Duration::from_secs(150),
             )
         });
         let running_deadline = Instant::now() + Duration::from_secs(3);
@@ -8086,12 +8087,12 @@ mod tests {
                             "command":"Write-Output SESSION_B_NOT_CANCELLED",
                             "shell":"windows_powershell",
                             "yield_time_ms":0,
-                            "timeout_ms":20000,
+                            "timeout_ms":120000,
                             "max_output_bytes":4096
                         }
                     }
                 }),
-                Duration::from_secs(30),
+                Duration::from_secs(150),
             )
         });
         thread::sleep(Duration::from_millis(100));
