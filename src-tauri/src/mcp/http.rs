@@ -239,9 +239,7 @@ impl RuntimeCommandControl for McpCancellationClient {
             match private_status {
                 "running" | "terminating" => RuntimeCommandStatus::Running,
                 "terminated" | "killed" | "cancelled" => RuntimeCommandStatus::Cancelled,
-                "exited" if exit_code.is_some_and(|code| code != 0) => {
-                    RuntimeCommandStatus::Failed
-                }
+                "exited" if exit_code.is_some_and(|code| code != 0) => RuntimeCommandStatus::Failed,
                 "exited" => RuntimeCommandStatus::Completed,
                 _ => RuntimeCommandStatus::Lost,
             }
@@ -272,12 +270,8 @@ impl RuntimeCommandControl for McpCancellationClient {
 fn map_command_transport_error(error: CodingToolsRuntimeError) -> RuntimeCommandControlError {
     match error {
         CodingToolsRuntimeError::ProtocolMismatch => RuntimeCommandControlError::InvalidRequest,
-        CodingToolsRuntimeError::UpstreamRpcError => {
-            RuntimeCommandControlError::CapabilityMismatch
-        }
-        CodingToolsRuntimeError::HttpStatus(404) => {
-            RuntimeCommandControlError::SessionUnavailable
-        }
+        CodingToolsRuntimeError::UpstreamRpcError => RuntimeCommandControlError::CapabilityMismatch,
+        CodingToolsRuntimeError::HttpStatus(404) => RuntimeCommandControlError::SessionUnavailable,
         _ => RuntimeCommandControlError::Unavailable,
     }
 }

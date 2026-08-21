@@ -303,12 +303,22 @@ async function exportPublicSource() {
 
 async function formatCheck() {
   run("git", ["diff", "--check"], { stdio: "inherit" });
-  let base = "HEAD^";
-  if (process.env.GITHUB_BASE_REF) base = `origin/${process.env.GITHUB_BASE_REF}`;
-  let changed = [];
-  try { changed = git(["diff", "--name-only", `${base}...HEAD`, "--", "*.rs"]).split(/\r?\n/).filter(Boolean); } catch { changed = []; }
-  for (const path of changed) run("rustfmt", ["--edition", "2024", "--check", path], { stdio: "inherit" });
-  console.log(`PRE_RELEASE_FORMAT_CHECK=PASS rust_files=${changed.length}`);
+  let base = process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : "HEAD^";
+  if (process.env.GITHUB_EVENT_PATH && existsSync(process.env.GITHUB_EVENT_PATH)) {
+    try {
+      const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8"));
+      if (typeof event.before === "string" && !/^0+$/.test(event.before)) base = event.before;
+    } catch {}
+  }
+  const changed = new Set();
+  try {
+    for (const path of git(["diff", "--name-only", "--diff-filter=ACMR", base, "HEAD", "--", "*.rs"]).split(/\r?\n/).filter(Boolean)) changed.add(path);
+  } catch {}
+  for (const path of git(["diff", "--name-only", "--diff-filter=ACMR", "HEAD", "--", "*.rs"]).split(/\r?\n/).filter(Boolean)) changed.add(path);
+  for (const path of [...changed].sort()) {
+    run("rustfmt", ["--edition", "2024", "--check", "--config", "skip_children=true", path], { stdio: "inherit" });
+  }
+  console.log(`PRE_RELEASE_FORMAT_CHECK=PASS rust_files=${changed.size}`);
 }
 
 async function verifyTrackedLocalState() {
