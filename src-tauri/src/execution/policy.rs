@@ -2720,10 +2720,10 @@ fn reviewed_administrator_filesystem(arguments: &Value) -> bool {
     };
     spec.validate().is_ok()
         && FilesystemPathPolicy::allows(&spec.path)
-        && !spec
+        && spec
             .destination
             .as_deref()
-            .is_some_and(|path| !FilesystemPathPolicy::allows(path))
+            .is_none_or(FilesystemPathPolicy::allows)
 }
 
 pub(crate) fn explicit_control_plane_reference(value: &str) -> bool {

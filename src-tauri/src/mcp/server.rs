@@ -1754,39 +1754,43 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     Ok(guard) => guard,
                     Err(TryLockError::Poisoned(error)) => error.into_inner(),
                     Err(TryLockError::WouldBlock) => {
-                        if name == "command_control"
-                            && let Some(public_session) = controlled_public_session.as_ref()
-                        {
-                            record_mcp_request_start(&request_diagnostic_key(&id), session, name);
-                            let decision = public_policy
-                                .read()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .decide_public(mode, name, &arguments);
-                            let result = if decision.allowed {
-                                direct_command_control_during_work(
-                                    &arguments,
-                                    public_session,
-                                    executions,
-                                    cancellation,
-                                    observed_workspace,
-                                    private_request_id.clone(),
-                                )
-                            } else {
-                                FacadeDenied {
-                                    reason: decision
-                                        .deny_reason
-                                        .expect("denied command_control decision contains reason"),
-                                    capability: decision.descriptor.capability,
+                        if name == "command_control" {
+                            if let Some(public_session) = controlled_public_session.as_ref() {
+                                record_mcp_request_start(
+                                    &request_diagnostic_key(&id),
+                                    session,
+                                    name,
+                                );
+                                let decision = public_policy
+                                    .read()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                    .decide_public(mode, name, &arguments);
+                                let result = if decision.allowed {
+                                    direct_command_control_during_work(
+                                        &arguments,
+                                        public_session,
+                                        executions,
+                                        cancellation,
+                                        observed_workspace,
+                                        private_request_id.clone(),
+                                    )
+                                } else {
+                                    FacadeDenied {
+                                        reason: decision.deny_reason.expect(
+                                            "denied command_control decision contains reason",
+                                        ),
+                                        capability: decision.descriptor.capability,
+                                    }
+                                    .to_mcp_result()
+                                };
+                                if let Some(error) =
+                                    operation_error_from_facade_result(&Ok(result.clone()))
+                                {
+                                    requests.record_error(request_key.clone(), error);
                                 }
-                                .to_mcp_result()
-                            };
-                            if let Some(error) =
-                                operation_error_from_facade_result(&Ok(result.clone()))
-                            {
-                                requests.record_error(request_key.clone(), error);
+                                requests.remove(&request_key);
+                                return write_rpc_result(&mut stream, id, result, Some(session));
                             }
-                            requests.remove(&request_key);
-                            return write_rpc_result(&mut stream, id, result, Some(session));
                         }
                         requests.record_error(
                             request_key.clone(),
@@ -2036,11 +2040,12 @@ fn handle_task_control(
                 if queued_cancelled {
                     let _ = tasks.finish(task_id, TerminalOutcome::Cancelled);
                 }
-                if let Some(task) = tasks.get(task_id)
-                    && let Some(active) = requests.get(&task.request)
-                    && cancel_registered_request(&active, cancellation, privileged).is_ok()
-                {
-                    cancelled = cancelled.saturating_add(1);
+                if let Some(task) = tasks.get(task_id) {
+                    if let Some(active) = requests.get(&task.request) {
+                        if cancel_registered_request(&active, cancellation, privileged).is_ok() {
+                            cancelled = cancelled.saturating_add(1);
+                        }
+                    }
                 }
                 for execution in executions
                     .running_owned_by(&session_id)
