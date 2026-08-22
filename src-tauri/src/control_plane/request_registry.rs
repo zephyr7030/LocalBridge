@@ -17,6 +17,13 @@ pub(crate) enum RequestCancellationTarget {
 pub(crate) struct ActiveRequest {
     pub key: RequestKey,
     pub cancellation: RequestCancellationTarget,
+    pub state: ActiveRequestState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActiveRequestState {
+    Active,
+    CancellationRequested,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,10 +53,34 @@ impl RequestRegistry {
         if state.active.contains_key(&key) {
             return Err(RequestRegistryError::AlreadyActive);
         }
-        state
-            .active
-            .insert(key.clone(), ActiveRequest { key, cancellation });
+        state.active.insert(
+            key.clone(),
+            ActiveRequest {
+                key,
+                cancellation,
+                state: ActiveRequestState::Active,
+            },
+        );
         Ok(())
+    }
+
+    pub(crate) fn request_cancellation(&self, key: &RequestKey) -> Option<ActiveRequest> {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let request = state.active.get_mut(key)?;
+        request.state = ActiveRequestState::CancellationRequested;
+        Some(request.clone())
+    }
+
+    pub(crate) fn cancellation_was_requested(&self, key: &RequestKey) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
+            .get(key)
+            .is_some_and(|request| request.state == ActiveRequestState::CancellationRequested)
     }
 
     pub(crate) fn remove(&self, key: &RequestKey) -> Option<ActiveRequest> {
@@ -58,15 +89,6 @@ impl RequestRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .active
             .remove(key)
-    }
-
-    pub(crate) fn get(&self, key: &RequestKey) -> Option<ActiveRequest> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .active
-            .get(key)
-            .cloned()
     }
 
     #[cfg(test)]
@@ -170,11 +192,27 @@ mod tests {
             registry.register(key.clone(), runtime_target(102)),
             Err(RequestRegistryError::AlreadyActive)
         );
-        let active = registry.get(&key).unwrap();
+        let active = registry.request_cancellation(&key).unwrap();
         assert!(matches!(
             active.cancellation,
             RequestCancellationTarget::Runtime(RpcRequestId::Number(101))
         ));
+    }
+
+    #[test]
+    fn cancellation_intent_is_owned_by_the_scoped_request() {
+        let registry = RequestRegistry::default();
+        let request = key("a", 3);
+        registry
+            .register(request.clone(), runtime_target(103))
+            .unwrap();
+
+        assert!(!registry.cancellation_was_requested(&request));
+        assert_eq!(
+            registry.request_cancellation(&request).unwrap().state,
+            ActiveRequestState::CancellationRequested
+        );
+        assert!(registry.cancellation_was_requested(&request));
     }
 
     #[test]

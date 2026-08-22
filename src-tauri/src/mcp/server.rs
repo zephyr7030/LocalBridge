@@ -859,7 +859,9 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
             break;
         }
         for request in &active {
-            let _ = cancel_registered_request(request, &cancellation, privileged.as_ref());
+            if let Some(request) = requests.request_cancellation(&request.key) {
+                let _ = cancel_registered_request(&request, &cancellation, privileged.as_ref());
+            }
         }
         thread::sleep(Duration::from_millis(25));
     }
@@ -883,7 +885,9 @@ fn settle_closed_session(
     privileged: Option<&Arc<dyn PrivilegedExecution>>,
 ) {
     for request in requests.owned_by(&session.id) {
-        let _ = cancel_registered_request(&request, cancellation, privileged);
+        if let Some(request) = requests.request_cancellation(&request.key) {
+            let _ = cancel_registered_request(&request, cancellation, privileged);
+        }
     }
     for task_id in scheduler.cancel_queued_by_session(&session.id) {
         let _ = tasks.finish(&task_id, TerminalOutcome::Cancelled);
@@ -1643,7 +1647,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             let call_task_id = registered_task
                 .clone()
                 .unwrap_or_else(|| TaskId::new(format!("projection-{}", private_request_id)));
-            let result = guard.call_tool_for_task(
+            let mut result = guard.call_tool_for_task(
                 mode,
                 name,
                 arguments,
@@ -1667,6 +1671,9 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     current_task.wake();
                 },
             );
+            if requests.cancellation_was_requested(&request_key) {
+                result = normalize_accepted_request_cancellation(name, result);
+            }
             if let Some(error) = operation_error_from_facade_result(&result) {
                 requests.record_error(request_key.clone(), error.clone());
                 if let Some(task_id) = &registered_task {
@@ -2020,9 +2027,7 @@ fn handle_task_control(
                 if queued_cancelled {
                     let _ = tasks.finish(task_id, TerminalOutcome::Cancelled);
                 }
-                let active_request = tasks
-                    .get(task_id)
-                    .and_then(|task| requests.get(&task.request));
+                let active_request = tasks.get(task_id).map(|task| task.request);
                 let running_executions = if explicit_task_capability {
                     executions.running_for_task(task_id)
                 } else {
@@ -2085,9 +2090,11 @@ fn handle_task_control(
                         cancelled = cancelled.saturating_add(1);
                     }
                 }
-                if let Some(active) = active_request {
-                    if cancel_registered_request(&active, cancellation, privileged).is_ok() {
-                        cancelled = cancelled.saturating_add(1);
+                if let Some(request_key) = active_request {
+                    if let Some(active) = requests.request_cancellation(&request_key) {
+                        if cancel_registered_request(&active, cancellation, privileged).is_ok() {
+                            cancelled = cancelled.saturating_add(1);
+                        }
                     }
                 }
             }
@@ -3490,6 +3497,31 @@ fn task_terminal_outcome(result: &Result<Value, FacadeCallError>) -> TerminalOut
     }
 }
 
+fn normalize_accepted_request_cancellation(
+    tool_name: &str,
+    result: Result<Value, FacadeCallError>,
+) -> Result<Value, FacadeCallError> {
+    if tool_name == "exec_command" {
+        let mut data = result
+            .as_ref()
+            .ok()
+            .and_then(|value| value.pointer("/structuredContent/data"))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        data.insert("status".into(), Value::String("cancelled".into()));
+        return Ok(stable_command_error(
+            FacadeErrorCode::ProcessCancelled,
+            "Command cancelled",
+            data,
+        ));
+    }
+    Ok(
+        FacadeError::new(FacadeErrorCode::ProcessCancelled, "Task cancelled", false)
+            .to_mcp_result(),
+    )
+}
+
 fn operation_error_from_facade_result(
     result: &Result<Value, FacadeCallError>,
 ) -> Option<OperationError> {
@@ -3557,7 +3589,7 @@ fn registered_request_for_transport_cancel(
     session_id: &McpSessionId,
     request_id: &RpcRequestId,
 ) -> Option<ActiveRequest> {
-    requests.get(&RequestKey::new(session_id.clone(), request_id.clone()))
+    requests.request_cancellation(&RequestKey::new(session_id.clone(), request_id.clone()))
 }
 
 fn next_private_request_id() -> RpcRequestId {
@@ -7208,14 +7240,12 @@ mod tests {
                 Duration::from_secs(150),
             )
         });
-        let running_deadline = Instant::now() + Duration::from_secs(3);
-        while !matches!(
-            pep.current_task_projection().latest_snapshot(),
-            CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
-        ) {
-            assert!(Instant::now() < running_deadline, "session A never ran");
-            thread::sleep(Duration::from_millis(10));
-        }
+        assert_eventually("session A never ran", Duration::from_secs(3), || {
+            matches!(
+                pep.current_task_projection().latest_snapshot(),
+                CurrentTaskStatus::Active(ref task) if task.state == TaskExecutionState::Running
+            )
+        });
 
         let call_session_b = session_b.clone();
         let call_b = thread::spawn(move || {
@@ -7370,7 +7400,14 @@ mod tests {
                 Duration::from_secs(150),
             )
         });
-        thread::sleep(Duration::from_millis(100));
+        assert_eventually(
+            "session B did not enter Work FIFO",
+            Duration::from_secs(3),
+            || {
+                let scheduler = pep.control_plane.scheduler().snapshot();
+                scheduler.work_running == 1 && scheduler.work_queued == 1
+            },
+        );
         let queued = pep.control_plane.scheduler().snapshot();
         assert_eq!(queued.work_running, 1);
         assert_eq!(queued.work_queued, 1, "session B did not enter Work FIFO");
@@ -7447,7 +7484,7 @@ mod tests {
         let call_session = session.clone();
         let call_started = std::time::Instant::now();
         let call = thread::spawn(move || {
-            post_with_read_timeout(
+            post(
                 port,
                 Some(&call_session),
                 &json!({
@@ -7466,7 +7503,6 @@ mod tests {
                         }
                     }
                 }),
-                Duration::from_secs(6),
             )
         });
 
@@ -7586,7 +7622,7 @@ mod tests {
         let port = pep.port();
         let worker_session = worker.clone();
         let foreground = thread::spawn(move || {
-            post_with_read_timeout(
+            post(
                 port,
                 Some(&worker_session),
                 &json!({
@@ -7602,17 +7638,13 @@ mod tests {
                         }
                     }
                 }),
-                Duration::from_secs(6),
             )
         });
-        let running_deadline = Instant::now() + Duration::from_secs(3);
-        while pep.control_plane.scheduler().snapshot().work_running != 1 {
-            assert!(
-                Instant::now() < running_deadline,
-                "foreground work never acquired its explicit scheduler slot"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        assert_eventually(
+            "foreground work never acquired its explicit scheduler slot",
+            Duration::from_secs(3),
+            || pep.control_plane.scheduler().snapshot().work_running == 1,
+        );
 
         let poll_started = Instant::now();
         let polled = public_tool_call(
@@ -7675,7 +7707,8 @@ mod tests {
             "{:#?}",
             cancel_worker.body
         );
-        let _ = foreground.join().expect("foreground worker response");
+        let foreground = foreground.join().expect("foreground worker response");
+        assert_tool_error(&foreground, "ProcessCancelled");
 
         let mut coding = pep.stop().expect("PEP stop after control-lane test");
         coding.stop().expect("MCP stop after control-lane test");

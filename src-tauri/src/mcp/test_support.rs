@@ -75,10 +75,15 @@ pub(crate) fn free_port() -> u16 {
 }
 
 pub(crate) fn cleanup_test_directory(path: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    // Windows can retain a process working-directory handle briefly after the
+    // Job has reported zero active processes. Keep that platform hand-off in
+    // the shared fixture instead of teaching individual lifecycle tests to
+    // sleep or to ignore cleanup failures.
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         match fs::remove_dir_all(path) {
             Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
             Err(error)
                 if matches!(
                     error.kind(),
@@ -89,6 +94,21 @@ pub(crate) fn cleanup_test_directory(path: &Path) {
             }
             Err(error) => panic!("remove test workspace {}: {error}", path.display()),
         }
+    }
+}
+
+pub(crate) fn assert_eventually(
+    description: &str,
+    timeout: Duration,
+    mut condition: impl FnMut() -> bool,
+) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if condition() {
+            return;
+        }
+        assert!(Instant::now() < deadline, "{description}");
+        thread::sleep(Duration::from_millis(10));
     }
 }
 

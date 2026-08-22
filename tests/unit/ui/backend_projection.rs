@@ -16,11 +16,22 @@ fn production_update_projection_exposes_the_official_release_source() {
         Some("https://github.com/zephyr7030/LocalBridge/releases")
     );
     assert!(projection.retryable);
+    let serialized = serde_json::to_value(&projection).expect("update command result serializes");
+    assert_eq!(serialized["state"], "idle");
+    assert_eq!(serialized["currentVersion"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        serialized["releaseUrl"],
+        "https://github.com/zephyr7030/LocalBridge/releases"
+    );
 
     let release = release_projection(&crate::domain::GitHubRepository::official(), &lifecycle)
         .expect("the fixed official release URL must be allowed");
     assert_eq!(
         release.release_url,
+        "https://github.com/zephyr7030/LocalBridge/releases"
+    );
+    assert_eq!(
+        serde_json::to_value(&release).expect("open-release command result serializes")["releaseUrl"],
         "https://github.com/zephyr7030/LocalBridge/releases"
     );
 }

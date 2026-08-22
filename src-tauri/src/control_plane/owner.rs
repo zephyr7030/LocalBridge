@@ -110,8 +110,8 @@ mod tests {
             .unwrap();
 
         assert!(requests_from_controller.remove(&request_a).is_some());
-        assert!(requests_from_controller.get(&request_a).is_none());
-        assert!(requests_from_controller.get(&request_b).is_some());
+        assert!(!requests_from_controller.contains(&request_a));
+        assert!(requests_from_controller.contains(&request_b));
         let _ = std::fs::remove_file(state_path);
     }
 }
