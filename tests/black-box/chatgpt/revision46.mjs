@@ -6,6 +6,7 @@ import {
   emptyLoopbackPreconnect,
   singleChunkedRequestFetch,
 } from "./client.mjs";
+import { drivePublicCommandToTerminal } from "./command_lifecycle.mjs";
 
 function argumentsFrom(argv) {
   const options = {};
@@ -63,23 +64,6 @@ async function toolCall(client, name, args, requestId) {
     const cause = error?.cause ? `; cause=${error.cause.code ?? error.cause}` : "";
     throw new Error(`${requestId} transport failed: ${error.message}${cause}`, { cause: error });
   }
-}
-
-async function pollToTerminal(client, publicSessionId, prefix) {
-  const deadline = performance.now() + 10_000;
-  let response;
-  do {
-    response = await toolCall(
-      client,
-      "command_control",
-      { action: "poll", session_id: publicSessionId, wait_ms: 100 },
-      `${prefix}-${Math.round(performance.now())}`,
-    );
-    const data = structured(response)?.data;
-    if (structured(response)?.error?.code === "OperationTimedOut") continue;
-    if (data?.status !== "running") return response;
-  } while (performance.now() < deadline);
-  assert.fail(`public command did not become terminal: ${explain(response)}`);
 }
 
 export async function runRevision46Scenario({ endpoint, workspace }) {
@@ -273,7 +257,11 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     );
     assert.ok(killed.elapsed_ms < 1_500, explain(killed));
     assert.notEqual(structured(killed)?.error?.code, "SessionUnavailable", explain(killed));
-    const killedTerminal = await pollToTerminal(client, interactiveSession, "killed-poll");
+    const killedTerminal = await drivePublicCommandToTerminal({
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      publicSessionId: interactiveSession,
+      requestPrefix: "killed-poll",
+    });
     const killedData = assertSuccess(killedTerminal);
     assert.equal(killedData.status, "cancelled", explain(killedTerminal));
     report.checks.command_session_ownership = "PASS";
@@ -325,11 +313,11 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     const taskCancelData = assertSuccess(taskCancel);
     assert.ok(taskCancel.elapsed_ms < 2_000, explain(taskCancel));
     assert.ok(taskCancelData.cancelled_requests >= 1, explain(taskCancel));
-    const taskTerminal = await pollToTerminal(
-      client,
-      cancellableData.session_id,
-      "task-cancel-poll",
-    );
+    const taskTerminal = await drivePublicCommandToTerminal({
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      publicSessionId: cancellableData.session_id,
+      requestPrefix: "task-cancel-poll",
+    });
     assert.equal(assertSuccess(taskTerminal).status, "cancelled", explain(taskTerminal));
     report.checks.task_cancel_detached = "PASS";
 

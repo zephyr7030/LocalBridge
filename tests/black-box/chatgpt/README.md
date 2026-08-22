@@ -37,6 +37,9 @@ ownership. A tool call has the same side effects it would have from ChatGPT;
 the test client itself adds no capabilities or privileged route.
 
 `client.test.mjs` fixes the transport contract without starting LocalBridge.
+`command_lifecycle.mjs` is the single black-box driver for following an accepted
+public command through retryable poll-budget expiry to one durable terminal
+outcome; scenarios must reuse it instead of copying polling loops.
 `live_client.rs` starts the real bundled runtime and policy facade, then invokes
 the external client to prove one public command reaches a terminal outcome.
 Neither test proves the OpenAI Tunnel path; Tunnel incidents must be reproduced

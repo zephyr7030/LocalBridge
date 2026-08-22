@@ -25,6 +25,13 @@ const chatGptClientPath = join(
   "chatgpt",
   "client.mjs",
 );
+const revisionScenarioPath = join(
+  repositoryRoot,
+  "tests",
+  "black-box",
+  "chatgpt",
+  "revision46.mjs",
+);
 
 test("legacy governance and schema-generation scripts cannot return to the live test tree", () => {
   const forbiddenNames = testScripts
@@ -58,4 +65,10 @@ test("the ChatGPT simulator remains outside production and internal state bounda
   ]) {
     assert.equal(source.includes(forbidden), false, `client imports internal seam: ${forbidden}`);
   }
+});
+
+test("black-box scenarios reuse the shared command terminal driver", () => {
+  const source = readFileSync(revisionScenarioPath, "utf8");
+  assert.match(source, /from "\.\/command_lifecycle\.mjs"/);
+  assert.equal(source.includes("function pollToTerminal"), false);
 });
