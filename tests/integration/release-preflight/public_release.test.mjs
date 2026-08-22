@@ -17,6 +17,9 @@ assert.equal(isPublicPath("compatibility/coding-tools/0.2.2/tools-list.json"), t
 assert.equal(isPrivatePath("compatibility/coding-tools/0.2.2/run-help.txt"), true);
 assert.equal(isPublicPath("compatibility/coding-tools/0.2.2/run-help.txt"), false);
 assert.equal(isPublicPath("tests/integration/mcp/coding_runtime.rs"), true);
+assert.equal(isPublicPath("tests/black-box/chatgpt/client.mjs"), true);
+assert.equal(isPublicPath("tests/black-box/chatgpt/client.test.mjs"), true);
+assert.equal(isPublicPath("tests/black-box/chatgpt/revision46.mjs"), true);
 assert.equal(isPublicPath("tests/e2e/dashboard/lb015_contract.test.mjs"), false);
 assert.equal(isPublicPath("tests/integration/release-preflight/lb018pre.test.mjs"), true);
 

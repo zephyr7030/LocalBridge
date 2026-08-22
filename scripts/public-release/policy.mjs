@@ -76,7 +76,12 @@ export function isPrivatePath(value) {
   if (/^授权信息(?:\.|$)/i.test(path)) return true;
   if (/authorization/i.test(path) && !path.startsWith("src-tauri/")) return true;
   if (/cloudflared(?:\.exe|-manifest\.json)$/i.test(path)) return true;
-  if (path.startsWith("tests/") && path.endsWith(".mjs") && !path.startsWith("tests/integration/release-preflight/")) return true;
+  if (
+    path.startsWith("tests/")
+    && path.endsWith(".mjs")
+    && !path.startsWith("tests/integration/release-preflight/")
+    && !path.startsWith("tests/black-box/chatgpt/")
+  ) return true;
   return false;
 }
 
