@@ -6,6 +6,7 @@ use crate::domain::{
 use super::execution_registry::{ExecutionRegistry, ExecutionRegistryError};
 
 pub(crate) const COMMAND_CONTROL_TRANSPORT_HEADROOM_MS: u64 = 1_000;
+pub(crate) const COMMAND_CONTROL_UPSTREAM_HEADROOM_MS: u64 = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommandControlAction {

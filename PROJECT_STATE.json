@@ -213,7 +213,7 @@
     "current_api_revision": 47,
     "verification": {
       "scope": "current local remediation gate only; not unified architecture acceptance",
-      "rust": "357 library tests plus all non-ignored migration/integration/policy/privilege/packaging tests passed locally; the two prior CI timing failures also passed 20 consecutive targeted runs each",
+      "rust": "359 library tests plus all non-ignored migration/integration/policy/privilege/packaging tests passed locally; the final library suite passed three consecutive single-threaded runs after all slow-runner fixes",
       "ignored": "3 process helper entry points and 1 explicit UAC test",
       "clippy": "all targets passed with -D warnings",
       "frontend": "11 tests passed",
@@ -228,7 +228,7 @@
       "revision47_external_client": "PASS; the external ChatGPT-style client verified cross-session detached control, explicit TaskId workflow resume/cancel after reconnect, truthful TaskIdRequired cancellation, bounded command write/kill, filesystem authority/search behavior, and terminal projection convergence; the cancellation race matrix also passed five consecutive isolated runs and the final unified Rust gate",
       "onboarding_permission": "PASS; the five-screen permission controls read the revisioned backend desired permission and no longer keep a React permission owner or write permission from project preparation",
       "update_backend": "PASS; retry_update_check returns a typed lifecycle projection, open_github_releases returns the selected URL, the production owner always carries the official repository, and the official latest-release API returned v0.1.2 during the local gate",
-      "test_fixture_synchronization": "PASS; scheduler tests wait for observable queue state, process-backed workspace cleanup centrally retries transient Windows handle release, and client socket budgets no longer expire before the command deadline under test",
+      "test_fixture_synchronization": "PASS; scheduler tests wait for observable queue state, every non-terminal command-control result is followed by one shared terminal driver, process-backed workspace cleanup centrally retries transient Windows handle release, and client socket budgets no longer expire before the command deadline under test",
       "local_http_stress": "PASS; deterministic delayed-request regression proves accepted sockets wait for HTTP bytes, and two sequential external-client fixtures completed without ECONNRESET",
       "real_cloud_tunnel": "NOT_RUN_LOCAL_PEP_ONLY"
     },
@@ -253,7 +253,9 @@
       "onboarding permission selection reads and confirms the backend-owned revisioned desired permission",
       "update and GitHub release commands return typed non-empty projections backed by the fixed official repository",
       "ExecutionRegistry cancellation intent is recorded before runtime cancellation and is the sole authority when a command session disappears",
-      "RequestRegistry owns typed Active/CancellationRequested request state, so an accepted foreground cancellation cannot later be projected as ProcessFailed"
+      "RequestRegistry owns typed Active/CancellationRequested request state, so an accepted foreground cancellation cannot later be projected as ProcessFailed",
+      "durable terminal output handles are reconstructed by their retained stream identity instead of changing output_refs from an object into an array",
+      "command control reserves half of the documented transport headroom for the outer public response path"
     ],
     "blocking_failures": [
       {

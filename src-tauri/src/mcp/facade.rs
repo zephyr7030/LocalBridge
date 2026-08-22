@@ -9,7 +9,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Map, Value, json};
 
-use crate::control_plane::command_control::COMMAND_CONTROL_TRANSPORT_HEADROOM_MS;
+use crate::control_plane::command_control::{
+    COMMAND_CONTROL_TRANSPORT_HEADROOM_MS, COMMAND_CONTROL_UPSTREAM_HEADROOM_MS,
+};
 use crate::control_plane::execution_registry::{ExecutionRegistry, ExecutionRegistryError};
 use crate::diagnostics::error::{
     DiagnosticErrorCode, DiagnosticPhase, ErrorDiagnostic, from_canonical_code,
@@ -1583,6 +1585,16 @@ impl PublicCommandSessions {
         self.outputs.stream(public_output_ref)
     }
 
+    fn output_refs_by_stream(&self, output_refs: &[String]) -> Map<String, Value> {
+        output_refs
+            .iter()
+            .filter_map(|output_ref| {
+                self.output_stream(output_ref)
+                    .map(|stream| (stream, Value::String(output_ref.clone())))
+            })
+            .collect()
+    }
+
     fn mark_terminal(
         &mut self,
         public_session_id: &str,
@@ -2925,17 +2937,14 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         if let Some(signal) = terminal.signal {
             data.insert("signal".into(), Value::String(signal));
         }
-        if !terminal.output_refs.is_empty() {
-            data.insert(
-                "output_refs".into(),
-                Value::Array(
-                    terminal
-                        .output_refs
-                        .into_iter()
-                        .map(Value::String)
-                        .collect(),
-                ),
-            );
+        let output_refs = self
+            .public_commands
+            .output_refs_by_stream(&terminal.output_refs);
+        if !output_refs.is_empty() {
+            if let Some(stdout) = output_refs.get("stdout").cloned() {
+                data.insert("output_ref".into(), stdout);
+            }
+            data.insert("output_refs".into(), Value::Object(output_refs));
         }
         match terminal.outcome {
             TerminalOutcome::Completed => Some(stable_success(
@@ -3440,7 +3449,7 @@ fn command_control_transport_timeout(wait_ms: u64) -> std::time::Duration {
     std::time::Duration::from_millis(
         wait_ms
             .min(30_000)
-            .saturating_add(COMMAND_CONTROL_TRANSPORT_HEADROOM_MS),
+            .saturating_add(COMMAND_CONTROL_UPSTREAM_HEADROOM_MS),
     )
 }
 
@@ -9660,7 +9669,7 @@ mod tests {
         assert!(wait.contains("1000ms") && wait.contains("end-to-end"));
         assert_eq!(
             command_control_transport_timeout(500),
-            std::time::Duration::from_millis(1500)
+            std::time::Duration::from_millis(1000)
         );
     }
 
@@ -10688,6 +10697,19 @@ mod tests {
             replay["structuredContent"]["error"]["code"],
             "ProcessCancelled"
         );
+    }
+
+    #[test]
+    fn durable_terminal_output_handles_retain_their_stream_identity() {
+        let task_state = test_task_state("terminal-output-streams");
+        let mut sessions = PublicCommandSessions::default();
+        let public = bind_test_session(&mut sessions, &task_state, "PRIVATE_OUTPUT_STREAMS");
+        let stdout = sessions.public_output_for_private("private-stdout", &public, "stdout");
+        let stderr = sessions.public_output_for_private("private-stderr", &public, "stderr");
+        let refs = sessions.output_refs_by_stream(&[stdout.clone(), stderr.clone()]);
+
+        assert_eq!(refs["stdout"], stdout);
+        assert_eq!(refs["stderr"], stderr);
     }
 
     #[test]

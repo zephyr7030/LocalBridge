@@ -79,7 +79,7 @@ pub(crate) fn cleanup_test_directory(path: &Path) {
     // Job has reported zero active processes. Keep that platform hand-off in
     // the shared fixture instead of teaching individual lifecycle tests to
     // sleep or to ignore cleanup failures.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         match fs::remove_dir_all(path) {
             Ok(()) => return,
@@ -535,5 +535,40 @@ pub(crate) fn settle_public_command(
                 response.body
             ),
         }
+    }
+}
+
+pub(crate) fn poll_public_command_to_terminal(
+    port: u16,
+    session: &str,
+    mut poll_id: u64,
+    public_session: &str,
+    timeout: Duration,
+) -> ClientResponse {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let response = public_tool_call(
+            port,
+            session,
+            poll_id,
+            "command_control",
+            json!({"action":"poll","session_id":public_session,"wait_ms":1_000}),
+        );
+        poll_id = poll_id.saturating_add(1);
+        let content = &response.body["result"]["structuredContent"];
+        match content["data"]["status"].as_str() {
+            Some("running") => {}
+            Some(_) => return response,
+            None if content["error"]["code"] == "OperationTimedOut" => {}
+            None => panic!(
+                "public command returned neither lifecycle status nor bounded timeout: {:#?}",
+                response.body
+            ),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "public command did not reach terminal state: {:#?}",
+            response.body
+        );
     }
 }

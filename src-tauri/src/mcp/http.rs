@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::control_plane::command_control::{
-    COMMAND_CONTROL_TRANSPORT_HEADROOM_MS, CommandControlAction, CommandKillSignal,
+    COMMAND_CONTROL_UPSTREAM_HEADROOM_MS, CommandControlAction, CommandKillSignal,
     RuntimeCommandControl, RuntimeCommandControlError, RuntimeCommandObservation,
     RuntimeCommandRequest, RuntimeCommandStatus,
 };
@@ -187,7 +187,7 @@ impl McpCancellationClient {
             Duration::from_millis(
                 wait_ms
                     .min(30_000)
-                    .saturating_add(COMMAND_CONTROL_TRANSPORT_HEADROOM_MS),
+                    .saturating_add(COMMAND_CONTROL_UPSTREAM_HEADROOM_MS),
             ),
         )
     }
@@ -818,5 +818,39 @@ fn parse_response(response: Vec<u8>) -> Result<HttpResponse, CodingToolsRuntimeE
 fn zero_bytes(bytes: &mut [u8]) {
     for byte in bytes {
         unsafe { std::ptr::write_volatile(byte, 0) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::control_plane::command_control::COMMAND_CONTROL_TRANSPORT_HEADROOM_MS;
+    use std::net::TcpListener;
+    use std::thread;
+
+    #[test]
+    fn command_control_reserves_outer_response_headroom() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            thread::sleep(Duration::from_secs(2));
+        });
+        let client = McpCancellationClient {
+            port,
+            bearer: Arc::new(InternalBearer::new("test-bearer").unwrap()),
+            session_id: Arc::from("test-session"),
+        };
+
+        let started = Instant::now();
+        let error = client
+            .control_command_session("runtime-session", "kill", None, 0)
+            .unwrap_err();
+        assert!(matches!(error, CodingToolsRuntimeError::RequestTimeout));
+        assert!(
+            started.elapsed() < Duration::from_millis(COMMAND_CONTROL_TRANSPORT_HEADROOM_MS),
+            "the upstream call consumed the public response headroom"
+        );
+        server.join().unwrap();
     }
 }

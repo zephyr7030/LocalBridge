@@ -7665,7 +7665,7 @@ mod tests {
         );
 
         let kill_started = Instant::now();
-        let killed = public_tool_call(
+        let mut killed = public_tool_call(
             pep.port(),
             &owner,
             345,
@@ -7676,6 +7676,15 @@ mod tests {
             kill_started.elapsed() < Duration::from_millis(2_500),
             "command_control kill waited behind unrelated Work"
         );
+        if killed.body["result"]["structuredContent"]["error"]["code"] == "OperationTimedOut" {
+            killed = poll_public_command_to_terminal(
+                pep.port(),
+                &owner,
+                34501,
+                &public_session,
+                Duration::from_secs(30),
+            );
+        }
         assert_eq!(
             killed.body["result"]["structuredContent"]["data"]["status"], "cancelled",
             "{:#?}",
@@ -8128,34 +8137,13 @@ mod tests {
             cancel.body
         );
 
-        let terminal_deadline = Instant::now() + Duration::from_secs(5);
-        let mut poll_request_id = 324;
-        let replay = loop {
-            let replay = public_tool_call(
-                pep.port(),
-                &other_session,
-                poll_request_id,
-                "command_control",
-                json!({"action":"poll","session_id":public_session,"wait_ms":100}),
-            );
-            poll_request_id += 1;
-            let content = &replay.body["result"]["structuredContent"];
-            if content["data"]["status"] == "cancelled" {
-                break replay;
-            }
-            assert!(
-                content["data"]["status"] == "running"
-                    || content["error"]["code"] == "OperationTimedOut",
-                "cancellation converged to an unexpected state: {:#?}",
-                replay.body
-            );
-            assert!(
-                Instant::now() < terminal_deadline,
-                "accepted cancellation did not converge: {:#?}",
-                replay.body
-            );
-            std::thread::sleep(Duration::from_millis(25));
-        };
+        let replay = poll_public_command_to_terminal(
+            pep.port(),
+            &other_session,
+            324,
+            &public_session,
+            Duration::from_secs(30),
+        );
         assert_eq!(
             replay.body["result"]["structuredContent"]["ok"], true,
             "{:#?}",
@@ -8286,32 +8274,13 @@ mod tests {
             "kill exceeded wait_ms plus transport headroom"
         );
         if killed.body["result"]["structuredContent"]["error"]["code"] == "OperationTimedOut" {
-            let observed_after_deadline = public_tool_call(
+            killed = poll_public_command_to_terminal(
                 pep.port(),
                 &other_session,
                 33301,
-                "command_control",
-                json!({"action":"poll","session_id":second_public_session,"wait_ms":0}),
+                &second_public_session,
+                Duration::from_secs(30),
             );
-            assert_ne!(
-                observed_after_deadline.body["result"]["structuredContent"]["data"]["status"],
-                "lost",
-                "a control request deadline must not fabricate an Execution terminal: {:#?}",
-                observed_after_deadline.body
-            );
-            if observed_after_deadline.body["result"]["structuredContent"]["data"]["status"]
-                == "running"
-            {
-                killed = public_tool_call(
-                    pep.port(),
-                    &other_session,
-                    33302,
-                    "command_control",
-                    json!({"action":"kill","session_id":second_public_session,"wait_ms":1000}),
-                );
-            } else {
-                killed = observed_after_deadline;
-            }
         }
         assert_eq!(
             killed.body["result"]["structuredContent"]["data"]["status"], "cancelled",

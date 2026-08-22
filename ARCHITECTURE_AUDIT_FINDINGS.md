@@ -102,7 +102,7 @@
 | 检查更新无论如何返回空 | RESOLVED | `retry_update_check` 从 `UiResult<()>` 改为返回真实 `UpdateProjection`；生命周期 owner 在启动网络线程前同步进入 `Checking`，因此调用至少返回可观察状态、版本、release URL 和 operation identity。 |
 | GitHub 页面后端返回空 | RESOLVED | `open_github_releases` 返回 typed `OpenReleaseProjection { release_url }`；生产构建固定使用 `zephyr7030/LocalBridge`，不再依赖可缺失的 build env。URL 经过 repository allowlist 后才交给系统浏览器。 |
 
-本轮本地证据：Rust 357 个 library tests 与全部非 ignored integration targets 通过，Clippy `-D warnings` 通过，frontend 11 tests/build、test-base、schema44 residue、public-release、license、runtime-resource gate 均通过；外部 revision47 客户端通过跨 Session workflow/task、command budget、filesystem 和终态一致性矩阵。Task cancel 竞态矩阵在定点修复后连续 5 次通过；发布前又把 Request cancellation intent 收口到 typed RequestRegistry，两个曾在慢速 CI 暴露的用例各连续运行 20 次并通过，完整共享门禁再次通过。GitHub 官方 latest-release API 实际返回 `v0.1.2` 和非空 release URL。这里仍不恢复统一架构验收：真实 authenticated cloud Tunnel 未运行，且本文件标记的结构性 `PARTIAL` 项仍未完成。
+本轮本地证据：Rust 359 个 library tests 与全部非 ignored integration targets 通过，Clippy `-D warnings` 通过，frontend 11 tests/build、test-base、schema44 residue、public-release、license、runtime-resource gate 均通过；外部 revision47 客户端通过跨 Session workflow/task、command budget、filesystem 和终态一致性矩阵。Task cancel 竞态矩阵在定点修复后连续 5 次通过；发布前又把 Request cancellation intent 收口到 typed RequestRegistry，统一非终态 command-control 的 terminal driver、按 stream 恢复 durable output handles，并为公共响应保留一半 transport headroom。相关定点场景各连续运行 20 次，最终 359-test library 单线程套件连续 3 轮通过，完整共享门禁再次通过。GitHub 官方 latest-release API 实际返回 `v0.1.2` 和非空 release URL。这里仍不恢复统一架构验收：真实 authenticated cloud Tunnel 未运行，且本文件标记的结构性 `PARTIAL` 项仍未完成。
 
 ### P0-55｜后代进程可绕过 Shell Policy（RESOLVED：删除虚假 Shell 子权限层）
 
