@@ -138,281 +138,76 @@ fn malformed_or_semantically_widened_policy_is_rejected() {
         "arbitrary_programs = \"allow\"",
     );
     assert!(CapabilityPolicy::from_toml(&arbitrary_elevated).is_err());
-    let no_shell_review = include_str!("../../../runtime-policy.toml").replace(
-        "unreviewable_shell_indirection = \"review_required\"",
-        "unreviewable_shell_indirection = \"allow\"",
+    let ambiguous_full_authority = include_str!("../../../runtime-policy.toml").replace(
+        "process_exec_in_full = \"current_user_token\"",
+        "process_exec_in_full = \"allow_if_reviewed\"",
     );
-    assert!(CapabilityPolicy::from_toml(&no_shell_review).is_err());
+    assert!(CapabilityPolicy::from_toml(&ambiguous_full_authority).is_err());
+    let restored_parallel_upstream_policy = include_str!("../../../runtime-policy.toml").replace(
+        "dangerously_skip_all_permissions = true",
+        "dangerously_skip_all_permissions = false",
+    );
+    assert!(CapabilityPolicy::from_toml(&restored_parallel_upstream_policy).is_err());
 }
 
 #[test]
-fn stable_public_classifier_declares_and_enforces_transitive_capabilities() {
+fn public_shell_authority_is_current_user_content_independent() {
     let policy = policy();
-    let diagnose = json!({"action":"diagnose"});
-    let diagnose_descriptor = policy
-        .classify_public_action("agent_workflow", &diagnose)
-        .expect("minimal diagnose action");
-    assert!(!diagnose_descriptor.transitive.process_exec);
-    assert!(diagnose_descriptor.transitive.git);
-    assert!(
-        policy
-            .decide_public(PermissionMode::Edit, "agent_workflow", &diagnose)
-            .allowed
-    );
+    let commands = [
+        json!({"command":"sc query EventLog","shell":"cmd"}),
+        json!({"command":"call .\\policy_probe.cmd","shell":"cmd"}),
+        json!({"command":"$program='sc'; & $program query EventLog","shell":"windows_powershell"}),
+        json!({"command":"docker version","shell":"cmd"}),
+    ];
 
-    let diagnose_with_command = json!({
-        "action":"diagnose",
-        "commands":[{"command":"Write-Output ok","shell":"windows_powershell"}]
-    });
-    let edit_diagnose_with_command = policy.decide_public(
-        PermissionMode::Edit,
-        "agent_workflow",
-        &diagnose_with_command,
-    );
-    assert!(!edit_diagnose_with_command.allowed);
-    assert_eq!(
-        edit_diagnose_with_command.deny_reason,
-        Some(DenyReason::IndirectProcessExecInEdit)
-    );
-    assert!(
-        policy
-            .decide_public(
-                PermissionMode::Full,
-                "agent_workflow",
-                &diagnose_with_command,
-            )
-            .allowed
-    );
-
-    let planner_verify = json!({
-        "action":"bugfix",
-        "phase":"verify",
-        "task_id":"lb-task-schema41"
-    });
-    let verify_descriptor = policy
-        .classify_public_action("agent_workflow", &planner_verify)
-        .expect("schema41 planner-owned verify action");
-    assert!(verify_descriptor.transitive.process_exec);
-    let edit_verify = policy.decide_public(
-        PermissionMode::Edit,
-        "agent_workflow",
-        &planner_verify,
-    );
-    assert!(!edit_verify.allowed);
-    assert_eq!(edit_verify.deny_reason, Some(DenyReason::IndirectProcessExecInEdit));
-    assert!(
-        policy
-            .decide_public(PermissionMode::Full, "agent_workflow", &planner_verify)
-            .allowed
-    );
-    assert!(
-        !policy
-            .decide_public(
-                PermissionMode::Edit,
-                "agent_workflow",
-                &json!({"action":"diagnose","commands":"invalid"}),
-            )
-            .allowed
-    );
-
-    let directory_only = json!({
-        "action":"document",
-        "directory_changes":[
-            {"action":"create_directory","path":"test"},
-            {"action":"remove_empty_directory","path":"test"}
-        ]
-    });
-    let directory_descriptor = policy
-        .classify_public_action("agent_workflow", &directory_only)
-        .expect("schema30 structured directory workflow");
-    assert!(directory_descriptor.transitive.read);
-    assert!(directory_descriptor.transitive.write);
-    assert!(directory_descriptor.transitive.git);
-    assert!(!directory_descriptor.transitive.process_exec);
-    assert!(!directory_descriptor.transitive.network);
-    assert!(!directory_descriptor.transitive.privilege);
-    assert!(!directory_descriptor.transitive.control_plane);
-    assert!(
-        policy
-            .decide_public(PermissionMode::Edit, "agent_workflow", &directory_only)
-            .allowed
-    );
-    assert!(
-        policy
-            .decide_public(PermissionMode::Full, "agent_workflow", &directory_only)
-            .allowed
-    );
-
-    for malformed in [
-        json!({"action":"document","directory_changes":[]}),
-        json!({"action":"document","directory_changes":[{"action":"create_directory","path":"test","extra":true}]}),
-        json!({"action":"document","directory_changes":[{"action":"recursive_delete","path":"test"}]}),
-        json!({"action":"document","directory_changes":[{"action":"create_directory","path":"test"}],"commands":[{"command":"echo process"}]}),
-    ] {
-        let decision = policy.decide_public(PermissionMode::Edit, "agent_workflow", &malformed);
-        assert!(
-            !decision.allowed,
-            "malformed/mixed request widened Edit: {malformed:#?}"
-        );
-    }
-
-    for structured_only_action in ["build_release", "custom"] {
-        let decision = policy.decide_public(
-            PermissionMode::Full,
-            "agent_workflow",
-            &json!({
-                "action":structured_only_action,
-                "directory_changes":[{"action":"create_directory","path":"test"}]
-            }),
-        );
-        assert!(
-            decision.allowed,
-            "action label incorrectly added privilege/network capability for {structured_only_action}"
-        );
-    }
-
-    let workflow = policy
-        .classify_public_action(
-            "agent_workflow",
-            &json!({"action":"bugfix","objective":"repair local tests"}),
-        )
-        .expect("stable workflow action");
-    assert_eq!(workflow.tool, "agent_workflow");
-    assert_eq!(workflow.action, "bugfix");
-    assert_eq!(workflow.descriptor.name, "agent_workflow");
-    assert_eq!(workflow.descriptor.capability, Capability::Workflow);
-    assert!(workflow.transitive.read);
-    assert!(!workflow.transitive.write);
-    assert!(!workflow.transitive.process_exec);
-    assert!(workflow.transitive.git);
-    assert!(!workflow.transitive.network);
-    assert!(!workflow.transitive.privilege);
-
-    let edit = policy.decide_public(
-        PermissionMode::Edit,
-        "agent_workflow",
-        &json!({"action":"bugfix","objective":"repair local tests"}),
-    );
-    assert!(edit.allowed, "objective-only bugfix has no process/write capability");
-
-    let build_release_without_network = policy.decide_public(
-        PermissionMode::Full,
-        "agent_workflow",
-        &json!({"action":"build_release","objective":"release"}),
-    );
-    assert!(build_release_without_network.allowed);
-
-    let custom_without_privilege = policy.decide_public(
-        PermissionMode::Full,
-        "agent_workflow",
-        &json!({"action":"custom","objective":"unspecified"}),
-    );
-    assert!(custom_without_privilege.allowed);
-
-    let external = policy.decide_public(
-        PermissionMode::Full,
-        "exec_command",
-        &json!({"command":"docker version"}),
-    );
-    assert!(!external.allowed);
-    assert_eq!(
-        external.deny_reason,
-        Some(DenyReason::PrivilegedRouteNotAvailable)
-    );
-
-    for arguments in [
-        json!({"command":"$x=('do'+'cker'); & $x ps","shell":"windows_powershell"}),
-        json!({"command":"$x='docker'; Start-Process $x","shell":"powershell"}),
-        json!({"command":"Set-Alias d docker; d ps","shell":"pwsh"}),
-        json!({"command":"sal d docker; d ps","shell":"pwsh"}),
-        json!({"command":"nal d docker; d ps","shell":"pwsh"}),
-        json!({"command":"$x='docker'; Set-Item Alias:lbgen12 $x; lbgen12 ps","shell":"windows_powershell"}),
-        json!({"command":"$x='docker'; si Alias:lbgen12 $x; lbgen12 ps","shell":"powershell"}),
-        json!({"command":"$Alias:lbgen12='docker'; lbgen12 ps","shell":"windows_powershell"}),
-        json!({"command":"$ExecutionContext.InvokeCommand.CommandNotFoundAction = { param($name,$eventArgs); $eventArgs.Command = Get-Command Write-Output }; lbgen13 'hook'","shell":"windows_powershell"}),
-        json!({"command":"$ExecutionContext.InvokeCommand.InvokeScript('Write-Output should-not-run')","shell":"windows_powershell"}),
-        json!({"command":"$value='abc'; $value.Trim()","shell":"windows_powershell"}),
-        json!({"command":"filter lbgen14 { Write-Output ok }; lbgen14","shell":"windows_powershell"}),
-        json!({"command":"workflow lbgen14 { Write-Output ok }; lbgen14","shell":"windows_powershell"}),
-        json!({"command":"configuration lbgen14 { Node localhost {} }","shell":"windows_powershell"}),
-        json!({"command":"$p='probe.ps1'; $sb=(Get-Command $p).ScriptBlock; 1 | ForEach-Object -Process $sb","shell":"windows_powershell"}),
-        json!({"command":"$p='probe.ps1'; $sb=(gcm $p).ScriptBlock; 1 | ForEach-Object -Process $sb","shell":"windows_powershell"}),
-        json!({"command":"$PSModuleAutoLoadingPreference='All'","shell":"windows_powershell"}),
-        json!({"command":"$n='PSModuleAutoLoadingPreference'; Set-Variable -Name $n -Value All","shell":"windows_powershell"}),
-        json!({"command":"#requires -Modules FutureModule\nWrite-Output ok","shell":"windows_powershell"}),
-        json!({"command":"New-Item Function:lbgen12 -Value { Write-Output ok }; lbgen12","shell":"windows_powershell"}),
-        json!({"command":"sc Function:lbgen12 -Value 'Write-Output ok'; lbgen12","shell":"powershell"}),
-        json!({"command":"Set-Item Env:LB_GEN12 harmless","shell":"windows_powershell"}),
-        json!({"command":"set x=docker & %x% ps","shell":"cmd"}),
-        json!({"command":"$x='C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'; $p=[System.Diagnostics.Process]::Start($x,'ps'); $p.WaitForExit()","shell":"windows_powershell"}),
-        json!({"command":"$t=[type]::GetType('System.Diagnostics.Process'); $t::Start($x,'ps')","shell":"powershell"}),
-        json!({"command":"$sh=New-Object -ComObject Shell.Application; $sh.ShellExecute($x)","shell":"powershell"}),
-        json!({"command":"$w=[wmiclass]'Win32_Process'; $w.Create($x)","shell":"windows_powershell"}),
-        json!({"command":"$x='C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe'; Write-Output \"$([System.Diagnostics.Process]::Start($x,'ps'))\"","shell":"windows_powershell"}),
-        json!({"command":"Write-Output \"value=$(1+1)\"","shell":"powershell"}),
-        json!({"command":"$x='C:\\tools\\runtime.exe'; start $x","shell":"windows_powershell"}),
-        json!({"command":"$x='C:\\tools\\runtime.exe'; ii $x","shell":"powershell"}),
-        json!({"command":"Sta`rt-Process $x","shell":"powershell"}),
-    ] {
-        let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
-        assert!(
-            !decision.allowed,
-            "shell indirection unexpectedly allowed: {arguments}"
-        );
-        assert_eq!(
-            decision.deny_reason,
-            Some(DenyReason::PrivilegedRouteNotAvailable)
-        );
-    }
-
-    for arguments in [
-        json!({"command":"Write-Output \"a|b\"; Write-Output \"a&b\"; Write-Output 'docker is text'","shell":"windows_powershell"}),
-        json!({"command":"Start-Sleep -Milliseconds 10; $line=[Console]::In.ReadLine(); Write-Output ('write:'+ $line)","shell":"auto"}),
-        json!({"command":"$line=[System.Console]::ReadLine(); Write-Output $line","shell":"windows_powershell"}),
-        json!({"command":"Write-Output '$(' ; Write-Output \"`$(`\"","shell":"windows_powershell"}),
-        json!({"command":"Write-Output '$ExecutionContext is documentation text'","shell":"windows_powershell"}),
-        json!({"command":"Write-Output 'filter workflow Get-Command .ScriptBlock probe.ps1 are documentation text'","shell":"windows_powershell"}),
-    ] {
+    for arguments in commands {
+        let descriptor = policy
+            .classify_public_action("exec_command", &arguments)
+            .expect("exec_command is a stable public action");
+        assert!(descriptor.transitive.process_exec, "{arguments}");
+        assert!(!descriptor.transitive.privilege, "{arguments}");
         assert!(
             policy
                 .decide_public(PermissionMode::Full, "exec_command", &arguments)
                 .allowed,
-            "review rejected ordinary schema28 shell semantics: {arguments}"
+            "Full must expose one current-user authority regardless of command spelling: {arguments}"
+        );
+        assert!(
+            policy
+                .decide_public(PermissionMode::Elevated, "exec_command", &arguments)
+                .allowed,
+            "Elevated ordinary execution must keep the same current-user token: {arguments}"
+        );
+        let edit = policy.decide_public(PermissionMode::Edit, "exec_command", &arguments);
+        assert!(
+            !edit.allowed,
+            "Edit must never gain process execution: {arguments}"
+        );
+        assert_eq!(
+            edit.deny_reason,
+            Some(DenyReason::IndirectProcessExecInEdit)
         );
     }
 
-    let workflow_indirection = policy.decide_public(
-        PermissionMode::Full,
-        "agent_workflow",
-        &json!({
-            "action":"bugfix",
-            "commands":[{"command":"$x=('do'+'cker'); & $x ps","shell":"windows_powershell"}]
-        }),
+    let workflow = json!({
+        "action":"diagnose",
+        "commands":[{"command":"call .\\policy_probe.cmd","shell":"cmd"}]
+    });
+    let descriptor = policy
+        .classify_public_action("agent_workflow", &workflow)
+        .expect("workflow command declaration");
+    assert!(descriptor.transitive.process_exec);
+    assert!(!descriptor.transitive.privilege);
+    assert!(
+        policy
+            .decide_public(PermissionMode::Full, "agent_workflow", &workflow)
+            .allowed
     );
-    assert!(!workflow_indirection.allowed);
-    assert_eq!(
-        workflow_indirection.deny_reason,
-        Some(DenyReason::PrivilegedRouteNotAvailable)
+    assert!(
+        !policy
+            .decide_public(PermissionMode::Edit, "agent_workflow", &workflow)
+            .allowed
     );
-}
-
-#[test]
-fn schema33_system_management_workflow_indirection_stays_broker_only() {
-    let policy = policy();
-    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
-        for command in ["bcdedit.exe /enum", "dism.exe /Online /Get-Features"] {
-            let decision = policy.decide_public(
-                mode,
-                "agent_workflow",
-                &json!({"action":"diagnose","commands":[{"command":command,"shell":"cmd"}]}),
-            );
-            assert!(!decision.allowed);
-            assert_eq!(
-                decision.deny_reason,
-                Some(DenyReason::PrivilegedRouteNotAvailable)
-            );
-        }
-    }
 }
 
 #[test]
@@ -466,53 +261,6 @@ fn unknown_public_actions_and_public_policy_widening_fail_closed() {
 }
 
 #[test]
-fn schema34_static_workspace_scripts_are_ordinary_but_dynamic_resolution_stays_reviewed() {
-    let policy = policy();
-    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
-        for arguments in [
-            json!({"command":r"scripts\probe.cmd alpha","shell":"cmd"}),
-            json!({"command":r"scripts\probe.bat alpha","shell":"cmd"}),
-            json!({"command":r".\scripts\probe.ps1 alpha","shell":"windows_powershell"}),
-            json!({"command":r"& '.\scripts\probe.ps1' alpha","shell":"windows_powershell"}),
-        ] {
-            let decision = policy.decide_public(mode, "exec_command", &arguments);
-            assert!(
-                decision.allowed,
-                "static workspace development script was denied solely by extension: {arguments}"
-            );
-        }
-    }
-
-    for arguments in [
-        json!({"command":r"$p='.\scripts\probe.ps1'; & $p","shell":"windows_powershell"}),
-        json!({"command":r". .\scripts\probe.ps1","shell":"windows_powershell"}),
-        json!({"command":r"& (Join-Path . scripts\probe.ps1)","shell":"windows_powershell"}),
-        json!({"command":r"%SCRIPT%.cmd","shell":"cmd"}),
-        json!({"command":r"echo ok & scripts\probe.cmd","shell":"cmd"}),
-    ] {
-        let decision = policy.decide_public(PermissionMode::Full, "exec_command", &arguments);
-        assert!(
-            !decision.allowed,
-            "dynamic/chained script resolution escaped review: {arguments}"
-        );
-        assert_eq!(
-            decision.deny_reason,
-            Some(DenyReason::PrivilegedRouteNotAvailable)
-        );
-    }
-    assert!(
-        policy
-            .decide_public(
-                PermissionMode::Full,
-                "exec_command",
-                &json!({"command":r"call scripts\probe.cmd","shell":"cmd"}),
-            )
-            .allowed,
-        "literal workspace cmd call must remain an ordinary Full development operation"
-    );
-}
-
-#[test]
 fn elevated_exec_review_consumes_real_program_args_and_workdir() {
     let policy = policy();
     let program = localbridge_lib::execution::reviewed_elevated_program()
@@ -552,163 +300,5 @@ fn elevated_exec_review_consumes_real_program_args_and_workdir() {
             decision.deny_reason,
             Some(DenyReason::ElevatedExecNotReviewed)
         );
-    }
-}
-
-
-#[test]
-fn schema42_extended_system_management_is_operation_classified_across_workflow_indirection() {
-    let policy = policy();
-    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
-        for (command, shell) in [
-            ("pnputil.exe /enum-drivers", "cmd"),
-            ("powercfg.exe /query", "cmd"),
-            ("wevtutil.exe el", "cmd"),
-            ("wevtutil.exe gl System", "windows_powershell"),
-        ] {
-            let decision = policy.decide_public(mode, "exec_command", &json!({"command":command,"shell":shell}));
-            assert!(decision.allowed, "frozen read-only system-management command was denied: {command}");
-        }
-        for (command, shell) in [
-            ("pnputil.exe /add-driver driver.inf /install", "cmd"),
-            ("powercfg.exe /setactive deadbeef", "cmd"),
-            ("wevtutil.exe cl System", "cmd"),
-            ("pnputil.exe /future-operation", "windows_powershell"),
-            ("echo before && pnputil.exe /enum-drivers", "cmd"),
-        ] {
-            let decision = policy.decide_public(mode, "exec_command", &json!({"command":command,"shell":shell}));
-            assert!(!decision.allowed, "system-management mutation/unknown escaped privileged route: {command}");
-            assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
-        }
-        let read_only_workflow = policy.decide_public(mode,"agent_workflow",&json!({"action":"diagnose","commands":[{"command":"pnputil.exe /enum-drivers","shell":"cmd"}]}));
-        assert!(read_only_workflow.allowed);
-        let mutating_workflow = policy.decide_public(mode,"agent_workflow",&json!({"action":"diagnose","commands":[{"command":"wevtutil.exe cl System","shell":"cmd"}]}));
-        assert!(!mutating_workflow.allowed);
-        assert_eq!(mutating_workflow.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
-    }
-}
-
-#[test]
-fn schema42_extended_windows_system_management_defaults_to_privileged_with_narrow_readonly_seams() {
-    let policy = policy();
-    for mode in [PermissionMode::Full, PermissionMode::Elevated] {
-        for (command, shell) in [
-            ("reagentc.exe /info", "cmd"),
-            ("manage-bde.exe -status", "cmd"),
-            ("fltmc.exe filters", "cmd"),
-            ("auditpol.exe /get /category:*", "cmd"),
-            ("vssadmin.exe list shadows", "windows_powershell"),
-        ] {
-            assert!(
-                policy
-                    .decide_public(mode, "exec_command", &json!({"command":command,"shell":shell}))
-                    .allowed,
-                "frozen read-only system-management command was denied: {command}"
-            );
-        }
-        for (command, shell) in [
-            ("net.exe user", "cmd"),
-            ("net1.exe localgroup", "cmd"),
-            ("fsutil.exe fsinfo drives", "cmd"),
-            ("mountvol.exe", "cmd"),
-            ("reagentc.exe /enable", "cmd"),
-            ("manage-bde.exe -on C:", "cmd"),
-            ("fltmc.exe unload example", "cmd"),
-            ("auditpol.exe /set /category:* /success:enable", "cmd"),
-            ("vssadmin.exe delete shadows /all", "windows_powershell"),
-        ] {
-            let decision = policy.decide_public(
-                mode,
-                "exec_command",
-                &json!({"command":command,"shell":shell}),
-            );
-            assert!(!decision.allowed, "system-management command escaped: {command}");
-            assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
-        }
-    }
-}
-
-#[test]
-fn schema42_shell_specific_classifiers_allow_ordinary_development_without_weakening_dynamic_review() {
-    let policy = policy();
-    for command in [
-        "set",
-        "set /p X=prompt",
-        "set X=value",
-        "copy test\\a.txt test\\b.txt",
-        "move test\\a.txt test\\b.txt",
-        "ren test\\a.txt b.txt",
-        "cmd /c echo nested-ok",
-        "cmd /k echo nested-ok",
-    ] {
-        assert!(
-            policy
-                .decide_public(PermissionMode::Full, "exec_command", &json!({"command":command,"shell":"cmd"}))
-                .allowed,
-            "ordinary CMD operation was over-classified: {command}"
-        );
-    }
-    for command in ["cmd /c net.exe user", "cmd /k sc.exe query"] {
-        let decision = policy.decide_public(
-            PermissionMode::Full,
-            "exec_command",
-            &json!({"command":command,"shell":"cmd"}),
-        );
-        assert!(!decision.allowed, "nested system-management command escaped: {command}");
-        assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
-    }
-    for command in [
-        "Set-Variable -Name LocalBridgeProbe -Value ok",
-        "Set-Content test\\probe.txt ok",
-        "New-Item test\\probe.txt",
-        "Copy-Item test\\a.txt test\\b.txt",
-        "Move-Item test\\a.txt test\\b.txt",
-        "Remove-Item test\\a.txt",
-        "cmd /c echo nested-ok",
-        "[System.Security.Principal.WindowsIdentity]::GetCurrent()",
-        "[WindowsIdentity]::GetCurrent()",
-    ] {
-        assert!(
-            policy
-                .decide_public(PermissionMode::Full, "exec_command", &json!({"command":command,"shell":"windows_powershell"}))
-                .allowed,
-            "ordinary PowerShell operation was over-classified: {command}"
-        );
-    }
-    for command in [
-        "New-Item Function:lb42 -Value { Write-Output ok }",
-        "Set-Content Alias:lb42 docker",
-        "Remove-Item HKLM:\\SOFTWARE\\LocalBridge",
-        "$n='PSModuleAutoLoadingPreference'; Set-Variable -Name $n -Value All",
-        "cmd /c net.exe user",
-    ] {
-        assert!(
-            !policy
-                .decide_public(PermissionMode::Full, "exec_command", &json!({"command":command,"shell":"windows_powershell"}))
-                .allowed,
-            "dynamic/provider/system-management surface escaped review: {command}"
-        );
-    }
-}
-
-#[test]
-fn schema42_quoted_nested_cmd_classifies_the_static_inner_command() {
-    let policy = policy();
-    for command in ["cmd /c \"echo nested-ok\"", "cmd /k \"echo nested-ok\""] {
-        assert!(
-            policy
-                .decide_public(PermissionMode::Full, "exec_command", &json!({"command":command,"shell":"cmd"}))
-                .allowed,
-            "quoted ordinary nested cmd was over-classified: {command}"
-        );
-    }
-    for command in ["cmd /c \"sc.exe query\"", "cmd /c \"echo ok & net.exe user\""] {
-        let decision = policy.decide_public(
-            PermissionMode::Full,
-            "exec_command",
-            &json!({"command":command,"shell":"cmd"}),
-        );
-        assert!(!decision.allowed, "quoted nested system command escaped: {command}");
-        assert_eq!(decision.deny_reason, Some(DenyReason::PrivilegedRouteNotAvailable));
     }
 }

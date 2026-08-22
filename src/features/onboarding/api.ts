@@ -9,6 +9,8 @@ export interface OnboardingReadiness {
 
 export interface OnboardingState {
   complete: boolean;
+  permission: AccessCode;
+  projectionRevision: number;
   connectionConfigured: boolean;
   runtimeKeySaved: boolean;
   runtimeKeyLength: number | null;
@@ -23,7 +25,7 @@ export interface ConnectorEndpointProjection {
 export const onboardingApi = {
   read: () => invoke<OnboardingState>("get_onboarding_state"),
   saveConnection: (tunnelId: string, runtimeKey: string) => invoke<void>("save_onboarding_connection", { tunnelId, runtimeKey }),
-  prepareProject: (mode: AccessCode, projectId: string | null, selectedFolder: string | null) => invoke<OnboardingState>("prepare_onboarding_project", { mode, projectId, selectedFolder }),
+  prepareProject: (projectId: string | null, selectedFolder: string | null) => invoke<OnboardingState>("prepare_onboarding_project", { projectId, selectedFolder }),
   chooseWorkspaceFolder: () => invoke<string | null>("choose_onboarding_workspace_folder"),
   openTunnelSettings: () => invoke<void>("open_openai_tunnel_settings"),
   openApiKeys: () => invoke<void>("open_openai_api_keys"),

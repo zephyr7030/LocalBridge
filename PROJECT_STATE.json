@@ -4,7 +4,7 @@
   "governance_model": "refactor_phases",
   "contract_file": "CONTROL_PLANE_REFACTOR_CONTRACT.json",
   "human_authority": "docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md",
-  "status": "SCHEMA44_ACCEPTED",
+  "status": "REMEDIATION_IN_PROGRESS",
   "current_phase": "R7",
   "implementation_started": true,
   "phase_order": ["R1", "R2", "R3", "R4", "R5", "R6", "R7"],
@@ -204,31 +204,67 @@
     "unified_final_acceptance_after": "R7"
   },
   "unified_acceptance": {
-    "status": "VERIFIED",
+    "status": "INVALIDATED",
     "accepted_at": "2026-08-21",
     "hardening_commits": ["818f186", "c89d474"],
+    "invalidated_at": "2026-08-22",
+    "invalidation_reason": "Post-acceptance black-box tests reproduced session ownership, cancellation, lifecycle, projection, filesystem, schema, path-authority, and capability-contract failures. Historical test counts are not current acceptance evidence.",
     "architecture_report": "docs/07_SCHEMA44_ARCHITECTURE_MIGRATION_REPORT.md",
+    "current_api_revision": 47,
     "verification": {
-      "rust": "351 library tests plus all non-ignored migration/integration/policy/privilege/packaging tests passed",
+      "scope": "current local remediation gate only; not unified architecture acceptance",
+      "rust": "356 library tests plus all non-ignored migration/integration/policy/privilege/packaging tests passed from an isolated local target directory",
       "ignored": "3 process helper entry points and 1 explicit UAC test",
       "clippy": "all targets passed with -D warnings",
       "frontend": "11 tests passed",
       "build": "production frontend build passed",
-      "runtime_manifest": "PASS",
-      "ui_language": "PASS",
-      "schema44_residue": "PASS"
+      "test_base": "PASS (8 structural tests; shared gate supports an isolated Cargo target while the desktop app is running)",
+      "format": "PASS",
+      "public_release": "PASS",
+      "licenses": "PASS",
+      "runtime_resources": "PASS",
+      "schema44_residue": "PASS; residue scan is not behavioral acceptance",
+      "revision46_external_client": "PASS; final socket-fix worktree ran the exact reported-issue matrix 2/2 with no reconnect or retry masking (100 chunked requests and 100 empty preconnects)",
+      "revision47_external_client": "PASS; the external ChatGPT-style client verified cross-session detached control, explicit TaskId workflow resume/cancel after reconnect, truthful TaskIdRequired cancellation, bounded command write/kill, filesystem authority/search behavior, and terminal projection convergence; the cancellation race matrix also passed five consecutive isolated runs and the final unified Rust gate",
+      "onboarding_permission": "PASS; the five-screen permission controls read the revisioned backend desired permission and no longer keep a React permission owner or write permission from project preparation",
+      "update_backend": "PASS; retry_update_check returns a typed lifecycle projection, open_github_releases returns the selected URL, the production owner always carries the official repository, and the official latest-release API returned v0.1.2 during the local gate",
+      "local_http_stress": "PASS; deterministic delayed-request regression proves accepted sockets wait for HTTP bytes, and two sequential external-client fixtures completed without ECONNRESET",
+      "real_cloud_tunnel": "NOT_RUN_LOCAL_PEP_ONLY"
     },
-    "verified_invariants": [
-      "INV-01",
-      "INV-02",
-      "INV-03",
-      "INV-04",
-      "INV-05",
-      "INV-06",
-      "INV-07",
-      "INV-08",
-      "INV-09"
-    ]
+    "resolved_black_box_failures": [
+      "session-scoped detached command poll/write/kill ownership",
+      "bounded command_control wait budget with typed OperationTimedOut",
+      "task_control cancel no longer reports success when no owned target exists",
+      "catalog revision changes no longer terminate a live MCP session",
+      "bounded HTTP chunked decoding and ambiguous framing rejection",
+      "Git invalid ref and blame range failures remain typed errors",
+      "document ranges and output handle errors remain resource-specific typed errors",
+      "ordinary Shell direct/script/descendant execution has one current-Windows-user authority owner",
+      "inner bundled runtime is a policy-neutral authenticated adapter rather than a parallel command-string policy owner",
+      "public filesystem never escalates through Broker and all paths remain active-workspace scoped",
+      "workspace volume-root list and recursive search tolerate inaccessible child entries without fabricating NotFound",
+      "task cancellation separates accepted cancellation intent from the later authoritative terminal outcome",
+      "TERM and KILL converge through ExecutionRegistry to one Cancelled terminal outcome even after a control timeout",
+      "Windows accepted sockets are explicitly blocking so delayed HTTP bytes cannot become false disconnects",
+      "elevated localized console output is decoded through the Windows OEM code page when it is not UTF-8",
+      "stable TaskId is an explicit post-reconnect capability for prepared workflow resume and cancellation",
+      "runtime availability failures converge Task to Failed while SessionUnavailable alone converges to Lost",
+      "onboarding permission selection reads and confirms the backend-owned revisioned desired permission",
+      "update and GitHub release commands return typed non-empty projections backed by the fixed official repository",
+      "ExecutionRegistry cancellation intent is recorded before runtime cancellation and is the sole authority when a command session disappears"
+    ],
+    "blocking_failures": [
+      {
+        "severity": "P0/P1",
+        "id": "REAL_TUNNEL_STABILITY_NOT_REPRODUCIBLE_LOCALLY",
+        "status": "NOT_RUN",
+        "evidence": "The local PEP external-client matrix and HTTP stress passed, but this run had no usable authenticated cloud Tunnel endpoint and therefore did not exercise the previously reported cloud 400/502/Session terminated path.",
+        "root_cause": "Unproven for the real Tunnel path; local HTTP reset causes were hardened and stress-tested without failure, but local success cannot substitute for a cloud-path observation.",
+        "required_direction": "Run the same tests/black-box/chatgpt client against a real foreground Tunnel session without automatic reconnect or retries before unified acceptance."
+      }
+    ],
+    "verified_invariants": [],
+    "verification_note": "The descendant authority inconsistency is resolved by one explicit current-user Shell authority owner, not by a fabricated sandbox. Unified acceptance remains invalid because real cloud Tunnel behavior was not exercised and P1-03, P1-17, P1-33 through P1-34, and P1-37 through P1-38 remain PARTIAL in ARCHITECTURE_AUDIT_FINDINGS.md."
   },
-  "next_action": "Maintain the accepted schema44 single-owner control plane; treat new product work as a separate contract."
+  "next_action": "Build and verify the explicitly requested v0.13.0 package locally, then update GitHub without restoring unified architecture acceptance. The remaining PARTIAL migrations and a real authenticated cloud Tunnel run stay required before unified acceptance can be restored."
 }

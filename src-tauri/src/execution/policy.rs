@@ -29,27 +29,6 @@ const CONTROL_PLANE_NAMES: &[&str] = &[
     "tunnel_config_write",
     "mcp_config_write",
 ];
-const WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS: &[&str] = &[
-    "reg.exe",
-    "schtasks.exe",
-    "sc.exe",
-    "netsh.exe",
-    "bcdedit.exe",
-    "dism.exe",
-    "pnputil.exe",
-    "powercfg.exe",
-    "wevtutil.exe",
-    "net.exe",
-    "net1.exe",
-    "fsutil.exe",
-    "mountvol.exe",
-    "reagentc.exe",
-    "manage-bde.exe",
-    "fltmc.exe",
-    "auditpol.exe",
-    "vssadmin.exe",
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ToolDescriptor {
     pub name: &'static str,
@@ -337,7 +316,6 @@ struct CapabilitySection {
     elevated_exec_in_elevated: String,
     workflow_with_process_exec_in_edit: String,
     control_plane: String,
-    privileged_external_runtime: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -391,9 +369,7 @@ struct EnforcementSection {
     upstream_direct_tunnel_target: String,
     unknown_tool: String,
     request_permissions: String,
-    transitive_exec_classification: String,
-    shell_invocation_review: String,
-    unreviewable_shell_indirection: String,
+    transitive_tool_capability_declaration: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -404,6 +380,7 @@ struct UpstreamSection {
     listener: String,
     internal_auth: String,
     direct_external_exposure: bool,
+    authority_owner: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -718,13 +695,17 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             if dry_run {
                 PublicCapabilityDeclaration::READ
             } else {
-                PublicCapabilityDeclaration {
-                    privilege: shell_request_requires_review(arguments),
-                    ..PublicCapabilityDeclaration::PROCESS
-                }
+                PublicCapabilityDeclaration::PROCESS
             },
         )),
         "command_control" => match action? {
+            "adopt" => Some(public_descriptor(
+                "command_control",
+                "adopt",
+                Capability::ProcessExec,
+                TaskKind::ExecuteCommand,
+                PublicCapabilityDeclaration::PROCESS,
+            )),
             "poll" => Some(public_descriptor(
                 "command_control",
                 "poll",
@@ -756,6 +737,13 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             _ => None,
         },
         "task_control" => match action? {
+            "list" => Some(public_descriptor(
+                "task_control",
+                "list",
+                Capability::Workflow,
+                TaskKind::Other,
+                PublicCapabilityDeclaration::READ,
+            )),
             "get" => Some(public_descriptor(
                 "task_control",
                 "get",
@@ -849,7 +837,6 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
             PublicCapabilityDeclaration::READ,
         )),
         "agent_workflow" => {
-            let shell_review_required = workflow_commands_require_review(arguments);
             let workflow_action = action?;
             let object = arguments.as_object()?;
             let phase = object.get("phase").and_then(Value::as_str);
@@ -917,7 +904,7 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                     commands_present,
                     true,
                     false,
-                    shell_review_required,
+                    false,
                 )
             };
             Some(public_descriptor(
@@ -932,944 +919,59 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
     }
 }
 
-fn workflow_commands_require_review(arguments: &Value) -> bool {
-    let Some(commands) = arguments.get("commands") else {
-        return false;
-    };
-    let Some(commands) = commands.as_array() else {
-        return true;
-    };
-    commands.iter().any(shell_request_requires_review)
-}
-
-fn shell_request_requires_review(arguments: &Value) -> bool {
-    let Some(command) = arguments.get("command").and_then(Value::as_str) else {
-        return false;
-    };
-    let shell = arguments
-        .get("shell")
-        .and_then(Value::as_str)
-        .unwrap_or("auto");
-    shell_invocation_requires_review(shell, command)
-}
-
-pub(crate) fn shell_invocation_requires_review(shell: &str, command: &str) -> bool {
-    if let Some((_, consumed)) = static_workspace_script_invocation(shell, command) {
-        let remainder = &command[consumed..];
-        return match shell {
-            "powershell" | "pwsh" | "windows_powershell" => {
-                powershell_invocation_requires_review(remainder)
-            }
-            "cmd" => cmd_invocation_requires_review(remainder),
-            "auto" => {
-                powershell_invocation_requires_review(remainder)
-                    || cmd_invocation_requires_review(remainder)
-            }
-            _ => true,
-        };
-    }
-    match shell {
-        "powershell" | "pwsh" | "windows_powershell" => {
-            powershell_invocation_requires_review(command)
-        }
-        "cmd" => cmd_invocation_requires_review(command),
-        // `auto` may legitimately fall back to cmd when no trusted PowerShell exists,
-        // so its review is the conservative union of both supported grammars.
-        "auto" => {
-            powershell_invocation_requires_review(command)
-                || cmd_invocation_requires_review(command)
-        }
-        // Invalid/unknown selectors are rejected by the public schema/Facade, but policy
-        // must never turn an unknown execution grammar into an allow decision.
-        _ => true,
-    }
-}
-
-pub(crate) fn static_workspace_script_target(shell: &str, command: &str) -> Option<String> {
-    static_workspace_script_invocation(shell, command).map(|(target, _)| target)
-}
-
-fn static_workspace_script_invocation(shell: &str, command: &str) -> Option<(String, usize)> {
-    let powershell = matches!(shell, "powershell" | "pwsh" | "windows_powershell" | "auto");
-    let cmd = matches!(shell, "cmd" | "auto");
-    if !powershell && !cmd {
-        return None;
-    }
-
-    fn parse_token(input: &str, allow_single_quote: bool) -> Option<(String, usize)> {
-        let leading = input.len().saturating_sub(input.trim_start().len());
-        let value = &input[leading..];
-        let first = value.chars().next()?;
-        if first == '"' || (allow_single_quote && first == '\'') {
-            let quote_len = first.len_utf8();
-            let body = &value[quote_len..];
-            let end = body.find(first)?;
-            let token = &body[..end];
-            if token.is_empty() {
-                return None;
-            }
-            return Some((token.to_string(), leading + quote_len + end + quote_len));
-        }
-        let end = value
-            .find(|ch: char| {
-                ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')' | '{' | '}')
-            })
-            .unwrap_or(value.len());
-        let token = &value[..end];
-        (!token.is_empty()).then(|| (token.to_string(), leading + end))
-    }
-
-    fn literal_script_target(target: &str) -> bool {
-        if target.is_empty()
-            || target.chars().any(|ch| {
-                matches!(
-                    ch,
-                    '$' | '%' | '!' | '`' | '*' | '?' | '[' | ']' | '{' | '}'
-                )
-            })
-        {
-            return false;
-        }
-        let lower = target.to_ascii_lowercase();
-        lower.ends_with(".ps1") || lower.ends_with(".cmd") || lower.ends_with(".bat")
-    }
-
-    let leading = command.len().saturating_sub(command.trim_start().len());
-    let trimmed = &command[leading..];
-
-    if powershell {
-        if trimmed.starts_with('.') && trimmed.chars().nth(1).is_some_and(char::is_whitespace) {
-            return None;
-        }
-        if let Some(after_call) = trimmed.strip_prefix('&') {
-            if !after_call.chars().next().is_some_and(char::is_whitespace) {
-                return None;
-            }
-            let (target, consumed) = parse_token(after_call, true)?;
-            if literal_script_target(&target) {
-                return Some((target, leading + 1 + consumed));
-            }
-            return None;
-        }
-        if !matches!(trimmed.chars().next(), Some('\'' | '"')) {
-            if let Some((target, consumed)) = parse_token(trimmed, false) {
-                if literal_script_target(&target) {
-                    return Some((target, leading + consumed));
-                }
-            }
-        }
-    }
-
-    if cmd {
-        let mut cmd_input = trimmed;
-        let mut prefix = leading;
-        if let Some(rest) = cmd_input.strip_prefix('@') {
-            cmd_input = rest;
-            prefix += 1;
-        }
-        if cmd_input
-            .get(..4)
-            .is_some_and(|value| value.eq_ignore_ascii_case("call"))
-            && cmd_input[4..]
-                .chars()
-                .next()
-                .is_some_and(char::is_whitespace)
-        {
-            let after_call = &cmd_input[4..];
-            let (target, consumed) = parse_token(after_call, false)?;
-            if literal_script_target(&target) {
-                return Some((target, prefix + 4 + consumed));
-            }
-            return None;
-        }
-        if let Some((target, consumed)) = parse_token(cmd_input, false) {
-            if literal_script_target(&target) {
-                return Some((target, prefix + consumed));
-            }
-        }
-    }
-    None
-}
-
-fn powershell_review_word(word: &str) -> bool {
-    let lower = word.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "docker"
-            | "docker.exe"
-            | "podman"
-            | "podman.exe"
-            | "wsl"
-            | "wsl.exe"
-            | "powershell"
-            | "powershell.exe"
-            | "pwsh"
-            | "pwsh.exe"
-            | "cmd"
-            | "cmd.exe"
-            | "invoke-expression"
-            | "iex"
-            | "start-process"
-            | "saps"
-            | "start"
-            | "invoke-item"
-            | "ii"
-            | "invoke-command"
-            | "icm"
-            | "start-job"
-            | "start-threadjob"
-            | "enter-pssession"
-            | "new-pssession"
-            | "import-pssession"
-            | "add-pssnapin"
-            | "new-module"
-            | "using"
-            | "requires"
-            | "get-command"
-            | "gcm"
-            | "psmoduleautoloadingpreference"
-            | "set-variable"
-            | "set"
-            | "sv"
-            | "new-variable"
-            | "nv"
-            | "remove-variable"
-            | "rv"
-            | "clear-variable"
-            | "clv"
-            | "set-alias"
-            | "sal"
-            | "new-alias"
-            | "nal"
-            | "set-item"
-            | "si"
-            | "new-item"
-            | "ni"
-            | "remove-item"
-            | "rd"
-            | "ri"
-            | "rm"
-            | "rmdir"
-            | "rename-item"
-            | "ren"
-            | "rni"
-            | "move-item"
-            | "mi"
-            | "move"
-            | "mv"
-            | "copy-item"
-            | "copy"
-            | "cp"
-            | "cpi"
-            | "clear-item"
-            | "cli"
-            | "set-content"
-            | "sc"
-            | "add-content"
-            | "ac"
-            | "clear-content"
-            | "clc"
-            | "import-alias"
-            | "ipal"
-            | "export-alias"
-            | "epal"
-            | "import-module"
-            | "ipmo"
-            | "invoke-cimmethod"
-            | "invoke-wmimethod"
-            | "get-wmiobject"
-            | "gwmi"
-            | "new-object"
-            | "add-type"
-            | "comobject"
-            | "wmiclass"
-            | "managementclass"
-            | "wmic"
-            | "rundll32"
-            | "rundll32.exe"
-            | "regsvr32"
-            | "regsvr32.exe"
-            | "mshta"
-            | "mshta.exe"
-            | "wscript"
-            | "wscript.exe"
-            | "cscript"
-            | "cscript.exe"
-            | "scriptblock"
-            | "createprocess"
-            | "win32_process"
-            | "alias"
-            | "function"
-            | "filter"
-            | "workflow"
-            | "configuration"
-            | "call"
-    )
-}
-
-fn cmd_review_word(word: &str) -> bool {
-    let lower = word.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "docker"
-            | "docker.exe"
-            | "podman"
-            | "podman.exe"
-            | "wsl"
-            | "wsl.exe"
-            | "powershell"
-            | "powershell.exe"
-            | "pwsh"
-            | "pwsh.exe"
-            | "rundll32"
-            | "rundll32.exe"
-            | "regsvr32"
-            | "regsvr32.exe"
-            | "mshta"
-            | "mshta.exe"
-            | "wscript"
-            | "wscript.exe"
-            | "cscript"
-            | "cscript.exe"
-            | "call"
-    )
-}
-
-fn simple_static_command_words(command: &str) -> Option<Vec<String>> {
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut quote = None;
-    for ch in command.chars() {
-        match quote {
-            Some(q) if ch == q => quote = None,
-            Some(_) => word.push(ch),
-            None if matches!(ch, '\'' | '"') => quote = Some(ch),
-            None if ch.is_whitespace() => {
-                if !word.is_empty() {
-                    words.push(std::mem::take(&mut word));
-                }
-            }
-            None if matches!(
-                ch,
-                '&' | '|' | ';' | '<' | '>' | '\r' | '\n' | '%' | '!' | '$' | '`' | '^'
-            ) =>
-            {
-                return None;
-            }
-            None => word.push(ch),
-        }
-    }
-    if quote.is_some() {
-        return None;
-    }
-    if !word.is_empty() {
-        words.push(word);
-    }
-    (!words.is_empty()).then_some(words)
-}
-
-fn frozen_readonly_system_management_invocation(command: &str) -> bool {
-    let Some(words) = simple_static_command_words(command) else {
-        return false;
-    };
-    let program = words[0].rsplit(['\\', '/']).next().unwrap_or(&words[0]);
-    let program = program
-        .strip_suffix(".exe")
-        .unwrap_or(program)
-        .to_ascii_lowercase();
-    let args = &words[1..];
-    match program.as_str() {
-        "pnputil" => matches!(args, [op] if op.eq_ignore_ascii_case("/enum-drivers")),
-        "powercfg" => {
-            matches!(args, [op] if ["/query","/getactivescheme","/list","/a"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed)))
-        }
-        "wevtutil" => {
-            matches!(args, [op] if op.eq_ignore_ascii_case("el"))
-                || matches!(args, [op, _log] if op.eq_ignore_ascii_case("gl"))
-        }
-        "reagentc" => matches!(args, [op] if op.eq_ignore_ascii_case("/info")),
-        "manage-bde" => matches!(args, [op] | [op, _] if op.eq_ignore_ascii_case("-status")),
-        "fltmc" => {
-            args.is_empty()
-                || matches!(args, [op] if ["filters", "instances", "volumes"].iter().any(|allowed| op.eq_ignore_ascii_case(allowed)))
-        }
-        "auditpol" => args
-            .first()
-            .is_some_and(|op| op.eq_ignore_ascii_case("/get")),
-        "vssadmin" => args
-            .first()
-            .is_some_and(|op| op.eq_ignore_ascii_case("list")),
-        _ => false,
-    }
-}
-
-fn windows_system_management_program_token(token: &str) -> bool {
-    let token = token.trim_matches(['\'', '"']);
-    let basename = token.rsplit(['\\', '/']).next().unwrap_or(token);
-    WINDOWS_SYSTEM_MANAGEMENT_PROGRAMS.iter().any(|program| {
-        basename.eq_ignore_ascii_case(program)
-            || program
-                .strip_suffix(".exe")
-                .is_some_and(|stem| basename.eq_ignore_ascii_case(stem))
-    })
-}
-
-fn powershell_static_system_management_target(command: &str) -> bool {
-    if frozen_readonly_system_management_invocation(command) {
-        return false;
-    }
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Quote {
-        None,
-        Single,
-        Double,
-    }
-
-    fn finish_target(token: &mut String, is_target: &mut bool) -> bool {
-        let requires_privilege = *is_target && windows_system_management_program_token(token);
-        token.clear();
-        *is_target = false;
-        requires_privilege
-    }
-
-    let mut quote = Quote::None;
-    let mut token = String::new();
-    let mut token_is_target = false;
-    let mut command_boundary = true;
-    let mut comment = false;
-    let mut chars = command.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if comment {
-            if matches!(ch, '\r' | '\n') {
-                comment = false;
-                command_boundary = true;
-            }
-            continue;
-        }
-        match quote {
-            Quote::Single => {
-                if ch == '\'' {
-                    if chars.peek() == Some(&'\'') {
-                        chars.next();
-                    } else {
-                        quote = Quote::None;
-                    }
-                }
-                continue;
-            }
-            Quote::Double => {
-                if ch == '`' {
-                    chars.next();
-                } else if ch == '"' {
-                    quote = Quote::None;
-                }
-                continue;
-            }
-            Quote::None => {}
-        }
-
-        if ch == '#' {
-            if finish_target(&mut token, &mut token_is_target) {
-                return true;
-            }
-            comment = true;
-            continue;
-        }
-        if matches!(ch, '\'' | '"') {
-            if finish_target(&mut token, &mut token_is_target) {
-                return true;
-            }
-            quote = if ch == '\'' {
-                Quote::Single
-            } else {
-                Quote::Double
-            };
-            command_boundary = false;
-            continue;
-        }
-        if ch == '`' {
-            if finish_target(&mut token, &mut token_is_target) {
-                return true;
-            }
-            chars.next();
-            command_boundary = false;
-            continue;
-        }
-        if matches!(ch, ';' | '|' | '&' | '\r' | '\n' | '{' | '}') {
-            if finish_target(&mut token, &mut token_is_target) {
-                return true;
-            }
-            command_boundary = true;
-            continue;
-        }
-        if ch.is_whitespace() {
-            if finish_target(&mut token, &mut token_is_target) {
-                return true;
-            }
-            continue;
-        }
-        if token.is_empty() {
-            token_is_target = command_boundary;
-            command_boundary = false;
-        }
-        token.push(ch);
-    }
-    finish_target(&mut token, &mut token_is_target)
-}
-
-fn cmd_static_system_management_target(command: &str) -> bool {
-    if frozen_readonly_system_management_invocation(command) {
-        return false;
-    }
-    fn finish_target(token: &mut String, is_target: &mut bool) -> bool {
-        let requires_privilege = *is_target && windows_system_management_program_token(token);
-        token.clear();
-        *is_target = false;
-        requires_privilege
-    }
-
-    let mut quoted = false;
-    let mut token = String::new();
-    let mut token_is_target = false;
-    let mut command_boundary = true;
-    let mut chars = command.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '"' {
-            if token.is_empty() && command_boundary {
-                token_is_target = true;
-                command_boundary = false;
-            }
-            quoted = !quoted;
-            if !quoted && finish_target(&mut token, &mut token_is_target) {
-                return true;
-            }
-            continue;
-        }
-        if quoted {
-            token.push(ch);
-            continue;
-        }
-        if ch == '^' {
-            if let Some(escaped) = chars.next() {
-                if token.is_empty() {
-                    token_is_target = command_boundary;
-                    command_boundary = false;
-                }
-                token.push(escaped);
-            }
-            continue;
-        }
-        if matches!(ch, '&' | '|' | '\r' | '\n' | '(' | ')') {
-            if finish_target(&mut token, &mut token_is_target) {
-                return true;
-            }
-            command_boundary = true;
-            continue;
-        }
-        if ch.is_whitespace() {
-            if finish_target(&mut token, &mut token_is_target) {
-                return true;
-            }
-            continue;
-        }
-        if command_boundary && ch == '@' && token.is_empty() {
-            continue;
-        }
-        if token.is_empty() {
-            token_is_target = command_boundary;
-            command_boundary = false;
-        }
-        token.push(ch);
-    }
-    finish_target(&mut token, &mut token_is_target)
-}
-
-fn cmd_if_segment_system_management_target(command: &str) -> bool {
-    fn finish_word(words: &mut Vec<String>, word: &mut String) {
-        if !word.is_empty() {
-            words.push(std::mem::take(word));
-        }
-    }
-
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut quoted = false;
-    let mut chars = command.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if ch == '^' && !quoted {
-            if let Some(escaped) = chars.next() {
-                word.push(escaped);
-            }
-            continue;
-        }
-        if !quoted && (ch.is_whitespace() || matches!(ch, '&' | '|' | '(' | ')')) {
-            finish_word(&mut words, &mut word);
-            continue;
-        }
-        if word.is_empty() && ch == '@' {
-            continue;
-        }
-        word.push(ch);
-    }
-    finish_word(&mut words, &mut word);
-
-    if !words
-        .first()
-        .is_some_and(|word| word.eq_ignore_ascii_case("if"))
-    {
-        return false;
-    }
-    let mut condition = 1usize;
-    while words
-        .get(condition)
-        .is_some_and(|word| word.eq_ignore_ascii_case("not") || word.eq_ignore_ascii_case("/i"))
-    {
-        condition += 1;
-    }
-    let Some(first_condition) = words.get(condition) else {
-        return false;
-    };
-    let command_start = if matches!(
-        first_condition.to_ascii_lowercase().as_str(),
-        "errorlevel" | "cmdextversion" | "exist" | "defined"
+pub(crate) fn command_task_kind(command: &str) -> TaskKind {
+    let command = command.to_ascii_lowercase();
+    if command_invokes_any(
+        &command,
+        &[
+            "cargo test",
+            "npm test",
+            "npm run test",
+            "pnpm test",
+            "pnpm run test",
+            "yarn test",
+            "bun test",
+            "dotnet test",
+            "go test",
+            "pytest",
+            "vitest",
+        ],
     ) {
-        condition + 2
-    } else if first_condition.contains("==") {
-        condition + 1
-    } else if words.get(condition + 1).is_some_and(|operator| {
-        matches!(
-            operator.to_ascii_lowercase().as_str(),
-            "equ" | "neq" | "lss" | "leq" | "gtr" | "geq"
-        )
-    }) {
-        condition + 3
+        TaskKind::Test
+    } else if command_invokes_any(
+        &command,
+        &[
+            "cargo build",
+            "npm run build",
+            "pnpm build",
+            "pnpm run build",
+            "yarn build",
+            "bun run build",
+            "dotnet build",
+            "go build",
+            "tauri build",
+        ],
+    ) {
+        TaskKind::Build
     } else {
-        // Unknown IF grammar stays fail-closed if a protected system-management
-        // executable appears later in the static command text.
-        condition + 1
-    };
-    let Some(target) = words.get(command_start) else {
-        return false;
-    };
-    if windows_system_management_program_token(target) {
-        return true;
-    }
-    let target = target.rsplit(['\\', '/']).next().unwrap_or(target);
-    if matches!(target.to_ascii_lowercase().as_str(), "cmd" | "cmd.exe")
-        && words
-            .get(command_start + 1)
-            .is_some_and(|switch| matches!(switch.to_ascii_lowercase().as_str(), "/c" | "/k"))
-    {
-        let inner = words[command_start + 2..].join(" ");
-        return !inner.is_empty() && cmd_invocation_requires_review(&inner);
-    }
-    false
-}
-
-fn cmd_if_system_management_target(command: &str) -> bool {
-    let mut quoted = false;
-    let mut segment = String::new();
-    let mut chars = command.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '^' && !quoted {
-            segment.push(ch);
-            if let Some(escaped) = chars.next() {
-                segment.push(escaped);
-            }
-            continue;
-        }
-        if ch == '"' {
-            quoted = !quoted;
-            segment.push(ch);
-            continue;
-        }
-        if !quoted && matches!(ch, '&' | '|' | '\r' | '\n') {
-            if cmd_if_segment_system_management_target(&segment) {
-                return true;
-            }
-            segment.clear();
-            continue;
-        }
-        segment.push(ch);
-    }
-    cmd_if_segment_system_management_target(&segment)
-}
-
-fn powershell_static_member_is_safe(chars: &[char], operator: usize) -> bool {
-    let mut left = operator;
-    while left > 0 && chars[left - 1].is_whitespace() {
-        left -= 1;
-    }
-    if left == 0 || chars[left - 1] != ']' {
-        return false;
-    }
-    let mut type_start = left - 1;
-    while type_start > 0 && chars[type_start] != '[' {
-        type_start -= 1;
-    }
-    if chars.get(type_start) != Some(&'[') || type_start + 1 >= left - 1 {
-        return false;
-    }
-    let type_name = chars[type_start + 1..left - 1]
-        .iter()
-        .collect::<String>()
-        .trim()
-        .to_ascii_lowercase();
-
-    let mut member_start = operator + 2;
-    while member_start < chars.len() && chars[member_start].is_whitespace() {
-        member_start += 1;
-    }
-    let mut member_end = member_start;
-    while member_end < chars.len()
-        && (chars[member_end].is_ascii_alphanumeric() || chars[member_end] == '_')
-    {
-        member_end += 1;
-    }
-    let member = chars[member_start..member_end]
-        .iter()
-        .collect::<String>()
-        .to_ascii_lowercase();
-
-    matches!(type_name.as_str(), "console" | "system.console")
-        && matches!(
-            member.as_str(),
-            "in" | "out" | "error" | "readline" | "write" | "writeline"
-        )
-}
-
-fn powershell_console_instance_member_is_safe(
-    chars: &[char],
-    operator: usize,
-    member: &str,
-) -> bool {
-    let mut left = operator;
-    while left > 0 && chars[left - 1].is_whitespace() {
-        left -= 1;
-    }
-    let prefix = chars[..left]
-        .iter()
-        .filter(|ch| !ch.is_whitespace())
-        .collect::<String>()
-        .to_ascii_lowercase();
-    match member.to_ascii_lowercase().as_str() {
-        "readline" | "readtoend" => {
-            prefix.ends_with("[console]::in") || prefix.ends_with("[system.console]::in")
-        }
-        "write" | "writeline" => {
-            prefix.ends_with("[console]::out")
-                || prefix.ends_with("[system.console]::out")
-                || prefix.ends_with("[console]::error")
-                || prefix.ends_with("[system.console]::error")
-        }
-        _ => false,
+        TaskKind::ExecuteCommand
     }
 }
 
-fn powershell_member_mutation_starts(chars: &[char], index: usize) -> bool {
-    if chars.get(index) == Some(&'=') {
-        return true;
-    }
-    if matches!(chars.get(index), Some('+' | '-' | '*' | '/' | '%'))
-        && chars.get(index + 1) == Some(&'=')
-    {
-        return true;
-    }
-    if chars.get(index) == Some(&'?')
-        && chars.get(index + 1) == Some(&'?')
-        && chars.get(index + 2) == Some(&'=')
-    {
-        return true;
-    }
-    matches!(
-        (chars.get(index), chars.get(index + 1)),
-        (Some('+'), Some('+')) | (Some('-'), Some('-'))
-    )
-}
-
-fn powershell_subexpression_requires_review(command: &str) -> bool {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Quote {
-        None,
-        Single,
-        Double,
-    }
-
-    let mut quote = Quote::None;
-    let mut chars = command.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match quote {
-            Quote::None => match ch {
-                '\'' => quote = Quote::Single,
-                '"' => quote = Quote::Double,
-                '`' => {
-                    chars.next();
-                }
-                '$' if chars.peek() == Some(&'(') => return true,
-                _ => {}
-            },
-            Quote::Single => {
-                if ch == '\'' {
-                    if chars.peek() == Some(&'\'') {
-                        chars.next();
-                    } else {
-                        quote = Quote::None;
-                    }
-                }
-            }
-            Quote::Double => {
-                if ch == '`' {
-                    chars.next();
-                } else if ch == '"' {
-                    quote = Quote::None;
-                } else if ch == '$' && chars.peek() == Some(&'(') {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-fn powershell_member_invocation_requires_review(command: &str) -> bool {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Quote {
-        None,
-        Single,
-        Double,
-    }
-
-    let mut visible = Vec::with_capacity(command.chars().count());
-    let mut quote = Quote::None;
-    let mut chars = command.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match quote {
-            Quote::None => match ch {
-                '\'' => {
-                    quote = Quote::Single;
-                    visible.push(' ');
-                }
-                '"' => {
-                    quote = Quote::Double;
-                    visible.push(' ');
-                }
-                '`' => {
-                    visible.push(' ');
-                    if chars.next().is_some() {
-                        visible.push(' ');
-                    }
-                }
-                _ => visible.push(ch),
-            },
-            Quote::Single => {
-                visible.push(' ');
-                if ch == '\'' {
-                    if chars.peek() == Some(&'\'') {
-                        chars.next();
-                        visible.push(' ');
-                    } else {
-                        quote = Quote::None;
-                    }
-                }
-            }
-            Quote::Double => {
-                visible.push(' ');
-                if ch == '`' {
-                    if chars.next().is_some() {
-                        visible.push(' ');
-                    }
-                } else if ch == '"' {
-                    quote = Quote::None;
-                }
-            }
-        }
-    }
-
-    let mut index = 0usize;
-    while index < visible.len() {
-        if visible[index] == ':'
-            && visible.get(index + 1) == Some(&':')
-            && !powershell_static_member_is_safe(&visible, index)
-        {
-            // Static .NET dispatch can select a process target through Process.Start,
-            // reflection/Activator, P/Invoke helpers, or equivalent runtime APIs. The
-            // only static exception is narrow Console I/O required by public sessions.
-            return true;
-        }
-
-        if visible[index] == '.' {
-            let mut member_start = index + 1;
-            while member_start < visible.len() && visible[member_start].is_whitespace() {
-                member_start += 1;
-            }
-            if visible.get(member_start) == Some(&'$') {
-                return true;
-            }
-            let mut member_end = member_start;
-            while member_end < visible.len()
-                && (visible[member_end].is_ascii_alphanumeric() || visible[member_end] == '_')
-            {
-                member_end += 1;
-            }
-            let member = visible[member_start..member_end].iter().collect::<String>();
-            if member.eq_ignore_ascii_case("scriptblock") {
-                // ScriptBlock is executable code. Exposing it from CommandInfo/function
-                // metadata lets later cmdlets execute code without a call operator or an
-                // Invoke member, so the code target is no longer statically reviewable.
-                return true;
-            }
-            let mut call = member_end;
-            while call < visible.len() && visible[call].is_whitespace() {
-                call += 1;
-            }
-            if powershell_member_mutation_starts(&visible, call) {
-                // Member mutation can rewrite command-engine state after target review
-                // (for example InvokeCommand.CommandNotFoundAction). Fail closed for the
-                // mutation grammar instead of enumerating engine property names.
-                return true;
-            }
-            if call < visible.len()
-                && visible[call] == '('
-                && !powershell_console_instance_member_is_safe(&visible, index, &member)
-            {
-                // Instance-member invocation is a dynamic dispatch surface. The runtime
-                // type and selected implementation cannot be proven from the public
-                // request; fail closed by grammar instead of method-name deny lists. The
-                // only instance-call exception is the statically rooted Console I/O chain
-                // required by LocalBridge's public session protocol.
-                return true;
-            }
-        }
-        index += 1;
-    }
-    false
-}
-
-fn flush_powershell_review_word(word: &mut String) -> bool {
-    if word.is_empty() {
-        return false;
-    }
-    let requires_review = powershell_review_word(word);
-    word.clear();
-    requires_review
-}
-
-fn flush_cmd_review_word(word: &mut String) -> bool {
-    let lower = word.to_ascii_lowercase();
-    if matches!(
-        lower.as_str(),
-        "set" | "copy" | "move" | "ren" | "rename" | "rmdir" | "rd"
-    ) {
-        word.clear();
-        return false;
-    }
-    let requires_review = cmd_review_word(word);
-    word.clear();
-    requires_review
+fn command_invokes_any(command: &str, invocations: &[&str]) -> bool {
+    command
+        .split([';', '\n'])
+        .flat_map(|segment| segment.split("&&"))
+        .flat_map(|segment| segment.split("||"))
+        .map(str::trim_start)
+        .any(|segment| {
+            invocations.iter().any(|invocation| {
+                segment == *invocation
+                    || segment
+                        .strip_prefix(invocation)
+                        .is_some_and(|suffix| suffix.starts_with(char::is_whitespace))
+            })
+        })
 }
 
 fn static_nested_cmd_inner(command: &str) -> Option<&str> {
@@ -1906,408 +1008,6 @@ fn nested_cmd_body(inner: &str) -> &str {
         .unwrap_or(inner)
 }
 
-fn powershell_readonly_identity_diagnostic(command: &str) -> bool {
-    let compact = command
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .collect::<String>();
-    compact.eq_ignore_ascii_case("[System.Security.Principal.WindowsIdentity]::GetCurrent()")
-        || compact.eq_ignore_ascii_case("[WindowsIdentity]::GetCurrent()")
-}
-
-fn powershell_provider_target(token: &str) -> bool {
-    let lower = token.trim_matches(['\'', '"']).to_ascii_lowercase();
-    [
-        "alias:",
-        "function:",
-        "variable:",
-        "env:",
-        "registry::",
-        "hklm:",
-        "hkcu:",
-        "hkcr:",
-        "hku:",
-        "hkcc:",
-        "cert:",
-        "wsman:",
-    ]
-    .iter()
-    .any(|prefix| lower.starts_with(prefix))
-}
-
-fn powershell_ordinary_development_invocation(command: &str) -> bool {
-    let Some(words) = simple_static_command_words(command) else {
-        return false;
-    };
-    let verb = words[0].to_ascii_lowercase();
-    if !matches!(
-        verb.as_str(),
-        "set-variable" | "set-content" | "new-item" | "copy-item" | "move-item" | "remove-item"
-    ) {
-        return false;
-    }
-    if words
-        .iter()
-        .skip(1)
-        .any(|word| powershell_provider_target(word))
-    {
-        return false;
-    }
-    if verb == "set-variable"
-        && words
-            .iter()
-            .any(|word| word.eq_ignore_ascii_case("PSModuleAutoLoadingPreference"))
-    {
-        return false;
-    }
-    true
-}
-
-fn powershell_simple_get_command_diagnostic(command: &str) -> bool {
-    if command
-        .chars()
-        .any(|ch| ch.is_whitespace() && !matches!(ch, ' ' | '\t'))
-    {
-        return false;
-    }
-    let mut words = command.split_ascii_whitespace();
-    let Some(verb) = words.next() else {
-        return false;
-    };
-    if !verb.eq_ignore_ascii_case("get-command") && !verb.eq_ignore_ascii_case("gcm") {
-        return false;
-    }
-    let Some(target) = words.next() else {
-        return false;
-    };
-    if words.next().is_some() {
-        return false;
-    }
-    !target.is_empty()
-        && target
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-}
-
-fn powershell_readonly_command_discovery(command: &str) -> bool {
-    let mut segments = command.split('|').map(str::trim);
-    let Some(discovery) = segments.next() else {
-        return false;
-    };
-    let Some(projection) = segments.next() else {
-        return false;
-    };
-    if segments.next().is_some() || !powershell_simple_get_command_diagnostic(discovery) {
-        return false;
-    }
-    let mut words = projection.split_ascii_whitespace();
-    let Some(select) = words.next() else {
-        return false;
-    };
-    if !select.eq_ignore_ascii_case("select-object") && !select.eq_ignore_ascii_case("select") {
-        return false;
-    }
-    let Some(expand) = words.next() else {
-        return false;
-    };
-    if !expand.eq_ignore_ascii_case("-expandproperty") {
-        return false;
-    }
-    let Some(property) = words.next() else {
-        return false;
-    };
-    if words.next().is_some() {
-        return false;
-    }
-    matches!(
-        property.to_ascii_lowercase().as_str(),
-        "source" | "path" | "name" | "commandtype"
-    )
-}
-
-fn powershell_readonly_version_diagnostic(command: &str) -> bool {
-    let command = command.trim();
-    command.eq_ignore_ascii_case("$PSVersionTable.PSVersion")
-        || command.eq_ignore_ascii_case("$PSVersionTable.PSVersion.ToString()")
-}
-
-fn powershell_invocation_requires_review(command: &str) -> bool {
-    #[derive(Clone, Copy, PartialEq, Eq)]
-    enum Quote {
-        None,
-        Single,
-        Double,
-    }
-
-    // Static command discovery is data inspection, not execution of the discovered target.
-    // Keep the exception deliberately narrow: only one literal target and an optional
-    // Select-Object projection of non-executable metadata are accepted.
-    if powershell_simple_get_command_diagnostic(command)
-        || powershell_readonly_command_discovery(command)
-        || powershell_readonly_version_diagnostic(command)
-        || powershell_readonly_identity_diagnostic(command)
-        || powershell_ordinary_development_invocation(command)
-    {
-        return false;
-    }
-
-    if let Some(inner) = static_nested_cmd_inner(command) {
-        let body = nested_cmd_body(inner);
-        if (inner.trim().starts_with('"') && inner.trim().ends_with('"'))
-            || !command
-                .chars()
-                .any(|ch| matches!(ch, ';' | '|' | '&' | '\r' | '\n' | '{' | '}'))
-        {
-            return cmd_invocation_requires_review(body);
-        }
-    }
-
-    if powershell_static_system_management_target(command)
-        || powershell_subexpression_requires_review(command)
-        || powershell_member_invocation_requires_review(command)
-    {
-        return true;
-    }
-
-    let mut quote = Quote::None;
-    let mut chars = command.chars().peekable();
-    let mut word = String::new();
-    let mut command_boundary = true;
-    let mut word_is_command = false;
-    while let Some(ch) = chars.next() {
-        match quote {
-            Quote::Single => {
-                if ch == '\'' {
-                    if chars.peek() == Some(&'\'') {
-                        chars.next();
-                    } else {
-                        quote = Quote::None;
-                    }
-                }
-                continue;
-            }
-            Quote::Double => {
-                if ch == '`' {
-                    chars.next();
-                } else if ch == '"' {
-                    quote = Quote::None;
-                }
-                continue;
-            }
-            Quote::None => {}
-        }
-
-        if ch == '\'' {
-            if word_is_command && flush_powershell_review_word(&mut word) {
-                return true;
-            }
-            word.clear();
-            word_is_command = false;
-            quote = Quote::Single;
-            continue;
-        }
-        if ch == '"' {
-            if word_is_command && flush_powershell_review_word(&mut word) {
-                return true;
-            }
-            word.clear();
-            word_is_command = false;
-            quote = Quote::Double;
-            continue;
-        }
-        if ch == '`' {
-            return true;
-        }
-        if ch == '&' {
-            if word_is_command && flush_powershell_review_word(&mut word) {
-                return true;
-            }
-            word.clear();
-            word_is_command = false;
-            if chars.peek() == Some(&'&') {
-                chars.next();
-                command_boundary = true;
-                continue;
-            }
-            return true;
-        }
-        if ch == '.' && command_boundary {
-            return true;
-        }
-        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
-            if word.is_empty() {
-                word_is_command = command_boundary;
-            }
-            word.push(ch);
-            command_boundary = false;
-            continue;
-        }
-        if word_is_command && flush_powershell_review_word(&mut word) {
-            return true;
-        }
-        word.clear();
-        word_is_command = false;
-        if matches!(ch, ';' | '|' | '\n' | '\r' | '{' | '}') {
-            command_boundary = true;
-        }
-    }
-    word_is_command && flush_powershell_review_word(&mut word)
-}
-
-fn cmd_chained_literal_script_requires_review(command: &str) -> bool {
-    let mut quoted = false;
-    let mut escaped = false;
-    for (index, ch) in command.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if ch == '^' {
-            escaped = true;
-            continue;
-        }
-        if ch == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if quoted || !matches!(ch, '&' | '|') {
-            continue;
-        }
-        let mut start = index + ch.len_utf8();
-        while command[start..]
-            .chars()
-            .next()
-            .is_some_and(|next| next.is_whitespace() || matches!(next, '&' | '|'))
-        {
-            start += command[start..].chars().next().unwrap().len_utf8();
-        }
-        if start < command.len()
-            && static_workspace_script_invocation("cmd", &command[start..]).is_some()
-        {
-            return true;
-        }
-    }
-    false
-}
-
-fn cmd_chained_nested_shell_requires_review(command: &str) -> bool {
-    let mut quoted = false;
-    let mut escaped = false;
-    for (index, ch) in command.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if ch == '^' {
-            escaped = true;
-            continue;
-        }
-        if ch == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if quoted || !matches!(ch, '&' | '|' | '\r' | '\n' | '(') {
-            continue;
-        }
-        let mut start = index + ch.len_utf8();
-        while command[start..]
-            .chars()
-            .next()
-            .is_some_and(|next| next.is_whitespace() || matches!(next, '&' | '|' | '('))
-        {
-            start += command[start..].chars().next().unwrap().len_utf8();
-        }
-        if start < command.len() {
-            if let Some(inner) = static_nested_cmd_inner(&command[start..]) {
-                if cmd_invocation_requires_review(nested_cmd_body(inner)) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-fn cmd_invocation_requires_review(command: &str) -> bool {
-    if let Some(inner) = static_nested_cmd_inner(command) {
-        return cmd_invocation_requires_review(nested_cmd_body(inner));
-    }
-    if cmd_static_system_management_target(command) || cmd_if_system_management_target(command) {
-        return true;
-    }
-    if cmd_chained_literal_script_requires_review(command) {
-        return true;
-    }
-    if cmd_chained_nested_shell_requires_review(command) {
-        return true;
-    }
-    let mut chars = command.chars().peekable();
-    let mut word = String::new();
-    let mut command_boundary = true;
-    let mut word_is_command = false;
-    let mut control_flow_command = false;
-    let mut quoted = false;
-    while let Some(ch) = chars.next() {
-        if matches!(ch, '%' | '!') {
-            // Expansion is authority-sensitive when it can construct the command target.
-            // Ordinary data arguments such as `echo %PATH%` remain Full-mode diagnostics.
-            if command_boundary || control_flow_command {
-                return true;
-            }
-            continue;
-        }
-        if ch == '^' {
-            if let Some(escaped) = chars.next() {
-                if escaped.is_ascii_alphanumeric() || matches!(escaped, '_' | '-' | '.') {
-                    if word.is_empty() {
-                        word_is_command = command_boundary;
-                    }
-                    word.push(escaped);
-                    command_boundary = false;
-                } else if word_is_command && flush_cmd_review_word(&mut word) {
-                    return true;
-                }
-            }
-            continue;
-        }
-        if ch == '"' {
-            quoted = !quoted;
-            if word_is_command && flush_cmd_review_word(&mut word) {
-                return true;
-            }
-            word.clear();
-            word_is_command = false;
-            continue;
-        }
-        if quoted {
-            continue;
-        }
-        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
-            if word.is_empty() {
-                word_is_command = command_boundary;
-            }
-            word.push(ch);
-            command_boundary = false;
-        } else {
-            if !word.is_empty() && word_is_command {
-                let lower = word.to_ascii_lowercase();
-                control_flow_command = matches!(lower.as_str(), "if" | "for");
-                if flush_cmd_review_word(&mut word) {
-                    return true;
-                }
-            } else {
-                word.clear();
-            }
-            word_is_command = false;
-            if matches!(ch, '&' | '|' | '\n' | '\r' | '(') {
-                command_boundary = true;
-                control_flow_command = false;
-            }
-        }
-    }
-    word_is_command && flush_cmd_review_word(&mut word)
-}
-
 fn is_control_plane_name(name: &str) -> bool {
     CONTROL_PLANE_NAMES.contains(&name)
         || name.starts_with("localbridge.")
@@ -2321,9 +1021,9 @@ fn exact_set(actual: &[String], expected: &[&str]) -> bool {
 }
 
 fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
-    if document.schema_version != 6
+    if document.schema_version != 7
         || document.runtime_version != PINNED_RUNTIME_VERSION
-        || document.status != "LB_007_STABLE_PUBLIC_POLICY"
+        || document.status != "SCHEMA46_CURRENT_USER_EXECUTION_POLICY"
     {
         return Err(PolicyError::ContractMismatch("identity"));
     }
@@ -2433,13 +1133,12 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
     }
     if document.capabilities.unknown != "deny"
         || document.capabilities.process_exec_in_edit != "deny"
-        || document.capabilities.process_exec_in_full != "allow_if_reviewed"
+        || document.capabilities.process_exec_in_full != "current_user_token"
         || document.capabilities.elevated_exec_in_edit != "deny"
         || document.capabilities.elevated_exec_in_full != "deny"
         || document.capabilities.elevated_exec_in_elevated != "allow_if_reviewed_and_broker_active"
         || document.capabilities.workflow_with_process_exec_in_edit != "deny"
         || document.capabilities.control_plane != "deny_always"
-        || document.capabilities.privileged_external_runtime != "review_required"
     {
         return Err(PolicyError::ContractMismatch("capabilities"));
     }
@@ -2482,20 +1181,19 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
         || document.enforcement.upstream_direct_tunnel_target != "forbidden"
         || document.enforcement.unknown_tool != "deny"
         || document.enforcement.request_permissions != "deny_always"
-        || document.enforcement.transitive_exec_classification != "required"
-        || document.enforcement.shell_invocation_review != "static_target_fail_closed"
-        || document.enforcement.unreviewable_shell_indirection != "review_required"
+        || document.enforcement.transitive_tool_capability_declaration != "required"
     {
         return Err(PolicyError::ContractMismatch("enforcement"));
     }
-    if document.upstream_coding_tools.permission_mode != "trusted_behind_guard"
-        || document
+    if document.upstream_coding_tools.permission_mode != "policy_neutral_behind_authenticated_guard"
+        || !document
             .upstream_coding_tools
             .dangerously_skip_all_permissions
         || document.upstream_coding_tools.telemetry != "disabled"
         || document.upstream_coding_tools.listener != "loopback_ephemeral"
         || document.upstream_coding_tools.internal_auth != "runtime_generated_bearer_required"
         || document.upstream_coding_tools.direct_external_exposure
+        || document.upstream_coding_tools.authority_owner != "localbridge_guard_only"
     {
         return Err(PolicyError::ContractMismatch("upstream_coding_tools"));
     }
@@ -2885,93 +1583,5 @@ mod administrator_gateway_tests {
             "operation":"shell","shell":"cmd","command":"reg.exe query HKLM\\Software\\Microsoft",
             "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
         })));
-    }
-}
-
-#[cfg(test)]
-mod schema36_shell_classifier_tests {
-    use super::*;
-
-    #[test]
-    fn full_style_diagnostics_are_not_privileged_by_argument_tokens() {
-        for command in ["where cmd", "where pwsh", "echo %PATH%", "echo %TEMP%"] {
-            assert!(
-                !shell_invocation_requires_review("cmd", command),
-                "{command}"
-            );
-        }
-    }
-
-    #[test]
-    fn command_position_and_dynamic_control_flow_remain_fail_closed() {
-        for command in [
-            "pwsh -NoProfile -Command whoami",
-            "%COMSPEC% /c whoami",
-            "if 1==1 %COMSPEC% /c whoami",
-        ] {
-            assert!(
-                shell_invocation_requires_review("cmd", command),
-                "{command}"
-            );
-        }
-        for command in ["cmd /c echo nested", "echo ok && cmd /c whoami"] {
-            assert!(
-                !shell_invocation_requires_review("cmd", command),
-                "{command}"
-            );
-        }
-        for command in [
-            "echo ok && cmd /c sc.exe query",
-            "if 1==1 cmd /c net.exe user",
-        ] {
-            assert!(
-                shell_invocation_requires_review("cmd", command),
-                "{command}"
-            );
-        }
-    }
-
-    #[test]
-    fn powershell_literal_command_discovery_allows_safe_projection_only() {
-        assert!(!shell_invocation_requires_review(
-            "windows_powershell",
-            "Get-Command cmd | Select-Object -ExpandProperty Source"
-        ));
-        assert!(!shell_invocation_requires_review(
-            "windows_powershell",
-            "gcm git | select -ExpandProperty Path"
-        ));
-        assert!(shell_invocation_requires_review(
-            "windows_powershell",
-            "Get-Command cmd | ForEach-Object { & $_.Source }"
-        ));
-        assert!(shell_invocation_requires_review(
-            "windows_powershell",
-            "Get-Command cmd | Select-Object -ExpandProperty ScriptBlock"
-        ));
-    }
-
-    #[test]
-    fn powershell_version_probe_is_read_only_but_suffixes_remain_reviewed() {
-        for command in [
-            "$PSVersionTable.PSVersion",
-            "$PSVersionTable.PSVersion.ToString()",
-            "  $psversiontable.psversion.tostring()  ",
-        ] {
-            assert!(
-                !shell_invocation_requires_review("pwsh", command),
-                "{command}"
-            );
-        }
-        for command in [
-            "$PSVersionTable.PSVersion.ToString(); Start-Process cmd",
-            "$PSVersionTable.PSVersion.ToString() | ForEach-Object { & cmd }",
-            "$env:COMSPEC.ToString()",
-        ] {
-            assert!(
-                shell_invocation_requires_review("pwsh", command),
-                "{command}"
-            );
-        }
     }
 }

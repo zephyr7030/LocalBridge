@@ -9,11 +9,14 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use localbridge_lib::control_plane::convergence::{
+    DesiredState, DesiredStateOwner, DesiredWorkspace, ServiceIntent,
+};
+use localbridge_lib::execution::CapabilityPolicy;
 use localbridge_lib::mcp::{
     CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig, InternalBearer,
     PolicyEnforcementRuntime,
 };
-use localbridge_lib::execution::CapabilityPolicy;
 use localbridge_lib::privilege::{
     AdministratorFilesystemAction, AdministratorFilesystemErrorCode, AdministratorFilesystemSortBy,
     AdministratorFilesystemSortOrder, AdministratorFilesystemSpec, BROKER_PROTOCOL_VERSION,
@@ -718,11 +721,20 @@ fn live_uac_mcp_elevated_exec_uses_administrator_token_and_revokes_catalog() {
         Duration::from_secs(10),
     )
     .expect("bundled coding runtime for live UAC acceptance");
-    let pep = PolicyEnforcementRuntime::start_with_privilege(
+    let desired = DesiredStateOwner::default();
+    desired.replace(DesiredState {
+        permission: PermissionMode::Full,
+        workspace: Some(DesiredWorkspace::for_runtime_path(&workspace)),
+        services: ServiceIntent::Enabled,
+        connection: None,
+    });
+    let pep = PolicyEnforcementRuntime::start_with_control_plane(
         coding,
         CapabilityPolicy::load(&repo.join("runtime-policy.toml")).unwrap(),
-        PermissionMode::Full,
-        privileged,
+        desired,
+        None,
+        Some(privileged),
+        None,
     )
     .expect("PEP with real privilege gateway");
 

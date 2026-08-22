@@ -1,9 +1,8 @@
 pub(crate) mod command_control;
-pub(crate) mod convergence;
+pub mod convergence;
 pub(crate) mod execution_registry;
 pub(crate) mod owner;
 pub(crate) mod request_registry;
-pub mod resource_lifecycle;
 pub(crate) mod scheduler;
 pub(crate) mod session_registry;
 pub(crate) mod snapshot;

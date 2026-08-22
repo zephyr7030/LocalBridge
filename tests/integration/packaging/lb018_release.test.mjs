@@ -26,7 +26,7 @@ if (tauri.bundle?.windows?.nsis?.installMode !== "perMachine") throw new Error("
 if (tauri.bundle?.windows?.nsis?.installerHooks !== "../scripts/public-release/nsis-hooks.nsh") throw new Error("NSIS uninstall credential hook is not wired");
 if (!credentials.includes('RUNTIME_API_KEY_CREDENTIAL_ID: &str = "runtime-api-key"')) throw new Error("runtime API key credential id drifted");
 if (!windowsCredentials.includes('TARGET_PREFIX: &str = "LocalBridge/RuntimeApiKey/"')) throw new Error("runtime API key credential prefix drifted");
-for (const marker of ["NSIS_HOOK_PREUNINSTALL", "CredDeleteW", "LocalBridge/RuntimeApiKey/runtime-api-key", "i 1", "i 0"]) if (!nsisHooks.includes(marker)) throw new Error(`NSIS credential cleanup marker missing: ${marker}`);
+for (const marker of ["NSIS_HOOK_PREUNINSTALL", "MB_DEFBUTTON2", "/DELETEUSERDATA=1", "CredDeleteW", "LocalBridge/RuntimeApiKey/runtime-api-key", "i 1", "i 0"]) if (!nsisHooks.includes(marker)) throw new Error(`NSIS credential cleanup marker missing: ${marker}`);
 if (/cmdkey|powershell|execwait/i.test(nsisHooks)) throw new Error("NSIS credential cleanup must not spawn a shell or helper process");
 if (tauri.bundle?.icon?.[0] !== "../assets/icons/localbridge.ico") throw new Error("frozen installer icon drifted");
 if (tauri.build?.beforeBuildCommand !== "node scripts/prepare-lb018-resources.mjs && npm run build") throw new Error("release resource preparation not wired before build");
@@ -44,7 +44,7 @@ for (const marker of [
   "configured_foreground_runtime_start", "background_launch", "runtime_restart_or_recovery",
   "tunnel_reconnect", "login_autostart", "managed_shell_or_direct_command_child",
   "CREATE_NO_WINDOW", "cloudflared", "verifyUninstallCredentialCleanupInvariant",
-  "uninstall_deletes_runtime_api_key_credential"
+  "uninstall_preserves_user_data_by_default", "uninstall_deletes_runtime_api_key_only_with_explicit_consent"
 ]) if (!release.includes(marker)) throw new Error(`release evidence marker missing: ${marker}`);
 if (release.includes("coding_runtime_managed_command_visible_window_behavior_gate")) throw new Error("obsolete single-scenario no-console evidence remains");
-console.log("LB018_PACKAGING_CONTRACT=PASS real_runtime=true dummy=false cloudflared=false broker=true sbom=true provenance=true credential_cleanup=true");
+console.log("LB018_PACKAGING_CONTRACT=PASS real_runtime=true dummy=false cloudflared=false broker=true sbom=true provenance=true credential_retention_default=true explicit_cleanup=true");

@@ -70,12 +70,16 @@ mod tests {
     fn pinned_standalone_tunnel_bundle_hashes_are_valid() {
         let verified = verify_bundle(&repo_root()).expect("vendored LB-008 bundle must verify");
         assert!(verified.executable.ends_with("tunnel-client.exe"));
-        assert!(!repo_root()
-            .join("runtime/tunnel-client/cloudflared.exe")
-            .exists());
-        assert!(!repo_root()
-            .join("runtime/tunnel-client/cloudflared-manifest.json")
-            .exists());
+        assert!(
+            !repo_root()
+                .join("runtime/tunnel-client/cloudflared.exe")
+                .exists()
+        );
+        assert!(
+            !repo_root()
+                .join("runtime/tunnel-client/cloudflared-manifest.json")
+                .exists()
+        );
     }
 
     #[test]

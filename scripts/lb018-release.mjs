@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..");
 const artifacts = resolve(root, "release-artifacts/LB-019PRE");
-const PRODUCT_VERSION = "0.1.2";
+const PRODUCT_VERSION = "0.13.0";
 const NO_CONSOLE_SCENARIOS = [
   "configured_foreground_runtime_start",
   "background_launch",
@@ -59,7 +59,7 @@ function verifyUninstallCredentialCleanupInvariant() {
   const windowsCredentials = readFileSync(resolve(root, "src-tauri/src/credentials/windows.rs"), "utf8");
   if (!credentials.includes('RUNTIME_API_KEY_CREDENTIAL_ID: &str = "runtime-api-key"')) throw new Error("runtime API key credential id drifted");
   if (!windowsCredentials.includes('TARGET_PREFIX: &str = "LocalBridge/RuntimeApiKey/"')) throw new Error("runtime API key credential prefix drifted");
-  for (const marker of ["NSIS_HOOK_PREUNINSTALL", "CredDeleteW", "LocalBridge/RuntimeApiKey/runtime-api-key", "i 1", "i 0"]) {
+  for (const marker of ["NSIS_HOOK_PREUNINSTALL", "MB_DEFBUTTON2", "/DELETEUSERDATA=1", "CredDeleteW", "LocalBridge/RuntimeApiKey/runtime-api-key", "i 1", "i 0"]) {
     if (!hook.includes(marker)) throw new Error(`NSIS credential cleanup marker missing: ${marker}`);
   }
   if (/cmdkey|powershell|execwait/i.test(hook)) throw new Error("NSIS credential cleanup must not spawn a shell or helper process");
@@ -184,7 +184,7 @@ function emitEvidence(noConsoleScenarios, sourceCommit, buildStartedMs) {
     schema: 1, product: "LocalBridge", version: PRODUCT_VERSION, target: "windows-11-x86_64", source_commit: inventory.source_commit,
     installer: inventory.installer, runtime_manifest_sha256: sha(resolve(root, "runtime-manifest.toml")), sbom_sha256: sha(resolve(artifacts, "sbom.cdx.json")),
     build_binding: { source_commit: sourceCommit, installer_sha256: inventory.installer.sha256, installer_bytes: inventory.installer.bytes, build_started_unix_ms: buildStartedMs },
-    packaging: { per_machine: true, system_webview2: true, bundled_webview2: false, cloudflared: false, runtime_payload_location: "install-root/runtime", mutable_state_root: "%LOCALAPPDATA%\\LocalBridge", secret_store: "Windows Credential Manager", uninstall_deletes_runtime_api_key_credential: true },
+    packaging: { per_machine: true, system_webview2: true, bundled_webview2: false, cloudflared: false, runtime_payload_location: "install-root/runtime", mutable_state_root: "%LOCALAPPDATA%\\LocalBridge", secret_store: "Windows Credential Manager", uninstall_preserves_user_data_by_default: true, uninstall_deletes_runtime_api_key_only_with_explicit_consent: true },
     no_console_evidence: { ...noConsoleScenarios, localbridge_pe_subsystem: mainSubsystem, broker_pe_subsystem: brokerSubsystem, managed_runtime_supervisor_uses_CREATE_NO_WINDOW: primaryManagedSpawnUsesNoWindow(readFileSync(resolve(root, "src-tauri/src/runtime/windows_supervisor.rs"), "utf8")), privileged_execution_uses_CREATE_NO_WINDOW: readFileSync(resolve(root, "src-tauri/src/privilege/execution.rs"), "utf8").includes("CREATE_NO_WINDOW") },
     ordinary_launch: { token: "current_windows_user", integrity: "medium", foreground_uac: false, background_uac: false, login_autostart_uac: false, high_integrity_route: "elevated_exec_broker_uac_only" }
   });
@@ -249,7 +249,7 @@ function verify() {
   if (provenance.source_commit !== inventory.source_commit) throw new Error("release provenance source commit mismatch");
   if (provenance.source_commit !== currentHead) throw new Error("release provenance is not bound to current source HEAD");
   if (provenance.build_binding?.source_commit !== currentHead || provenance.build_binding?.installer_sha256 !== inventory.installer.sha256 || provenance.build_binding?.installer_bytes !== inventory.installer.bytes) throw new Error("release build binding mismatch");
-  if (provenance.packaging.cloudflared !== false || provenance.packaging.bundled_webview2 !== false || provenance.packaging.uninstall_deletes_runtime_api_key_credential !== true) throw new Error("release provenance packaging invariant failed");
+  if (provenance.packaging.cloudflared !== false || provenance.packaging.bundled_webview2 !== false || provenance.packaging.uninstall_preserves_user_data_by_default !== true || provenance.packaging.uninstall_deletes_runtime_api_key_only_with_explicit_consent !== true) throw new Error("release provenance packaging invariant failed");
   for (const scenario of NO_CONSOLE_SCENARIOS) {
     if (provenance.no_console_evidence?.[scenario] !== true || noConsoleScenarios[scenario] !== true) throw new Error(`no-console scenario evidence mismatch: ${scenario}`);
   }

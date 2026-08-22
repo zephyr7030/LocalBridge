@@ -109,7 +109,10 @@ fn legitimate_persisted_workspace_is_revalidated_on_restart() {
     let json = serde_json::to_string(&state).unwrap();
     let decoded: WorkspacePersistence = serde_json::from_str(&json).unwrap();
     let active = decoded.resolve_active(&validator).unwrap().unwrap();
-    assert_eq!(active.validated.identity().as_str(), expected.identity().as_str());
+    assert_eq!(
+        active.validated.identity().as_str(),
+        expected.identity().as_str()
+    );
     assert_eq!(active.validated.execution_path(), expected.execution_path());
 }
 
@@ -122,8 +125,18 @@ fn verbatim_alias_is_identity_only_and_active_execution_path_is_ordinary() {
     let through_alias = validator.validate(&alias).unwrap();
 
     assert_eq!(ordinary.identity(), through_alias.identity());
-    assert!(through_alias.resolved_path().to_string_lossy().starts_with(r"\\?\"));
-    assert!(!through_alias.execution_path().to_string_lossy().starts_with(r"\\?\"));
+    assert!(
+        through_alias
+            .resolved_path()
+            .to_string_lossy()
+            .starts_with(r"\\?\")
+    );
+    assert!(
+        !through_alias
+            .execution_path()
+            .to_string_lossy()
+            .starts_with(r"\\?\")
+    );
 
     let mut state = WorkspacePersistence::default();
     let id = state

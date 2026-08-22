@@ -436,14 +436,14 @@ D:\project\LocalBridge
 ## 权限
 
 ```text
-编辑模式   → active workspace 内 read/search/Git/reviewed 文件目录写；无普通 process exec
-完整模式   → Edit + 当前 Windows 普通用户 token 的 workspace 相关进程/命令；仍受 active workspace 文件边界
+编辑模式   → active workspace 内结构化 read/search/Git/reviewed 文件目录写；无普通 process exec
+完整模式   → Edit + 当前 Windows 用户 token 的任意 Shell/进程；结构化文件工具仍受 active workspace 边界，Shell 及其后代拥有该用户本来可用的 OS/文件权限
 管理员模式 → 固定风险警告 → 红色确认按钮完整 9 秒倒计时 → 用户明确确认 → Windows UAC → Active Privileged Broker；在管理员 Token 范围内获得全文件系统、普通及管理员进程/命令与系统维护能力，不再受 active workspace 限制
 ```
 
-Schema30 明确：active workspace 是 reviewed **read/write 授权根**，不是只读根。授权根内普通文件/目录创建、修改与安全清理属于编辑模式和完整模式都可使用的 workspace write。例如 active workspace=`D:\project` 时，`agent_workflow.directory_changes[]` 可用 `create_directory` 创建 `test/`，并在目录为空时用 `remove_empty_directory` 清理；这两个结构化动作不需要 process exec。该能力不允许 MCP 修改项目列表、切换 active workspace 或扩大授权根。PowerShell `New-Item` / `Set-Content` / `Set-Item` 等通用 provider mutation 因还能影响 `Alias:` / `Function:` 等命令面，仍可保持 review-required；产品必须通过结构化 workspace write 提供正常目录控制，而不是靠放宽 shell provider 安全边界。
+Schema30 明确：active workspace 是结构化工具的 reviewed **read/write 授权根**，不是只读根。授权根内普通文件/目录创建、修改与安全清理属于编辑模式和完整模式都可使用的 workspace write。例如 active workspace=`D:\project` 时，`agent_workflow.directory_changes[]` 可用 `create_directory` 创建 `test/`，并在目录为空时用 `remove_empty_directory` 清理；这两个结构化动作不需要 process exec。该能力不允许 MCP 修改项目列表、切换 active workspace 或扩大授权根。Full 的任意 Shell 是另一条执行模型：它由 Windows 当前用户令牌授权，不能声称通过解析命令文本对文件路径或后代行为施加结构化 workspace 边界。
 
-管理员模式无 TTL；9 秒只属于**每次进入管理员授权流程前的安全确认等待期**，不是管理员模式失效时长。`reg / sc / schtasks / netsh / bcdedit / dism` 等系统管理目标不能借 Full 越过管理员边界；Elevated + Active Broker 才能以管理员 Token 执行系统级维护。LocalBridge 自身 PermissionMode、管理员 consent/UAC、Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy 与 LocalBridge autostart 仍属于 MCP/AI 永久不可修改的 control-plane。系统修改产生的后果必须在授权前明确告知并由用户自主承担。
+管理员模式无 TTL；9 秒只属于**每次进入管理员授权流程前的安全确认等待期**，不是管理员模式失效时长。`reg / sc / schtasks / netsh / bcdedit / dism` 等系统工具在 Full Shell 中只拥有当前用户权限：当前用户可做的查询/操作可直接执行，需要管理员令牌的操作由 Windows 拒绝；只有 Elevated + Active Broker 的结构化管理员 route 使用管理员 Token。LocalBridge 的 public tool/control-plane 路由仍不允许 AI 修改 PermissionMode、管理员 consent/UAC、Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy 或 LocalBridge autostart。系统修改产生的后果必须在授权前明确告知并由用户自主承担。
 
 管理员实际状态独立于用户偏好：
 

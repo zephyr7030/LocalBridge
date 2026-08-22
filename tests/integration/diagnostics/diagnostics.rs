@@ -224,7 +224,10 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
         true,
     );
     assert_eq!(first.request_diagnostics.len(), 1);
-    assert_eq!(first.request_diagnostics[0].kind, RequestDiagnosticKind::Start);
+    assert_eq!(
+        first.request_diagnostics[0].kind,
+        RequestDiagnosticKind::Start
+    );
     assert_eq!(first.request_diagnostics[0].attempt, 1);
     assert_eq!(first.request_diagnostics[0].request_id, request_id);
     let serialized_start = serde_json::to_value(&first.request_diagnostics[0]).unwrap();
@@ -305,7 +308,11 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
         &PrivilegeState::Disabled,
         true,
     );
-    assert_eq!(reread.request_diagnostics.len(), event_count, "snapshot read mutated request diagnostics");
+    assert_eq!(
+        reread.request_diagnostics.len(),
+        event_count,
+        "snapshot read mutated request diagnostics"
+    );
 
     let path = export_snapshot(root.path(), &recovered).unwrap();
     let export = fs::read_to_string(path).unwrap();
@@ -331,27 +338,39 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
 fn stable_runtime_and_broker_observations_do_not_flood_recent_events() {
     reset_recent_user_events_for_test();
     for _ in 0..20 {
-        record_runtime_user_events(
-            &RuntimeState::Ready,
-            None,
-            &PrivilegeState::Requested,
-        );
+        record_runtime_user_events(&RuntimeState::Ready, None, &PrivilegeState::Requested);
     }
     let stable = recent_user_events();
-    assert_eq!(stable.len(), 2, "stable runtime/broker observations were duplicated");
-    assert!(stable.iter().any(|event| event.message == "本地运行服务：已就绪"));
-    assert!(stable.iter().any(|event| event.message.contains("管理员权限：")));
+    assert_eq!(
+        stable.len(),
+        2,
+        "stable runtime/broker observations were duplicated"
+    );
+    assert!(
+        stable
+            .iter()
+            .any(|event| event.message == "本地运行服务：已就绪")
+    );
+    assert!(
+        stable
+            .iter()
+            .any(|event| event.message.contains("管理员权限："))
+    );
 
     record_runtime_user_events(
         &RuntimeState::Faulted(RuntimeFault::TunnelExited),
         None,
         &PrivilegeState::Requested,
     );
-    assert_eq!(recent_user_events().len(), 3, "real runtime transition was not recorded");
+    assert_eq!(
+        recent_user_events().len(),
+        3,
+        "real runtime transition was not recorded"
+    );
 }
 
 #[test]
-fn mcp_active_request_tracking_is_bounded_and_eviction_is_terminal() {
+fn mcp_request_diagnostics_are_append_only_and_bounded() {
     reset_request_diagnostics_for_test();
     for index in 0..40 {
         record_mcp_request_start(
@@ -360,13 +379,13 @@ fn mcp_active_request_tracking_is_bounded_and_eviction_is_terminal() {
             "workspace_context",
         );
     }
-    assert_eq!(active_request_diagnostics_for_test(), ACTIVE_REQUEST_DIAGNOSTIC_LIMIT);
     let events = request_diagnostics_for_test();
-    assert!(events.iter().any(|event| {
-        event.kind == RequestDiagnosticKind::End
-            && event.outcome.as_deref() == Some("lost")
-            && event.cause.as_deref() == Some("request_tracking_evicted")
-    }));
+    assert_eq!(events.len(), REQUEST_DIAGNOSTIC_LIMIT);
+    assert!(
+        events
+            .iter()
+            .all(|event| event.kind == RequestDiagnosticKind::Start)
+    );
 }
 
 #[test]
@@ -385,11 +404,20 @@ fn materialized_log_directory_contains_a_redacted_diagnostics_artifact() {
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .collect::<Vec<_>>();
-    assert_eq!(artifacts.len(), 1, "log materialization did not create one artifact");
+    assert_eq!(
+        artifacts.len(),
+        1,
+        "log materialization did not create one artifact"
+    );
     let text = fs::read_to_string(&artifacts[0]).unwrap();
     assert!(text.contains("schemaVersion"));
     assert!(!text.contains(r"C:\project\redacted"));
-    for forbidden in ["Runtime API Key", "Authorization", "synthetic-secret", "nonce"] {
+    for forbidden in [
+        "Runtime API Key",
+        "Authorization",
+        "synthetic-secret",
+        "nonce",
+    ] {
         assert!(!text.contains(forbidden));
     }
 }

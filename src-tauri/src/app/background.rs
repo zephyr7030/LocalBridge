@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, TryLockError, mpsc};
+use std::sync::{Arc, Mutex, TryLockError, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -204,9 +204,18 @@ pub enum DesktopRuntimeControlError {
     Workspace(WorkspaceSwitchError),
 }
 
-#[derive(Default)]
 struct ProductionRuntimeOwner {
     active: Option<Box<dyn ExitRuntime + Send>>,
+    observed_inactive: DesktopRuntimeSnapshot,
+}
+
+impl Default for ProductionRuntimeOwner {
+    fn default() -> Self {
+        Self {
+            active: None,
+            observed_inactive: DesktopRuntimeSnapshot::inactive(),
+        }
+    }
 }
 
 impl ProductionRuntimeOwner {
@@ -229,11 +238,16 @@ impl ProductionRuntimeOwner {
         self.active.take()
     }
 
+    fn observe_inactive(&mut self, snapshot: DesktopRuntimeSnapshot) {
+        debug_assert!(!snapshot.active);
+        self.observed_inactive = snapshot;
+    }
+
     fn snapshot(&self) -> DesktopRuntimeSnapshot {
         self.active
             .as_deref()
             .map(ExitRuntime::runtime_snapshot)
-            .unwrap_or_else(DesktopRuntimeSnapshot::inactive)
+            .unwrap_or_else(|| self.observed_inactive.clone())
     }
 
     fn task_aggregate_snapshot(&self) -> TaskAggregate {
@@ -436,7 +450,6 @@ pub struct DesktopLifecycle {
     runtime_operation: Arc<Mutex<()>>,
     runtime: Arc<Mutex<ProductionRuntimeOwner>>,
     recovery_cancellation: RecoveryCancellation,
-    runtime_snapshot_cache: Arc<RwLock<DesktopRuntimeSnapshot>>,
     runtime_control_generation: Arc<AtomicU64>,
     snapshot_owner: ControlPlaneSnapshotOwner,
     update_checker: UpdateChecker,
@@ -491,8 +504,7 @@ fn publish_control_plane_observation(
         state: runtime.state.clone(),
         local_environment_available: previous
             .runtime
-            .value
-            .as_ref()
+            .value()
             .and_then(|runtime| runtime.local_environment_available),
         current_task_elapsed_ms: runtime.current_task_elapsed_ms,
         last_tool: runtime.last_tool.as_ref().map(|tool| LastToolProjection {
@@ -509,7 +521,7 @@ fn publish_control_plane_observation(
     let runtime_section = if activity.is_some() {
         ProjectionSection::ready(runtime_value)
     } else {
-        ProjectionSection::stale(previous.runtime.value)
+        ProjectionSection::stale(previous.runtime.into_value())
     };
     let authority = ProjectionSection::ready(AuthorityProjection {
         desired: convergence.effective.authority.configured,
@@ -602,8 +614,8 @@ fn publish_control_plane_observation(
             ProjectionSection::ready(activity),
         ),
         None => (
-            ProjectionSection::stale(previous.scheduler.value),
-            ProjectionSection::stale(previous.activity.value),
+            ProjectionSection::stale(previous.scheduler.into_value()),
+            ProjectionSection::stale(previous.activity.into_value()),
         ),
     };
     owner.publish(SnapshotDraft {
@@ -666,7 +678,6 @@ impl DesktopLifecycle {
         let runtime_operation = Arc::new(Mutex::new(()));
         let runtime = Arc::new(Mutex::new(ProductionRuntimeOwner::default()));
         let recovery_cancellation = RecoveryCancellation::default();
-        let runtime_snapshot_cache = Arc::new(RwLock::new(DesktopRuntimeSnapshot::inactive()));
         let runtime_control_generation = Arc::new(AtomicU64::new(0));
         let snapshot_owner = ControlPlaneSnapshotOwner::default();
         let update_owner = UpdateStateOwner::default();
@@ -682,7 +693,6 @@ impl DesktopLifecycle {
         let close_window_continue_running = Arc::new(AtomicBool::new(true));
         let monitor_operation = Arc::clone(&runtime_operation);
         let monitor_runtime = Arc::clone(&runtime);
-        let monitor_snapshot = Arc::clone(&runtime_snapshot_cache);
         let monitor_control_plane = snapshot_owner.clone();
         let monitor_desired = desired.clone();
         let monitor_privilege = privilege.clone();
@@ -712,9 +722,6 @@ impl DesktopLifecycle {
                     let activity = owner.task_aggregate_snapshot();
                     drop(owner);
                     record_desktop_runtime_events(&snapshot, &monitor_privilege);
-                    *monitor_snapshot
-                        .write()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot.clone();
                     publish_control_plane_observation(
                         &monitor_control_plane,
                         &monitor_desired,
@@ -731,7 +738,6 @@ impl DesktopLifecycle {
             runtime_operation,
             runtime,
             recovery_cancellation,
-            runtime_snapshot_cache,
             runtime_control_generation,
             snapshot_owner,
             update_checker,
@@ -850,11 +856,7 @@ impl DesktopLifecycle {
                     FaultSource::Settings,
                     error,
                 ));
-                ProjectionSection {
-                    availability: crate::control_plane::snapshot::ProjectionAvailability::Fault,
-                    stale: true,
-                    value: Some(settings),
-                }
+                ProjectionSection::faulted(Some(settings))
             }
             None => ProjectionSection::ready(settings),
         };
@@ -871,16 +873,23 @@ impl DesktopLifecycle {
         })
     }
 
+    pub fn publish_settings_fault(&self, error: OperationError) -> ControlPlaneSnapshot {
+        let settings = self
+            .snapshot_owner
+            .read()
+            .settings
+            .value()
+            .cloned()
+            .unwrap_or_default();
+        self.publish_settings_snapshot(settings, Some(error))
+    }
+
     pub fn publish_local_environment_observation(&self, available: bool) -> ControlPlaneSnapshot {
         let previous = self.snapshot_owner.read();
-        let runtime = ProjectionSection {
-            availability: previous.runtime.availability,
-            stale: previous.runtime.stale,
-            value: previous.runtime.value.map(|mut runtime| {
-                runtime.local_environment_available = Some(available);
-                runtime
-            }),
-        };
+        let runtime = previous.runtime.map(|mut runtime| {
+            runtime.local_environment_available = Some(available);
+            runtime
+        });
         self.snapshot_owner.publish(SnapshotDraft {
             runtime,
             authority: previous.authority,
@@ -899,32 +908,20 @@ impl DesktopLifecycle {
     }
 
     pub(crate) fn publish_current_observation(&self) -> ControlPlaneSnapshot {
-        let (runtime, activity) = match self.runtime.try_lock() {
-            Ok(owner) => (owner.snapshot(), Some(owner.task_aggregate_snapshot())),
-            Err(TryLockError::Poisoned(error)) => {
-                let owner = error.into_inner();
-                (owner.snapshot(), Some(owner.task_aggregate_snapshot()))
-            }
-            Err(TryLockError::WouldBlock) => (
-                self.runtime_snapshot_cache
-                    .read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .clone(),
-                None,
-            ),
+        let owner = match self.runtime.try_lock() {
+            Ok(owner) => owner,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(TryLockError::WouldBlock) => return self.snapshot_owner.mark_observation_stale(),
         };
-        if activity.is_some() {
-            *self
-                .runtime_snapshot_cache
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = runtime.clone();
-        }
+        let runtime = owner.snapshot();
+        let activity = owner.task_aggregate_snapshot();
+        drop(owner);
         publish_control_plane_observation(
             &self.snapshot_owner,
             &self.desired,
             &self.privilege,
             runtime,
-            activity,
+            Some(activity),
         )
     }
 
@@ -944,7 +941,6 @@ impl DesktopLifecycle {
             runtime_operation: Arc::clone(&self.runtime_operation),
             runtime: Arc::clone(&self.runtime),
             recovery_cancellation: self.recovery_cancellation.clone(),
-            runtime_snapshot_cache: Arc::clone(&self.runtime_snapshot_cache),
             runtime_control_generation: Arc::clone(&self.runtime_control_generation),
             snapshot_owner: self.snapshot_owner.clone(),
             #[cfg(windows)]
@@ -1032,7 +1028,7 @@ impl DesktopLifecycle {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take_active();
         let report = shutdown_in_security_order(active.as_deref_mut(), &self.privilege);
-        self.write_snapshot_cache(DesktopRuntimeSnapshot::inactive());
+        self.publish_runtime_observation(DesktopRuntimeSnapshot::inactive());
         report
     }
 
@@ -1060,7 +1056,7 @@ impl DesktopLifecycle {
             .as_deref_mut()
             .map(ExitRuntime::finish_exit_after_tunnel)
             .unwrap_or(Ok(()));
-        self.write_snapshot_cache(DesktopRuntimeSnapshot::inactive());
+        self.publish_runtime_observation(DesktopRuntimeSnapshot::inactive());
         if tunnel.is_err() || lower.is_err() {
             return Err(DesktopRuntimeControlError::Runtime(RuntimeFault::Unknown));
         }
@@ -1078,57 +1074,20 @@ impl DesktopLifecycle {
     }
 
     pub fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
-        match self.runtime.try_lock() {
-            Ok(owner) => {
-                if !owner.is_active() {
-                    drop(owner);
-                    return self
-                        .runtime_snapshot_cache
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .clone();
-                }
-                let snapshot = owner.snapshot();
-                *self
-                    .runtime_snapshot_cache
-                    .write()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot.clone();
-                return snapshot;
-            }
-            Err(TryLockError::Poisoned(error)) => {
-                let owner = error.into_inner();
-                if !owner.is_active() {
-                    drop(owner);
-                    return self
-                        .runtime_snapshot_cache
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .clone();
-                }
-                let snapshot = owner.snapshot();
-                *self
-                    .runtime_snapshot_cache
-                    .write()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot.clone();
-                return snapshot;
-            }
-            Err(TryLockError::WouldBlock) => {}
-        }
-        self.runtime_snapshot_cache
-            .read()
+        self.runtime
+            .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+            .snapshot()
     }
 
     pub fn wait_projection_change_after(&self, since: u64) -> u64 {
         let snapshot = self.snapshot_owner.read();
-        let activity_active = snapshot.activity.value.as_ref().is_some_and(|activity| {
+        let activity_active = snapshot.activity.value().is_some_and(|activity| {
             activity.foreground_task.is_some() || activity.detached_execution.is_some()
         });
         let last_tool_age_ms = snapshot
             .runtime
-            .value
-            .as_ref()
+            .value()
             .and_then(|runtime| runtime.last_tool.as_ref())
             .map(|last| last.age_ms);
         let timeout = next_projection_display_wait(activity_active, last_tool_age_ms);
@@ -1162,7 +1121,7 @@ impl DesktopLifecycle {
             .switch_workspace(candidate);
         let snapshot = owner.snapshot();
         drop(owner);
-        self.write_snapshot_cache(snapshot);
+        self.publish_runtime_observation(snapshot);
         result
     }
 
@@ -1185,7 +1144,7 @@ impl DesktopLifecycle {
             .manual_retry();
         let snapshot = owner.snapshot();
         drop(owner);
-        self.write_snapshot_cache(snapshot);
+        self.publish_runtime_observation(snapshot);
         result
     }
 
@@ -1202,13 +1161,13 @@ impl DesktopLifecycle {
             .runtime_operation
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut runtime = self
+        let mut active = self
             .runtime
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let report = shutdown_in_security_order(Some(&mut *runtime), privilege);
-        drop(runtime);
-        self.write_snapshot_cache(DesktopRuntimeSnapshot::inactive());
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take_active();
+        let report = shutdown_in_security_order(active.as_deref_mut(), privilege);
+        self.publish_runtime_observation(DesktopRuntimeSnapshot::inactive());
         report
     }
 
@@ -1229,7 +1188,7 @@ impl DesktopLifecycle {
         owner.activate_boxed(Box::new(runtime))?;
         let snapshot = owner.snapshot();
         drop(owner);
-        self.write_snapshot_cache(snapshot);
+        self.publish_runtime_observation(snapshot);
         Ok(())
     }
 
@@ -1241,12 +1200,14 @@ impl DesktopLifecycle {
         self.shutdown_with_privilege(privilege)
     }
 
-    fn write_snapshot_cache(&self, snapshot: DesktopRuntimeSnapshot) {
+    fn publish_runtime_observation(&self, snapshot: DesktopRuntimeSnapshot) {
         record_desktop_runtime_events(&snapshot, &self.privilege);
-        *self
-            .runtime_snapshot_cache
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
+        if !snapshot.active {
+            self.runtime
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .observe_inactive(snapshot);
+        }
         self.publish_current_observation();
     }
 }
@@ -1279,7 +1240,6 @@ pub struct DesktopBackendHandle {
     runtime_operation: Arc<Mutex<()>>,
     runtime: Arc<Mutex<ProductionRuntimeOwner>>,
     recovery_cancellation: RecoveryCancellation,
-    runtime_snapshot_cache: Arc<RwLock<DesktopRuntimeSnapshot>>,
     runtime_control_generation: Arc<AtomicU64>,
     snapshot_owner: ControlPlaneSnapshotOwner,
     #[cfg(windows)]
@@ -1381,10 +1341,6 @@ impl DesktopBackendHandle {
         let snapshot = owner.snapshot();
         drop(owner);
         if self.is_current_generation(generation) {
-            *self
-                .runtime_snapshot_cache
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot.clone();
             self.publish_observation(snapshot, None);
         }
         Ok(())
@@ -1485,11 +1441,6 @@ impl DesktopBackendHandle {
                                 .lock()
                                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                                 .snapshot();
-                            *backend
-                                .runtime_snapshot_cache
-                                .write()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                                snapshot.clone();
                             backend.publish_observation(snapshot, None);
                         }
                     }
@@ -1497,11 +1448,7 @@ impl DesktopBackendHandle {
             });
         if spawn.is_err() && self.is_current_generation(generation) {
             let snapshot = DesktopRuntimeSnapshot::inactive();
-            *self
-                .runtime_snapshot_cache
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot.clone();
-            self.publish_observation(snapshot, Some(TaskAggregate::idle()));
+            self.observe_inactive_and_publish(snapshot, Some(TaskAggregate::idle()));
         }
         spawn
     }
@@ -1532,11 +1479,7 @@ impl DesktopBackendHandle {
             connection_profile: self.desired.snapshot().state.connection,
             outage: None,
         };
-        *self
-            .runtime_snapshot_cache
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot.clone();
-        self.publish_observation(snapshot, Some(TaskAggregate::idle()));
+        self.observe_inactive_and_publish(snapshot, Some(TaskAggregate::idle()));
     }
 
     fn publish_fault_if_current(&self, generation: u64, workspace: PathBuf, fault: RuntimeFault) {
@@ -1553,11 +1496,7 @@ impl DesktopBackendHandle {
             connection_profile: self.desired.snapshot().state.connection,
             outage: None,
         };
-        *self
-            .runtime_snapshot_cache
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot.clone();
-        self.publish_observation(snapshot, Some(TaskAggregate::idle()));
+        self.observe_inactive_and_publish(snapshot, Some(TaskAggregate::idle()));
     }
 
     pub fn shutdown(&self) -> ShutdownReport {
@@ -1571,19 +1510,27 @@ impl DesktopBackendHandle {
             .runtime_operation
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut runtime = self
+        let mut active = self
             .runtime
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let report = shutdown_in_security_order(Some(&mut *runtime), &self.privilege);
-        drop(runtime);
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take_active();
+        let report = shutdown_in_security_order(active.as_deref_mut(), &self.privilege);
         let snapshot = DesktopRuntimeSnapshot::inactive();
-        *self
-            .runtime_snapshot_cache
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot.clone();
-        self.publish_observation(snapshot, Some(TaskAggregate::idle()));
+        self.observe_inactive_and_publish(snapshot, Some(TaskAggregate::idle()));
         report
+    }
+
+    fn observe_inactive_and_publish(
+        &self,
+        runtime: DesktopRuntimeSnapshot,
+        activity: Option<TaskAggregate>,
+    ) -> ControlPlaneSnapshot {
+        self.runtime
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .observe_inactive(runtime.clone());
+        self.publish_observation(runtime, activity)
     }
 
     fn publish_observation(

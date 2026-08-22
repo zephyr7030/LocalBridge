@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -15,9 +16,11 @@ use crate::domain::{
     RuntimeCommandHandle, TaskId, TerminalOutcome,
 };
 
-use super::resource_lifecycle::{MAX_ACTIVE_EXECUTIONS, MAX_TERMINAL_EXECUTIONS};
-
-const EXECUTION_STATE_VERSION: u32 = 2;
+const EXECUTION_STATE_VERSION: u32 = 3;
+const MAX_ACTIVE_EXECUTIONS: usize = 64;
+const MAX_TERMINAL_EXECUTIONS: usize = 64;
+pub(crate) const EXECUTION_ORPHAN_TTL_MS: u64 = 30 * 60 * 1_000;
+pub(crate) const EXECUTION_MAX_DETACHED_AGE_MS: u64 = 24 * 60 * 60 * 1_000;
 const MAX_OUTPUT_REFS: usize = 4;
 const MAX_STABLE_TOKEN: usize = 128;
 static EXECUTION_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -83,6 +86,7 @@ struct LegacyTaskState {
 struct ExecutionRegistryInner {
     path: PathBuf,
     state: PersistedExecutionState,
+    cancellation_signals: HashMap<ExecutionId, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +97,7 @@ pub(crate) enum ExecutionRegistryError {
     Storage(&'static str),
     CapacityExceeded,
     UnknownExecution(ExecutionId),
+    UnknownPublicSession(PublicSessionId),
     PublicSessionCollision(PublicSessionId),
     OwnerConflict {
         execution_id: ExecutionId,
@@ -112,6 +117,7 @@ impl fmt::Display for ExecutionRegistryError {
             Self::Storage(operation) => write!(f, "execution registry {operation} failed"),
             Self::CapacityExceeded => f.write_str("execution registry capacity exceeded"),
             Self::UnknownExecution(id) => write!(f, "unknown execution {id}"),
+            Self::UnknownPublicSession(id) => write!(f, "unknown public session {id}"),
             Self::PublicSessionCollision(id) => write!(f, "public session collision {id}"),
             Self::OwnerConflict {
                 execution_id,
@@ -150,7 +156,16 @@ impl ExecutionRegistry {
                 .and_then(|mut file| file.read_to_end(&mut bytes))
                 .map_err(|_| ExecutionRegistryError::Storage("read"))?;
             match serde_json::from_slice::<PersistedExecutionState>(&bytes) {
-                Ok(state) if state.version == EXECUTION_STATE_VERSION => (state, false),
+                Ok(mut state) if matches!(state.version, 2 | EXECUTION_STATE_VERSION) => {
+                    let migrated = state.version != EXECUTION_STATE_VERSION;
+                    state.version = EXECUTION_STATE_VERSION;
+                    for execution in &mut state.executions {
+                        if execution.last_observed_at_ms == 0 {
+                            execution.last_observed_at_ms = execution.started_at_ms;
+                        }
+                    }
+                    (state, migrated)
+                }
                 _ => {
                     let legacy: LegacyTaskState = serde_json::from_slice(&bytes)
                         .map_err(|_| ExecutionRegistryError::Storage("parse"))?;
@@ -179,6 +194,7 @@ impl ExecutionRegistry {
         Ok(Self(Arc::new(Mutex::new(ExecutionRegistryInner {
             path,
             state,
+            cancellation_signals: HashMap::new(),
         }))))
     }
 
@@ -207,6 +223,7 @@ impl ExecutionRegistry {
                     public_session_id.clone(),
                 ));
             }
+            let now = now_unix_ms();
             state.executions.push(ExecutionRecord {
                 id: execution_id.clone(),
                 task_id,
@@ -214,7 +231,9 @@ impl ExecutionRegistry {
                 owner_session: None,
                 runtime_handle: None,
                 state: ExecutionState::Running,
-                started_at_ms: now_unix_ms(),
+                started_at_ms: now,
+                last_observed_at_ms: now,
+                orphaned_at_ms: None,
             });
             Ok(())
         })?;
@@ -244,8 +263,39 @@ impl ExecutionRegistry {
                 None => {}
             }
             execution.owner_session = Some(owner);
+            execution.orphaned_at_ms = None;
             Ok(())
         })
+    }
+
+    pub(crate) fn adopt_owner(
+        &self,
+        public_session_id: &PublicSessionId,
+        owner: McpSessionId,
+    ) -> Result<ExecutionRecord, ExecutionRegistryError> {
+        let mut adopted = None;
+        self.transact("adopt_owner", |state| {
+            let execution = state
+                .executions
+                .iter_mut()
+                .find(|execution| &execution.public_session_id == public_session_id)
+                .ok_or_else(|| {
+                    ExecutionRegistryError::UnknownPublicSession(public_session_id.clone())
+                })?;
+            if let ExecutionState::Terminal(terminal) = &execution.state {
+                return Err(ExecutionRegistryError::AlreadyTerminal {
+                    execution_id: execution.id.clone(),
+                    outcome: terminal.outcome,
+                });
+            }
+            execution.owner_session = Some(owner);
+            execution.orphaned_at_ms = None;
+            execution.last_observed_at_ms = now_unix_ms();
+            adopted = Some(execution.clone());
+            Ok(())
+        })?;
+        adopted
+            .ok_or_else(|| ExecutionRegistryError::UnknownPublicSession(public_session_id.clone()))
     }
 
     pub(crate) fn bind_runtime_handle(
@@ -279,12 +329,78 @@ impl ExecutionRegistry {
         })
     }
 
+    pub(crate) fn request_cancellation(
+        &self,
+        public_session_id: &PublicSessionId,
+        signal: &str,
+    ) -> Result<(), ExecutionRegistryError> {
+        let mut inner = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let execution = inner
+            .state
+            .executions
+            .iter()
+            .find(|execution| &execution.public_session_id == public_session_id)
+            .ok_or_else(|| {
+                ExecutionRegistryError::UnknownPublicSession(public_session_id.clone())
+            })?;
+        if let ExecutionState::Terminal(terminal) = &execution.state {
+            return Err(ExecutionRegistryError::AlreadyTerminal {
+                execution_id: execution.id.clone(),
+                outcome: terminal.outcome,
+            });
+        }
+        let execution_id = execution.id.clone();
+        inner
+            .cancellation_signals
+            .insert(execution_id, bounded_token(signal.to_string()));
+        Ok(())
+    }
+
+    pub(crate) fn cancellation_signal(
+        &self,
+        public_session_id: &PublicSessionId,
+    ) -> Option<String> {
+        let inner = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let execution = inner
+            .state
+            .executions
+            .iter()
+            .find(|execution| &execution.public_session_id == public_session_id)?;
+        if execution.state.is_terminal() {
+            None
+        } else {
+            inner.cancellation_signals.get(&execution.id).cloned()
+        }
+    }
+
+    pub(crate) fn clear_cancellation(&self, public_session_id: &PublicSessionId) {
+        let mut inner = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let execution_id = inner
+            .state
+            .executions
+            .iter()
+            .find(|execution| &execution.public_session_id == public_session_id)
+            .map(|execution| execution.id.clone());
+        if let Some(execution_id) = execution_id {
+            inner.cancellation_signals.remove(&execution_id);
+        }
+    }
+
     pub(crate) fn finish(
         &self,
         execution_id: &ExecutionId,
         terminal: ExecutionTerminal,
     ) -> Result<(), ExecutionRegistryError> {
-        self.transact("finish", |state| {
+        let result = self.transact("finish", |state| {
             let execution = state
                 .executions
                 .iter_mut()
@@ -292,6 +408,7 @@ impl ExecutionRegistry {
                 .ok_or_else(|| ExecutionRegistryError::UnknownExecution(execution_id.clone()))?;
             match &execution.state {
                 ExecutionState::Queued | ExecutionState::Running => {
+                    execution.last_observed_at_ms = terminal.completed_at_ms;
                     execution.state = ExecutionState::Terminal(sanitize_terminal(terminal));
                     Ok(())
                 }
@@ -305,7 +422,15 @@ impl ExecutionRegistry {
                     })
                 }
             }
-        })
+        });
+        if result.is_ok() {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .cancellation_signals
+                .remove(execution_id);
+        }
+        result
     }
 
     pub(crate) fn execution_for_public_session(
@@ -346,6 +471,94 @@ impl ExecutionRegistry {
             .collect()
     }
 
+    pub(crate) fn all(&self) -> Vec<ExecutionRecord> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .state
+            .executions
+            .clone()
+    }
+
+    pub(crate) fn orphan_owned_by(
+        &self,
+        owner: &McpSessionId,
+    ) -> Result<usize, ExecutionRegistryError> {
+        let now = now_unix_ms();
+        let mut orphaned = 0usize;
+        self.transact("orphan_owner", |state| {
+            for execution in &mut state.executions {
+                if !execution.state.is_terminal() && execution.owner_session.as_ref() == Some(owner)
+                {
+                    execution.owner_session = None;
+                    execution.orphaned_at_ms.get_or_insert(now);
+                    orphaned = orphaned.saturating_add(1);
+                }
+            }
+            Ok(())
+        })?;
+        Ok(orphaned)
+    }
+
+    pub(crate) fn observe_all_running(&self) -> Result<(), ExecutionRegistryError> {
+        let now = now_unix_ms();
+        self.transact("observe", |state| {
+            for execution in &mut state.executions {
+                if matches!(execution.state, ExecutionState::Running) {
+                    execution.last_observed_at_ms = now;
+                }
+            }
+            Ok(())
+        })
+    }
+
+    pub(crate) fn reap_stale(
+        &self,
+        now_ms: u64,
+    ) -> Result<Vec<ExecutionId>, ExecutionRegistryError> {
+        let mut lost = Vec::new();
+        self.transact("reap_stale", |state| {
+            for execution in &mut state.executions {
+                if execution.state.is_terminal() {
+                    continue;
+                }
+                let orphan_expired = execution.orphaned_at_ms.is_some_and(|orphaned_at| {
+                    now_ms.saturating_sub(orphaned_at) >= EXECUTION_ORPHAN_TTL_MS
+                });
+                let max_age_expired =
+                    now_ms.saturating_sub(execution.started_at_ms) >= EXECUTION_MAX_DETACHED_AGE_MS;
+                if orphan_expired || max_age_expired {
+                    let execution_id = execution.id.clone();
+                    execution.state = ExecutionState::Terminal(ExecutionTerminal {
+                        outcome: TerminalOutcome::Lost,
+                        exit_code: None,
+                        signal: None,
+                        output_refs: Vec::new(),
+                        error_code: Some(if orphan_expired {
+                            "ExecutionOrphanExpired".to_string()
+                        } else {
+                            "ExecutionMaxAgeExceeded".to_string()
+                        }),
+                        completed_at_ms: now_ms,
+                    });
+                    execution.last_observed_at_ms = now_ms;
+                    lost.push(execution_id);
+                }
+            }
+            Ok(())
+        })?;
+        if !lost.is_empty() {
+            let mut inner = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for execution_id in &lost {
+                inner.cancellation_signals.remove(execution_id);
+            }
+        }
+        Ok(lost)
+    }
+
     pub(crate) fn running_owned_by(&self, owner: &McpSessionId) -> Vec<ExecutionRecord> {
         self.0
             .lock()
@@ -356,6 +569,35 @@ impl ExecutionRegistry {
             .filter(|execution| {
                 matches!(execution.state, ExecutionState::Running)
                     && execution.owner_session.as_ref() == Some(owner)
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn running_unowned(&self) -> Vec<ExecutionRecord> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .state
+            .executions
+            .iter()
+            .filter(|execution| {
+                matches!(execution.state, ExecutionState::Running)
+                    && execution.owner_session.is_none()
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn running_for_task(&self, task_id: &TaskId) -> Vec<ExecutionRecord> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .state
+            .executions
+            .iter()
+            .filter(|execution| {
+                matches!(execution.state, ExecutionState::Running) && &execution.task_id == task_id
             })
             .cloned()
             .collect()
@@ -452,6 +694,8 @@ fn migrate_legacy_state(legacy: LegacyTaskState) -> PersistedExecutionState {
                 completed_at_ms: terminal.completed_at_ms,
             })),
             started_at_ms: terminal.completed_at_ms,
+            last_observed_at_ms: terminal.completed_at_ms,
+            orphaned_at_ms: None,
         });
     }
     if let Some(current) = legacy.legacy_running_command {
@@ -467,6 +711,8 @@ fn migrate_legacy_state(legacy: LegacyTaskState) -> PersistedExecutionState {
                 runtime_handle: None,
                 state: ExecutionState::Terminal(lost_terminal()),
                 started_at_ms: current.started_at_ms,
+                last_observed_at_ms: current.started_at_ms,
+                orphaned_at_ms: None,
             });
         }
     }
@@ -749,6 +995,66 @@ mod tests {
             registry.bind_owner(&execution, McpSessionId::new("mcp-b")),
             Err(ExecutionRegistryError::OwnerConflict { .. })
         ));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn disconnected_execution_can_be_adopted_before_orphan_ttl() {
+        let path = temp_path("orphan-adopt");
+        let registry = ExecutionRegistry::open_at(path.clone()).unwrap();
+        let public = PublicSessionId::new("public");
+        let execution = registry.start(TaskId::new("task"), public.clone()).unwrap();
+        let original = McpSessionId::new("mcp-a");
+        registry.bind_owner(&execution, original.clone()).unwrap();
+        assert_eq!(registry.orphan_owned_by(&original).unwrap(), 1);
+        let orphan = registry.execution_for_public_session(&public).unwrap();
+        assert_eq!(orphan.owner_session, None);
+        assert!(orphan.orphaned_at_ms.is_some());
+
+        let adopted = registry
+            .adopt_owner(&public, McpSessionId::new("mcp-b"))
+            .unwrap();
+        assert_eq!(adopted.owner_session, Some(McpSessionId::new("mcp-b")));
+        assert_eq!(adopted.orphaned_at_ms, None);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn orphan_ttl_converges_execution_exactly_once_to_lost() {
+        let path = temp_path("orphan-expiry");
+        let registry = ExecutionRegistry::open_at(path.clone()).unwrap();
+        let public = PublicSessionId::new("public");
+        let execution = registry.start(TaskId::new("task"), public.clone()).unwrap();
+        let owner = McpSessionId::new("mcp-a");
+        registry.bind_owner(&execution, owner.clone()).unwrap();
+        registry.orphan_owned_by(&owner).unwrap();
+        let orphaned_at = registry
+            .execution_for_public_session(&public)
+            .unwrap()
+            .orphaned_at_ms
+            .unwrap();
+        assert_eq!(
+            registry
+                .reap_stale(orphaned_at + EXECUTION_ORPHAN_TTL_MS)
+                .unwrap(),
+            vec![execution.clone()]
+        );
+        assert!(matches!(
+            registry
+                .execution_for_public_session(&public)
+                .unwrap()
+                .state,
+            ExecutionState::Terminal(ExecutionTerminal {
+                outcome: TerminalOutcome::Lost,
+                ..
+            })
+        ));
+        assert!(
+            registry
+                .reap_stale(orphaned_at + EXECUTION_ORPHAN_TTL_MS + 1)
+                .unwrap()
+                .is_empty()
+        );
         let _ = fs::remove_file(path);
     }
 

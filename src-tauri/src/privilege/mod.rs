@@ -8,7 +8,6 @@ mod protocol;
 #[cfg(windows)]
 mod windows;
 
-pub(crate) use broker::MAX_ACTIVE_BROKER_REQUESTS;
 pub use broker::{
     BrokerClientSession, BrokerProcessArgs, BrokerRunError, parse_broker_args, run_broker_process,
 };

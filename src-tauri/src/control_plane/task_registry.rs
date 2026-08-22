@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -8,7 +8,7 @@ use crate::domain::{
     TerminalOutcome,
 };
 
-use super::resource_lifecycle::MAX_RETAINED_TASKS;
+const MAX_RETAINED_TASKS: usize = 256;
 
 static TASK_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -162,6 +162,20 @@ impl TaskRegistry {
             .collect()
     }
 
+    pub(crate) fn owned_by(&self, owner: &McpSessionId) -> Vec<TaskRecord> {
+        let state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state
+            .order
+            .iter()
+            .filter_map(|task_id| state.tasks.get(task_id))
+            .filter(|task| &task.owner_session == owner)
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn latest_active(&self) -> Option<TaskRecord> {
         let state = self
             .0
@@ -182,6 +196,13 @@ impl TaskRegistry {
     }
 
     pub(crate) fn latest_terminal(&self) -> Option<TaskRecord> {
+        self.latest_terminal_excluding(&HashSet::new())
+    }
+
+    pub(crate) fn latest_terminal_excluding(
+        &self,
+        excluded: &HashSet<TaskId>,
+    ) -> Option<TaskRecord> {
         let state = self
             .0
             .lock()
@@ -190,7 +211,7 @@ impl TaskRegistry {
             state
                 .tasks
                 .get(task_id)
-                .filter(|task| task.lifecycle.is_terminal())
+                .filter(|task| task.lifecycle.is_terminal() && !excluded.contains(&task.id))
                 .cloned()
         })
     }

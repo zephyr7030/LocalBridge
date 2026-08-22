@@ -166,10 +166,9 @@ for (const required of [
   "pub const V1_CORE_TOOL_NAMES: [&str; 8]",
   "CapabilityUnavailable",
   "ToolboxResolver::probe(runtime.install_root())",
-  ".rewrite_command(kind, &request.execution.command)",
   '"PATH":self.toolbox.child_path()',
   '"NoDefaultCurrentDirectoryInExePath":"1"',
-]) if (!facade.includes(required)) throw new Error(`LB-012 schema42 Toolbox facade integration missing: ${required}`);
+]) if (!facade.includes(required)) throw new Error(`LB-012 schema46 Toolbox environment integration missing: ${required}`);
 for (const required of [
   "struct ToolboxResolver",
   "run_bounded_command",

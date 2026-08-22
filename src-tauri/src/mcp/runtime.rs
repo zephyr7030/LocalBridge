@@ -29,7 +29,17 @@ impl CodingToolsPermissionMode {
     const fn as_upstream_arg(self) -> &'static str {
         match self {
             Self::Safe => "safe",
-            Self::Trusted => "trusted",
+            // The trusted variant is never a public listener. LocalBridge's
+            // authenticated Rust Guard is the sole policy owner, so the inner
+            // runtime must not apply a second command-string/filesystem policy.
+            Self::Trusted => "dangerous",
+        }
+    }
+
+    const fn bypasses_inner_policy(self) -> &'static str {
+        match self {
+            Self::Safe => "0",
+            Self::Trusted => "1",
         }
     }
 }
@@ -115,6 +125,7 @@ pub enum CodingToolsRuntimeError {
     PortUnavailable,
     Supervisor(SupervisorError),
     ConnectionUnavailable,
+    RequestTimeout,
     HttpStatus(u16),
     ProtocolMismatch,
     UpstreamRpcError,
@@ -142,6 +153,9 @@ impl CodingToolsRuntimeError {
             Self::ConnectionUnavailable | Self::HttpStatus(_) | Self::HealthTimeout => {
                 RuntimeFault::McpHealthTimeout
             }
+            // Callers must not persist this fallback: a bounded request timing out does not
+            // prove the Runtime is faulty or the owned Execution is terminal.
+            Self::RequestTimeout => RuntimeFault::Unknown,
             Self::McpExited => RuntimeFault::McpExited,
             Self::Cancelled => RuntimeFault::UserStopped,
         }
@@ -165,6 +179,7 @@ impl fmt::Display for CodingToolsRuntimeError {
             Self::ConnectionUnavailable => {
                 f.write_str("coding runtime loopback connection is unavailable")
             }
+            Self::RequestTimeout => f.write_str("coding runtime request deadline expired"),
             Self::HttpStatus(status) => {
                 write!(f, "coding runtime returned unexpected HTTP status {status}")
             }
@@ -249,6 +264,7 @@ impl CodingToolsRuntime {
         let verified = verify_bundle(&config.install_root)?;
         reserve_loopback_port(config.port)?;
 
+        let inner_policy_bypass = config.permission_mode.bypasses_inner_policy();
         let mut spec = ManagedProcessSpec::new("coding-tools-mcp", verified.python_executable)?
             .arg("-I")
             .arg("-B")
@@ -271,7 +287,10 @@ impl CodingToolsRuntime {
             ("CODING_TOOLS_MCP_TRACE", "0"),
             ("CODING_TOOLS_MCP_SHELL_ENV_INHERIT", "core"),
             ("CODING_TOOLS_MCP_SHELL_ENV_SET", "{}"),
-            ("CODING_TOOLS_MCP_DANGEROUSLY_SKIP_ALL_PERMISSIONS", "0"),
+            (
+                "CODING_TOOLS_MCP_DANGEROUSLY_SKIP_ALL_PERMISSIONS",
+                inner_policy_bypass,
+            ),
             (
                 "CODING_TOOLS_MCP_DANGEROUSLY_FAKE_READONLY_ANNOTATIONS",
                 "0",
@@ -519,6 +538,20 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn guarded_runtime_is_policy_neutral_and_safe_runtime_remains_isolated() {
+        assert_eq!(CodingToolsPermissionMode::Safe.as_upstream_arg(), "safe");
+        assert_eq!(CodingToolsPermissionMode::Safe.bypasses_inner_policy(), "0");
+        assert_eq!(
+            CodingToolsPermissionMode::Trusted.as_upstream_arg(),
+            "dangerous"
+        );
+        assert_eq!(
+            CodingToolsPermissionMode::Trusted.bypasses_inner_policy(),
+            "1"
+        );
+    }
 
     #[test]
     fn frozen_workspace_identity_rejects_same_path_replacement_before_spawn() {

@@ -361,7 +361,7 @@ impl PublicMcpClient {
         )
     }
 
-    pub(crate) fn start_detached_command(&self, arguments: Value) -> DetachedCommand {
+    pub(crate) fn start_detached_command(&self, arguments: Value) -> DetachedCommand<'_> {
         let response = self.call_tool("exec_command", arguments);
         DetachedCommand::from_response(self, response)
     }

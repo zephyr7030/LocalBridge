@@ -10,8 +10,6 @@ export interface TaskProjection { kind: TaskKindCode; summary: string | null; st
 export type WorkflowStateCode = "running" | "waiting";
 export type CommandActivityStateCode = "running" | "waiting_input" | "cancelling";
 export type CommandTerminalStateCode = "completed" | "failed" | "cancelled" | "timed_out" | "lost";
-export interface CurrentWorkflowProjection { state: WorkflowStateCode }
-export interface CurrentCommandProjection { state: CommandActivityStateCode }
 export interface LastCommandProjection { status: CommandTerminalStateCode; ageMs: number }
 export interface LastToolProjection { kind: TaskKindCode; summary: string | null; ageMs: number }
 export type ActivityStateCode = "running" | "waiting" | "waiting_input" | "cancelling";
@@ -24,7 +22,9 @@ export interface UiError { code: string; category: UiErrorCategory; message: str
 export interface UiFaultProjection { code: string; category: UiErrorCategory; message: string; retryable: boolean }
 export type UpdateStateCode = "source_unavailable" | "idle" | "checking" | "current" | "available" | "failed";
 export interface UpdateProjection { state: UpdateStateCode; currentVersion: string; latestVersion: string | null; releaseUrl: string | null; operationId: string | null; attempt: number | null; retryable: boolean }
-export interface MainProjection { permission: AccessCode; privilege: PrivilegeCode; localEnvironmentService: ServiceCode; tunnelService: ServiceCode; codingService: ServiceCode; currentProject: string | null; projects: ProjectProjection[]; currentTask: TaskProjection | null; currentWorkflow: CurrentWorkflowProjection | null; currentCommand: CurrentCommandProjection | null; lastCommand: LastCommandProjection | null; lastTool: LastToolProjection | null; currentActivity: CurrentActivityProjection | null; lastActivity: LastActivityProjection | null; projectionRevision: number; tunnelId: string | null; runtimeKeySaved: boolean; autoStart: boolean; closeWindowContinueRunning: boolean; reconnect: ReconnectProjection | null; update: UpdateProjection; activeFaults: UiFaultProjection[]; }
+export interface OpenReleaseProjection { releaseUrl: string }
+export interface AdminConsentChallenge { challengeId: string; notBeforeUnixMs: number }
+export interface MainProjection { permission: AccessCode; effectivePermission: AccessCode; elevatedActive: boolean; privilege: PrivilegeCode; localEnvironmentService: ServiceCode; tunnelService: ServiceCode; codingService: ServiceCode; currentProject: string | null; projects: ProjectProjection[]; currentTask: TaskProjection | null; currentActivity: CurrentActivityProjection | null; lastActivity: LastActivityProjection | null; projectionRevision: number; tunnelId: string | null; runtimeKeySaved: boolean; autoStart: boolean; closeWindowContinueRunning: boolean; reconnect: ReconnectProjection | null; update: UpdateProjection; activeFaults: UiFaultProjection[]; }
 export function uiErrorMessage(value: unknown, fallback: string): string {
   if (typeof value === "object" && value !== null && "message" in value && typeof value.message === "string" && value.message.trim()) return value.message;
   if (value instanceof Error && value.message.trim()) return value.message;
@@ -35,6 +35,9 @@ export const bridge = {
   waitForProjectionChange: (sinceRevision: number) => invoke<number>("wait_main_projection_change", { sinceRevision }),
   uiReady: () => invoke<void>("ui_ready"),
   setAccess: (mode: AccessCode) => invoke<void>("set_permission_mode", { mode }),
+  beginAdminConsent: (challengeId: string) => invoke<AdminConsentChallenge>("begin_admin_consent", { challengeId }),
+  cancelAdminConsent: (challengeId: string) => invoke<void>("cancel_admin_consent", { challengeId }),
+  confirmAdminConsent: (challengeId: string) => invoke<void>("confirm_admin_consent", { challengeId }),
   setAutoStart: (enabled: boolean) => invoke<void>("set_auto_start", { enabled }),
   setCloseWindowContinueRunning: (enabled: boolean) => invoke<void>("set_close_window_continue_running", { enabled }),
   saveTunnelId: (value: string) => invoke<void>("save_tunnel_id", { value }),
@@ -47,6 +50,6 @@ export const bridge = {
   removeProject: (id: string) => invoke<void>("remove_project", { id }),
   restartServices: () => invoke<void>("restart_services"),
   stopServices: () => invoke<void>("stop_services"),
-  retryUpdateCheck: () => invoke<void>("retry_update_check"),
-  openGitHubReleases: () => invoke<void>("open_github_releases"),
+  retryUpdateCheck: () => invoke<UpdateProjection>("retry_update_check"),
+  openGitHubReleases: () => invoke<OpenReleaseProjection>("open_github_releases"),
 };

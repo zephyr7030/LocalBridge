@@ -3,6 +3,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 #[cfg(windows)]
+use crate::control_plane::convergence::{
+    DesiredState, DesiredStateOwner, DesiredWorkspace, ServiceIntent,
+};
+#[cfg(windows)]
 use crate::credentials::{
     CredentialMetadata, CredentialStore, CredentialStoreError, RUNTIME_API_KEY_CREDENTIAL_ID,
     SecretString,
@@ -13,7 +17,7 @@ use crate::mcp::InternalBearer;
 use crate::mcp::{ProductionRuntimeConfig, ProductionRuntimeDriver};
 use crate::runtime::RuntimeDriver;
 #[cfg(windows)]
-use crate::state::RuntimeFault;
+use crate::state::{PermissionMode, RuntimeFault};
 #[cfg(windows)]
 use crate::tunnel::{PreparedTunnelStart, TunnelId, TunnelRuntimeConfig};
 #[cfg(windows)]
@@ -163,19 +167,19 @@ fn runtime_owner_lock_contention_marks_activity_stale_without_running_compensati
     let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
     lifecycle.publish_current_observation();
     let ready = lifecycle.control_plane_snapshot();
-    assert!(!ready.activity.stale);
+    assert!(!ready.activity.is_stale());
     let _runtime_owner = lifecycle
         .runtime
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     lifecycle.publish_current_observation();
     let contended = lifecycle.control_plane_snapshot();
-    assert!(contended.activity.stale);
+    assert!(contended.activity.is_stale());
     assert_eq!(
-        contended.activity.availability,
+        contended.activity.availability(),
         crate::control_plane::snapshot::ProjectionAvailability::TemporarilyUnavailable
     );
-    let aggregate = contended.activity.value.unwrap();
+    let aggregate = contended.activity.into_value().unwrap();
     assert!(aggregate.foreground_task.is_none());
     assert!(aggregate.detached_execution.is_none());
 }
@@ -201,16 +205,16 @@ fn partial_runtime_observation_does_not_upgrade_a_stale_runtime_section() {
         lifecycle.publish_current_observation();
     }
     let stale = lifecycle.control_plane_snapshot();
-    assert!(stale.runtime.stale);
+    assert!(stale.runtime.is_stale());
 
     lifecycle.publish_local_environment_observation(true);
     let updated = lifecycle.control_plane_snapshot();
-    assert!(updated.runtime.stale);
-    assert_eq!(updated.runtime.availability, stale.runtime.availability);
+    assert!(updated.runtime.is_stale());
+    assert_eq!(updated.runtime.availability(), stale.runtime.availability());
     assert_eq!(
         updated
             .runtime
-            .value
+            .into_value()
             .and_then(|runtime| runtime.local_environment_available),
         Some(true)
     );
@@ -332,7 +336,7 @@ fn explicit_control_cancels_before_owner_lock_and_snapshot_remains_responsive() 
     let snapshot_lifecycle = Arc::clone(&lifecycle);
     let (snapshot_tx, snapshot_rx) = mpsc::channel();
     let snapshot_thread = thread::spawn(move || {
-        let _ = snapshot_tx.send(snapshot_lifecycle.runtime_snapshot());
+        let _ = snapshot_tx.send(snapshot_lifecycle.control_plane_snapshot());
     });
     let snapshot_result = snapshot_rx.recv_timeout(Duration::from_secs(1));
 
@@ -345,9 +349,11 @@ fn explicit_control_cancels_before_owner_lock_and_snapshot_remains_responsive() 
         cancelled_before_release,
         "explicit control must cancel recovery before waiting for runtime_operation"
     );
-    let snapshot = snapshot_result.expect("snapshot cache must not wait for runtime owner mutex");
-    assert!(snapshot.active);
-    assert_eq!(snapshot.state, RuntimeState::Ready);
+    let snapshot =
+        snapshot_result.expect("revisioned snapshot must not wait for runtime owner mutex");
+    let runtime = snapshot.runtime.value().expect("runtime observation");
+    assert!(runtime.active);
+    assert_eq!(runtime.state, RuntimeState::Ready);
     assert!(control_result.expect("control thread returns").is_ok());
     assert!(!lifecycle.runtime_snapshot().active);
 }
@@ -467,10 +473,10 @@ fn stale_built_runtime_is_cleaned_and_cannot_replace_newer_generation_owner_or_s
 
     thread::sleep(RUNTIME_WATCHDOG_INTERVAL + Duration::from_millis(100));
     let after_watchdog = backend
-        .runtime_snapshot_cache
-        .read()
+        .runtime
+        .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone();
+        .snapshot();
     assert_eq!(after_watchdog.state, RuntimeState::StartingMcp);
     assert_eq!(
         after_watchdog.configured_workspace.as_deref(),
@@ -777,12 +783,20 @@ fn production_tray_exit_owns_actual_adapter_and_stops_tunnel_gate_pep_mcp() {
         &health,
         TunnelId::new(ACTUAL_TUNNEL_ID).unwrap(),
     );
+    let desired = DesiredStateOwner::default();
+    desired.replace(DesiredState {
+        permission: PermissionMode::Full,
+        workspace: Some(DesiredWorkspace::for_runtime_path(&workspace)),
+        services: ServiceIntent::Enabled,
+        connection: None,
+    });
     let mut driver =
         ProductionRuntimeDriver::new_owned(config, ActualAdapterCredentialStore, || {
             InternalBearer::new(ACTUAL_INTERNAL_BEARER)
                 .map_err(|_| RuntimeFault::ConfigurationInvalid)
         })
-        .with_privileged_execution(Arc::new(controller.gateway()));
+        .with_privileged_execution(Arc::new(controller.gateway()))
+        .with_control_plane_state(desired, None);
 
     let mut mcp = driver.start_mcp().expect("actual bundled MCP starts");
     driver

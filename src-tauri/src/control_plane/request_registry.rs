@@ -4,14 +4,13 @@ use std::sync::{Arc, Mutex};
 use crate::domain::{McpSessionId, OperationError, RequestKey, RpcRequestId};
 use crate::filesystem::service::FilesystemCancellation;
 
-use super::resource_lifecycle::MAX_RETAINED_REQUEST_ERRORS;
+const MAX_RETAINED_REQUEST_ERRORS: usize = 256;
 
 #[derive(Debug, Clone)]
 pub(crate) enum RequestCancellationTarget {
     Runtime(RpcRequestId),
     WorkspaceFilesystem(FilesystemCancellation),
     PrivilegedExecution(String),
-    PrivilegedFilesystem(String),
 }
 
 #[derive(Debug, Clone)]

@@ -57,4 +57,8 @@ pub struct ExecutionRecord {
     pub runtime_handle: Option<RuntimeCommandHandle>,
     pub state: ExecutionState,
     pub started_at_ms: u64,
+    #[serde(default)]
+    pub last_observed_at_ms: u64,
+    #[serde(default)]
+    pub orphaned_at_ms: Option<u64>,
 }

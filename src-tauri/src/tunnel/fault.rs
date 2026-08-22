@@ -221,7 +221,9 @@ pub fn classify_control_plane_error(message: &str) -> ControlPlaneFault {
     let lower = message.to_ascii_lowercase();
     if lower.contains("400") || lower.contains("bad request") {
         ControlPlaneFault::BadRequest
-    } else if lower.contains("401") || lower.contains("unauthorized") || lower.contains("invalid api key")
+    } else if lower.contains("401")
+        || lower.contains("unauthorized")
+        || lower.contains("invalid api key")
     {
         ControlPlaneFault::Authentication
     } else if lower.contains("403")
@@ -269,7 +271,11 @@ mod tests {
     #[test]
     fn control_plane_faults_have_stable_typed_retryability() {
         for (message, expected, retryability) in [
-            ("400 bad request", ControlPlaneFault::BadRequest, Retryability::NonRecoverable),
+            (
+                "400 bad request",
+                ControlPlaneFault::BadRequest,
+                Retryability::NonRecoverable,
+            ),
             (
                 "401 unauthorized",
                 ControlPlaneFault::Authentication,
@@ -327,7 +333,10 @@ mod tests {
         let fault = classify_control_plane_error("HTTP 400 Bad Request");
         assert_eq!(fault, ControlPlaneFault::BadRequest);
         assert_eq!(fault.retryability(), Retryability::NonRecoverable);
-        assert_eq!(TunnelError::ControlPlane(fault).runtime_fault(), RuntimeFault::ConfigurationInvalid);
+        assert_eq!(
+            TunnelError::ControlPlane(fault).runtime_fault(),
+            RuntimeFault::ConfigurationInvalid
+        );
         let diagnostic = fault.diagnostic();
         assert_eq!(diagnostic.error_code, DiagnosticErrorCode::Unavailable);
         assert_eq!(diagnostic.phase, DiagnosticPhase::Transport);

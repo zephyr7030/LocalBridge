@@ -9,7 +9,7 @@ use crate::credentials::CredentialStore;
 use crate::execution::CapabilityPolicy;
 use crate::privilege::PrivilegedExecution;
 use crate::runtime::{RecoveryPermit, RuntimeDriver};
-use crate::state::{CurrentTaskStatus, CurrentTaskTiming, PermissionMode, RuntimeFault};
+use crate::state::{CurrentTaskStatus, CurrentTaskTiming, RuntimeFault};
 use crate::tunnel::{
     ConnectorEndpoint, PreparedTunnelStart, TunnelId, TunnelRuntime, TunnelRuntimeConfig,
 };
@@ -230,44 +230,18 @@ where
     fn start_pep(&mut self, mcp: Self::Mcp) -> Result<Self::Pep, RuntimeFault> {
         let policy = CapabilityPolicy::load(&self.config.install_root.join("runtime-policy.toml"))
             .map_err(|_| RuntimeFault::PolicyInvalid)?;
-        if let Some(desired_state) = self.desired_state.as_ref() {
-            return PolicyEnforcementRuntime::start_with_control_plane(
-                mcp,
-                policy,
-                desired_state.clone(),
-                self.observed_connection.clone(),
-                self.privileged_execution.clone(),
-                self.task_projection_wake.clone(),
-            )
-            .map_err(policy_runtime_fault);
-        }
-        match (
-            self.privileged_execution.as_ref(),
-            self.task_projection_wake.as_ref(),
-        ) {
-            (Some(privileged_execution), Some(wake)) => {
-                PolicyEnforcementRuntime::start_with_privilege_and_wake(
-                    mcp,
-                    policy,
-                    PermissionMode::Edit,
-                    Arc::clone(privileged_execution),
-                    Arc::clone(wake),
-                )
-            }
-            (Some(privileged_execution), None) => PolicyEnforcementRuntime::start_with_privilege(
-                mcp,
-                policy,
-                PermissionMode::Edit,
-                Arc::clone(privileged_execution),
-            ),
-            (None, Some(wake)) => PolicyEnforcementRuntime::start_with_wake(
-                mcp,
-                policy,
-                PermissionMode::Edit,
-                Arc::clone(wake),
-            ),
-            (None, None) => PolicyEnforcementRuntime::start(mcp, policy, PermissionMode::Edit),
-        }
+        let desired_state = self
+            .desired_state
+            .as_ref()
+            .ok_or(RuntimeFault::PolicyInvalid)?;
+        PolicyEnforcementRuntime::start_with_control_plane(
+            mcp,
+            policy,
+            desired_state.clone(),
+            self.observed_connection.clone(),
+            self.privileged_execution.clone(),
+            self.task_projection_wake.clone(),
+        )
         .map_err(policy_runtime_fault)
     }
 

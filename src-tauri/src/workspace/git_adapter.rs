@@ -1357,6 +1357,23 @@ mod tests {
             "INVALID_ARGUMENT"
         );
 
+        let past_eof = handle_git_tool(
+            &root,
+            "git_blame",
+            &json!({"path":"blame.txt","start_line":999,"end_line":1000,"max_lines":200}),
+        )
+        .unwrap();
+        assert_eq!(past_eof["isError"], true, "{past_eof:#?}");
+
+        for (tool, arguments) in [
+            ("git_show", json!({"path":".","rev":"definitely-not-a-ref"})),
+            ("git_log", json!({"path":".","ref":"definitely-not-a-ref"})),
+        ] {
+            let missing = handle_git_tool(&root, tool, &arguments).unwrap();
+            assert_eq!(missing["isError"], true, "{tool}: {missing:#?}");
+            assert_eq!(missing["structuredContent"]["ok"], false);
+        }
+
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -36,7 +36,7 @@ export function App() {
         : !onboarding ? <main className="onboarding-loading">正在准备 LocalBridge…</main>
           : !onboarding.complete ? <Onboarding initial={onboarding} onComplete={() => setOnboarding({ ...onboarding, complete: true })} />
             : onboardingPreview ? <Onboarding initial={onboarding} previewMode onComplete={() => setOnboardingPreview(false)} />
-              : <Dashboard onOpenWelcome={() => setOnboardingPreview(true)} />}
+              : <Dashboard onOpenWelcome={() => { void onboardingApi.read().then((current) => { setOnboarding(current); setOnboardingPreview(true); }).catch(() => setOnboardingError(true)); }} />}
     </WindowChrome>
   );
 }
@@ -106,7 +106,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const currentElapsed = currentActivityElapsed(currentActivity);
   const activeProject = projection?.projects.find((item) => item.active) ?? null;
   const reconnectVisible = Boolean(projection?.reconnect && projection.reconnect.generation !== handledGeneration);
-  const adminModeFullAccess = projection?.permission === "admin";
+  const adminModeFullAccess = projection?.elevatedActive === true;
   const chooseAccess = (mode: AccessCode) => {
     if (mode === "admin" && projection?.privilege !== "active") {
       setAdminWarningOpen(true);
@@ -130,7 +130,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       <div className="row"><span className="label">本地运行环境</span><span className="value service-value"><ServiceStatusDot service={projection?.localEnvironmentService ?? null}/><span>{projection ? serviceText[projection.localEnvironmentService] : "正在读取"}</span></span></div>
       <div className="row"><span className="label">OpenAI 安全隧道</span><span className="value service-value"><ServiceStatusDot service={projection?.tunnelService ?? null}/><span>{projection ? serviceText[projection.tunnelService] : "正在读取"}</span></span></div>
       <div className="row"><span className="label">编码服务</span><span className="value service-value"><ServiceStatusDot service={projection?.codingService ?? null}/><span>{projection ? serviceText[projection.codingService] : "正在读取"}</span></span></div>
-      <div className="row"><span className="label">权限模式</span><span className="value permission-mode-value">{projection ? accessText[projection.permission] : "正在读取"}</span></div>
+      <div className="row"><span className="label">权限模式</span><span className="value permission-mode-value">{projection ? accessText[projection.effectivePermission] : "正在读取"}</span></div>
     </section>
     <div className="service-actions" aria-label="服务控制"><button className="secondary service-restart" onClick={() => void run(() => bridge.restartServices())}>重启服务</button><button className="secondary service-stop" onClick={() => void run(() => bridge.stopServices())}>关闭服务</button></div>
     <div className="task-row" aria-live="polite"><span className={`activity-dot task-${taskState}`} aria-hidden="true"/><span className="activity-row-main"><span className="activity-action">{currentActivityText(currentActivity)}</span>{currentDetail && <span className="activity-summary">{currentDetail}</span>}</span>{currentElapsed && <span className="activity-elapsed">{currentElapsed}</span>}</div>
@@ -143,7 +143,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
         <div className="field"><label htmlFor="runtime-key">Runtime API Key</label>{editingKey ? <><input id="runtime-key" type="password" autoComplete="off" value={keyValue} onChange={(event) => setKeyValue(event.target.value)} placeholder="输入新的 Runtime API Key"/><div className="inline-actions"><button className="primary" disabled={!keyValue.trim()} onClick={() => void run(async () => { await bridge.saveKey(keyValue); setKeyValue(""); setEditingKey(false); })}>保存</button><button className="secondary" onClick={() => { setKeyValue(""); setEditingKey(false); }}>取消</button></div></> : confirmingKeyDelete && projection?.runtimeKeySaved ? <div className="settings-summary settings-delete-confirm"><span>请确认从windows安全凭据中删除？</span><button className="secondary settings-delete-cancel" onClick={() => setConfirmingKeyDelete(false)}>取消</button><button className="secondary settings-confirm-delete" onClick={() => void run(async () => { await bridge.clearKey(); setConfirmingKeyDelete(false); })}>确认</button></div> : <div className="settings-summary"><span>{projection?.runtimeKeySaved ? "已保存" : "未保存"}</span>{projection?.runtimeKeySaved && <button className="secondary settings-clear" onClick={() => setConfirmingKeyDelete(true)}>清除</button>}<button className="secondary settings-replace" onClick={() => { setConfirmingKeyDelete(false); setKeyValue(""); setEditingKey(true); }}>更换</button></div>}</div>
       </section>
       <section className="settings-section"><h3>权限</h3><div className="access-grid">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} className={`choice ${mode === "admin" ? "admin-choice" : ""} ${projection?.permission === mode ? "selected" : ""}`} onClick={() => chooseAccess(mode)}>{accessText[mode]}</button>)}</div></section>
-      <section className="settings-section"><h3>关于</h3><div className="settings-summary"><span>{updateStatusText(projection?.update ?? null)}</span><div className="inline-actions"><button className="secondary" disabled={!projection?.update.retryable || projection.update.state === "checking"} onClick={() => void run(() => bridge.retryUpdateCheck())}>检查更新</button><button className="secondary" disabled={!projection?.update.releaseUrl} onClick={() => void run(() => bridge.openGitHubReleases())}>GitHub Releases</button></div></div></section>
+      <section className="settings-section"><h3>关于</h3><div className="settings-summary"><span>{updateStatusText(projection?.update ?? null)}</span><div className="inline-actions"><button className="secondary" disabled={!projection?.update.retryable || projection.update.state === "checking"} onClick={() => void run(async () => { await bridge.retryUpdateCheck(); })}>检查更新</button><button className="secondary" disabled={!projection?.update.releaseUrl} onClick={() => void run(async () => { await bridge.openGitHubReleases(); })}>GitHub Releases</button></div></div></section>
       <div className="dialog-actions"><button className="secondary" onClick={onOpenWelcome}>打开欢迎页</button><button className="primary" onClick={() => setView("main")}>完成</button></div>
     </section></div>}
     {view === "diagnostics" && <Diagnostics onClose={() => setView("main")} />}

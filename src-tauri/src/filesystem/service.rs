@@ -141,7 +141,7 @@ pub(crate) struct FilesystemSearchOptions {
 impl Default for FilesystemSearchOptions {
     fn default() -> Self {
         Self {
-            recursive: true,
+            recursive: false,
             max_depth: 16,
             max_entries: 10_000,
             max_results: 1_000,
@@ -373,8 +373,14 @@ impl FilesystemService {
         {
             return Err(FilesystemError::InvalidArgument);
         }
-        let depth = if recursive { max_depth } else { 1 };
-        self.walk(&root, depth, max_entries)
+        if recursive {
+            self.walk(&root, max_depth, max_entries)
+        } else {
+            // A non-recursive listing intentionally stops at the root children;
+            // contents below a returned directory are outside the requested
+            // traversal and therefore are not truncation.
+            self.walk_with_root_pin(&root, 1, max_entries, false, false)
+        }
     }
 
     pub(crate) fn stat(
@@ -1245,6 +1251,7 @@ impl FilesystemService {
             .authority
             .resolve_existing(source)
             .map_err(map_path_error)?;
+        let source_display = self.display_path(&source_path)?;
         let initial_metadata =
             fs::symlink_metadata(&source_path).map_err(|_| FilesystemError::Io)?;
         if metadata_is_reparse(&initial_metadata) {
@@ -1313,7 +1320,7 @@ impl FilesystemService {
                         .revalidate_opened_path(&committed)
                         .map_err(map_path_error)?;
                     return Ok(FilesystemMutationResult {
-                        path: source.replace('\\', "/"),
+                        path: source_display,
                         destination: Some(self.display_path(&final_destination)?),
                         bytes,
                         changed: true,
@@ -1335,7 +1342,7 @@ impl FilesystemService {
                     .resolve_existing(destination)
                     .map_err(map_path_error)?;
                 return Ok(FilesystemMutationResult {
-                    path: source.replace('\\', "/"),
+                    path: source_display,
                     destination: Some(self.display_path(&destination_final)?),
                     bytes,
                     changed: true,
@@ -1425,7 +1432,7 @@ impl FilesystemService {
                         .revalidate_opened_path(&destination_path)
                         .map_err(map_path_error)?;
                     return Ok(FilesystemMutationResult {
-                        path: source.replace('\\', "/"),
+                        path: source_display,
                         destination: Some(self.display_path(&final_destination)?),
                         bytes: if source_metadata.is_file() {
                             source_metadata.len()
@@ -1467,6 +1474,7 @@ impl FilesystemService {
             .authority
             .resolve_existing(path)
             .map_err(map_path_error)?;
+        let display_path = self.display_path(&target)?;
         if self.authority.scope() == PathAuthorityScope::ActiveWorkspace
             && self.authority.canonical_root() == Some(target.as_path())
         {
@@ -1559,7 +1567,7 @@ impl FilesystemService {
             }
         }
         Ok(FilesystemMutationResult {
-            path: path.replace('\\', "/"),
+            path: display_path,
             destination: None,
             bytes: metadata.len(),
             changed: true,
@@ -1927,7 +1935,7 @@ impl FilesystemService {
         max_depth: u32,
         max_entries: usize,
     ) -> Result<FilesystemListResult, FilesystemError> {
-        self.walk_with_root_pin(root, max_depth, max_entries, false)
+        self.walk_with_root_pin(root, max_depth, max_entries, false, true)
     }
 
     fn walk_with_root_pin(
@@ -1936,6 +1944,7 @@ impl FilesystemService {
         max_depth: u32,
         max_entries: usize,
         root_already_pinned: bool,
+        report_depth_overflow: bool,
     ) -> Result<FilesystemListResult, FilesystemError> {
         self.check_cancelled()?;
         let mut entries = Vec::new();
@@ -1960,6 +1969,7 @@ impl FilesystemService {
                 &mut entries,
                 &mut scanned_entries,
                 &mut truncated,
+                report_depth_overflow,
             )?;
         }
         #[cfg(not(windows))]
@@ -1969,12 +1979,14 @@ impl FilesystemService {
             while let Some((directory, depth)) = stack.pop() {
                 self.check_cancelled()?;
                 if depth >= max_depth {
-                    if directory_has_entry_with_budget(
-                        &directory,
-                        &mut scanned_entries,
-                        max_entries,
-                        &self.cancellation,
-                    )? {
+                    if report_depth_overflow
+                        && directory_has_entry_with_budget(
+                            &directory,
+                            &mut scanned_entries,
+                            max_entries,
+                            &self.cancellation,
+                        )?
+                    {
                         truncated = true;
                     }
                     continue;
@@ -2009,9 +2021,6 @@ impl FilesystemService {
                 if overflow {
                     truncated = true;
                 }
-                if truncated {
-                    break;
-                }
             }
         }
         entries.sort_by(|a, b| a.path.cmp(&b.path));
@@ -2033,15 +2042,18 @@ impl FilesystemService {
         entries: &mut Vec<FilesystemEntry>,
         scanned_entries: &mut usize,
         truncated: &mut bool,
+        report_depth_overflow: bool,
     ) -> Result<(), FilesystemError> {
         self.check_cancelled()?;
         if depth >= max_depth {
-            if directory_has_entry_with_budget(
-                directory,
-                scanned_entries,
-                max_entries,
-                &self.cancellation,
-            )? {
+            if report_depth_overflow
+                && directory_has_entry_with_budget(
+                    directory,
+                    scanned_entries,
+                    max_entries,
+                    &self.cancellation,
+                )?
+            {
                 *truncated = true;
             }
             return Ok(());
@@ -2051,22 +2063,36 @@ impl FilesystemService {
         for child in children {
             self.check_cancelled()?;
             let path = child.path();
-            let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    *truncated = true;
+                    continue;
+                }
+            };
             if metadata_is_reparse(&metadata) {
-                return Err(FilesystemError::OutsideAuthority);
+                *truncated = true;
+                continue;
             }
             use windows_sys::Win32::Storage::FileSystem::FILE_LIST_DIRECTORY;
-            let child_handle = self
-                .authority
-                .open_validated_handle(
-                    &path,
-                    if metadata.is_dir() {
-                        FILE_LIST_DIRECTORY
-                    } else {
-                        0
-                    },
-                )
-                .map_err(map_path_error)?;
+            let child_handle = match self.authority.open_validated_handle(
+                &path,
+                if metadata.is_dir() {
+                    FILE_LIST_DIRECTORY
+                } else {
+                    0
+                },
+            ) {
+                Ok(handle) => handle,
+                Err(_) => {
+                    // Volume roots commonly contain system-owned directories that
+                    // cannot be opened by the current token. Omit only that child;
+                    // never turn it into an entry that escaped Path Authority and
+                    // never make the whole authorized root appear missing.
+                    *truncated = true;
+                    continue;
+                }
+            };
             let stable_path = child_handle.final_path().to_path_buf();
             let metadata = child_handle.metadata().map_err(|_| FilesystemError::Io)?;
             entries.push(FilesystemEntry {
@@ -2076,7 +2102,7 @@ impl FilesystemService {
                 modified_ms: modified_ms(&metadata),
             });
             if metadata.is_dir() {
-                self.walk_windows_directory(
+                match self.walk_windows_directory(
                     &stable_path,
                     depth + 1,
                     max_depth,
@@ -2084,9 +2110,11 @@ impl FilesystemService {
                     entries,
                     scanned_entries,
                     truncated,
-                )?;
-                if *truncated {
-                    return Ok(());
+                    report_depth_overflow,
+                ) {
+                    Ok(()) => {}
+                    Err(FilesystemError::Cancelled) => return Err(FilesystemError::Cancelled),
+                    Err(_) => *truncated = true,
                 }
             }
         }
@@ -2103,7 +2131,8 @@ impl FilesystemService {
         max_depth: u32,
         max_entries: usize,
     ) -> Result<u64, FilesystemError> {
-        let walked = self.walk_with_root_pin(source, max_depth, max_entries, cfg!(windows))?;
+        let walked =
+            self.walk_with_root_pin(source, max_depth, max_entries, cfg!(windows), true)?;
         if walked.truncated {
             return Err(FilesystemError::LimitExceeded);
         }
@@ -2795,6 +2824,7 @@ mod tests {
                 ".",
                 &FilesystemSearchOptions {
                     pattern: "*.txt".into(),
+                    recursive: true,
                     ..Default::default()
                 },
             )
@@ -2812,6 +2842,124 @@ mod tests {
         assert!(bounded.truncated);
         assert_eq!(bounded.entries.len(), 2);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn non_recursive_list_does_not_treat_child_contents_as_root_truncation() {
+        let root = workspace("non-recursive-list");
+        fs::create_dir(root.join(".coding-tools")).unwrap();
+        fs::write(root.join(".coding-tools/private.txt"), b"hidden by depth").unwrap();
+        fs::create_dir(root.join("LocalBridge")).unwrap();
+        for index in 0..13 {
+            fs::write(root.join(format!("entry-{index:02}.txt")), b"x").unwrap();
+        }
+        let service = FilesystemService::active_workspace(&root).unwrap();
+
+        let listed = service.list(".", false, 8, 20).unwrap();
+        assert_eq!(listed.scanned_entries, 15);
+        assert_eq!(listed.entries.len(), 15);
+        assert!(!listed.truncated);
+
+        let found = service
+            .search(
+                ".",
+                &FilesystemSearchOptions {
+                    pattern: "LocalBridge".into(),
+                    max_entries: 20,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(found.entries.len(), 1);
+        assert_eq!(found.entries[0].path, "LocalBridge");
+        assert_eq!(found.scanned_entries, 15);
+        assert!(!found.truncated);
+
+        let recursive = service
+            .search(
+                ".",
+                &FilesystemSearchOptions {
+                    pattern: "LocalBridge".into(),
+                    recursive: true,
+                    max_depth: 1,
+                    max_entries: 20,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(recursive.entries.len(), 1);
+        assert_eq!(recursive.entries[0].path, "LocalBridge");
+        assert!(
+            recursive.truncated,
+            "deeper content is truncated without discarding root siblings"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn active_workspace_volume_root_can_be_enumerated() {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let volume_root = manifest
+            .ancestors()
+            .last()
+            .expect("Cargo manifest path has a volume root");
+        let service = FilesystemService::active_workspace(volume_root).unwrap();
+
+        let listed = service
+            .list(".", false, 1, MAX_FILESYSTEM_ENTRIES)
+            .expect("active workspace volume root must be listable");
+        let absolute = service
+            .list(
+                volume_root.to_string_lossy().as_ref(),
+                false,
+                1,
+                MAX_FILESYSTEM_ENTRIES,
+            )
+            .expect("absolute active workspace volume root must be listable");
+
+        assert!(
+            listed.entries.iter().any(|entry| {
+                volume_root.join(&entry.path) == manifest
+                    || manifest.starts_with(volume_root.join(&entry.path))
+            }),
+            "volume-root listing omitted the repository ancestor: {listed:#?}"
+        );
+        assert!(
+            absolute.entries.iter().any(|entry| {
+                volume_root.join(&entry.path) == manifest
+                    || manifest.starts_with(volume_root.join(&entry.path))
+            }),
+            "absolute volume-root listing omitted the repository ancestor: {absolute:#?}"
+        );
+
+        let repository_ancestor = manifest
+            .strip_prefix(volume_root)
+            .unwrap()
+            .components()
+            .next()
+            .unwrap()
+            .as_os_str()
+            .to_string_lossy()
+            .into_owned();
+        let searched = service
+            .search(
+                ".",
+                &FilesystemSearchOptions {
+                    pattern: repository_ancestor.clone(),
+                    max_depth: 1,
+                    max_entries: MAX_FILESYSTEM_ENTRIES,
+                    ..Default::default()
+                },
+            )
+            .expect("active workspace volume root must be searchable");
+        assert!(
+            searched
+                .entries
+                .iter()
+                .any(|entry| entry.path.eq_ignore_ascii_case(&repository_ancestor)),
+            "volume-root search omitted {repository_ancestor}: {searched:#?}"
+        );
     }
 
     #[test]

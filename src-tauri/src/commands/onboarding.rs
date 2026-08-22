@@ -19,7 +19,7 @@ use crate::commands::ui;
 use crate::control_plane::convergence::ConnectionProfile;
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::settings::SettingsStore;
-use crate::state::RuntimeState;
+use crate::state::{PermissionMode, RuntimeState};
 
 pub const OPENAI_TUNNEL_SETTINGS_URL: &str =
     "https://platform.openai.com/settings/organization/tunnels";
@@ -45,6 +45,8 @@ impl OnboardingReadiness {
 #[serde(rename_all = "camelCase")]
 pub struct OnboardingState {
     complete: bool,
+    permission: &'static str,
+    projection_revision: u64,
     connection_configured: bool,
     runtime_key_saved: bool,
     runtime_key_length: Option<usize>,
@@ -199,12 +201,10 @@ pub async fn choose_onboarding_workspace_folder() -> UiResult<Option<String>> {
 
 #[tauri::command]
 pub async fn prepare_onboarding_project(
-    mode: String,
     project_id: Option<String>,
     selected_folder: Option<String>,
     app: AppHandle,
 ) -> UiResult<OnboardingState> {
-    ui::set_permission_mode(mode, app.clone()).await?;
     tauri::async_runtime::spawn_blocking(move || -> UiResult<OnboardingState> {
         if let Some(folder) = selected_folder.filter(|value| !value.trim().is_empty()) {
             let lifecycle = app.state::<DesktopLifecycle>();
@@ -263,11 +263,21 @@ pub async fn complete_onboarding(app: AppHandle) -> UiResult<()> {
 
 fn project_state(lifecycle: &DesktopLifecycle) -> UiResult<OnboardingState> {
     let snapshot = lifecycle.control_plane_snapshot();
-    let settings = snapshot.settings.value.as_ref();
-    let connection = snapshot.connection.value.as_ref();
-    let runtime = snapshot.runtime.value.as_ref();
+    let settings = snapshot.settings.value();
+    let connection = snapshot.connection.value();
+    let runtime = snapshot.runtime.value();
     Ok(OnboardingState {
         complete: settings.is_some_and(|settings| settings.onboarding_complete),
+        permission: snapshot
+            .authority
+            .value()
+            .map(|authority| match authority.desired {
+                PermissionMode::Edit => "edit",
+                PermissionMode::Full => "full",
+                PermissionMode::Elevated => "admin",
+            })
+            .unwrap_or("edit"),
+        projection_revision: snapshot.revision,
         connection_configured: connection
             .is_some_and(|connection| connection.desired_tunnel_id.is_some()),
         runtime_key_saved: settings.is_some_and(|settings| settings.runtime_key_saved),

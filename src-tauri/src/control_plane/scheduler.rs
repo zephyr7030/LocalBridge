@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{McpSessionId, TaskId};
 
 pub(crate) const MAX_WORK_QUEUE: usize = 32;
+pub(crate) const MAX_OBSERVATION_ACTIVE: usize = 16;
+pub(crate) const MAX_CONTROL_ACTIVE: usize = 16;
 const FOREGROUND_WORK_SLOTS: usize = 1;
 static TICKET_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -20,15 +22,21 @@ pub(crate) enum SchedulerLane {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SchedulerAdmissionError {
     QueueCapacityExceeded,
+    ImmediateCapacityExceeded,
     Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SchedulerSnapshot {
     pub observation_active: usize,
+    pub observation_capacity: usize,
     pub control_active: usize,
+    pub control_capacity: usize,
+    #[serde(rename = "foreground_work_running")]
     pub work_running: usize,
+    #[serde(rename = "queue_depth")]
     pub work_queued: usize,
+    #[serde(rename = "queue_capacity")]
     pub work_capacity: usize,
     pub rejected_total: u64,
 }
@@ -37,7 +45,9 @@ impl SchedulerSnapshot {
     pub(crate) const fn idle() -> Self {
         Self {
             observation_active: 0,
+            observation_capacity: MAX_OBSERVATION_ACTIVE,
             control_active: 0,
+            control_capacity: MAX_CONTROL_ACTIVE,
             work_running: 0,
             work_queued: 0,
             work_capacity: MAX_WORK_QUEUE,
@@ -92,7 +102,10 @@ pub(crate) struct WorkPermit {
 }
 
 impl Scheduler {
-    pub(crate) fn enter_immediate(&self, lane: SchedulerLane) -> SchedulerPermit {
+    pub(crate) fn enter_immediate(
+        &self,
+        lane: SchedulerLane,
+    ) -> Result<SchedulerPermit, SchedulerAdmissionError> {
         assert!(lane != SchedulerLane::Work);
         let mut state = self
             .0
@@ -101,16 +114,26 @@ impl Scheduler {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         match lane {
             SchedulerLane::Observation => {
+                if state.observation_active >= MAX_OBSERVATION_ACTIVE {
+                    state.rejected_total = state.rejected_total.saturating_add(1);
+                    return Err(SchedulerAdmissionError::ImmediateCapacityExceeded);
+                }
                 state.observation_active = state.observation_active.saturating_add(1)
             }
-            SchedulerLane::Control => state.control_active = state.control_active.saturating_add(1),
+            SchedulerLane::Control => {
+                if state.control_active >= MAX_CONTROL_ACTIVE {
+                    state.rejected_total = state.rejected_total.saturating_add(1);
+                    return Err(SchedulerAdmissionError::ImmediateCapacityExceeded);
+                }
+                state.control_active = state.control_active.saturating_add(1)
+            }
             SchedulerLane::Work => unreachable!(),
         }
         drop(state);
-        SchedulerPermit::Immediate(ImmediatePermit {
+        Ok(SchedulerPermit::Immediate(ImmediatePermit {
             scheduler: self.clone(),
             lane,
-        })
+        }))
     }
 
     pub(crate) fn admit_work(
@@ -208,6 +231,28 @@ impl Scheduler {
         true
     }
 
+    pub(crate) fn cancel_queued_task_by_id(&self, task_id: &TaskId) -> bool {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(index) = state
+            .queue
+            .iter()
+            .position(|queued| &queued.task_id == task_id)
+        else {
+            return false;
+        };
+        let queued = state
+            .queue
+            .remove(index)
+            .expect("located queued work remains present");
+        state.cancelled.insert(queued.ticket);
+        self.0.changed.notify_all();
+        true
+    }
+
     pub(crate) fn snapshot(&self) -> SchedulerSnapshot {
         let state = self
             .0
@@ -216,7 +261,9 @@ impl Scheduler {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         SchedulerSnapshot {
             observation_active: state.observation_active,
+            observation_capacity: MAX_OBSERVATION_ACTIVE,
             control_active: state.control_active,
+            control_capacity: MAX_CONTROL_ACTIVE,
             work_running: state.work_running,
             work_queued: state.queue.len(),
             work_capacity: MAX_WORK_QUEUE,
@@ -310,7 +357,7 @@ mod tests {
         let _work = scheduler
             .admit_work(McpSessionId::new("a"), TaskId::new("a"))
             .unwrap();
-        let control = scheduler.enter_immediate(SchedulerLane::Control);
+        let control = scheduler.enter_immediate(SchedulerLane::Control).unwrap();
         assert_eq!(scheduler.snapshot().control_active, 1);
         drop(control);
         assert_eq!(scheduler.snapshot().control_active, 0);

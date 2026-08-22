@@ -6,7 +6,7 @@
 >
 > 目标读者：后续接手 LocalBridge 的 AI / 架构工程师。
 >
-> 最近核验：2026-08-22；分支 `codex/release-0.1.2`；HEAD `12df18f3ed9c06f9aa860f90c9372f3258bbba05`。
+> 审查基线：2026-08-22；分支 `codex/release-0.1.2`；HEAD `12df18f3ed9c06f9aa860f90c9372f3258bbba05`。下方“本地修复核验”记录基线之后尚未提交的工作树结果。
 >
 > 状态标签：`CONFIRMED` = 当前源码或黑盒可直接证明；`PARTIAL` = 核心事实成立但原措辞/严重度需校正；`DESIGN_DEBT` = 设计债/简化候选，不作为独立 runtime bug；`RESOLVED` = 只有真实修复并验证后才可使用。
 
@@ -39,6 +39,80 @@
 | 综合判断 A/B | SUMMARY | 原 P1-51/P1-52 改为综合结论，不再重复计入 defect。 |
 | P1-53 | CONFIRMED | NSIS `PREUNINSTALL` 无条件 `CredDeleteW`，且 release verifier 反向要求该行为存在。 |
 | P1-54 | CONFIRMED | `START_HERE.md` 仍描述 R1→R5/当前 R1，而 `PROJECT_STATE.json` 已是 R7。 |
+
+### 2026-08-22 本地修复核验
+
+本表取代上面的审查基线状态，但保留原证据供追溯。`RESOLVED` 只用于已由当前源码和本地行为测试验证的条目。
+
+| 条目 | 当前状态 | 修复与证据 |
+|---|---|---|
+| P0-01～02 | RESOLVED | `PrivilegeController` 只写一个类型化 `BrokerLifecycle`；`Active` 必然持有真实 Broker，gate/process 不再是平行 truth。 |
+| P1-03 | PARTIAL | Desired 与 Broker lifecycle 已各自收口为单一 owner，UI/PEP 读取相同 owner；`ControlPlane` 仍未成为覆盖所有产品域的唯一组合根。 |
+| P1-04～09 | RESOLVED | PEP 只按 Effective authority 选路；UI 使用 `effective/elevated_active`；权限意图接受与 broker reconcile 错误分离；新增独立管理员审核错误码和行为验证。 |
+| P0-10～14 | RESOLVED | 增加 session-scoped task list/get/cancel、显式 PublicSession adopt、真实 schema 字段与多任务返回；取消不再影响非 owner 资源。 |
+| P1-15 | RESOLVED | 公共控制面可列举完整 owned task/execution；latest/current 只保留为从 registry 派生的 UI presentation，不再可写。 |
+| P0-16 | RESOLVED | Observation/Control 有独立并发容量，连接 worker 有硬上限，容量错误进入类型化错误与 snapshot。 |
+| P1-17 | PARTIAL | Work FIFO、队列和连接线程均有硬上限；queued Work 仍占用一个有界连接 worker，尚未迁移为纯 task-data executor。 |
+| P1-18～23 | RESOLVED | 输出/protocol buffer 有界；detached observation 自适应；Execution orphan/stale TTL、active-request-aware Session reaper、workflow stale/cancel 闭环已执行。 |
+| P1-24～26 | RESOLVED | 删除后端 500ms shadow presentation、第二任务状态机和每任务短命线程；UI 仅展示 revisioned terminal observation。 |
+| P1-27～29 / P2-30 | RESOLVED | 删除描述性 lifecycle catalog 和 shape gate；删除 `WorkflowDatum`，opaque workflow payload 回到明确 adapter/persistence 边界。 |
+| P1-31～32 | RESOLVED | 生产 negotiate 不再启动真实 shell semantic probe；Adapter 未实现能力默认 fail-closed，测试夹具必须显式声明能力。 |
+| P1-33～34 | PARTIAL | 已删除 presentation/compatibility 大段旧职责和历史巨型测试，但 `mcp/facade.rs`、`mcp/server.rs` 仍需继续按真实职责拆分。 |
+| P1-35～36 | RESOLVED | 删除 `runtime_snapshot_cache`；非活动 Runtime observation 归唯一 Runtime owner，锁竞争只发布 revisioned stale snapshot；Diagnostics 不再维护第二套 active-request registry。 |
+| P1-37～38 | PARTIAL | Task/Execution 核心状态保持 typed，公共 action 表已统一常量；MCP output JSON mapping 和全部 schema 尚未迁到独立单一协议模块。 |
+| P2-39～40 | RESOLVED | `ProjectionSection` 字段私有且只能经合法构造器变迁；管理员未审核错误映射为 policy/Denied，不再降级为 Unknown。 |
+| P2-41 | DESIGN_DEBT | 保留现状；不属于本轮已复现 runtime failure。 |
+| P2-42 / P1-43 / P2-44～45 | RESOLVED | 三 lane 有真实 admission；旧 PEP constructor 仅测试可见；管理员确认使用独立 RPC 和后端 deadline。 |
+| P2-46～48 | DESIGN_DEBT | 保留现状；后续以 profile 和维护收益决定是否简化。 |
+| P1-49 / P2-50 | RESOLVED | schema44 只做禁止残留扫描，行为由 Rust gate 证明；删除旧 G4/PR provenance 巨型 verifier 和旧 `verify:lb001` 可执行链。 |
+| P1-53～54 | RESOLVED | 卸载默认保留凭据，仅显式 `/DELETEUSERDATA=1` 删除；入口文档只引用 live phase authority。 |
+| P0-55 | RESOLVED | 删除 ordinary Shell 首层字符串权限分类、静态脚本/重定向/rmdir 补偿与 toolbox 命令改写；Full 明确以当前 Windows 用户令牌执行 Shell 及全部后代，结构化路径授权与 Shell execution 分离。内层 authenticated loopback runtime 改为 policy-neutral adapter，LocalBridge Guard 成为唯一授权 owner；direct `sc` 与脚本后代 `sc` 黑盒权限一致。 |
+
+本地门禁（2026-08-22 当前工作树）：frontend 11 tests、Rust 351 library tests 与全部已启用 migration/integration/policy/privilege/packaging targets、Clippy `-D warnings`、schema44 residue scan、release preflight、license、runtime resources、测试基座 8 项结构约束均取得明确退出码 0。3 个 process helper entry point 和 1 个需要人工 UAC 的用例显式 ignored，均不计入自动验收。最终 socket 修复后的完整 revision46 黑盒矩阵 2/2 通过（合计 100 次 chunked request + 100 次 empty preconnect），且两次都与基础外部客户端在同一测试进程中串行运行；没有自动 reconnect 或 retry。另有确定性 delayed-request 时序测试固定 accepted-socket 行为。本轮按用户限定只执行本地验证，没有重新打包、push 或运行云端 CI；真实 cloud Tunnel 未运行。
+
+上述证据只证明本表标记为 `RESOLVED` 的修复和当前本地门禁，不恢复 schema44 统一架构验收。`P1-03`、`P1-17`、`P1-33～34`、`P1-37～38` 仍为 `PARTIAL`，因此 `PROJECT_STATE.json.unified_acceptance` 必须保持 `INVALIDATED`；在这些边界缺陷被真实迁移并完成统一行为验收前，不得使用“架构重构完成”或“统一验收通过”。
+
+### 2026-08-22 API revision 46 增量核验
+
+| 用户复现 | 当前状态 | 本地修复与行为证据 |
+|---|---|---|
+| detached command Session ownership | RESOLVED | `poll/write/kill` 使用同一 MCP Session 的稳定 ownership；增量读取不重复，terminal output 可继续按 `output_ref` 分页读取。 |
+| `command_control.wait_ms` 长时间失效 | RESOLVED | Runtime I/O 使用覆盖完整请求链的 deadline；超时返回 `OperationTimedOut`，且不会伪造 Execution terminal。真实 bundled runtime 的 `write/kill(wait_ms=0)` 行为测试要求 1.5 秒内返回。 |
+| `task_control(cancel)` 假成功 | RESOLVED | 当前 Session 没有可取消 owned target 时返回 `NotFound`；存在其他 live Session 的 workflow 时返回带 `task_id` 的 `TaskIdRequired`，不再返回 `ok=true` 空取消。 |
+| catalog revision 导致 MCP Session terminated | RESOLVED | 工具 catalog 签名变化只更新 Session 内 pending notification，不再关闭或删除 Session；缩权后同一 Session 立即按新 Effective authority fail-closed。 |
+| Tunnel HTTP 400/502 透传 | RESOLVED（已定位路径） | 修复 bounded chunked decoder；拒绝 `Content-Length + Transfer-Encoding` 歧义、压缩 body、坏 chunk、超限 header/body，并由行为测试固定 framing。仍需真实前台 tunnel 长稳黑盒验收。 |
+| Git invalid ref / blame 越界吞错 | RESOLVED | adapter error 不再被空对象投影覆盖；facade 归一化为 typed error。 |
+| document 越界与 output handle taxonomy | RESOLVED | document 拒绝非法行范围并明确 `eof`；不存在的 output handle 返回 `OutputNotFound`，stream 不匹配的 `InvalidArgument.details` 指明字段、期望值和实际值。 |
+| `filesystem` 绕过 active-workspace Path Authority | RESOLVED | 删除 public `filesystem` 的隐式 Broker 升权分支及对应 cancellation target；Full/Elevated/Broker Active 均只走统一 `WorkspaceResolver + PathAuthority`。工作区外 read/write/delete 的行为测试全部返回 `WorkspaceDenied`，Broker 未被调用。 |
+| workspace 卷根 list/search 返回 `NotFound` | RESOLVED | Windows 枚举在已验证根目录之下遇到不可打开、reparse 或竞争消失的子项时标记 `truncated` 并继续，不再把单个系统目录失败投影成整个卷根不存在；`.`、绝对卷根和递归 search 行为测试通过。 |
+| Task 可观察但不可取消 / cancel 假终态 | RESOLVED | detached `Execution` 以稳定 `task_id` 作为控制 capability；`task_control(cancel)` 只在 owned target 接受取消时返回成功，并显式返回 `cancellation_requested=true`。该字段不伪造 terminal；测试继续 poll 到 ExecutionRegistry 的唯一 `cancelled` 终态。 |
+| `KILL` timeout 后投影为 `failed/ProcessFailed` | RESOLVED | cancellation intent 由 ExecutionRegistry 唯一持有；KILL 的 transport timeout 不删除 intent，后续观察到进程退出时统一提交 `Cancelled/ProcessCancelled`，TERM/KILL 和即时/后续 poll 不再生成两种 domain outcome。 |
+| Elevated 本地化控制台输出乱码 | RESOLVED | Broker 输出先保持合法 UTF-8；非 UTF-8 字节按当前 Windows OEM code page 经 Win32 转为 Unicode，再进入脱敏与公开映射。真实 `whoami.exe /user` 测试确认无替换字符。 |
+| 本地 PEP 随机 `ECONNRESET` | RESOLVED | 确认 Windows 上非阻塞 listener 的 accepted socket 会继承非阻塞模式；请求字节稍晚到达时旧实现把 `WouldBlock` 误判为断开。生产连接边界现显式切回 blocking 并设置 deadline；确定性 delayed-request 测试在修复前失败、修复后通过，测试客户端未增加 retry。真实 cloud Tunnel 仍未运行。 |
+
+### 2026-08-23 API revision 47 本轮复核
+
+| 用户报告 | 当前状态 | 根因修复和行为证据 |
+|---|---|---|
+| phased durable workflow 跨调用 `TaskNotOwned` | RESOLVED | `TaskId` 成为显式可转移 capability；重连后的 MCP Session 只有提交精确稳定 `task_id` 才能原子接管同一 checkpoint owner，省略或错误 ID 仍 fail-closed。外部 ChatGPT 风格客户端已完成 prepare → 跨 Session resume → cancel → terminal。 |
+| `task_control(cancel)` 无法控制可见 detached Task | RESOLVED | 当前 Session 没有所有权且请求未携带 `task_id` 时返回 `TaskIdRequired` 并给出可管理 identity；显式 TaskId 只取消该 Task/Execution，不存在 cancel-all 回退。 |
+| Runtime unavailable 被投影为 Lost | RESOLVED | Runtime unavailable/protocol/capability failure 统一提交 Task `Failed`；只有 Session 生命周期丢失提交 `Lost`。 |
+| 五屏引导权限维护本地默认值 | RESOLVED | `OnboardingState.permission + projection_revision` 来自一次 revisioned 后端 snapshot；React 不再持有平行 permission state，准备项目也不再重复写权限。切换后同时复读 onboarding/MainProjection 并确认后端 desired 值。 |
+| workspace 根 search 扫描 10000 项 | RESOLVED | `filesystem.search/list` 默认非递归，只扫描明确根层；递归必须显式请求，截断不再被默认行为意外触发。 |
+| 检查更新无论如何返回空 | RESOLVED | `retry_update_check` 从 `UiResult<()>` 改为返回真实 `UpdateProjection`；生命周期 owner 在启动网络线程前同步进入 `Checking`，因此调用至少返回可观察状态、版本、release URL 和 operation identity。 |
+| GitHub 页面后端返回空 | RESOLVED | `open_github_releases` 返回 typed `OpenReleaseProjection { release_url }`；生产构建固定使用 `zephyr7030/LocalBridge`，不再依赖可缺失的 build env。URL 经过 repository allowlist 后才交给系统浏览器。 |
+
+本轮本地证据：Rust 356 个 library tests 与全部非 ignored integration targets 通过，Clippy `-D warnings` 通过，frontend 11 tests/build、test-base、schema44 residue、public-release、license、runtime-resource gate 均通过；外部 revision47 客户端通过跨 Session workflow/task、command budget、filesystem 和终态一致性矩阵。Task cancel 竞态矩阵在定点修复后连续 5 次通过，并再次通过包含所有 Rust targets 的最终共享门禁。GitHub 官方 latest-release API 实际返回 `v0.1.2` 和非空 release URL。这里仍不恢复统一架构验收：真实 authenticated cloud Tunnel 未运行，且本文件标记的结构性 `PARTIAL` 项仍未完成。
+
+### P0-55｜后代进程可绕过 Shell Policy（RESOLVED：删除虚假 Shell 子权限层）
+
+原 Shell Policy 只能分类顶层命令文本。工作区脚本通过顶层分类后，可在后代进程中启动系统管理程序；Windows Job Object 只能约束进程归属、终止与资源，不能对后代 image 或系统调用实施所需的选择性权限策略。因此继续扩充危险命令字符串匹配不构成修复。
+
+本轮做了隔离边界原型验证：普通 AppContainer 仍允许该后代调用；LPAC 能阻断调用，但同时阻断普通 `cmd`、PowerShell、`where`、批处理和编译器后代，破坏 LocalBridge 承诺的 shell/build 工作负载。该临时原型、测试探针和依赖已全部移除，没有把 preview 隔离组件带入产品。
+
+本轮选择与产品所需任意 coding/build Shell 相容的明确边界：Full Shell 的 authority 就是当前 Windows 用户令牌，Shell、脚本、解释器、工具与全部后代一致；需要管理员令牌的 structured administrator work 仍只能走 Broker。结构化 filesystem/document/Git/image 继续使用 active-workspace Path Authority，但不再解析或补偿 Shell command text。为消除第二个可写策略 owner，bundled runtime 的 Guard-backed production route 改为 authenticated loopback policy-neutral adapter；Edit/Full/Elevated、transitive capability、WorkspaceResolver 与 Broker route 均由 LocalBridge Guard 授权。
+
+已删除的旧补偿包括 ordinary command classifier、system-management executable blacklist、静态 workspace script scanner、CMD absolute-redirection rewrite、`rmdir→rd` alias rewrite、PowerShell ordinary provider/autoload restriction和 toolbox command parser。真实外部 MCP client 复核 direct `sc query EventLog` 与 workspace `.cmd → sc.exe` 都以 current-user authority 完成；结构化 workspace 外读取仍为 `WorkspaceDenied`，管理员 route 仍要求 Active Broker。该修复不声称提供进程树 sandbox；UI/schema 已明确 Full Shell 可使用当前用户本来拥有的 OS/文件权限。
 
 ## 0. 总结
 

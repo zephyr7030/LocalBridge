@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { bridge } from "../bridge";
 
-const ADMIN_WARNING_COUNTDOWN_MS = 9000;
-
-export function adminWarningRemainingSeconds(startedAt: number, now: number): number {
-  return Math.ceil(Math.max(0, ADMIN_WARNING_COUNTDOWN_MS - (now - startedAt)) / 1000);
+export function adminWarningRemainingSeconds(notBeforeUnixMs: number, nowUnixMs: number): number {
+  return Math.ceil(Math.max(0, notBeforeUnixMs - nowUnixMs) / 1000);
 }
 
-export function adminWarningCanConfirm(startedAt: number, now: number): boolean {
-  return now - startedAt >= ADMIN_WARNING_COUNTDOWN_MS;
+export function adminWarningCanConfirm(notBeforeUnixMs: number, nowUnixMs: number): boolean {
+  return nowUnixMs >= notBeforeUnixMs;
 }
 
 const ADMIN_WARNING_CONSEQUENCES = [
@@ -24,7 +22,7 @@ const ADMIN_WARNING_CONSEQUENCES = [
 
 export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   const challengeId = useRef(crypto.randomUUID());
-  const startedAt = useRef<number | null>(null);
+  const notBeforeUnixMs = useRef<number | null>(null);
   const confirmationHandedOff = useRef(false);
   const onCancelRef = useRef(onCancel);
   const [backendChallengeReady, setBackendChallengeReady] = useState(false);
@@ -35,7 +33,7 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
   const cancel = async () => {
     if (confirmationHandedOff.current) return;
     try {
-      await invoke<void>("set_permission_mode", { mode: `admin-consent-cancel:${challengeId.current}` });
+      await bridge.cancelAdminConsent(challengeId.current);
     } finally {
       onCancelRef.current();
     }
@@ -43,17 +41,17 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
 
   useEffect(() => {
     let disposed = false;
-    void invoke<void>("set_permission_mode", { mode: `admin-consent-begin:${challengeId.current}` }).then(() => {
+    void bridge.beginAdminConsent(challengeId.current).then((challenge) => {
       if (disposed) return;
-      startedAt.current = performance.now();
-      setRemainingSeconds(9);
+      notBeforeUnixMs.current = challenge.notBeforeUnixMs;
+      setRemainingSeconds(adminWarningRemainingSeconds(challenge.notBeforeUnixMs, Date.now()));
       setBackendChallengeReady(true);
     }).catch(() => {
       if (!disposed) setBackendChallengeReady(false);
     });
     const update = () => {
-      if (startedAt.current !== null) {
-        setRemainingSeconds(adminWarningRemainingSeconds(startedAt.current, performance.now()));
+      if (notBeforeUnixMs.current !== null) {
+        setRemainingSeconds(adminWarningRemainingSeconds(notBeforeUnixMs.current, Date.now()));
       }
     };
     const timer = window.setInterval(update, 100);
@@ -66,15 +64,15 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
       window.clearInterval(timer);
       window.removeEventListener("keydown", onKeyDown);
       if (!confirmationHandedOff.current) {
-        void invoke<void>("set_permission_mode", { mode: `admin-consent-cancel:${challengeId.current}` }).catch(() => undefined);
+        void bridge.cancelAdminConsent(challengeId.current).catch(() => undefined);
       }
     };
   }, []);
 
   const confirm = async () => {
-    if (!backendChallengeReady || startedAt.current === null || !adminWarningCanConfirm(startedAt.current, performance.now())) return;
+    if (!backendChallengeReady || notBeforeUnixMs.current === null || !adminWarningCanConfirm(notBeforeUnixMs.current, Date.now())) return;
     try {
-      await invoke<void>("set_permission_mode", { mode: `admin-consent-confirm:${challengeId.current}` });
+      await bridge.confirmAdminConsent(challengeId.current);
     } catch {
       setBackendChallengeReady(false);
       return;

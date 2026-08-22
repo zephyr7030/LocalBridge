@@ -1,14 +1,18 @@
 use super::*;
-use crate::state::{SafeTaskSummary, TaskExecutionState, TaskKind};
+#[cfg(windows)]
+use crate::control_plane::convergence::{
+    DesiredState, DesiredStateOwner, DesiredWorkspace, ServiceIntent,
+};
 #[cfg(windows)]
 use crate::mcp::{InternalBearer, ProductionRuntimeConfig, ProductionRuntimeDriver};
+#[cfg(windows)]
+use crate::state::PermissionMode;
+use crate::state::{SafeTaskSummary, TaskExecutionState, TaskKind};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 #[cfg(windows)]
-use crate::credentials::{
-    CredentialMetadata, CredentialStore, CredentialStoreError, SecretString,
-};
+use crate::credentials::{CredentialMetadata, CredentialStore, CredentialStoreError, SecretString};
 #[cfg(windows)]
 use crate::tunnel::TunnelId;
 #[cfg(windows)]
@@ -46,7 +50,11 @@ impl FakeDriver {
         let events = Rc::new(RefCell::new(Vec::new()));
         let task = Rc::new(RefCell::new(CurrentTaskStatus::Idle));
         (
-            Self { events: events.clone(), failure, task: task.clone() },
+            Self {
+                events: events.clone(),
+                failure,
+                task: task.clone(),
+            },
             events,
             task,
         )
@@ -132,7 +140,9 @@ fn fake_sidecars_follow_mcp_pep_tunnel_ready_and_reverse_manual_stop() {
     let (driver, events, _) = FakeDriver::new(None);
     let mut orchestrator = RuntimeOrchestrator::new(driver);
     let mut states = Vec::new();
-    orchestrator.start_with_state_projection(|state| states.push(state.clone())).unwrap();
+    orchestrator
+        .start_with_state_projection(|state| states.push(state.clone()))
+        .unwrap();
     assert_eq!(
         states,
         vec![
@@ -148,7 +158,14 @@ fn fake_sidecars_follow_mcp_pep_tunnel_ready_and_reverse_manual_stop() {
     assert_eq!(orchestrator.state(), &RuntimeState::Ready);
     assert_eq!(
         &*events.borrow(),
-        &["mcp.start", "mcp.ready", "pep.start", "pep.ready", "tunnel.start", "tunnel.ready"]
+        &[
+            "mcp.start",
+            "mcp.ready",
+            "pep.start",
+            "pep.ready",
+            "tunnel.start",
+            "tunnel.ready"
+        ]
     );
 
     orchestrator.stop().unwrap();
@@ -156,8 +173,15 @@ fn fake_sidecars_follow_mcp_pep_tunnel_ready_and_reverse_manual_stop() {
     assert_eq!(
         &*events.borrow(),
         &[
-            "mcp.start", "mcp.ready", "pep.start", "pep.ready", "tunnel.start", "tunnel.ready",
-            "tunnel.stop", "pep.stop", "mcp.stop",
+            "mcp.start",
+            "mcp.ready",
+            "pep.start",
+            "pep.ready",
+            "tunnel.start",
+            "tunnel.ready",
+            "tunnel.stop",
+            "pep.stop",
+            "mcp.stop",
         ]
     );
 }
@@ -178,7 +202,14 @@ fn repeated_start_is_rejected_without_state_or_resource_divergence_and_restart_a
     assert_eq!(orchestrator.state(), &RuntimeState::Stopped);
     orchestrator.start().unwrap();
     assert_eq!(orchestrator.state(), &RuntimeState::Ready);
-    assert_eq!(events.borrow().iter().filter(|event| **event == "mcp.start").count(), 2);
+    assert_eq!(
+        events
+            .borrow()
+            .iter()
+            .filter(|event| **event == "mcp.start")
+            .count(),
+        2
+    );
     orchestrator.stop().unwrap();
 }
 
@@ -186,18 +217,66 @@ fn repeated_start_is_rejected_without_state_or_resource_divergence_and_restart_a
 fn staged_start_failures_cleanup_every_owned_lower_layer_in_reverse_order() {
     let cases: &[(FailurePoint, &[&str])] = &[
         (FailurePoint::StartMcp, &["mcp.start"]),
-        (FailurePoint::ConfirmMcp, &["mcp.start", "mcp.ready", "mcp.stop"]),
-        (FailurePoint::StartPep, &["mcp.start", "mcp.ready", "pep.start", "pep.start.failure-owned-mcp-cleanup"]),
-        (FailurePoint::ConfirmPep, &["mcp.start", "mcp.ready", "pep.start", "pep.ready", "pep.stop", "mcp.stop"]),
-        (FailurePoint::StartTunnel, &["mcp.start", "mcp.ready", "pep.start", "pep.ready", "tunnel.start", "pep.stop", "mcp.stop"]),
-        (FailurePoint::ConfirmTunnel, &["mcp.start", "mcp.ready", "pep.start", "pep.ready", "tunnel.start", "tunnel.ready", "tunnel.stop", "pep.stop", "mcp.stop"]),
+        (
+            FailurePoint::ConfirmMcp,
+            &["mcp.start", "mcp.ready", "mcp.stop"],
+        ),
+        (
+            FailurePoint::StartPep,
+            &[
+                "mcp.start",
+                "mcp.ready",
+                "pep.start",
+                "pep.start.failure-owned-mcp-cleanup",
+            ],
+        ),
+        (
+            FailurePoint::ConfirmPep,
+            &[
+                "mcp.start",
+                "mcp.ready",
+                "pep.start",
+                "pep.ready",
+                "pep.stop",
+                "mcp.stop",
+            ],
+        ),
+        (
+            FailurePoint::StartTunnel,
+            &[
+                "mcp.start",
+                "mcp.ready",
+                "pep.start",
+                "pep.ready",
+                "tunnel.start",
+                "pep.stop",
+                "mcp.stop",
+            ],
+        ),
+        (
+            FailurePoint::ConfirmTunnel,
+            &[
+                "mcp.start",
+                "mcp.ready",
+                "pep.start",
+                "pep.ready",
+                "tunnel.start",
+                "tunnel.ready",
+                "tunnel.stop",
+                "pep.stop",
+                "mcp.stop",
+            ],
+        ),
     ];
     for (failure, expected) in cases {
         let (driver, events, _) = FakeDriver::new(Some(*failure));
         let mut orchestrator = RuntimeOrchestrator::new(driver);
         let error = orchestrator.start().unwrap_err();
         assert_eq!(error.fault, RuntimeFault::Unknown);
-        assert!(matches!(orchestrator.state(), RuntimeState::Faulted(RuntimeFault::Unknown)));
+        assert!(matches!(
+            orchestrator.state(),
+            RuntimeState::Faulted(RuntimeFault::Unknown)
+        ));
         assert_eq!(&*events.borrow(), *expected, "failure point: {failure:?}");
         assert_eq!(orchestrator.current_task(), CurrentTaskStatus::Idle);
     }
@@ -214,7 +293,10 @@ fn cleanup_failure_does_not_prevent_remaining_reverse_shutdown() {
         &events.borrow()[events.borrow().len() - 3..],
         &["tunnel.stop", "pep.stop", "mcp.stop"]
     );
-    assert!(matches!(orchestrator.state(), RuntimeState::Faulted(RuntimeFault::Unknown)));
+    assert!(matches!(
+        orchestrator.state(),
+        RuntimeState::Faulted(RuntimeFault::Unknown)
+    ));
     assert_eq!(orchestrator.current_task(), CurrentTaskStatus::Idle);
 }
 
@@ -231,7 +313,10 @@ fn current_task_is_single_live_pep_projection_and_terminal_state_can_clear_to_id
     .unwrap();
     assert!(matches!(
         orchestrator.current_task(),
-        CurrentTaskStatus::Active(crate::state::CurrentTask { state: TaskExecutionState::Failed, .. })
+        CurrentTaskStatus::Active(crate::state::CurrentTask {
+            state: TaskExecutionState::Failed,
+            ..
+        })
     ));
     *task.borrow_mut() = CurrentTaskStatus::Idle;
     assert_eq!(orchestrator.current_task(), CurrentTaskStatus::Idle);
@@ -247,9 +332,17 @@ fn outage_generation_emits_final_user_attention_once_per_generation_only() {
     assert_eq!(first.get(), 1);
     assert!(orchestrator.mark_user_attention_required(first));
     assert!(!orchestrator.mark_user_attention_required(first));
-    assert!(orchestrator.active_outage().unwrap().user_attention_emitted());
+    assert!(
+        orchestrator
+            .active_outage()
+            .unwrap()
+            .user_attention_emitted()
+    );
 
-    let second = orchestrator.begin_outage(RuntimeComponent::PolicyEnforcement, RuntimeFault::PolicyInvalid);
+    let second = orchestrator.begin_outage(
+        RuntimeComponent::PolicyEnforcement,
+        RuntimeFault::PolicyInvalid,
+    );
     assert_eq!(second.get(), 2);
     assert!(!orchestrator.mark_user_attention_required(first));
     assert!(orchestrator.mark_user_attention_required(second));
@@ -280,7 +373,10 @@ struct NoopCredentialStore;
 
 #[cfg(windows)]
 impl CredentialStore for NoopCredentialStore {
-    fn save_runtime_api_key(&self, _secret: &SecretString) -> Result<CredentialMetadata, CredentialStoreError> {
+    fn save_runtime_api_key(
+        &self,
+        _secret: &SecretString,
+    ) -> Result<CredentialMetadata, CredentialStoreError> {
         unreachable!("LB-009 production composition test never starts Tunnel")
     }
 
@@ -356,9 +452,17 @@ fn production_driver_composes_actual_bundled_mcp_then_loopback_pep_and_recovers_
         TunnelId::new("tunnel_0123456789abcdef0123456789abcdef").unwrap(),
     );
     let store = NoopCredentialStore;
+    let desired = DesiredStateOwner::default();
+    desired.replace(DesiredState {
+        permission: PermissionMode::Full,
+        workspace: Some(DesiredWorkspace::for_runtime_path(&workspace)),
+        services: ServiceIntent::Enabled,
+        connection: None,
+    });
     let mut driver = ProductionRuntimeDriver::new(config, &store, || {
         InternalBearer::new(SYNTHETIC_BEARER).map_err(|_| RuntimeFault::ConfigurationInvalid)
-    });
+    })
+    .with_control_plane_state(desired, None);
 
     let mut mcp = driver.start_mcp().expect("actual bundled MCP start");
     let mcp_pid = mcp.process_snapshot().pid;

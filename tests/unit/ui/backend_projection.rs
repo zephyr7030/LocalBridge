@@ -4,6 +4,28 @@ use crate::state::{
 };
 
 #[test]
+fn production_update_projection_exposes_the_official_release_source() {
+    let owner = crate::control_plane::update::UpdateStateOwner::default();
+    let lifecycle = owner.snapshot();
+    let projection = update_projection(Some(&lifecycle));
+
+    assert_eq!(projection.state, "idle");
+    assert_eq!(projection.current_version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        projection.release_url.as_deref(),
+        Some("https://github.com/zephyr7030/LocalBridge/releases")
+    );
+    assert!(projection.retryable);
+
+    let release = release_projection(&crate::domain::GitHubRepository::official(), &lifecycle)
+        .expect("the fixed official release URL must be allowed");
+    assert_eq!(
+        release.release_url,
+        "https://github.com/zephyr7030/LocalBridge/releases"
+    );
+}
+
+#[test]
 fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     assert_eq!(permission_code(PermissionMode::Edit), "edit");
     assert_eq!(permission_code(PermissionMode::Full), "full");
@@ -83,6 +105,8 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     }
     let rendered = serde_json::to_string(&MainProjection {
         permission: "admin",
+        effective_permission: "admin",
+        elevated_active: true,
         privilege: "active",
         local_environment_service: "online",
         tunnel_service: "online",
@@ -90,10 +114,6 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
         current_project: None,
         projects: vec![],
         current_task: None,
-        current_workflow: None,
-        current_command: None,
-        last_command: None,
-        last_tool: None,
         current_activity: None,
         last_activity: None,
         projection_revision: 7,
@@ -123,6 +143,10 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
         "broker_generation",
         "nonce",
         "pid",
+        "currentWorkflow",
+        "currentCommand",
+        "lastCommand",
+        "lastTool",
     ] {
         assert!(!rendered.contains(forbidden));
     }
@@ -165,18 +189,11 @@ fn schema44_typed_task_aggregate_separates_current_and_history() {
                 completed_at_ms: 7,
             }),
             started_at_ms: 2,
+            last_observed_at_ms: 7,
+            orphaned_at_ms: None,
         }),
         scheduler: SchedulerSnapshot::idle(),
     };
-    assert_eq!(
-        current_workflow_projection(&waiting).unwrap().state,
-        "waiting"
-    );
-    assert!(current_command_projection(&waiting).is_none());
-    assert_eq!(
-        last_command_projection(&waiting).unwrap().status,
-        "cancelled"
-    );
     let current = current_activity_projection(&waiting).unwrap();
     assert_eq!(current.kind, "other");
     assert_eq!(current.state, "waiting");
@@ -189,9 +206,8 @@ fn schema44_typed_task_aggregate_separates_current_and_history() {
     assert_eq!(last.outcome, "cancelled");
     assert_eq!(last.completed_at_ms, 7);
     let idle = TaskAggregate::idle();
-    assert!(current_workflow_projection(&idle).is_none());
-    assert!(current_command_projection(&idle).is_none());
-    assert!(last_command_projection(&idle).is_none());
+    assert!(current_activity_projection(&idle).is_none());
+    assert!(last_activity_projection(&idle).is_none());
     let running = TaskAggregate {
         foreground_task: None,
         detached_execution: Some(ExecutionRecord {
@@ -202,15 +218,16 @@ fn schema44_typed_task_aggregate_separates_current_and_history() {
             runtime_handle: None,
             state: ExecutionState::Running,
             started_at_ms: 1,
+            last_observed_at_ms: 1,
+            orphaned_at_ms: None,
         }),
         last_task: None,
         last_execution: None,
         scheduler: SchedulerSnapshot::idle(),
     };
-    assert_eq!(
-        current_command_projection(&running).unwrap().state,
-        "running"
-    );
+    let running_activity = current_activity_projection(&running).unwrap();
+    assert_eq!(running_activity.kind, "command");
+    assert_eq!(running_activity.state, "running");
     assert_eq!(
         task_projection_from_aggregate(&running, Some(10))
             .unwrap()

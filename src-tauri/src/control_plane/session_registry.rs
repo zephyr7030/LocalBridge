@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::{McpSessionId, McpSessionState, RequestKey, TaskId};
 
-pub(crate) use super::resource_lifecycle::MCP_SESSION_TTL_MS;
+pub(crate) const MCP_SESSION_TTL_MS: u64 = 5 * 60 * 1_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionRecord {
@@ -173,6 +173,7 @@ impl SessionRegistry {
             .iter()
             .filter(|(_, session)| {
                 session.state.accepts_requests()
+                    && session.owned_requests.is_empty()
                     && now_ms.saturating_sub(session.last_seen_ms) >= ttl_ms
             })
             .map(|(id, _)| id.clone())
@@ -290,6 +291,24 @@ mod tests {
         assert_eq!(reaped[0].id, expired);
         assert_eq!(reaped[0].state, McpSessionState::Closed);
         assert!(registry.get(&fresh).is_some());
+    }
+
+    #[test]
+    fn ttl_reaper_never_closes_a_session_with_an_active_request() {
+        let registry = SessionRegistry::default();
+        let id = McpSessionId::new("active-request");
+        registry
+            .insert_bounded(record("active-request", "v1", "catalog"), 64)
+            .unwrap();
+        let request = RequestKey::new(id.clone(), crate::domain::RpcRequestId::Number(9));
+        assert!(registry.add_request(&id, request));
+        registry.set_last_seen_for_test(&id, 10);
+        assert!(
+            SessionReaper::new(registry.clone(), 50)
+                .reap_at(100)
+                .is_empty()
+        );
+        assert!(registry.get(&id).is_some());
     }
 
     #[test]

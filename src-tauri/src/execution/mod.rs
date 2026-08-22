@@ -1,7 +1,6 @@
 pub(crate) mod output_handles;
 pub(crate) mod policy;
 pub(crate) mod shell;
-pub(crate) mod shell_policy;
 pub(crate) mod toolbox;
 pub(crate) mod verification;
 

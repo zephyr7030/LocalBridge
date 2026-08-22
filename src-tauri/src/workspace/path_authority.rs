@@ -350,6 +350,16 @@ impl WorkspaceResolver {
 
     pub fn resolve_existing(&self, raw: &str) -> Result<PathBuf, PathAuthorityError> {
         let candidate = self.input_path(raw)?;
+        if self.scope == PathAuthorityScope::ActiveWorkspace
+            && !lexical_path_starts_with(
+                &candidate,
+                self.execution_root
+                    .as_ref()
+                    .expect("active workspace authority has execution root"),
+            )
+        {
+            return Err(PathAuthorityError::OutsideAuthority);
+        }
         let canonical = ordinary_path(
             &std::fs::canonicalize(candidate).map_err(|_| PathAuthorityError::NotFound)?,
         )
@@ -362,6 +372,16 @@ impl WorkspaceResolver {
 
     pub fn resolve_missing_leaf(&self, raw: &str) -> Result<PathBuf, PathAuthorityError> {
         let candidate = self.input_path(raw)?;
+        if self.scope == PathAuthorityScope::ActiveWorkspace
+            && !lexical_path_starts_with(
+                &candidate,
+                self.execution_root
+                    .as_ref()
+                    .expect("active workspace authority has execution root"),
+            )
+        {
+            return Err(PathAuthorityError::OutsideAuthority);
+        }
         if std::fs::symlink_metadata(&candidate).is_ok() {
             return self.resolve_existing(raw);
         }
@@ -843,6 +863,19 @@ mod tests {
         );
         assert_eq!(
             authority.resolve_existing(outside.join("outside.txt").to_string_lossy().as_ref()),
+            Err(PathAuthorityError::OutsideAuthority)
+        );
+        assert_eq!(
+            authority.resolve_existing(outside.join("missing.txt").to_string_lossy().as_ref()),
+            Err(PathAuthorityError::OutsideAuthority)
+        );
+        assert_eq!(
+            authority.resolve_missing_leaf(
+                outside
+                    .join("must-not-be-created.txt")
+                    .to_string_lossy()
+                    .as_ref()
+            ),
             Err(PathAuthorityError::OutsideAuthority)
         );
         assert_eq!(

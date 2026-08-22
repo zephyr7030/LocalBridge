@@ -20,9 +20,9 @@ pub enum ProjectionAvailability {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectionSection<T> {
-    pub availability: ProjectionAvailability,
-    pub stale: bool,
-    pub value: Option<T>,
+    availability: ProjectionAvailability,
+    stale: bool,
+    value: Option<T>,
 }
 
 impl<T> ProjectionSection<T> {
@@ -50,11 +50,43 @@ impl<T> ProjectionSection<T> {
         }
     }
 
+    pub fn faulted(previous: Option<T>) -> Self {
+        Self {
+            availability: ProjectionAvailability::Fault,
+            stale: previous.is_some(),
+            value: previous,
+        }
+    }
+
     pub fn stale(previous: Option<T>) -> Self {
         Self {
             availability: ProjectionAvailability::TemporarilyUnavailable,
             stale: true,
             value: previous,
+        }
+    }
+
+    pub const fn availability(&self) -> ProjectionAvailability {
+        self.availability
+    }
+
+    pub const fn is_stale(&self) -> bool {
+        self.stale
+    }
+
+    pub const fn value(&self) -> Option<&T> {
+        self.value.as_ref()
+    }
+
+    pub fn into_value(self) -> Option<T> {
+        self.value
+    }
+
+    pub fn map<U>(self, project: impl FnOnce(T) -> U) -> ProjectionSection<U> {
+        ProjectionSection {
+            availability: self.availability,
+            stale: self.stale,
+            value: self.value.map(project),
         }
     }
 }
@@ -327,6 +359,21 @@ impl ControlPlaneSnapshotOwner {
             connection: previous.connection,
             settings: previous.settings,
             activity: ProjectionSection::stale(previous.activity.value),
+            update: previous.update,
+            active_faults: previous.active_faults,
+        })
+    }
+
+    pub fn mark_observation_stale(&self) -> ControlPlaneSnapshot {
+        let previous = self.read();
+        self.publish(SnapshotDraft {
+            runtime: ProjectionSection::stale(previous.runtime.into_value()),
+            authority: ProjectionSection::stale(previous.authority.into_value()),
+            scheduler: ProjectionSection::stale(previous.scheduler.into_value()),
+            workspace: ProjectionSection::stale(previous.workspace.into_value()),
+            connection: ProjectionSection::stale(previous.connection.into_value()),
+            settings: previous.settings,
+            activity: ProjectionSection::stale(previous.activity.into_value()),
             update: previous.update,
             active_faults: previous.active_faults,
         })

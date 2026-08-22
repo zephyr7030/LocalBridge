@@ -7,8 +7,9 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use crate::control_plane::command_control::{
-    CommandControlAction, CommandKillSignal, RuntimeCommandControl, RuntimeCommandControlError,
-    RuntimeCommandObservation, RuntimeCommandRequest, RuntimeCommandStatus,
+    COMMAND_CONTROL_TRANSPORT_HEADROOM_MS, CommandControlAction, CommandKillSignal,
+    RuntimeCommandControl, RuntimeCommandControlError, RuntimeCommandObservation,
+    RuntimeCommandRequest, RuntimeCommandStatus,
 };
 use crate::domain::RpcRequestId;
 
@@ -17,7 +18,6 @@ use super::runtime::{CodingToolsRuntimeError, InternalBearer};
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
 const MAX_HTTP_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
-const COMMAND_CONTROL_TRANSPORT_HEADROOM_MS: u64 = 2_000;
 static HEALTH_REQUEST_ID: AtomicU64 = AtomicU64::new(1_000_000);
 static CONTROL_REQUEST_ID: AtomicI64 = AtomicI64::new(-1);
 
@@ -272,6 +272,7 @@ fn map_command_transport_error(error: CodingToolsRuntimeError) -> RuntimeCommand
         CodingToolsRuntimeError::ProtocolMismatch => RuntimeCommandControlError::InvalidRequest,
         CodingToolsRuntimeError::UpstreamRpcError => RuntimeCommandControlError::CapabilityMismatch,
         CodingToolsRuntimeError::HttpStatus(404) => RuntimeCommandControlError::SessionUnavailable,
+        CodingToolsRuntimeError::RequestTimeout => RuntimeCommandControlError::TimedOut,
         _ => RuntimeCommandControlError::Unavailable,
     }
 }
@@ -619,7 +620,7 @@ fn remaining_until(deadline: Instant) -> Result<Duration, CodingToolsRuntimeErro
     deadline
         .checked_duration_since(Instant::now())
         .filter(|value| !value.is_zero())
-        .ok_or(CodingToolsRuntimeError::ConnectionUnavailable)
+        .ok_or(CodingToolsRuntimeError::RequestTimeout)
 }
 
 fn post_json_with_timeouts(
@@ -679,7 +680,7 @@ fn post_json_with_timeouts(
                     .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
                 let count = stream
                     .write(&request[written..])
-                    .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
+                    .map_err(|_| CodingToolsRuntimeError::RequestTimeout)?;
                 if count == 0 {
                     return Err(CodingToolsRuntimeError::ConnectionUnavailable);
                 }
@@ -690,7 +691,7 @@ fn post_json_with_timeouts(
                 .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)?;
             stream
                 .flush()
-                .map_err(|_| CodingToolsRuntimeError::ConnectionUnavailable)
+                .map_err(|_| CodingToolsRuntimeError::RequestTimeout)
         })()
     } else {
         stream
@@ -716,8 +717,11 @@ fn post_json_with_timeouts(
                     if response.len() > MAX_HTTP_RESPONSE_BYTES {
                         return Err(CodingToolsRuntimeError::ProtocolMismatch);
                     }
+                    if http_response_body_complete(&response)? {
+                        break;
+                    }
                 }
-                Err(_) => return Err(CodingToolsRuntimeError::ConnectionUnavailable),
+                Err(_) => return Err(CodingToolsRuntimeError::RequestTimeout),
             }
         }
     } else {
@@ -730,6 +734,36 @@ fn post_json_with_timeouts(
         return Err(CodingToolsRuntimeError::ProtocolMismatch);
     }
     parse_response(response)
+}
+
+fn http_response_body_complete(response: &[u8]) -> Result<bool, CodingToolsRuntimeError> {
+    let Some(split) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return Ok(false);
+    };
+    let headers = std::str::from_utf8(&response[..split])
+        .map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
+    let content_length = headers
+        .split("\r\n")
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .find_map(|(name, value)| {
+            name.trim()
+                .eq_ignore_ascii_case("Content-Length")
+                .then(|| value.trim().parse::<usize>())
+        })
+        .transpose()
+        .map_err(|_| CodingToolsRuntimeError::ProtocolMismatch)?;
+    let Some(content_length) = content_length else {
+        return Ok(false);
+    };
+    let expected = split
+        .checked_add(4)
+        .and_then(|header_len| header_len.checked_add(content_length))
+        .ok_or(CodingToolsRuntimeError::ProtocolMismatch)?;
+    if response.len() > expected {
+        return Err(CodingToolsRuntimeError::ProtocolMismatch);
+    }
+    Ok(response.len() == expected)
 }
 
 fn parse_response(response: Vec<u8>) -> Result<HttpResponse, CodingToolsRuntimeError> {

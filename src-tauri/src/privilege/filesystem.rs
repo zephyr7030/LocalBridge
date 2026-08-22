@@ -321,8 +321,7 @@ pub(crate) fn run_administrator_filesystem_with_cancellation(
 
 fn administrator_workspace_guards(
     spec: &AdministratorFilesystemSpec,
-) -> Result<Vec<crate::filesystem::service::WorkspacePathGuard>, AdministratorFilesystemErrorCode>
-{
+) -> Result<Vec<crate::filesystem::service::WorkspacePathGuard>, AdministratorFilesystemErrorCode> {
     let Some(root) = spec.workspace_root.as_deref() else {
         return Ok(Vec::new());
     };
@@ -330,8 +329,9 @@ fn administrator_workspace_guards(
         .workspace_identity
         .as_deref()
         .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?;
-    let authority = crate::workspace::WorkspaceResolver::active_workspace(std::path::Path::new(root))
-        .map_err(|_| AdministratorFilesystemErrorCode::OutsideAuthority)?;
+    let authority =
+        crate::workspace::WorkspaceResolver::active_workspace(std::path::Path::new(root))
+            .map_err(|_| AdministratorFilesystemErrorCode::OutsideAuthority)?;
     authority
         .matches_workspace_identity_token(identity)
         .map_err(|_| AdministratorFilesystemErrorCode::OutsideAuthority)?;

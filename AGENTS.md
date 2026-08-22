@@ -1,57 +1,35 @@
 # LocalBridge Agent Rules
 
-This is the root execution instruction file. Keep it small and stable.
+## 1. 事实与状态所有权
 
-## 1. Read live authority first
+- 当前磁盘源码与真实测试是实现事实源。
+- 每个 live fact 必须只有一个 mutable owner；禁止双写、镜像状态、手工同步和“缓存即事实”。
+- 权限只能有一个权威状态源。`configured / broker / effective / route` 必须由同一 Authority owner 管理或从其原子快照派生；UI、MCP、Runtime、Policy 不得各自保存权限真相。
+- 前端严格绑定后端快照：只显示后端已经发布的状态、错误和生命周期；不得根据按钮点击、本地变量、超时或乐观假设伪造成功、运行中、管理员可用等状态。
+- `elevated available` 必须来自同一后端 Authority 快照，并与真正执行门使用同一判定；展示状态和执行判定不得使用两套条件。
+- Desired / Observed / Effective 可以分层，但只能派生，不能各自成为可写真相。
 
-Read in this order:
+## 2. 修改原则
 
-1. `AGENTS.md`
-2. `CONTROL_PLANE_REFACTOR_CONTRACT.json`
-3. `PROJECT_STATE.json`
-4. `docs/06_CONTROL_PLANE_REFACTOR_EXECUTION.md`
-5. Current source/tests and only the additional baseline documents needed for the active phase.
+- 单智能体、串行修改；先追真实调用链和根因，再改代码。
+- 修公共根因，不给每个调用者补同步逻辑。
+- 删除旧 owner / 旧 writer 后再宣告迁移完成；长期兼容双写禁止。
+- 安全边界、数据完整性、取消/终态、身份作用域必须 fail-closed。
+- 非终态任务必须跟踪到 terminal 后才能宣告完成。
 
-`PR_INDEX.json`, `PR_CONTRACTS.json`, `docs/06_PR_GROUPS_AND_EXECUTION.md`, old G0-G4 review records, and old LB-PR status are legacy history only. They must never be used to resolve current work, current phase, acceptance, or writable scope.
+## 3. Ponytail
 
-Current disk code and real tests define implementation reality. The schema44 control-plane contract defines required behavior. If current live authorities contradict each other, stop and report the conflict instead of guessing.
+默认采用最小可行实现：
 
-## 2. Execute one refactor phase at a time
+`不需要做 → 复用现有实现 → 标准库/平台能力 → 已有依赖 → 最少代码`
 
-The live sequence is strictly:
+- YAGNI：不为假想未来增加抽象、配置、factory、wrapper 或依赖。
+- 删除优先于新增；最少文件、最短正确 diff 优先。
+- Bug 修根因：先查共享入口和所有调用者，一处修复优于多处补丁。
+- 简单不等于草率：权限、安全、输入边界、错误处理、数据丢失风险不得省略。
+- 非平凡逻辑至少留下一个最小可运行验证；已有测试体系则复用。
+- 先完整理解，再选择最懒但正确的方案。
 
-`R1 → R2 → R3 → R4 → R5 → R6 → R7`
+## 4. 验证
 
-`PROJECT_STATE.json.current_phase` is the only current-phase pointer. Single agent, serial execution. After each phase is implemented and verified, update the pointer and continue automatically. Perform one unified final acceptance after R7.
-
-Do not add unrelated product features while the contract freezes them. Keep product changes and governance/provenance changes separate. Never fabricate PASS, review, authorization, provenance, or human evidence.
-
-## 3. Ownership migration is the primary rule
-
-Every authoritative fact must have exactly one mutable owner.
-
-For each migrated fact use strangler migration only:
-
-`new owner → migrate readers → migrate writers → disable old writer → delete old truth`
-
-Long-lived dual-write between legacy state and new ControlPlane state is forbidden. Migrate ownership before moving files or reorganizing modules.
-
-## 4. Preserve hard boundaries
-
-- Public API and authorization fail closed.
-- Request identity is MCP-session scoped.
-- Task and Execution have stable identities and exactly one terminal outcome.
-- Cancellation affects only the declared ownership scope.
-- Accepted Work is explicitly Queued, Running, or Terminal; Mutex contention is not business state.
-- Desired, Observed, and Effective state are distinct; Effective authority/workspace is derived fail-closed.
-- UI reads revisioned ControlPlane snapshots; lock contention must never fabricate Running.
-- Transport code cannot own domain lifecycle state.
-- Core lifecycle/control-plane state must be typed Rust state, not opaque `serde_json::Value`.
-
-Existing Edit / Full / Elevated security boundaries remain in force unless the current refactor contract explicitly changes how their state is owned or derived.
-
-## 5. Verify behavior, not names
-
-Target the current phase and the contract invariants first. Concurrency, cancellation, session lifecycle, terminal convergence, recovery, and snapshot consistency require executable behavior tests; source markers or function names are not substitutes.
-
-Any command/session/operation returning a non-terminal state must be followed to a durable terminal state before completion is claimed. Report each verified phase while continuing serially; claim acceptance only after the unified final gate following R7.
+验证行为而不是函数名或注释。涉及权限时至少验证：后端唯一状态源、UI 投影一致、MCP 投影一致、Broker/gate 实际执行一致，以及失败/恢复路径不会产生互相矛盾的状态组合。

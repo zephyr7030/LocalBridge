@@ -1,4 +1,4 @@
-use localbridge_lib::settings::{MigrationError, SettingsStore, CURRENT_SETTINGS_SCHEMA_VERSION};
+use localbridge_lib::settings::{CURRENT_SETTINGS_SCHEMA_VERSION, MigrationError, SettingsStore};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,7 +23,10 @@ fn v1_migrates_sequentially_to_current_registry_and_active_reference() {
     let data = SettingsStore::new(&path).load().unwrap();
     assert_eq!(data.schema_version, CURRENT_SETTINGS_SCHEMA_VERSION);
     assert_eq!(data.workspace.registry.entries().len(), 1);
-    assert_eq!(data.workspace.active_entry().unwrap().workspace_id.as_str(), "legacy-one");
+    assert_eq!(
+        data.workspace.active_entry().unwrap().workspace_id.as_str(),
+        "legacy-one"
+    );
     assert!(SettingsStore::new(&path).backup_path().exists());
     fs::remove_dir_all(dir).unwrap();
 }
@@ -33,7 +36,14 @@ fn v2_migrates_to_current_without_skipping_version_contract() {
     let (dir, path) = temp_file("settings.json", include_str!("v2-single-workspace.json"));
     let data = SettingsStore::new(&path).load().unwrap();
     assert_eq!(data.schema_version, CURRENT_SETTINGS_SCHEMA_VERSION);
-    assert_eq!(data.workspace.active_entry().unwrap().validated_identity.as_str(), "validated:v2");
+    assert_eq!(
+        data.workspace
+            .active_entry()
+            .unwrap()
+            .validated_identity
+            .as_str(),
+        "validated:v2"
+    );
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -49,7 +59,10 @@ fn v3_migrates_close_window_policy_to_safe_continue_running_default() {
 
 #[test]
 fn unvalidated_historical_workspace_is_preserved_as_pending_but_not_authorized() {
-    let (dir, path) = temp_file("settings.json", include_str!("v2-unvalidated-workspace.json"));
+    let (dir, path) = temp_file(
+        "settings.json",
+        include_str!("v2-unvalidated-workspace.json"),
+    );
     let data = SettingsStore::new(&path).load().unwrap();
     assert!(data.workspace.registry.entries().is_empty());
     assert!(data.workspace.active_workspace_id.is_none());

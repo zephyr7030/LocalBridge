@@ -7,8 +7,9 @@ use crate::state::{
 };
 
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
-use crate::execution::policy::{CapabilityPolicy, DenyReason, PolicyDecision, ToolDescriptor};
-use crate::execution::shell_policy::{ShellExecutionPolicy, ShellPolicyDecision};
+use crate::execution::policy::{
+    CapabilityPolicy, DenyReason, PolicyDecision, ToolDescriptor, command_task_kind,
+};
 
 pub trait GuardRuntime {
     fn raw_list_tools(&mut self) -> Result<Value, CodingToolsRuntimeError>;
@@ -235,17 +236,7 @@ fn decide_actual_request(
 }
 
 fn effective_indirect_capabilities(request: &ToolCallRequest) -> Vec<Capability> {
-    let mut capabilities = request.indirect_capabilities.clone();
-    if request.name == "exec_command" {
-        if let Some(command) = string_argument(&request.arguments, &["cmd", "command"]) {
-            let shell = string_argument(&request.arguments, &["shell"])
-                .unwrap_or_else(|| "auto".to_string());
-            if ShellExecutionPolicy::evaluate(&shell, &command) == ShellPolicyDecision::Review {
-                capabilities.push(Capability::PrivilegedExternalRuntime);
-            }
-        }
-    }
-    capabilities
+    request.indirect_capabilities.clone()
 }
 
 fn safe_summary(name: &str, arguments: &Value) -> SafeTaskSummary {
@@ -348,19 +339,5 @@ fn refined_task_kind(descriptor: ToolDescriptor, arguments: &Value) -> TaskKind 
     let Some(command) = string_argument(arguments, &["cmd", "command"]) else {
         return TaskKind::ExecuteCommand;
     };
-    let lower = command.to_ascii_lowercase();
-    if lower.contains("cargo test")
-        || lower.contains("npm test")
-        || lower.contains("vitest")
-        || lower.contains("pytest")
-    {
-        TaskKind::Test
-    } else if lower.contains("cargo build")
-        || lower.contains("npm run build")
-        || lower.contains("tauri build")
-    {
-        TaskKind::Build
-    } else {
-        TaskKind::ExecuteCommand
-    }
+    command_task_kind(&command)
 }

@@ -1,7 +1,7 @@
 use std::fmt;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -22,66 +22,67 @@ struct ActiveBroker {
     process: ElevatedBrokerProcess,
 }
 
+enum BrokerLifecycle {
+    Disabled,
+    Requested,
+    AwaitingUac,
+    Active {
+        generation: GenerationId,
+        broker: ActiveBroker,
+    },
+    Faulted(PrivilegeFault),
+}
+
+impl BrokerLifecycle {
+    fn state(&self) -> PrivilegeState {
+        match self {
+            Self::Disabled => PrivilegeState::Disabled,
+            Self::Requested => PrivilegeState::Requested,
+            Self::AwaitingUac => PrivilegeState::AwaitingUac,
+            Self::Active { generation, .. } => PrivilegeState::Active {
+                broker_generation: *generation,
+            },
+            Self::Faulted(fault) => PrivilegeState::Faulted(fault.clone()),
+        }
+    }
+}
+
 struct PrivilegeShared {
-    state: RwLock<PrivilegeState>,
-    gate_open: AtomicBool,
+    lifecycle: Mutex<BrokerLifecycle>,
     next_generation: AtomicU64,
-    active: Mutex<Option<ActiveBroker>>,
 }
 
 impl Default for PrivilegeShared {
     fn default() -> Self {
         Self {
-            state: RwLock::new(PrivilegeState::Disabled),
-            gate_open: AtomicBool::new(false),
+            lifecycle: Mutex::new(BrokerLifecycle::Disabled),
             next_generation: AtomicU64::new(1),
-            active: Mutex::new(None),
         }
     }
 }
 
 impl PrivilegeShared {
-    fn cached_state(&self) -> PrivilegeState {
-        self.state
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-    }
-
-    fn set_state(&self, state: PrivilegeState) {
-        *self
-            .state
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = state;
-    }
-
-    fn apply_broker_liveness(&self, running: bool) {
-        if running || !self.gate_open.swap(false, Ordering::AcqRel) {
-            return;
-        }
-        self.active
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        self.set_state(PrivilegeState::Faulted(PrivilegeFault::BrokerExited));
-    }
-
     fn refresh_broker_liveness(&self) -> PrivilegeState {
-        if !self.gate_open.load(Ordering::Acquire) {
-            return self.cached_state();
-        }
-        let running = {
-            let active = self
-                .active
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            active
-                .as_ref()
-                .and_then(|active| active.process.is_running().ok())
-                .unwrap_or(false)
+        let mut lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let broker_exited = match &*lifecycle {
+            BrokerLifecycle::Active { broker, .. } => !broker.process.is_running().unwrap_or(false),
+            _ => false,
         };
-        self.apply_broker_liveness(running);
-        self.cached_state()
+        if broker_exited {
+            *lifecycle = BrokerLifecycle::Faulted(PrivilegeFault::BrokerExited);
+        }
+        lifecycle.state()
+    }
+
+    fn replace(&self, next: BrokerLifecycle) -> BrokerLifecycle {
+        let mut lifecycle = self
+            .lifecycle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::mem::replace(&mut *lifecycle, next)
     }
 }
 
@@ -94,10 +95,6 @@ impl fmt::Debug for PrivilegeController {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PrivilegeController")
             .field("state", &self.state())
-            .field(
-                "call_gate_open",
-                &self.shared.gate_open.load(Ordering::Acquire),
-            )
             .finish()
     }
 }
@@ -127,7 +124,7 @@ impl PrivilegeController {
 
     pub fn request_without_uac(&self) -> Result<(), PrivilegeFault> {
         self.disable()?;
-        self.set_state(PrivilegeState::Requested);
+        self.shared.replace(BrokerLifecycle::Requested);
         Ok(())
     }
 
@@ -142,9 +139,9 @@ impl PrivilegeController {
             .fetch_add(1, Ordering::AcqRel)
             .max(1);
         let generation = GenerationId::new(generation_value);
-        self.set_state(PrivilegeState::Requested);
+        self.shared.replace(BrokerLifecycle::Requested);
         let server = NamedPipeServer::create().map_err(|error| self.fail(map_ipc_fault(error)))?;
-        self.set_state(PrivilegeState::AwaitingUac);
+        self.shared.replace(BrokerLifecycle::AwaitingUac);
         let process =
             launch_broker_with_explicit_uac(broker_executable, server.name(), generation_value)
                 .map_err(|error| self.fail(map_uac_fault(error)))?;
@@ -156,31 +153,19 @@ impl PrivilegeController {
         session
             .ping()
             .map_err(|error| self.fail(map_broker_fault(error)))?;
-        {
-            let mut active = self
-                .shared
-                .active
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            *active = Some(ActiveBroker { session, process });
-        }
-        self.set_state(PrivilegeState::Active {
-            broker_generation: generation,
+        self.shared.replace(BrokerLifecycle::Active {
+            generation,
+            broker: ActiveBroker { session, process },
         });
-        self.shared.gate_open.store(true, Ordering::Release);
         Ok(generation)
     }
 
     pub fn disable(&self) -> Result<(), PrivilegeFault> {
-        self.shared.gate_open.store(false, Ordering::Release);
-        self.set_state(PrivilegeState::Disabled);
-        let active = self
-            .shared
-            .active
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        let Some(mut active) = active else {
+        let previous = self.shared.replace(BrokerLifecycle::Disabled);
+        let BrokerLifecycle::Active {
+            broker: mut active, ..
+        } = previous
+        else {
             return Ok(());
         };
         let shutdown_result = active.session.shutdown();
@@ -207,18 +192,8 @@ impl PrivilegeController {
     }
 
     fn fail(&self, fault: PrivilegeFault) -> PrivilegeFault {
-        self.shared.gate_open.store(false, Ordering::Release);
-        self.shared
-            .active
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        self.set_state(PrivilegeState::Faulted(fault.clone()));
+        self.shared.replace(BrokerLifecycle::Faulted(fault.clone()));
         fault
-    }
-
-    fn set_state(&self, state: PrivilegeState) {
-        self.shared.set_state(state);
     }
 }
 
@@ -281,7 +256,6 @@ impl fmt::Debug for PrivilegedExecutionGateway {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PrivilegedExecutionGateway")
             .field("state", &self.state())
-            .field("gate_open", &self.shared.gate_open.load(Ordering::Acquire))
             .finish()
     }
 }
@@ -309,44 +283,37 @@ impl PrivilegedExecutionGateway {
         self.cancel_execute(request_id)
     }
 
-    fn require_gate(&self) -> Result<(), PrivilegedExecError> {
-        let state = self.state();
-        if self.shared.gate_open.load(Ordering::Acquire) && state.accepts_privileged_calls() {
-            Ok(())
-        } else {
-            Err(PrivilegedExecError::GateClosed(state))
-        }
-    }
-
     fn with_session<T>(
         &self,
         operation: impl FnOnce(&mut BrokerClientSession) -> Result<T, BrokerRunError>,
     ) -> Result<T, PrivilegedExecError> {
-        let mut active = self
+        let mut lifecycle = self
             .shared
-            .active
+            .lifecycle
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if !self.shared.gate_open.load(Ordering::Acquire) {
-            return Err(PrivilegedExecError::GateClosed(self.shared.cached_state()));
-        }
-        let Some(broker) = active.as_mut() else {
-            let state = if self.shared.gate_open.swap(false, Ordering::AcqRel) {
-                let state = PrivilegeState::Faulted(PrivilegeFault::BrokerExited);
-                self.shared.set_state(state.clone());
-                state
-            } else {
-                self.shared.cached_state()
-            };
-            return Err(PrivilegedExecError::GateClosed(state));
+        let state = lifecycle.state();
+        let running = match &*lifecycle {
+            BrokerLifecycle::Active { broker, .. } => broker.process.is_running().unwrap_or(false),
+            _ => return Err(PrivilegedExecError::GateClosed(state)),
         };
-        operation(&mut broker.session).map_err(|error| {
-            let fault = map_broker_fault(error);
-            self.shared.gate_open.store(false, Ordering::Release);
-            self.shared
-                .set_state(PrivilegeState::Faulted(fault.clone()));
-            PrivilegedExecError::Broker(fault)
-        })
+        if !running {
+            let state = PrivilegeState::Faulted(PrivilegeFault::BrokerExited);
+            *lifecycle = BrokerLifecycle::Faulted(PrivilegeFault::BrokerExited);
+            return Err(PrivilegedExecError::GateClosed(state));
+        }
+        let result = match &mut *lifecycle {
+            BrokerLifecycle::Active { broker, .. } => operation(&mut broker.session),
+            _ => unreachable!("active broker lifecycle changed while locked"),
+        };
+        match result {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                let fault = map_broker_fault(error);
+                *lifecycle = BrokerLifecycle::Faulted(fault.clone());
+                Err(PrivilegedExecError::Broker(fault))
+            }
+        }
     }
 }
 
@@ -360,7 +327,6 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
         request_id: String,
         spec: ElevatedExecSpec,
     ) -> Result<(), PrivilegedExecError> {
-        self.require_gate()?;
         self.with_session(|session| session.start_exec(request_id, spec))
     }
 
@@ -368,12 +334,10 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
         &self,
         request_id: String,
     ) -> Result<Option<ElevatedExecResult>, PrivilegedExecError> {
-        self.require_gate()?;
         self.with_session(|session| session.poll_exec(request_id))
     }
 
     fn cancel_execute(&self, request_id: String) -> Result<(), PrivilegedExecError> {
-        self.require_gate()?;
         self.with_session(|session| session.cancel_exec(request_id))
     }
 
@@ -381,7 +345,6 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
         &self,
         spec: PrivilegedFilesystemSpec,
     ) -> Result<PrivilegedFilesystemResult, PrivilegedExecError> {
-        self.require_gate()?;
         self.with_session(|session| session.filesystem(spec))
     }
 
@@ -389,7 +352,6 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
         &self,
         spec: AdministratorFilesystemSpec,
     ) -> Result<AdministratorFilesystemResult, PrivilegedExecError> {
-        self.require_gate()?;
         self.with_session(|session| session.structured_filesystem(spec))?
             .map_err(PrivilegedExecError::Filesystem)
     }
@@ -399,7 +361,6 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
         request_id: String,
         spec: AdministratorFilesystemSpec,
     ) -> Result<(), PrivilegedExecError> {
-        self.require_gate()?;
         self.with_session(|session| session.start_structured_filesystem(request_id, spec))
     }
 
@@ -410,12 +371,10 @@ impl PrivilegedExecution for PrivilegedExecutionGateway {
         Option<Result<AdministratorFilesystemResult, AdministratorFilesystemErrorCode>>,
         PrivilegedExecError,
     > {
-        self.require_gate()?;
         self.with_session(|session| session.poll_structured_filesystem(request_id))
     }
 
     fn cancel_structured_filesystem(&self, request_id: String) -> Result<(), PrivilegedExecError> {
-        self.require_gate()?;
         self.with_session(|session| session.cancel_structured_filesystem(request_id))
     }
 }
@@ -459,7 +418,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gate_accepts_calls_only_when_active_and_closes_before_disabled_state_is_observed() {
+    fn gateway_rejects_calls_without_an_active_broker_lifecycle() {
         let controller = PrivilegeController::new();
         assert!(matches!(
             controller.gateway().execute(
@@ -474,46 +433,22 @@ mod tests {
             ),
             Err(PrivilegedExecError::GateClosed(PrivilegeState::Disabled))
         ));
-        controller.shared.gate_open.store(true, Ordering::Release);
-        controller.set_state(PrivilegeState::Active {
-            broker_generation: GenerationId::new(1),
-        });
-        controller.shared.gate_open.store(false, Ordering::Release);
-        controller.set_state(PrivilegeState::Disabled);
-        assert!(!controller.shared.gate_open.load(Ordering::Acquire));
-        assert_eq!(controller.state(), PrivilegeState::Disabled);
-    }
-
-    #[test]
-    fn broker_crash_immediately_closes_gate_and_leaves_active_state() {
-        let controller = PrivilegeController::new();
-        controller.shared.gate_open.store(true, Ordering::Release);
-        controller.set_state(PrivilegeState::Active {
-            broker_generation: GenerationId::new(9),
-        });
-        controller.shared.apply_broker_liveness(false);
-        assert!(!controller.shared.gate_open.load(Ordering::Acquire));
+        controller.request_without_uac().unwrap();
         assert_eq!(
-            controller.state(),
-            PrivilegeState::Faulted(PrivilegeFault::BrokerExited)
+            controller
+                .gateway()
+                .with_session(|_| Ok::<_, BrokerRunError>(())),
+            Err(PrivilegedExecError::GateClosed(PrivilegeState::Requested))
         );
     }
 
     #[test]
-    fn gateway_state_refreshes_stale_active_without_ui_or_diagnostics_poll() {
+    fn fault_transition_replaces_the_previous_lifecycle_atomically() {
         let controller = PrivilegeController::new();
-        controller.shared.gate_open.store(true, Ordering::Release);
-        controller.set_state(PrivilegeState::Active {
-            broker_generation: GenerationId::new(10),
-        });
-
+        controller.request_without_uac().unwrap();
+        controller.fail(PrivilegeFault::BrokerExited);
         assert_eq!(
             controller.gateway().state(),
-            PrivilegeState::Faulted(PrivilegeFault::BrokerExited)
-        );
-        assert!(!controller.shared.gate_open.load(Ordering::Acquire));
-        assert_eq!(
-            controller.state(),
             PrivilegeState::Faulted(PrivilegeFault::BrokerExited)
         );
     }

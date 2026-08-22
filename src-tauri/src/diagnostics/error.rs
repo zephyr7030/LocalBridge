@@ -91,16 +91,19 @@ impl ErrorDiagnostic {
 
 pub fn from_canonical_code(code: &str) -> ErrorDiagnostic {
     match code {
-        "InvalidArgument" | "NotFound" | "TaskIdRequired" | "InvalidShellSyntax"
-        | "FileChanged" | "PatchConflict" | "AmbiguousMatch" => ErrorDiagnostic::new(
-            DiagnosticErrorCode::InvalidRequest,
-            DiagnosticPhase::Tool,
-            canonical_cause(code),
-        ),
+        "InvalidArgument" | "NotFound" | "OutputNotFound" | "TaskIdRequired"
+        | "InvalidShellSyntax" | "FileChanged" | "PatchConflict" | "AmbiguousMatch" => {
+            ErrorDiagnostic::new(
+                DiagnosticErrorCode::InvalidRequest,
+                DiagnosticPhase::Tool,
+                canonical_cause(code),
+            )
+        }
         "WorkspaceDenied"
         | "CapabilityDenied"
         | "PolicyDenied"
         | "TaskNotOwned"
+        | "ElevatedOperationNotReviewed"
         | "PrivilegedRouteUnavailable"
         | "ElevationRequired" => ErrorDiagnostic::new(
             DiagnosticErrorCode::Denied,
@@ -111,6 +114,11 @@ pub fn from_canonical_code(code: &str) -> ErrorDiagnostic {
             DiagnosticErrorCode::Timeout,
             DiagnosticPhase::Process,
             "process_timed_out",
+        ),
+        "OperationTimedOut" => ErrorDiagnostic::new(
+            DiagnosticErrorCode::Timeout,
+            DiagnosticPhase::Transport,
+            "operation_timed_out",
         ),
         "ProcessCancelled" => ErrorDiagnostic::new(
             DiagnosticErrorCode::Cancelled,

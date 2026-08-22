@@ -191,15 +191,15 @@ command state 的 start/replace/finish/clear 都必须比较 `(task_id, session_
 
 `agent_workflow` 增加 workspace-relative `path` 作为**项目上下文选择器**，默认 `.`。active workspace 仍是唯一授权根；`path` 只选择该授权根内的工程上下文，不得切换 WorkspaceRegistry、不得新增授权根。`path="LocalBridge"` 必须直接选择 `D:\project\LocalBridge`；若 `path` 指向 `LocalBridge/src` 等后代目录，则向上寻找最近 enclosing repository/project root，搜索上限仍是 active workspace root。workflow 的 Git before/after、默认 command workdir 与稳定结果中的 selected/project context 必须基于该选择，且与 `git_workflow` 的 nested-repository resolver 一致。
 
-可信 PowerShell 启动继续在 user command 前关闭 arbitrary module autoload，但不能因此破坏正常 coding shell。LocalBridge 必须通过固定 allowlist + 可信安装身份/路径验证，预加载或等价提供最小标准 PowerShell cmdlet surface；至少 `Get-Location`、`Get-ChildItem`、`Test-Path` 在 `windows_powershell` 与 `auto`→PowerShell 下可用。用户控制的 `PSModulePath` 不得决定 preload 来源。此修复不得弱化 LB-007：`New-Item`、`Set-Content`、`Set-Item`、Alias/Function provider 等动态 provider/command-surface mutation 仍按既有 review-required 处理。
+可信 PowerShell 解析必须稳定选择受信任的已安装 executable，且不能破坏正常 coding shell；至少 `Get-Location`、`Get-ChildItem`、`Test-Path` 在 `windows_powershell` 与 `auto`→PowerShell 下可用。Full 的 PowerShell 与其他任意 Shell 一样使用当前 Windows 用户令牌，不再维护一套只能检查首层文本、无法约束脚本与后代的 provider/command matcher。
 
 active workspace 内普通文件/目录 mutation 属于 reviewed workspace write，而不是 WorkspaceRegistry/control-plane mutation。该结构化路线固定在现有 `agent_workflow` 的 optional `directory_changes` 字段：bounded array 中每项只能是 `{ action, path }`，`action` 只允许 `create_directory` / `remove_empty_directory`，`path` 必须 active-workspace-relative。它无需 process exec，可在 `D:\project` 授权下创建 `test/`，并在为空时清理该目录；Edit 与 Full 都可授权此类 reviewed write。该路线必须执行 final identity/reparse 边界验证，禁止 absolute/`..`/reparse escape；本合同不自动授权非空递归目录删除，也不增加第九个 public core tool。
 
 ### Schema33 — Elevated administrator-token scope / UI geometry
 
-权限边界分为两个执行域：普通 LocalBridge/普通 command route 始终保持非提权；管理员操作由 Active Privileged Broker 单独承载。Edit/Full 继续以 active workspace 为文件授权边界，Full 只增加当前普通用户 token 的 workspace 相关 process exec。Elevated 在固定风险警告、完整 9000ms 红色确认倒计时、用户明确确认和 Windows UAC 完成后，允许 Broker 在管理员 Token 范围内访问 workspace 外文件系统、执行普通/管理员进程与可信 shell 命令、执行系统维护。
+权限边界分为三个明确表面：Edit/Full 的结构化文件工具以 active workspace 为授权根；Edit 不提供 process exec；Full 的任意 Shell/进程使用当前 Windows 用户令牌，Shell 与全部后代具有相同 OS 权限，不声称受结构化 workspace path authority 约束。管理员操作由 Active Privileged Broker 单独承载。Elevated 在固定风险警告、完整 9000ms 红色确认倒计时、用户明确确认和 Windows UAC 完成后，允许 Broker 在管理员 Token 范围内访问 workspace 外文件系统、执行 reviewed 管理员进程与可信 shell 命令、执行系统维护。
 
-`reg.exe / sc.exe / schtasks.exe / netsh.exe / bcdedit.exe / dism.exe` 是 Full 必须拦在管理员边界之外的系统管理目标；Elevated 的管理员 route 可以使用它们，也可以执行一般管理员程序/命令。ordinary `exec_command` 不得因为 Broker Active 而隐式继承管理员 token。整个 LocalBridge 主进程仍禁止整体提权。
+`reg.exe / sc.exe / schtasks.exe / netsh.exe / bcdedit.exe / dism.exe` 在 Full 中与脚本、解释器和后代一样使用当前用户令牌：Windows 允许的操作可执行，需要管理员令牌的操作由 OS 拒绝。LocalBridge 不按 executable 名称制造一套可被脚本绕过的平行权限真相。Elevated 的 reviewed administrator route 可以使用管理员令牌；ordinary `exec_command` 不得因为 Broker Active 而隐式继承该 token。整个 LocalBridge 主进程仍禁止整体提权。
 
 管理员范围扩大不扩大 LocalBridge control-plane：AI/MCP 仍不能修改 PermissionMode、批准警告/UAC、启停 Broker、修改 WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy 或 LocalBridge autostart。
 
@@ -400,11 +400,11 @@ Public v1 core Registry 仍严格为 8 个工具；不得为了 capability disco
 
 `workspace_context` 在原 workspace/default_cwd 之外增加只读 typed projection：`permission_mode / workspace_scope / ordinary_route_token / elevated_route_available / privilege_state / shell_discovery / capabilities`。该 snapshot 只用于观察，不能授权；PermissionMode/Broker 状态变化后必须刷新，同一 `tools/call` 仍在服务端重新判定。capabilities 至少安全表达当前 public tools/actions、trusted cmd、PowerShell Core、Windows PowerShell、Git、bundled Python/Node（若存在）以及 elevated route 可用性/原因。
 
-Full ordinary Shell 分类以 executable + 参数/操作语义为依据，不因 `where`、环境变量展开、脚本扩展名或普通重定向表面文字自动升级管理员权限。`where cmd`、`where pwsh`、`echo %PATH%` 属于普通只读诊断。cmd/PowerShell 必须保持 Windows 原生常用语义，包括 NUL 重定向、管道、`>`/`2>`、引号、`&&`/`||`、环境变量、Unicode 路径以及已验证 workspace 内 `.cmd/.bat/.ps1`；禁止把 Shell 收缩成自定义 DSL。
+Full ordinary Shell 的权限只由 Effective Permission 与 `current_windows_user` execution token 决定，不根据 executable、参数、脚本扩展名、别名、重定向或后代表面文本改变。cmd/PowerShell 必须保持 Windows 原生常用语义，包括 NUL 重定向、管道、`>`/`2>`、引号、`&&`/`||`、环境变量、Unicode 路径以及 `.cmd/.bat/.ps1`；禁止把 Shell 收缩成自定义 DSL。结构化 filesystem/document/Git/image 的 path authority 不得解析或补偿 Shell command text。
 
 canonical public errors 至少稳定区分 `PolicyDenied / WorkspaceDenied / RuntimeUnavailable / InvalidShellSyntax / PrivilegedRouteUnavailable / ProcessTimedOut`。可附带脱敏 `rule_category` 与 remediation；不得泄漏私有 policy internals。历史 `PrivilegedRouteNotAvailable` 仅可作内部/兼容别名，新的 public canonical 输出使用 `PrivilegedRouteUnavailable`。显式 `shell=pwsh` 不可用时，`RuntimeUnavailable` 同时返回可信发现摘要和可用 fallback。
 
-`exec_command` 与 `agent_workflow` 可在既有 schema 上提供只读 `dry_run/explain`：只返回 `ordinary / workspace_restricted / elevated_required / permanently_denied` 与安全规则类别，不执行、不授权。统一环境自检由 enriched `workspace_context` 与/或 `agent_workflow(action=diagnose)` 承担。
+`exec_command` 与 `agent_workflow` 可在既有 schema 上提供只读 `dry_run/explain`，但 ordinary Shell 只能如实返回 current-user execution authority，不能从首层命令文本推断后代是否“需要管理员权限”。结构化动作仍可返回 `workspace_restricted / elevated_required / permanently_denied`。统一环境自检由 enriched `workspace_context` 与/或 `agent_workflow(action=diagnose)` 承担。
 
 command/session 稳定结果在适用时统一 `task_id/session_id/status/elapsed_ms/exit_code/output_ref`；retained output 分页增加 `total_bytes/offset/returned_bytes/truncated`。public contract 不要求暴露 OS PID。所有 document/image/Git/workflow/workspace structured path authority 继续由单一 LocalBridge-owned canonical containment/path-authority 实现。
 
@@ -414,7 +414,7 @@ LocalBridge 的 Agent 执行模型统一为 `Workflow → Task → optional Exec
 
 Public schema 的 authority 是真实 downstream MCP client 最终可消费的投影，而不是 facade/server 内部 JSON Schema 单测。多 action/operation 工具必须保留直接可发现的顶层 properties/enum/bounds；合法调用不得要求模型先触发 `InvalidArgument` 猜字段。服务端继续做严格 action/operation-specific validation，不能为了客户端兼容而降低验证。
 
-typed error 继续沿用现有 LocalBridge canonical names，不创建同义错误体系。同一失败条件经 direct tool 或 `agent_workflow` 间接路径必须进入同一 normalization table。`agent_workflow` 只承担 orchestration，必须复用与 direct tools 相同的 filesystem/Git/process/document/image/privilege service、Session Manager、ShellResolver、terminal finalizer、path authority 与 capability classifier，不得维护第二套 Shell/File/Git 语义。
+typed error 继续沿用现有 LocalBridge canonical names，不创建同义错误体系。同一失败条件经 direct tool 或 `agent_workflow` 间接路径必须进入同一 normalization table。`agent_workflow` 只承担 orchestration，必须复用与 direct tools 相同的 filesystem/Git/process/document/image/privilege service、Session Manager、ShellResolver、terminal finalizer、path authority 与显式 transitive capability declaration；不得维护第二套 Shell/File/Git 语义或命令字符串 classifier。
 
 `workspace_context` 是 compact first-turn discovery：在可确定时直接投影 project name/type/version、Git branch/dirty/changed count、package manager、build/test system、runtime availability、trusted shells、permission mode、current task。稳定 discovery 优先读取已有/缓存 snapshot，禁止为了同一稳定信息在每次调用时重复拉起探测进程；无法确定的字段必须显式 unknown/unavailable，不能猜测。
 

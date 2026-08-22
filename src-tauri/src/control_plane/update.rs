@@ -35,7 +35,7 @@ impl Default for UpdateStateOwner {
     fn default() -> Self {
         Self::new(
             ProductVersion::current(),
-            GitHubRepository::from_build_metadata(),
+            Some(GitHubRepository::official()),
         )
     }
 }
@@ -316,6 +316,16 @@ mod tests {
             ProductVersion::parse("1.0.0").unwrap(),
             Some(GitHubRepository::new("owner/repo").unwrap()),
         )
+    }
+
+    #[test]
+    fn production_default_always_uses_the_official_release_source() {
+        let owner = UpdateStateOwner::default();
+        assert_eq!(
+            owner.repository().as_ref().map(GitHubRepository::as_str),
+            Some(crate::domain::OFFICIAL_GITHUB_REPOSITORY)
+        );
+        assert!(matches!(owner.snapshot(), UpdateLifecycle::Idle { .. }));
     }
 
     #[test]

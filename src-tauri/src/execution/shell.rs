@@ -467,7 +467,13 @@ fn powershell_single_quoted_literal(value: &Path) -> String {
     value.to_string_lossy().replace('\'', "''")
 }
 
-fn hardened_powershell_script(command: &str, management_module: &Path) -> String {
+fn current_user_powershell_script(command: &str) -> String {
+    format!(
+        "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{command}"
+    )
+}
+
+fn hardened_administrator_powershell_script(command: &str, management_module: &Path) -> String {
     let management_module = powershell_single_quoted_literal(management_module);
     format!(
         "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;Import-Module -Name '{management_module}' -ErrorAction Stop;Remove-Item Alias:curl -Force -ErrorAction SilentlyContinue;[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;{command}"
@@ -532,7 +538,7 @@ where
         spec: &ShellExecutionSpec,
     ) -> Result<DirectProcessSpec, ShellResolveError> {
         let shell = self.resolver.resolve(spec.shell)?;
-        Self::direct_spec_for_resolved_shell(spec, shell)
+        Self::direct_spec_for_resolved_shell(spec, shell, false)
     }
 
     pub fn broker_direct_spec(
@@ -540,25 +546,31 @@ where
         spec: &ShellExecutionSpec,
     ) -> Result<DirectProcessSpec, ShellResolveError> {
         let shell = self.resolver.resolve_for_broker(spec.shell)?;
-        Self::direct_spec_for_resolved_shell(spec, shell)
+        Self::direct_spec_for_resolved_shell(spec, shell, true)
     }
 
     fn direct_spec_for_resolved_shell(
         spec: &ShellExecutionSpec,
         shell: ResolvedShell,
+        administrator: bool,
     ) -> Result<DirectProcessSpec, ShellResolveError> {
         let args = match shell.kind {
             ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
-                let management_module = shell
-                    .management_module
-                    .as_deref()
-                    .ok_or(ShellResolveError::NoShellAvailable)?;
+                let script = if administrator {
+                    let management_module = shell
+                        .management_module
+                        .as_deref()
+                        .ok_or(ShellResolveError::NoShellAvailable)?;
+                    hardened_administrator_powershell_script(&spec.command, management_module)
+                } else {
+                    current_user_powershell_script(&spec.command)
+                };
                 vec![
                     OsString::from("-NoLogo"),
                     OsString::from("-NoProfile"),
                     OsString::from("-NonInteractive"),
                     OsString::from("-Command"),
-                    OsString::from(hardened_powershell_script(&spec.command, management_module)),
+                    OsString::from(script),
                 ]
             }
             ResolvedShellKind::Cmd => vec![
@@ -590,11 +602,7 @@ where
         let command_line = match shell.kind {
             ResolvedShellKind::Cmd => spec.command.clone(),
             ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
-                let management_module = shell
-                    .management_module
-                    .as_deref()
-                    .ok_or(ShellResolveError::NoShellAvailable)?;
-                let script = hardened_powershell_script(&spec.command, management_module);
+                let script = current_user_powershell_script(&spec.command);
                 let mut utf16le = Vec::with_capacity(script.len() * 2);
                 for unit in script.encode_utf16() {
                     utf16le.extend_from_slice(&unit.to_le_bytes());
@@ -991,18 +999,18 @@ mod tests {
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
             .collect::<Vec<_>>();
         let decoded = String::from_utf16(&units).unwrap();
-        assert!(decoded.starts_with(
-            "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;"
-        ));
-        assert!(decoded.contains("PSModuleAutoLoadingPreference"));
-        assert!(decoded.contains("Microsoft.PowerShell.Management.psd1"));
-        assert!(decoded.contains("Import-Module -Name '"));
+        assert!(
+            decoded
+                .starts_with("[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);")
+        );
+        assert!(!decoded.contains("PSModuleAutoLoadingPreference"));
+        assert!(!decoded.contains("Import-Module"));
         assert!(decoded.contains("OutputEncoding"));
         assert!(decoded.ends_with(user));
     }
 
     #[test]
-    fn powershell_direct_spec_locks_module_autoload_before_user_text() {
+    fn ordinary_powershell_direct_spec_preserves_current_user_language_surface() {
         let win = PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
         let cmd = PathBuf::from(r"C:\Windows\System32\cmd.exe");
         let resolver = ShellResolver::new(
@@ -1029,11 +1037,12 @@ mod tests {
             })
             .unwrap();
         let script = direct.args.last().unwrap().to_string_lossy();
-        assert!(script.starts_with(
-            "Set-Variable -Name PSModuleAutoLoadingPreference -Value None -Option Constant -Force;"
-        ));
-        assert!(script.contains("Microsoft.PowerShell.Management.psd1"));
-        assert!(script.contains("Import-Module -Name '"));
+        assert!(
+            script
+                .starts_with("[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);")
+        );
+        assert!(!script.contains("PSModuleAutoLoadingPreference"));
+        assert!(!script.contains("Import-Module"));
         assert!(script.contains("OutputEncoding"));
         assert!(script.ends_with(user));
     }

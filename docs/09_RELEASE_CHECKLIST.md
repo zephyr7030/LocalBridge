@@ -261,8 +261,8 @@
 - [ ] command_control and elevated_exec expose directly projectable top-level properties without client-hostile top-level oneOf; strict server call validation remains
 - [ ] document_workflow rebuild schema discloses existing target path + content requirements
 - [ ] Windows 300ms timeout converges within 1800ms, TERM does not map to CTRL_BREAK/debug mode, and forced tree kill is bounded
-- [ ] Full cmd rmdir /s /q ordinary workspace cleanup is not privilege-classified solely by alias token; PowerShell rmdir stays review-required
-- [ ] schema38 does not silently expand system-management executables beyond the current ratified set
+- [ ] Full cmd/PowerShell aliases and scripts execute with unchanged current-user authority; no alias rewrite or top-level command-string privilege classifier remains
+- [ ] direct system tools and descendant-invoked system tools have identical current-user authority; administrator-token work is available only through the structured Broker route
 
 ## Schema39 Agent Execution Platform
 

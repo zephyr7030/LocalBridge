@@ -2,14 +2,32 @@ import { pathToFileURL } from "node:url";
 
 import { runStages, selectStages, validateStages } from "./process.mjs";
 
-const cargo = (...args) => ({ program: "cargo", args: ["+1.85.0", ...args] });
+export function cargoCommand(args, environment = process.env) {
+  const targetDir = environment.LOCALBRIDGE_CARGO_TARGET_DIR?.trim();
+  return {
+    program: "cargo",
+    args: [
+      "+1.85.0",
+      args[0],
+      ...(targetDir ? ["--target-dir", targetDir] : []),
+      ...args.slice(1),
+    ],
+  };
+}
+
+const cargo = (...args) => cargoCommand(args);
 const node = (...args) => ({ program: process.execPath, args });
 
 export const CI_STAGES = validateStages([
   {
     id: "test-base",
     label: "test infrastructure contract",
-    ...node("--test", "scripts/test/ci-gate.test.mjs"),
+    ...node(
+      "--test",
+      "tests/black-box/chatgpt/client.test.mjs",
+      "scripts/test/ci-gate.test.mjs",
+      "scripts/test/structure.test.mjs",
+    ),
   },
   {
     id: "format",
@@ -28,7 +46,7 @@ export const CI_STAGES = validateStages([
   },
   {
     id: "schema44",
-    label: "schema44 architecture invariants",
+    label: "schema44 architecture residue scan",
     ...node("scripts/verify-schema44/index.mjs"),
   },
   {
@@ -50,8 +68,16 @@ export const CI_STAGES = validateStages([
   },
   {
     id: "rust-test",
-    label: "Rust unit and integration tests",
-    ...cargo("test", "--manifest-path", "src-tauri/Cargo.toml", "--locked", "--", "--test-threads=1"),
+    label: "schema44 behavioral invariants and Rust tests",
+    ...cargo(
+      "test",
+      "--quiet",
+      "--manifest-path",
+      "src-tauri/Cargo.toml",
+      "--locked",
+      "--",
+      "--test-threads=1",
+    ),
   },
   {
     id: "rust-clippy",
@@ -81,9 +107,12 @@ export function parseGateArguments(args) {
     if (argument === "--list") options.list = true;
     else if (argument === "--only") options.only = args[++index];
     else if (argument === "--from") options.from = args[++index];
+    else if (argument === "--through") options.through = args[++index];
     else throw new Error(`unknown test gate argument: ${argument}`);
   }
-  if (options.only && options.from) throw new Error("--only and --from are mutually exclusive");
+  if (options.only && (options.from || options.through)) {
+    throw new Error("--only is mutually exclusive with --from/--through");
+  }
   return options;
 }
 

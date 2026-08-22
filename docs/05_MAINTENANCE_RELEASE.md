@@ -8,14 +8,15 @@
 逐步实现：
 
 ```text
-verify-architecture
+test:ci（统一行为门禁）
+verify-schema44（仅扫描已禁止架构残留）
 verify-runtime-manifest
 verify-ui-language
 diff-upstream-surface
 generate-sbom
 ```
 
-`ARCHITECTURE_RULES.json` 是机器约束源。
+控制面不变量由 Rust 行为测试验证；历史 review provenance 形状检查已退出可执行门禁。
 
 ## 持久化
 

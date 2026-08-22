@@ -35,6 +35,8 @@ use windows_sys::Win32::UI::Shell::ShellExecuteW;
 #[serde(rename_all = "camelCase")]
 pub struct MainProjection {
     permission: &'static str,
+    effective_permission: &'static str,
+    elevated_active: bool,
     privilege: &'static str,
     local_environment_service: &'static str,
     tunnel_service: &'static str,
@@ -42,10 +44,6 @@ pub struct MainProjection {
     current_project: Option<String>,
     projects: Vec<ProjectProjection>,
     current_task: Option<TaskProjection>,
-    current_workflow: Option<CurrentWorkflowProjection>,
-    current_command: Option<CurrentCommandProjection>,
-    last_command: Option<LastCommandProjection>,
-    last_tool: Option<LastToolProjection>,
     current_activity: Option<CurrentActivityProjection>,
     last_activity: Option<LastActivityProjection>,
     projection_revision: u64,
@@ -60,7 +58,7 @@ pub struct MainProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UpdateProjection {
+pub struct UpdateProjection {
     state: &'static str,
     current_version: String,
     latest_version: Option<String>,
@@ -68,6 +66,12 @@ struct UpdateProjection {
     operation_id: Option<String>,
     attempt: Option<u8>,
     retryable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenReleaseProjection {
+    release_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -94,31 +98,6 @@ struct TaskProjection {
     summary: Option<String>,
     state: &'static str,
     elapsed_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct CurrentWorkflowProjection {
-    state: &'static str,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct CurrentCommandProjection {
-    state: &'static str,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LastCommandProjection {
-    status: &'static str,
-    age_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LastToolProjection {
-    kind: &'static str,
-    summary: Option<String>,
-    age_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -153,6 +132,13 @@ const ADMIN_CONSENT_DURATION: Duration = Duration::from_millis(9000);
 struct PendingAdminConsent {
     challenge_id: String,
     not_before: Instant,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminConsentChallenge {
+    challenge_id: String,
+    not_before_unix_ms: u64,
 }
 
 #[derive(Debug, Default)]
@@ -216,7 +202,7 @@ fn admin_consent_gate() -> &'static Mutex<AdminConsentGate> {
     GATE.get_or_init(|| Mutex::new(AdminConsentGate::default()))
 }
 
-fn begin_admin_consent_challenge(challenge_id: &str) -> UiResult<()> {
+fn begin_admin_consent_challenge(challenge_id: &str) -> UiResult<AdminConsentChallenge> {
     if !valid_admin_consent_challenge_id(challenge_id) {
         return Err(UiError::from("管理员确认标识无效"));
     }
@@ -224,7 +210,10 @@ fn begin_admin_consent_challenge(challenge_id: &str) -> UiResult<()> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .begin_at(challenge_id, Instant::now());
-    Ok(())
+    Ok(AdminConsentChallenge {
+        challenge_id: challenge_id.to_string(),
+        not_before_unix_ms: unix_millis().saturating_add(ADMIN_CONSENT_DURATION.as_millis() as u64),
+    })
 }
 
 fn cancel_admin_consent_challenge(challenge_id: &str) -> UiResult<()> {
@@ -304,10 +293,10 @@ pub async fn ui_ready(app: AppHandle) -> UiResult<()> {
 
 fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainProjection> {
     let control_plane = lifecycle.control_plane_snapshot();
-    let runtime = control_plane.runtime.value.as_ref();
-    let authority = control_plane.authority.value.as_ref();
-    let settings = control_plane.settings.value.as_ref();
-    let task_aggregate = control_plane.activity.value.as_ref();
+    let runtime = control_plane.runtime.value();
+    let authority = control_plane.authority.value();
+    let settings = control_plane.settings.value();
+    let task_aggregate = control_plane.activity.value();
     let projects = settings
         .map(|settings| {
             settings
@@ -347,6 +336,12 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
                 .map(|authority| authority.desired)
                 .unwrap_or(PermissionMode::Edit),
         ),
+        effective_permission: permission_code(
+            authority
+                .map(|authority| authority.effective)
+                .unwrap_or(PermissionMode::Edit),
+        ),
+        elevated_active: authority.is_some_and(|authority| authority.elevated_active),
         privilege: authority
             .map(|authority| privilege_code(&authority.broker))
             .unwrap_or("off"),
@@ -361,23 +356,12 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
                 runtime.and_then(|runtime| runtime.current_task_elapsed_ms),
             )
         }),
-        current_workflow: task_aggregate.and_then(current_workflow_projection),
-        current_command: task_aggregate.and_then(current_command_projection),
-        last_command: task_aggregate.and_then(last_command_projection),
-        last_tool: runtime
-            .and_then(|runtime| runtime.last_tool.as_ref())
-            .map(|last| LastToolProjection {
-                kind: task_kind_code(last.kind),
-                summary: last.summary.clone(),
-                age_ms: last.age_ms,
-            }),
         current_activity: task_aggregate.and_then(current_activity_projection),
         last_activity: task_aggregate.and_then(last_activity_projection),
         projection_revision: control_plane.revision,
         tunnel_id: control_plane
             .connection
-            .value
-            .as_ref()
+            .value()
             .and_then(|connection| connection.desired_tunnel_id.clone()),
         runtime_key_saved: settings.is_some_and(|settings| settings.runtime_key_saved),
         auto_start: settings.is_some_and(|settings| settings.auto_start),
@@ -385,24 +369,27 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
             .map(|settings| settings.close_window_continue_running)
             .unwrap_or(true),
         reconnect,
-        update: update_projection(control_plane.update.value.as_ref()),
+        update: update_projection(control_plane.update.value()),
         active_faults: ui_faults(&control_plane),
     })
 }
 
 #[tauri::command]
-pub async fn retry_update_check(app: AppHandle) -> UiResult<()> {
+pub async fn retry_update_check(app: AppHandle) -> UiResult<UpdateProjection> {
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<DesktopLifecycle>()
+        let lifecycle = app.state::<DesktopLifecycle>();
+        lifecycle
             .start_update_check(UpdateCheckTrigger::Manual)
-            .map_err(update_start_error)
+            .map_err(update_start_error)?;
+        let state = lifecycle.update_lifecycle();
+        Ok(update_projection(Some(&state)))
     })
     .await
     .map_err(|_| UiError::internal("Update.JoinFailed", "更新检查后台任务异常"))?
 }
 
 #[tauri::command]
-pub async fn open_github_releases(app: AppHandle) -> UiResult<()> {
+pub async fn open_github_releases(app: AppHandle) -> UiResult<OpenReleaseProjection> {
     tauri::async_runtime::spawn_blocking(move || {
         let lifecycle = app.state::<DesktopLifecycle>();
         let repository = lifecycle.update_repository().ok_or_else(|| {
@@ -413,20 +400,9 @@ pub async fn open_github_releases(app: AppHandle) -> UiResult<()> {
                 false,
             ))
         })?;
-        let release_url = lifecycle
-            .update_lifecycle()
-            .release_url()
-            .map(str::to_owned)
-            .unwrap_or_else(|| repository.releases_url());
-        if !repository.owns_release_url(&release_url) {
-            return Err(UiError::from(OperationError::new(
-                "Update.ReleaseLinkDenied",
-                ErrorCategory::Authorization,
-                "发布页面不属于当前构建的 GitHub 仓库",
-                false,
-            )));
-        }
-        open_system_url(&release_url)
+        let projection = release_projection(&repository, &lifecycle.update_lifecycle())?;
+        open_system_url(&projection.release_url)?;
+        Ok(projection)
     })
     .await
     .map_err(|_| UiError::internal("Update.OpenJoinFailed", "打开发布页面后台任务异常"))?
@@ -435,15 +411,6 @@ pub async fn open_github_releases(app: AppHandle) -> UiResult<()> {
 #[tauri::command]
 pub async fn set_permission_mode(mode: String, app: AppHandle) -> UiResult<()> {
     tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
-        if let Some(challenge_id) = mode.strip_prefix("admin-consent-begin:") {
-            return begin_admin_consent_challenge(challenge_id);
-        }
-        if let Some(challenge_id) = mode.strip_prefix("admin-consent-cancel:") {
-            return cancel_admin_consent_challenge(challenge_id);
-        }
-        if let Some(challenge_id) = mode.strip_prefix("admin-consent-confirm:") {
-            return confirm_admin_consent_challenge(challenge_id);
-        }
         let lifecycle = app.state::<DesktopLifecycle>();
         let requested = parse_permission(&mode)?;
         if requested != PermissionMode::Elevated {
@@ -458,28 +425,63 @@ pub async fn set_permission_mode(mode: String, app: AppHandle) -> UiResult<()> {
             return Err(UiError::from("管理员确认尚未完成"));
         }
         let (store, mut data) = load_app_data(&app)?;
-        data.settings.permission_mode = requested.into();
-        store
-            .save(&data)
-            .map_err(|_| "无法保存权限设置".to_string())?;
+        // DesiredStateOwner is the single live permission owner. The settings
+        // file is only its restart seed; persistence failure never rolls the
+        // live desired state back or creates a second effective authority.
         lifecycle.set_desired_permission(requested);
+        data.settings.permission_mode = requested.into();
+        if store.save(&data).is_err() {
+            lifecycle.publish_settings_fault(OperationError::new(
+                "Settings.PermissionPersistenceFailed",
+                ErrorCategory::Unavailable,
+                "权限期望已生效，但无法持久化为下次启动设置",
+                true,
+            ));
+            return Err(UiError::from("无法保存权限设置"));
+        }
         refresh_settings_snapshot(&app, &lifecycle)?;
-        let reconciliation = match lifecycle.reconciliation_plan().permission {
-            PermissionReconcileAction::RequestAuthorization => request_explicit_admin(&lifecycle)
-                .map_err(|_| UiError::from("管理员权限目标已保存，Broker 当前不可用")),
-            PermissionReconcileAction::DisableBroker => lifecycle
-                .privilege()
-                .disable()
-                .map_err(|_| UiError::from("权限目标已保存，但管理员 Broker 尚未完全关闭")),
-            PermissionReconcileAction::None => Ok(()),
-        };
+        match lifecycle.reconciliation_plan().permission {
+            PermissionReconcileAction::RequestAuthorization => {
+                let _ = request_explicit_admin(&lifecycle);
+            }
+            PermissionReconcileAction::DisableBroker => {
+                let _ = lifecycle.privilege().disable();
+            }
+            PermissionReconcileAction::None => {}
+        }
         lifecycle.publish_current_observation();
-        reconciliation?;
         Ok(())
     })
     .await
     .map_err(|_| UiError::internal("Ui.PermissionJoinFailed", "权限设置后台任务异常"))?
     .map_err(UiError::from_string)
+}
+
+#[tauri::command]
+pub async fn begin_admin_consent(challenge_id: String) -> UiResult<AdminConsentChallenge> {
+    tauri::async_runtime::spawn_blocking(move || begin_admin_consent_challenge(&challenge_id))
+        .await
+        .map_err(|_| {
+            UiError::internal("Ui.AdminConsentBeginJoinFailed", "管理员确认后台任务异常")
+        })?
+}
+
+#[tauri::command]
+pub async fn cancel_admin_consent(challenge_id: String) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || cancel_admin_consent_challenge(&challenge_id))
+        .await
+        .map_err(|_| {
+            UiError::internal("Ui.AdminConsentCancelJoinFailed", "管理员确认后台任务异常")
+        })?
+}
+
+#[tauri::command]
+pub async fn confirm_admin_consent(challenge_id: String) -> UiResult<()> {
+    tauri::async_runtime::spawn_blocking(move || confirm_admin_consent_challenge(&challenge_id))
+        .await
+        .map_err(|_| {
+            UiError::internal("Ui.AdminConsentConfirmJoinFailed", "管理员确认后台任务异常")
+        })?
 }
 
 fn request_explicit_admin(lifecycle: &DesktopLifecycle) -> Result<(), ()> {
@@ -1072,6 +1074,12 @@ fn unix_seconds() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+fn unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 fn unix_nanos() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1139,46 +1147,6 @@ fn local_environment_service_code(state: &RuntimeState) -> &'static str {
         RuntimeState::Faulted(_) => "fault",
     }
 }
-fn current_workflow_projection(aggregate: &TaskAggregate) -> Option<CurrentWorkflowProjection> {
-    let task = aggregate.foreground_task.as_ref()?;
-    if task.kind != TaskKind::Other {
-        return None;
-    }
-    Some(CurrentWorkflowProjection {
-        state: match task.lifecycle {
-            LifecycleState::Queued => "waiting",
-            LifecycleState::Running => "running",
-            LifecycleState::Terminal(_) => return None,
-        },
-    })
-}
-
-fn current_command_projection(aggregate: &TaskAggregate) -> Option<CurrentCommandProjection> {
-    if aggregate
-        .foreground_task
-        .as_ref()
-        .is_some_and(|task| task.kind == TaskKind::ExecuteCommand)
-        || aggregate
-            .detached_execution
-            .as_ref()
-            .is_some_and(|execution| matches!(execution.state, ExecutionState::Running))
-    {
-        return Some(CurrentCommandProjection { state: "running" });
-    }
-    None
-}
-
-fn last_command_projection(aggregate: &TaskAggregate) -> Option<LastCommandProjection> {
-    let execution = aggregate.last_execution.as_ref()?;
-    let ExecutionState::Terminal(terminal) = &execution.state else {
-        return None;
-    };
-    Some(LastCommandProjection {
-        status: terminal_outcome_code(terminal.outcome),
-        age_ms: now_unix_ms().saturating_sub(terminal.completed_at_ms),
-    })
-}
-
 fn current_activity_projection(aggregate: &TaskAggregate) -> Option<CurrentActivityProjection> {
     if let Some(task) = aggregate.foreground_task.as_ref() {
         return Some(CurrentActivityProjection {
@@ -1401,6 +1369,25 @@ fn update_projection(state: Option<&UpdateLifecycle>) -> UpdateProjection {
             retryable: error.retryable,
         },
     }
+}
+
+fn release_projection(
+    repository: &crate::domain::GitHubRepository,
+    lifecycle: &UpdateLifecycle,
+) -> UiResult<OpenReleaseProjection> {
+    let release_url = lifecycle
+        .release_url()
+        .map(str::to_owned)
+        .unwrap_or_else(|| repository.releases_url());
+    if !repository.owns_release_url(&release_url) {
+        return Err(UiError::from(OperationError::new(
+            "Update.ReleaseLinkDenied",
+            ErrorCategory::Authorization,
+            "发布页面不属于当前构建的 GitHub 仓库",
+            false,
+        )));
+    }
+    Ok(OpenReleaseProjection { release_url })
 }
 
 fn update_start_error(error: UpdateStartError) -> UiError {

@@ -1,6 +1,6 @@
 [package]
 name = "localbridge"
-version = "0.1.2"
+version = "0.13.0"
 description = "LocalBridge desktop shell"
 authors = ["LocalBridge"]
 edition = "2024"
@@ -35,6 +35,7 @@ toml = "0.9"
 ureq = { version = "3.3", features = ["platform-verifier"] }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_Globalization",
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Security_Cryptography",
@@ -94,6 +95,10 @@ path = "../tests/integration/privilege/broker_ipc.rs"
 [[test]]
 name = "lb019pre_release_no_console"
 path = "../tests/integration/packaging/lb019pre_release_no_console.rs"
+
+[[test]]
+name = "chatgpt_black_box"
+path = "../tests/black-box/chatgpt/live_client.rs"
 
 [profile.release]
 strip = true

@@ -9,6 +9,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Map, Value, json};
 
+use crate::control_plane::command_control::COMMAND_CONTROL_TRANSPORT_HEADROOM_MS;
 use crate::control_plane::execution_registry::{ExecutionRegistry, ExecutionRegistryError};
 use crate::diagnostics::error::{
     DiagnosticErrorCode, DiagnosticPhase, ErrorDiagnostic, from_canonical_code,
@@ -28,34 +29,29 @@ use crate::state::{
 
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use crate::control_plane::workflow_checkpoint::{
-    WorkflowCheckpoint, WorkflowCheckpointStore, WorkflowDatum,
+    WorkflowCheckpoint as StoredWorkflowCheckpoint, WorkflowCheckpointStore, WorkflowFailure,
 };
-use crate::execution::policy::{
-    CapabilityPolicy, DenyReason, PolicyDecision, static_workspace_script_target,
-};
+use crate::execution::policy::{CapabilityPolicy, DenyReason, PolicyDecision, command_task_kind};
 use crate::execution::shell::{
     ResolvedShellKind, ShellExecutionSpec, ShellExecutor, ShellResolveError, ShellSelector,
 };
-use crate::execution::toolbox::{ToolboxError, ToolboxErrorKind, ToolboxResolver};
+use crate::execution::toolbox::ToolboxResolver;
 use crate::execution::verification::VerificationPlanner;
 use crate::filesystem::edit::{CodingEditError, CodingEditService};
 use crate::filesystem::service::{
     FilesystemCancellation, FilesystemError, FilesystemSearchOptions, FilesystemService,
 };
 use crate::workspace::context::ContextService;
+use crate::workspace::git_adapter::handle_git_tool_with_authority;
 use crate::workspace::path_authority::{
     PathAuthorityError, WorkspaceLifetimePin, WorkspaceResolver, workspace_input_path_valid,
     workspace_relative_path_valid,
 };
 
-impl From<Value> for WorkflowDatum {
-    fn from(value: Value) -> Self {
-        serde_json::from_value(value).expect("JSON transport value maps to WorkflowDatum")
-    }
-}
+type WorkflowCheckpoint = StoredWorkflowCheckpoint<Value>;
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 43;
+pub const AGENT_API_REVISION: u32 = 47;
 pub const V1_CORE_TOOL_NAMES: [&str; 9] = [
     "workspace_context",
     "agent_workflow",
@@ -67,6 +63,8 @@ pub const V1_CORE_TOOL_NAMES: [&str; 9] = [
     "document_workflow",
     "view_image",
 ];
+pub(crate) const COMMAND_CONTROL_ACTIONS: [&str; 5] = ["adopt", "poll", "read", "write", "kill"];
+pub(crate) const TASK_CONTROL_ACTIONS: [&str; 3] = ["list", "get", "cancel"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FacadeErrorCode {
@@ -76,15 +74,18 @@ pub enum FacadeErrorCode {
     CapabilityDenied,
     PolicyDenied,
     InvalidShellSyntax,
+    ElevatedOperationNotReviewed,
     PrivilegedRouteNotAvailable,
     ElevationRequired,
     ProcessFailed,
     ProcessTimedOut,
     ProcessCancelled,
+    OperationTimedOut,
     QueueCapacityExceeded,
     TaskIdRequired,
     TaskNotOwned,
     SessionUnavailable,
+    OutputNotFound,
     OutputTruncated,
     RuntimeUnavailable,
     CapabilityUnavailable,
@@ -105,15 +106,18 @@ impl FacadeErrorCode {
             Self::CapabilityDenied => "CapabilityDenied",
             Self::PolicyDenied => "PolicyDenied",
             Self::InvalidShellSyntax => "InvalidShellSyntax",
+            Self::ElevatedOperationNotReviewed => "ElevatedOperationNotReviewed",
             Self::PrivilegedRouteNotAvailable => "PrivilegedRouteUnavailable",
             Self::ElevationRequired => "ElevationRequired",
             Self::ProcessFailed => "ProcessFailed",
             Self::ProcessTimedOut => "ProcessTimedOut",
             Self::ProcessCancelled => "ProcessCancelled",
+            Self::OperationTimedOut => "OperationTimedOut",
             Self::QueueCapacityExceeded => "QueueCapacityExceeded",
             Self::TaskIdRequired => "TaskIdRequired",
             Self::TaskNotOwned => "TaskNotOwned",
             Self::SessionUnavailable => "SessionUnavailable",
+            Self::OutputNotFound => "OutputNotFound",
             Self::OutputTruncated => "OutputTruncated",
             Self::RuntimeUnavailable => "RuntimeUnavailable",
             Self::CapabilityUnavailable => "CapabilityUnavailable",
@@ -133,17 +137,21 @@ impl FacadeErrorCode {
             Self::WorkspaceDenied => "workspace_boundary",
             Self::PolicyDenied | Self::CapabilityDenied | Self::TaskNotOwned => "policy",
             Self::InvalidShellSyntax => "shell_syntax",
-            Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => "privileged_route",
+            Self::ElevatedOperationNotReviewed
+            | Self::PrivilegedRouteNotAvailable
+            | Self::ElevationRequired => "privileged_route",
             Self::RuntimeUnavailable
             | Self::CapabilityUnavailable
             | Self::RuntimeProtocolMismatch
             | Self::RuntimeCapabilityMismatch => "runtime",
             Self::ProcessTimedOut => "process_timeout",
+            Self::OperationTimedOut => "command_runtime",
             Self::ProcessFailed
             | Self::ProcessCancelled
             | Self::QueueCapacityExceeded
             | Self::SessionUnavailable
             | Self::OutputTruncated => "command_runtime",
+            Self::OutputNotFound => "request",
             Self::FileChanged | Self::PatchConflict | Self::AmbiguousMatch => "edit_conflict",
             Self::InvalidArgument | Self::NotFound | Self::TaskIdRequired | Self::Internal => {
                 "request"
@@ -158,6 +166,9 @@ impl FacadeErrorCode {
                 "查看 workspace_context.capabilities 或使用 dry_run 获取允许路线"
             }
             Self::InvalidShellSyntax => "按所选 Windows Shell 的原生语法修正命令",
+            Self::ElevatedOperationNotReviewed => {
+                "使用允许列表中的程序、参数与工作目录提交管理员操作"
+            }
             Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => {
                 "检查 workspace_context 中的权限模式与管理员路由状态"
             }
@@ -168,11 +179,15 @@ impl FacadeErrorCode {
                 "查看 workspace_context.shell_discovery 与运行时诊断"
             }
             Self::ProcessTimedOut => "提高 timeout_ms 或缩小单次任务",
+            Self::OperationTimedOut => {
+                "命令控制请求已达到 wait_ms 预算；稍后 poll 以观察同一 Execution"
+            }
             Self::ProcessCancelled => "重新发起命令",
             Self::QueueCapacityExceeded => "等待其他任务完成后重试",
             Self::TaskIdRequired => "指定当前 MCP Session 拥有的 task_id",
             Self::TaskNotOwned => "使用当前 MCP Session 拥有且尚未终止的 task_id",
             Self::SessionUnavailable => "重新执行命令以创建新会话",
+            Self::OutputNotFound => "使用命令返回的有效 output_ref，或重新执行命令生成新输出",
             Self::OutputTruncated => {
                 "若返回 output_ref 则分页读取；否则提高 max_bytes 或 resize 后重试"
             }
@@ -193,6 +208,7 @@ pub struct FacadeError {
     pub message: &'static str,
     pub retryable: bool,
     diagnostic: Option<ErrorDiagnostic>,
+    details: Value,
 }
 
 impl FacadeError {
@@ -202,11 +218,17 @@ impl FacadeError {
             message,
             retryable,
             diagnostic: None,
+            details: Value::Null,
         }
     }
 
     pub fn with_diagnostic(mut self, diagnostic: ErrorDiagnostic) -> Self {
         self.diagnostic = Some(diagnostic);
+        self
+    }
+
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.details = details;
         self
     }
 
@@ -235,7 +257,8 @@ impl FacadeError {
                     "message": self.message,
                     "retryable": self.retryable,
                     "rule_category": self.code.safe_rule_category(),
-                    "remediation": self.code.safe_remediation()
+                    "remediation": self.code.safe_remediation(),
+                    "details": self.details
                 }
             },
             "isError": true
@@ -265,7 +288,12 @@ impl FacadeDenied {
                 "工作区路径参数无效",
                 false,
             ),
-            DenyReason::PrivilegedRouteNotAvailable | DenyReason::ElevatedExecNotReviewed => (
+            DenyReason::ElevatedExecNotReviewed => (
+                FacadeErrorCode::ElevatedOperationNotReviewed,
+                "管理员操作未通过允许列表审核",
+                false,
+            ),
+            DenyReason::PrivilegedRouteNotAvailable => (
                 FacadeErrorCode::PrivilegedRouteNotAvailable,
                 "该操作需要受控管理员路由",
                 false,
@@ -327,13 +355,13 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "agent_workflow" => (
-            "Run a LocalBridge engineering workflow using stable actions. resume accepts only action and continues the latest durable incomplete workflow; other actions may use objective/path/directory_changes/patch/commands as permitted by policy.",
+            "Run a LocalBridge engineering workflow using stable actions. resume may use the returned task_id to continue a durable workflow after MCP reconnect; other actions may use objective/path/directory_changes/patch/commands as permitted by policy.",
             json!({
                 "type":"object",
                 "properties":{
-                    "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"],"description":"resume requires no other fields and never starts a new workflow; all other actions start or inspect a workflow."},
+                    "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"],"description":"resume never starts a new workflow; all other actions start or inspect a workflow."},
                     "phase":{"type":"string","enum":["prepare","edit","verify","persist"],"description":"Optional coding-agent-v1 phase. Omit for legacy one-shot behavior."},
-                    "task_id":{"type":"string","minLength":1,"description":"Required for edit/verify/persist phased calls; returned by prepare."},
+                    "task_id":{"type":"string","minLength":1,"description":"Required for edit/verify/persist phased calls and for resume after MCP reconnect; returned by prepare."},
                     "objective":{"type":"string","description":"Optional for non-resume actions; forbidden for resume."},
                     "path":{"type":"string","default":".","description":"Optional project path for non-resume actions; forbidden for resume."},
                     "patch":{"type":"string","minLength":1,"description":"Optional workspace patch for write-capable non-resume actions; forbidden for resume."},
@@ -381,7 +409,7 @@ fn public_tool_schema(name: &str) -> Value {
                     "path":{"type":"string","minLength":1,"description":"Required for list/stat/read/write/search/delete/hash."},
                     "source":{"type":"string","minLength":1,"description":"Required for copy/move."},
                     "destination":{"type":"string","minLength":1,"description":"Required for copy/move."},
-                    "recursive":{"type":"boolean"},
+                    "recursive":{"type":"boolean","default":false,"description":"List and search are non-recursive by default; set true only when recursive traversal is required."},
                     "max_depth":{"type":"integer","minimum":1,"maximum":64},
                     "max_entries":{"type":"integer","minimum":1,"maximum":100000},
                     "max_results":{"type":"integer","minimum":1,"maximum":10000},
@@ -405,11 +433,11 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "exec_command" => (
-            "Execute a command through a LocalBridge trusted logical shell selector.",
+            "Execute a command through a trusted logical shell under the current Windows user token. Full shell execution includes the same current-user authority for the shell and every descendant; administrator-token work is available only through the structured Broker route.",
             json!({
                 "type":"object",
                 "properties":{
-                    "command":{"type":"string","minLength":1},
+                    "command":{"type":"string","minLength":1,"description":"Shell text executed with current Windows user authority; descendants inherit that authority."},
                     "shell":{"type":"string","enum":["auto","powershell","pwsh","windows_powershell","cmd"],"default":"auto"},
                     "workdir":{"type":"string"},
                     "timeout_ms":{"type":"integer","minimum":1,"maximum":600000,"default":30000},
@@ -422,16 +450,16 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "command_control" => (
-            "Read, write, poll, or terminate an existing LocalBridge command session.",
+            "Adopt, read, write, poll, or terminate an existing LocalBridge command session.",
             json!({
                 "type":"object",
                 "properties":{
-                    "action":{"type":"string","enum":["poll","read","write","kill"],"description":"poll/write/kill use session_id; read uses output_ref."},
-                    "session_id":{"type":"string","minLength":1,"description":"Required for poll, write, and kill."},
+                    "action":{"type":"string","enum":COMMAND_CONTROL_ACTIONS,"description":"adopt/poll/write/kill use session_id; read uses output_ref."},
+                    "session_id":{"type":"string","minLength":1,"description":"Required for adopt, poll, write, and kill."},
                     "output_ref":{"type":"string","minLength":1,"description":"Required for read."},
                     "chars":{"type":"string","minLength":1,"description":"Required for write."},
                     "signal":{"type":"string","enum":["TERM","KILL","INT"],"description":"Optional kill signal; defaults to TERM."},
-                    "wait_ms":{"type":"integer","minimum":0,"maximum":30000,"description":"Server-side wait target for poll/write/kill. Under a responsive local runtime LocalBridge returns within wait_ms plus at most 2000ms transport headroom; the budget is end-to-end and is not reset per socket stage."},
+                    "wait_ms":{"type":"integer","minimum":0,"maximum":30000,"description":format!("Server-side wait target for poll/write/kill. Under a responsive local runtime LocalBridge returns within wait_ms plus at most {COMMAND_CONTROL_TRANSPORT_HEADROOM_MS}ms transport headroom; the budget is end-to-end and is not reset per socket stage.")},
                     "stream":{"type":"string","enum":["stdout","stderr"],"description":"Optional read stream."},
                     "offset":{"type":"integer","minimum":0,"description":"Optional read byte offset."},
                     "limit":{"type":"integer","minimum":1,"maximum":1048576,"description":"Optional read byte limit."}
@@ -441,12 +469,12 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "task_control" => (
-            "Read or cancel LocalBridge tasks within the current MCP session.",
+            "List, read, or cancel LocalBridge tasks and detached executions.",
             json!({
                 "type":"object",
                 "properties":{
-                    "action":{"type":"string","enum":["get","cancel"]},
-                    "task_id":{"type":"string","minLength":1,"description":"Optional for cancel only. Required when this MCP session owns more than one cancellable task."}
+                    "action":{"type":"string","enum":TASK_CONTROL_ACTIONS},
+                    "task_id":{"type":"string","minLength":1,"description":"Optional for get and cancel. Required when cancel has more than one candidate."}
                 },
                 "required":["action"],
                 "additionalProperties":false
@@ -548,7 +576,7 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "important_files":{"type":"array","items":{"type":"string"}},
                 "instructions":{"type":"array","items":{"type":"string"}},
                 "permission_mode":{"type":"string","enum":["edit","full","elevated"]},
-                "workspace_scope":{"type":"string","enum":["active_workspace"]},
+                "workspace_scope":{"type":"string","enum":["structured_tools_active_workspace"]},
                 "ordinary_route_token":{"type":"string","enum":["current_windows_user"]},
                 "elevated_route_available":{"type":"boolean"},
                 "privilege_state":{"type":"string"},
@@ -556,6 +584,19 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "uac_state":{"type":"string"},
                 "administrator_token_available":{"type":"boolean"},
                 "selected_route":{"type":"string"},
+                "authority":{
+                    "type":"object",
+                    "properties":{
+                        "desired_permission":{"type":"string","enum":["edit","full","elevated"]},
+                        "observed_privilege":{"type":"string"},
+                        "observed_broker":{"type":"string"},
+                        "observed_uac":{"type":"string"},
+                        "effective_permission":{"type":"string","enum":["edit","full","elevated"]},
+                        "reconciliation":{"type":"string","enum":["converged","awaiting_authorization","broker_unavailable","disable_pending","unavailable"]}
+                    },
+                    "required":["desired_permission","observed_privilege","observed_broker","observed_uac","effective_permission","reconciliation"],
+                    "additionalProperties":false
+                },
                 "shell_discovery":{"type":"object","additionalProperties":true},
                 "capabilities":{"type":"object","additionalProperties":true},
                 "project_name":{"type":["string","null"]},
@@ -571,7 +612,7 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "trusted_shells":{"type":"array","items":{"type":"string"}},
                 "current_task":{"type":["object","null"],"additionalProperties":true}
             },
-            "required":["api_version","facade_revision","workspace","default_cwd","runtime","permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","privilege_state","shell_discovery","capabilities","project_name","project_type","project_version","git_branch","git_dirty","git_changed_count","package_manager","build_system","test_system","runtime_availability","trusted_shells","current_task"],
+            "required":["api_version","facade_revision","workspace","default_cwd","runtime","permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","privilege_state","authority","shell_discovery","capabilities","project_name","project_type","project_version","git_branch","git_dirty","git_changed_count","package_manager","build_system","test_system","runtime_availability","trusted_shells","current_task"],
             "additionalProperties":false
         }),
         "agent_workflow" => json!({
@@ -596,7 +637,7 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "patch_applied":{"type":"boolean"},
                 "directory_changes":{"type":"array","items":{"type":"object","additionalProperties":true}},
                 "commands":{"type":"array","items":{"type":"object","additionalProperties":true}},
-                "current_command":{"type":"object","additionalProperties":true}
+                "current_execution":{"type":"object","additionalProperties":true}
             },
             "required":["action","state","workspace","project","git_before","patch_applied","directory_changes","commands"],
             "additionalProperties":false
@@ -655,23 +696,25 @@ fn public_tool_output_schema(name: &str) -> Value {
             "type":"object",
             "properties":{
                 "state":{"type":"string","enum":["idle","active","waiting","cancel_requested"]},
+                "availability":{"type":"string","enum":["ready","stale","unknown","unavailable"]},
                 "execution_state":{"type":"string"},
                 "kind":{"type":["string","null"]},
                 "summary":{"type":["string","null"]},
                 "task_id":{"type":["string","null"]},
                 "session_id":{"type":["string","null"]},
-                "current_step":{"type":["string","null"]},
-                "next_step":{"type":["string","null"]},
-                "current_workflow":{"type":["object","null"],"additionalProperties":true},
-                "current_command":{"type":["object","null"],"additionalProperties":true},
-                "last_command":{"type":["object","null"],"additionalProperties":true},
                 "current_activity":{"type":["object","null"],"additionalProperties":true},
                 "last_activity":{"type":["object","null"],"additionalProperties":true},
+                "scheduler":{"type":"object","additionalProperties":true},
                 "cancelled_requests":{"type":"integer","minimum":0},
+                "cancellation_requested":{"type":"boolean"},
+                "cancelled_queued_tasks":{"type":"integer","minimum":0},
                 "durable_task_cancelled":{"type":"boolean"},
-                "last_terminal_command":{"type":["object","null"]}
+                "workflow_cancelled":{"type":"boolean"},
+                "task":{"type":["object","null"],"additionalProperties":true},
+                "tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},
+                "executions":{"type":"array","items":{"type":"object","additionalProperties":true}}
             },
-            "required":["state"],
+            "required":["state","availability"],
             "additionalProperties":false
         }),
         "git_workflow" => json!({
@@ -699,11 +742,12 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "text":{"type":"string"},
                 "encoding":{"type":"string"},
                 "start_line":{"type":"integer"},
-                "end_line":{"type":"integer"},
+                "end_line":{"type":["integer","null"]},
                 "total_lines":{"type":"integer"},
                 "total_bytes":{"type":"integer"},
                 "bytes_read":{"type":"integer"},
                 "truncated":{"type":"boolean"},
+                "eof":{"type":"boolean"},
                 "created":{"type":"boolean"},
                 "converted":{"type":"boolean"},
                 "rebuilt":{"type":"boolean"}
@@ -776,8 +820,8 @@ pub(crate) fn public_error_output_schema() -> Value {
         "properties":{
             "code":{"type":"string","enum":[
                 "InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied",
-                "InvalidShellSyntax","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
-                "ProcessCancelled","QueueCapacityExceeded","TaskIdRequired","TaskNotOwned","SessionUnavailable","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
+                "InvalidShellSyntax","ElevatedOperationNotReviewed","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
+                "ProcessCancelled","OperationTimedOut","QueueCapacityExceeded","TaskIdRequired","TaskNotOwned","SessionUnavailable","OutputNotFound","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
                 "RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"
             ]},
             "error_code":{"type":"string","enum":["InvalidRequest","Unavailable","Denied","Timeout","Cancelled","ExecutionFailed","Unknown"]},
@@ -787,7 +831,8 @@ pub(crate) fn public_error_output_schema() -> Value {
             "message":{"type":"string"},
             "retryable":{"type":"boolean"},
             "rule_category":{"type":"string"},
-            "remediation":{"type":"string"}
+            "remediation":{"type":"string"},
+            "details":{"anyOf":[{"type":"object","additionalProperties":true},{"type":"null"}]}
         },
         "required":["code","error_code","phase","cause","message","retryable"],
         "additionalProperties":false
@@ -1254,7 +1299,11 @@ pub trait WorkspaceRuntimeAdapter {
     fn negotiate(&mut self) -> Result<(), FacadeError>;
     fn workspace_context(&mut self, request_id: Option<&Value>) -> Result<Value, FacadeError>;
     fn validate_workspace_identity(&self) -> Result<(), FacadeError> {
-        Ok(())
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "工作区身份验证不可用",
+            false,
+        ))
     }
     fn runtime_discovery(&self) -> Value {
         json!({
@@ -1264,46 +1313,55 @@ pub trait WorkspaceRuntimeAdapter {
                 "windows_powershell":{"available":false},
                 "auto_resolved":null
             },
-            "git":{"available":true},
-            "bundled_python":{"available":true},
+            "git":{"available":false},
+            "bundled_python":{"available":false},
             "bundled_node":{"available":false,"reason":"not_bundled"}
         })
     }
     fn live_runtime_health(&mut self) -> Result<CodingRuntimeHealth, FacadeError> {
-        Ok(CodingRuntimeHealth {
-            state: CodingRuntimeHealthState::Ready,
-            root_process_alive: true,
-            authenticated_mcp: true,
-            fault: None,
-        })
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "运行时健康状态不可用",
+            true,
+        ))
     }
     fn take_runtime_fault(&mut self) -> Option<RuntimeFault> {
         None
     }
     fn coding_context(&self, _project_path: &str, _objective: &str) -> Result<Value, FacadeError> {
-        Ok(json!({
-            "instructions":[],
-            "important_files":[],
-            "related_files":[],
-            "relevant_ranges":[],
-            "files_read":[]
-        }))
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "编码上下文不可用",
+            false,
+        ))
     }
     fn coding_verification_plan(&self, _project_path: &str) -> Result<Vec<Value>, FacadeError> {
-        Ok(Vec::new())
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "验证计划不可用",
+            false,
+        ))
     }
     fn verify_coding_edit_preconditions(
         &self,
         _expected: &Map<String, Value>,
     ) -> Result<(), FacadeError> {
-        Ok(())
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "编辑前置条件验证不可用",
+            false,
+        ))
     }
     fn apply_coding_patch(
         &self,
         _patch: &str,
-        expected: &Map<String, Value>,
+        _expected: &Map<String, Value>,
     ) -> Result<Vec<String>, FacadeError> {
-        Ok(expected.keys().cloned().collect())
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "补丁应用能力不可用",
+            false,
+        ))
     }
     fn normalize_workspace_path(
         &self,
@@ -1355,26 +1413,34 @@ pub trait WorkspaceRuntimeAdapter {
     fn reap_command_sessions(&mut self) -> Result<(), FacadeError>;
     fn has_running_execution(&self) -> bool;
     fn load_workflow_checkpoint(&self) -> Result<Option<Value>, FacadeError> {
-        Ok(None)
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "工作流检查点不可用",
+            false,
+        ))
     }
     fn save_workflow_checkpoint(&self, _checkpoint: &Value) -> Result<(), FacadeError> {
-        Ok(())
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "工作流检查点不可用",
+            false,
+        ))
     }
     fn clear_workflow_checkpoint(&self) -> Result<(), FacadeError> {
-        Ok(())
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "工作流检查点不可用",
+            false,
+        ))
     }
     fn durable_command_terminal(&self, _session_id: &str) -> Option<Value> {
-        None
-    }
-    fn latest_running_execution_snapshot(&self) -> Option<Value> {
-        None
-    }
-    fn latest_terminal_execution_snapshot(&self) -> Option<Value> {
         None
     }
 }
 
 static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
+const MAX_PENDING_OUTPUT_BYTES: usize = 1024 * 1024;
+const MAX_STDERR_PROTOCOL_BYTES: usize = 256 * 1024;
 
 fn next_public_handle(prefix: &str) -> String {
     let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
@@ -1390,6 +1456,7 @@ struct PublicCommandSession {
     execution_id: ExecutionId,
     started_at: Instant,
     pending_output: String,
+    pending_output_truncated: bool,
     stderr_protocol_buffer: String,
 }
 
@@ -1416,6 +1483,7 @@ impl PublicCommandSessions {
                 execution_id,
                 started_at: Instant::now(),
                 pending_output: String::new(),
+                pending_output_truncated: false,
                 stderr_protocol_buffer: String::new(),
             },
         );
@@ -1445,9 +1513,10 @@ impl PublicCommandSessions {
         &mut self,
         private_output_ref: &str,
         owner_public_session_id: &str,
+        stream: &str,
     ) -> String {
         self.outputs
-            .public_for_private(private_output_ref, owner_public_session_id)
+            .public_for_private(private_output_ref, owner_public_session_id, stream)
     }
 
     fn retain_local_output(&mut self, stream: &str, content: String) -> String {
@@ -1510,6 +1579,10 @@ impl PublicCommandSessions {
         self.outputs.local(public_output_ref)
     }
 
+    fn output_stream(&self, public_output_ref: &str) -> Option<String> {
+        self.outputs.stream(public_output_ref)
+    }
+
     fn mark_terminal(
         &mut self,
         public_session_id: &str,
@@ -1522,7 +1595,14 @@ impl PublicCommandSessions {
             .ok_or_else(session_unavailable)?
             .execution_id
             .clone();
-        match executions.finish(&execution_id, execution_terminal_from_result(&result)) {
+        let public_session = PublicSessionId::new(public_session_id);
+        let mut terminal = execution_terminal_from_result(&result);
+        if let Some(signal) = executions.cancellation_signal(&public_session) {
+            terminal.outcome = TerminalOutcome::Cancelled;
+            terminal.signal = terminal.signal.or(Some(signal));
+            terminal.error_code = Some("ProcessCancelled".to_string());
+        }
+        match executions.finish(&execution_id, terminal) {
             Ok(()) => {}
             Err(ExecutionRegistryError::AlreadyTerminal { .. }) => return Ok(()),
             Err(error) => return Err(normalize_execution_registry_error(error)),
@@ -1545,14 +1625,20 @@ impl PublicCommandSessions {
         }
         if let Some(session) = self.sessions.get_mut(public_session_id) {
             session.pending_output.push_str(output);
+            session.pending_output_truncated |=
+                trim_utf8_front(&mut session.pending_output, MAX_PENDING_OUTPUT_BYTES);
         }
     }
 
     fn take_pending(&mut self, public_session_id: &str) -> String {
-        self.sessions
-            .get_mut(public_session_id)
-            .map(|session| std::mem::take(&mut session.pending_output))
-            .unwrap_or_default()
+        let Some(session) = self.sessions.get_mut(public_session_id) else {
+            return String::new();
+        };
+        let mut output = std::mem::take(&mut session.pending_output);
+        if std::mem::take(&mut session.pending_output_truncated) {
+            output.insert_str(0, "[earlier command output truncated]\n");
+        }
+        output
     }
 
     fn terminal_with_pending(&mut self, public_session_id: &str, terminal: Value) -> Value {
@@ -1582,6 +1668,16 @@ impl PublicCommandSessions {
             return public_command_stderr(stderr);
         };
         session.stderr_protocol_buffer.push_str(stderr);
+        if trim_utf8_front(
+            &mut session.stderr_protocol_buffer,
+            MAX_STDERR_PROTOCOL_BYTES,
+        ) {
+            let retained = std::mem::take(&mut session.stderr_protocol_buffer);
+            return format!(
+                "[stderr protocol fragment truncated]\n{}",
+                public_command_stderr(&retained)
+            );
+        }
         drain_public_stderr_protocol_buffer(&mut session.stderr_protocol_buffer)
     }
 
@@ -1695,7 +1791,9 @@ impl CodingToolsRuntimeAdapter {
         {
             Ok(raw) => raw,
             Err(error) => {
-                self.pending_runtime_fault = Some(error.runtime_fault());
+                if !matches!(error, CodingToolsRuntimeError::RequestTimeout) {
+                    self.pending_runtime_fault = Some(error.runtime_fault());
+                }
                 return Err(normalize_runtime_error(error));
             }
         };
@@ -1726,7 +1824,9 @@ impl CodingToolsRuntimeAdapter {
         ) {
             Ok(raw) => raw,
             Err(error) => {
-                self.pending_runtime_fault = Some(error.runtime_fault());
+                if !matches!(error, CodingToolsRuntimeError::RequestTimeout) {
+                    self.pending_runtime_fault = Some(error.runtime_fault());
+                }
                 return Err(normalize_runtime_error(error));
             }
         };
@@ -1748,35 +1848,6 @@ impl CodingToolsRuntimeAdapter {
             .map_err(normalize_path_authority_error)
     }
 
-    fn private_runtime_cmd_compat_command(
-        &self,
-        command: &str,
-        cwd: &str,
-    ) -> Result<String, FacadeError> {
-        let Some(target) = direct_cmd_rmdir_target(command) else {
-            return Ok(command.to_string());
-        };
-        let candidate = join_project_workdir(cwd, &target)?;
-        let normalized =
-            self.normalized_workspace_path(candidate.to_string_lossy().as_ref(), false)?;
-        if normalized == "." {
-            return Err(FacadeError::new(
-                FacadeErrorCode::WorkspaceDenied,
-                "不能通过普通命令清理当前工作区根目录",
-                false,
-            ));
-        }
-        let resolved = self.resolve_existing_workspace_path(&normalized)?;
-        if !resolved.is_dir() {
-            return Err(FacadeError::new(
-                FacadeErrorCode::InvalidArgument,
-                "rmdir 目标必须是工作区内已存在的目录",
-                false,
-            ));
-        }
-        Ok(rewrite_direct_cmd_rmdir(command))
-    }
-
     fn normalized_workspace_path(
         &self,
         raw: &str,
@@ -1791,49 +1862,8 @@ impl CodingToolsRuntimeAdapter {
             .map_err(normalize_path_authority_error)
     }
 
-    fn validate_static_workspace_script(
-        &self,
-        execution: &ShellExecutionSpec,
-    ) -> Result<(), FacadeError> {
-        let shell = match execution.shell {
-            ShellSelector::Auto => "auto",
-            ShellSelector::Powershell => "powershell",
-            ShellSelector::Pwsh => "pwsh",
-            ShellSelector::WindowsPowershell => "windows_powershell",
-            ShellSelector::Cmd => "cmd",
-        };
-        let Some(target) = static_workspace_script_target(shell, &execution.command) else {
-            return Ok(());
-        };
-
-        let target = target.replace('\\', "/");
-        let cwd = execution.cwd.to_string_lossy().replace('\\', "/");
-        let input = if Path::new(&target).is_absolute() || cwd == "." {
-            target
-        } else {
-            format!("{}/{}", cwd.trim_end_matches('/'), target)
-        };
-        if !workspace_input_path_valid(&input) {
-            return Err(FacadeError::new(
-                FacadeErrorCode::WorkspaceDenied,
-                "脚本目标必须位于当前工作区内",
-                false,
-            ));
-        }
-        let resolved = self
-            .workspace_authority
-            .resolve_existing(&input)
-            .map_err(normalize_path_authority_error)?;
-        if !resolved.is_file() {
-            return Err(FacadeError::new(
-                FacadeErrorCode::InvalidArgument,
-                "脚本目标必须是文件",
-                false,
-            ));
-        }
-        Ok(())
-    }
-
+    #[cfg(test)]
+    #[allow(dead_code)]
     fn probe_private_result_semantics(&mut self) -> Result<(), FacadeError> {
         let invocation = self
             .shell_executor
@@ -1961,7 +1991,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         }
         self.cached_project_discovery = Some(project_discovery);
         self.cached_default_cwd = Some(default_cwd);
-        self.probe_private_result_semantics()
+        Ok(())
     }
 
     fn validate_workspace_identity(&self) -> Result<(), FacadeError> {
@@ -2214,22 +2244,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             ));
         }
         request.execution.cwd = PathBuf::from(normalized_cwd);
-        self.validate_static_workspace_script(&request.execution)?;
         let selector = request.execution.shell;
-        let kind = self
-            .shell_executor
-            .resolved_kind(selector)
-            .map_err(|error| normalize_shell_error(error, selector))?;
-        request.execution.command = self
-            .toolbox
-            .rewrite_command(kind, &request.execution.command)
-            .map_err(normalize_toolbox_error)?;
-        if kind == ResolvedShellKind::Cmd {
-            request.execution.command = self.private_runtime_cmd_compat_command(
-                &request.execution.command,
-                request.execution.cwd.to_string_lossy().as_ref(),
-            )?;
-        }
         let public_session_id = self
             .public_commands
             .start_session(&self.executions, request.owner_task_id.clone())?;
@@ -2301,12 +2316,33 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 .get("stream")
                 .and_then(Value::as_str)
                 .unwrap_or("stdout");
-            if let Some((retained_stream, content)) =
+            let retained_stream = self
+                .public_commands
+                .output_stream(public_output_ref)
+                .ok_or_else(|| {
+                    FacadeError::new(
+                        FacadeErrorCode::OutputNotFound,
+                        "输出句柄不存在或已超过保留期",
+                        false,
+                    )
+                    .with_details(json!({"output_ref":public_output_ref}))
+                })?;
+            if stream != retained_stream {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::InvalidArgument,
+                    "stream 与 output_ref 所属输出流不一致",
+                    false,
+                )
+                .with_details(json!({
+                    "field":"stream",
+                    "output_ref":public_output_ref,
+                    "expected":retained_stream,
+                    "actual":stream
+                })));
+            }
+            if let Some((_retained_stream, content)) =
                 self.public_commands.local_output(public_output_ref)
             {
-                if stream != retained_stream {
-                    return Err(invalid_argument());
-                }
                 return public_local_output_page(
                     public_output_ref,
                     stream,
@@ -2321,7 +2357,14 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             let private_output_ref = self
                 .public_commands
                 .private_output(public_output_ref)
-                .ok_or_else(session_unavailable)?;
+                .ok_or_else(|| {
+                    FacadeError::new(
+                        FacadeErrorCode::OutputNotFound,
+                        "输出句柄不存在或已超过保留期",
+                        false,
+                    )
+                    .with_details(json!({"output_ref":public_output_ref}))
+                })?;
             if stream == "stderr" {
                 let raw = self.private_call(
                     "read_output",
@@ -2369,6 +2412,16 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             .public_commands
             .private_session(&self.executions, &public_session_id)
             .ok_or_else(session_unavailable)?;
+        let public_session_key = PublicSessionId::new(public_session_id.clone());
+        if action == CommandControlAction::Kill {
+            let signal = object
+                .get("signal")
+                .and_then(Value::as_str)
+                .unwrap_or("TERM");
+            self.executions
+                .request_cancellation(&public_session_key, signal)
+                .map_err(normalize_execution_registry_error)?;
+        }
         let mut private = Map::new();
         private.insert("session_id".into(), Value::String(private_session_id));
         let private_name = match action {
@@ -2451,11 +2504,42 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             Err(error) => {
                 self.public_commands
                     .append_pending(&public_session_id, &pending);
-                self.public_commands.mark_error_terminal(
-                    &public_session_id,
-                    &error,
-                    &self.executions,
-                )?;
+                let cancellation_signal = self.executions.cancellation_signal(&public_session_key);
+                if matches!(
+                    error.code,
+                    FacadeErrorCode::SessionUnavailable | FacadeErrorCode::RuntimeUnavailable
+                ) && cancellation_signal.is_some()
+                {
+                    self.public_commands.mark_terminal(
+                        &public_session_id,
+                        stable_success(
+                            json!({
+                                "status":"cancelled",
+                                "session_id":public_session_id,
+                                "signal":cancellation_signal,
+                                "output":""
+                            }),
+                            "Command cancelled",
+                        ),
+                        &self.executions,
+                    )?;
+                    let terminal = self
+                        .durable_command_terminal(&public_session_id)
+                        .ok_or_else(command_state_internal_error)?;
+                    return Ok(self
+                        .public_commands
+                        .terminal_with_pending(&public_session_id, terminal));
+                }
+                if error.code != FacadeErrorCode::OperationTimedOut {
+                    if action == CommandControlAction::Kill {
+                        self.executions.clear_cancellation(&public_session_key);
+                    }
+                    self.public_commands.mark_error_terminal(
+                        &public_session_id,
+                        &error,
+                        &self.executions,
+                    )?;
+                }
                 Err(error)
             }
         }
@@ -2465,11 +2549,31 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         &mut self,
         action: GitWorkflowAction,
         mut arguments: Value,
-        request_id: Option<&Value>,
+        _request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
-        if let Some(path) = arguments.get("path").and_then(Value::as_str) {
-            let normalized = self.normalized_workspace_path(path, false)?;
-            arguments["path"] = Value::String(normalized);
+        let normalized_project = match arguments.get("path").and_then(Value::as_str) {
+            Some(path) => self.normalized_workspace_path(path, false)?,
+            None => ".".to_string(),
+        };
+        arguments["path"] = Value::String(normalized_project.clone());
+        if let Some(paths) = arguments.get_mut("paths").and_then(Value::as_array_mut) {
+            for path_value in paths {
+                let path = path_value.as_str().ok_or_else(invalid_argument)?;
+                let qualified = if normalized_project == "." {
+                    PathBuf::from(path)
+                } else {
+                    Path::new(&normalized_project).join(path)
+                };
+                let qualified = qualified.to_string_lossy().replace('\\', "/");
+                if !workspace_relative_path_valid(&qualified) {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::WorkspaceDenied,
+                        "Git path filter is outside the selected repository",
+                        false,
+                    ));
+                }
+                *path_value = Value::String(qualified);
+            }
         }
         let private_name = match action {
             GitWorkflowAction::Status => "git_status",
@@ -2478,7 +2582,37 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             GitWorkflowAction::Show => "git_show",
             GitWorkflowAction::Blame => "git_blame",
         };
-        let raw = self.private_call(private_name, arguments, request_id)?;
+        let raw =
+            handle_git_tool_with_authority(&self.workspace_authority, private_name, &arguments)
+                .or_else(|| {
+                    (action == GitWorkflowAction::Status).then(|| {
+                        json!({
+                            "structuredContent": {
+                                "is_repo": false,
+                                "path": normalized_project,
+                                "repository_root": null,
+                                "branch": null,
+                                "head": null,
+                                "upstream": null,
+                                "ahead": 0,
+                                "behind": 0,
+                                "clean": true,
+                                "entries": [],
+                                "truncated": false
+                            },
+                            "isError": false
+                        })
+                    })
+                })
+                .ok_or_else(runtime_capability_mismatch)?;
+        if raw.get("isError").and_then(Value::as_bool) == Some(true)
+            || raw
+                .pointer("/structuredContent/ok")
+                .and_then(Value::as_bool)
+                == Some(false)
+        {
+            return Err(normalize_git_error(&raw));
+        }
         Ok(normalize_git_success(action, &raw))
     }
 
@@ -2526,6 +2660,43 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
             source.split_inclusive('\n').collect::<Vec<_>>()
         };
         let total_lines = lines.len();
+        if start == 0 {
+            return Err(FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "start_line 必须大于等于 1",
+                false,
+            )
+            .with_details(json!({"field":"start_line","minimum":1,"actual":start})));
+        }
+        if total_lines == 0 {
+            return Ok(stable_success(
+                json!({
+                    "text":"",
+                    "path":relative,
+                    "encoding":"utf-8",
+                    "start_line":1,
+                    "end_line":Value::Null,
+                    "total_lines":0,
+                    "total_bytes":raw.len(),
+                    "bytes_read":0,
+                    "truncated":false,
+                    "eof":true
+                }),
+                "Document inspected",
+            ));
+        }
+        if start > total_lines && total_lines > 0 {
+            return Err(FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "请求的文档行范围超出文件末尾",
+                false,
+            )
+            .with_details(json!({
+                "field":"start_line",
+                "requested_start_line":start,
+                "total_lines":total_lines
+            })));
+        }
         let natural_end = start.saturating_add(max_lines.saturating_sub(1));
         let end = requested_end
             .unwrap_or(natural_end)
@@ -2557,7 +2728,8 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 "total_lines":total_lines,
                 "total_bytes":raw.len(),
                 "bytes_read":bytes_read,
-                "truncated":truncated
+                "truncated":truncated,
+                "eof":end >= total_lines
             }),
             "Document inspected",
         ))
@@ -2698,6 +2870,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 }
             }
         }
+        self.executions
+            .observe_all_running()
+            .map_err(normalize_execution_registry_error)?;
         Ok(())
     }
 
@@ -2707,7 +2882,7 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
 
     fn load_workflow_checkpoint(&self) -> Result<Option<Value>, FacadeError> {
         self.workflow_checkpoint
-            .load()
+            .load::<Value>()
             .map_err(workflow_checkpoint_error)?
             .map(|checkpoint| serde_json::to_value(checkpoint).map_err(workflow_checkpoint_error))
             .transpose()
@@ -2777,10 +2952,9 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 command_summary("timed_out"),
                 data,
             )),
-            TerminalOutcome::Cancelled => Some(stable_command_error(
-                FacadeErrorCode::ProcessCancelled,
+            TerminalOutcome::Cancelled => Some(stable_success(
+                Value::Object(data),
                 command_summary("cancelled"),
-                data,
             )),
             TerminalOutcome::Lost => Some(stable_command_error(
                 FacadeErrorCode::SessionUnavailable,
@@ -2788,24 +2962,6 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 data,
             )),
         }
-    }
-
-    fn latest_running_execution_snapshot(&self) -> Option<Value> {
-        let execution = self.executions.latest_running()?;
-        let elapsed_ms = unix_time_ms().saturating_sub(execution.started_at_ms);
-        Some(
-            json!({"state":"running","task_id":execution.task_id,"execution_id":execution.id,"session_id":execution.public_session_id,"elapsed_ms":elapsed_ms}),
-        )
-    }
-
-    fn latest_terminal_execution_snapshot(&self) -> Option<Value> {
-        let execution = self.executions.latest_terminal()?;
-        let ExecutionState::Terminal(terminal) = execution.state else {
-            return None;
-        };
-        Some(
-            json!({"task_id":execution.task_id,"execution_id":execution.id,"session_id":execution.public_session_id,"status":terminal.outcome.as_str(),"exit_code":terminal.exit_code,"signal":terminal.signal,"timed_out":terminal.outcome == TerminalOutcome::TimedOut,"cancelled":terminal.outcome == TerminalOutcome::Cancelled,"output_refs":terminal.output_refs,"error_code":terminal.error_code,"completed_at_ms":terminal.completed_at_ms}),
-        )
     }
 }
 
@@ -2828,10 +2984,16 @@ impl CodingToolsRuntimeAdapter {
             .and_then(|object| object.get("timed_out"))
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let public_status = if action == Some(CommandControlAction::Kill) {
+        let observed_status = command_public_status(private_status, exit_code, timed_out);
+        let cancellation_signal = self
+            .executions
+            .cancellation_signal(&PublicSessionId::new(public_session_id));
+        let public_status = if cancellation_signal.is_some()
+            && matches!(observed_status, "completed" | "failed" | "cancelled")
+        {
             "cancelled"
         } else {
-            command_public_status(private_status, exit_code, timed_out)
+            observed_status
         };
 
         let mut data = Map::new();
@@ -2844,6 +3006,8 @@ impl CodingToolsRuntimeAdapter {
             .and_then(Value::as_str)
         {
             data.insert("signal".into(), Value::String(signal.to_string()));
+        } else if let Some(signal) = cancellation_signal {
+            data.insert("signal".into(), Value::String(signal));
         }
         data.insert(
             "session_id".into(),
@@ -2866,9 +3030,6 @@ impl CodingToolsRuntimeAdapter {
         data.insert("output".into(), Value::String(output));
         self.map_private_output_refs(structured, &mut data, public_session_id);
 
-        let successful_kill_data = (action == Some(CommandControlAction::Kill)
-            && public_status == "cancelled")
-            .then(|| data.clone());
         let result = match public_status {
             "running" => stable_success(Value::Object(data), command_summary("running")),
             "completed" => stable_success(Value::Object(data), command_summary("completed")),
@@ -2882,11 +3043,7 @@ impl CodingToolsRuntimeAdapter {
                 command_summary("timed_out"),
                 data,
             ),
-            "cancelled" => stable_command_error(
-                FacadeErrorCode::ProcessCancelled,
-                command_summary("cancelled"),
-                data,
-            ),
+            "cancelled" => stable_success(Value::Object(data), command_summary("cancelled")),
             _ => stable_command_error(
                 FacadeErrorCode::SessionUnavailable,
                 command_summary("lost"),
@@ -2900,19 +3057,15 @@ impl CodingToolsRuntimeAdapter {
                 &self.executions,
             )?;
         }
-        if let Some(data) = successful_kill_data {
+        if action == Some(CommandControlAction::Kill) && public_status == "cancelled" {
             self.mark_owner_workflow_waiting_after_kill(public_session_id)?;
-            return Ok(stable_success(
-                Value::Object(data),
-                command_summary("cancelled"),
-            ));
         }
         Ok(result)
     }
 
     fn mark_owner_workflow_waiting_after_kill(&self, session_id: &str) -> Result<(), FacadeError> {
         self.workflow_checkpoint
-            .settle_command_kill(session_id)
+            .settle_command_kill::<Value>(session_id)
             .map(|_| ())
             .map_err(workflow_checkpoint_error)
     }
@@ -3016,10 +3169,11 @@ impl CodingToolsRuntimeAdapter {
         if let Some(private) = structured.get("output_ref").and_then(Value::as_str) {
             data.insert(
                 "output_ref".into(),
-                Value::String(
-                    self.public_commands
-                        .public_output_for_private(private, public_session_id),
-                ),
+                Value::String(self.public_commands.public_output_for_private(
+                    private,
+                    public_session_id,
+                    "stdout",
+                )),
             );
         }
         if let Some(private_refs) = structured.get("output_refs").and_then(Value::as_object) {
@@ -3028,10 +3182,11 @@ impl CodingToolsRuntimeAdapter {
                 if let Some(private) = private_refs.get(stream).and_then(Value::as_str) {
                     public_refs.insert(
                         stream.into(),
-                        Value::String(
-                            self.public_commands
-                                .public_output_for_private(private, public_session_id),
-                        ),
+                        Value::String(self.public_commands.public_output_for_private(
+                            private,
+                            public_session_id,
+                            stream,
+                        )),
                     );
                 }
             }
@@ -3157,60 +3312,6 @@ fn command_summary(status: &str) -> &'static str {
     }
 }
 
-fn rewrite_direct_cmd_rmdir(command: &str) -> String {
-    let trimmed = command.trim_start();
-    let leading = command.len().saturating_sub(trimmed.len());
-    let token_end = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
-    format!("{}rd{}", &command[..leading], &trimmed[token_end..])
-}
-
-fn direct_cmd_rmdir_target(command: &str) -> Option<String> {
-    let mut tokens = Vec::<String>::new();
-    let mut token = String::new();
-    let mut quoted = false;
-    for ch in command.chars() {
-        if matches!(ch, '\r' | '\n' | '%' | '!' | '^') {
-            return None;
-        }
-        if ch == '"' {
-            quoted = !quoted;
-            continue;
-        }
-        if !quoted && matches!(ch, '&' | '|' | '<' | '>' | '(' | ')') {
-            return None;
-        }
-        if !quoted && ch.is_whitespace() {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-            continue;
-        }
-        token.push(ch);
-    }
-    if quoted {
-        return None;
-    }
-    if !token.is_empty() {
-        tokens.push(token);
-    }
-    if !tokens
-        .first()
-        .is_some_and(|token| token.eq_ignore_ascii_case("rmdir"))
-    {
-        return None;
-    }
-    let mut target = None;
-    for argument in tokens.into_iter().skip(1) {
-        if matches!(argument.to_ascii_lowercase().as_str(), "/s" | "/q") {
-            continue;
-        }
-        if argument.starts_with('/') || target.replace(argument).is_some() {
-            return None;
-        }
-    }
-    target
-}
-
 fn command_public_status(
     private_status: &str,
     exit_code: Option<i64>,
@@ -3218,7 +3319,7 @@ fn command_public_status(
 ) -> &'static str {
     if timed_out || private_status == "timeout" {
         "timed_out"
-    } else if matches!(private_status, "terminated" | "killed") {
+    } else if matches!(private_status, "terminated" | "killed" | "cancelled") {
         "cancelled"
     } else if matches!(private_status, "terminating" | "running") {
         "running"
@@ -3233,7 +3334,7 @@ fn execution_terminal_from_result(result: &Value) -> ExecutionTerminal {
     let data = result
         .pointer("/structuredContent/data")
         .and_then(Value::as_object);
-    let error_code = result
+    let mut error_code = result
         .pointer("/structuredContent/error/code")
         .and_then(Value::as_str)
         .map(str::to_string);
@@ -3257,6 +3358,15 @@ fn execution_terminal_from_result(result: &Value) -> ExecutionTerminal {
             _ => TerminalOutcome::Failed,
         },
     };
+    if error_code.is_none() {
+        error_code = match status {
+            TerminalOutcome::Completed => None,
+            TerminalOutcome::Cancelled => Some("ProcessCancelled".to_string()),
+            TerminalOutcome::TimedOut => Some("ProcessTimedOut".to_string()),
+            TerminalOutcome::Lost => Some("SessionUnavailable".to_string()),
+            TerminalOutcome::Failed | TerminalOutcome::Blocked => Some("ProcessFailed".to_string()),
+        };
+    }
     let mut output_refs = Vec::new();
     if let Some(value) = data
         .and_then(|value| value.get("output_ref"))
@@ -3327,9 +3437,14 @@ fn command_transport_timeout(wait_ms: u64) -> std::time::Duration {
 }
 
 fn command_control_transport_timeout(wait_ms: u64) -> std::time::Duration {
-    std::time::Duration::from_millis(wait_ms.min(30_000).saturating_add(2_000))
+    std::time::Duration::from_millis(
+        wait_ms
+            .min(30_000)
+            .saturating_add(COMMAND_CONTROL_TRANSPORT_HEADROOM_MS),
+    )
 }
 
+#[cfg(test)]
 fn validate_private_command_result_semantics(
     raw: &Value,
     running_required: bool,
@@ -3398,6 +3513,7 @@ fn validate_private_command_result_semantics(
     Ok((session_id.to_string(), stdout_ref.to_string()))
 }
 
+#[cfg(test)]
 fn validate_private_read_output_semantics(raw: &Value) -> Result<(), FacadeError> {
     let structured = raw
         .get("structuredContent")
@@ -3651,6 +3767,19 @@ pub struct AgentFacade<A = CodingToolsRuntimeAdapter> {
     registry: ToolRegistry,
 }
 
+pub(crate) struct TaskCallIdentity<'a> {
+    pub request_id: Option<&'a Value>,
+    pub task_id: TaskId,
+    pub owner_session: Option<McpSessionId>,
+}
+
+#[derive(Clone, Copy)]
+struct WorkflowCallContext<'a> {
+    request_id: Option<&'a Value>,
+    task_id: &'a TaskId,
+    owner_session: Option<&'a McpSessionId>,
+}
+
 impl AgentFacade<CodingToolsRuntimeAdapter> {
     pub(crate) fn from_coding_runtime_with_executions(
         runtime: CodingToolsRuntime,
@@ -3659,10 +3788,6 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
     ) -> Result<Self, FacadeError> {
         let adapter = CodingToolsRuntimeAdapter::new_with_executions(runtime, executions)?;
         Self::with_adapter(adapter, policy)
-    }
-
-    pub(crate) fn workspace_path(&self) -> &Path {
-        &self.adapter.workspace
     }
 
     pub(crate) fn workspace_authority(&self) -> WorkspaceResolver {
@@ -3795,38 +3920,18 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
 
     pub(crate) fn task_aggregate_snapshot(&self) -> Value {
         let current_workflow = self.durable_workflow_current_snapshot();
-        let current_command = self.adapter.latest_running_execution_snapshot();
-        let last_command = self.adapter.latest_terminal_execution_snapshot();
-        let state = if current_command.is_some()
-            || current_workflow
-                .as_ref()
-                .and_then(|v| v.get("state"))
-                .and_then(Value::as_str)
-                == Some("running")
-        {
-            "active"
-        } else if current_workflow.is_some() {
+        let state = if current_workflow.is_some() {
             "waiting"
         } else {
             "idle"
         };
-        let mut aggregate = json!({"state":state,"current_workflow":current_workflow,"current_command":current_command,"last_command":last_command,"last_terminal_command":last_command});
+        let mut aggregate = json!({"state":state,"current_workflow":current_workflow});
         if let (Some(object), Some(workflow)) = (
             aggregate.as_object_mut(),
             current_workflow.as_ref().and_then(Value::as_object),
         ) {
             for key in ["task_id", "kind", "current_step", "next_step"] {
                 if let Some(value) = workflow.get(key) {
-                    object.insert(key.into(), value.clone());
-                }
-            }
-        } else if let (Some(object), Some(command)) = (
-            aggregate.as_object_mut(),
-            current_command.as_ref().and_then(Value::as_object),
-        ) {
-            object.insert("kind".into(), Value::String("command".into()));
-            for key in ["task_id", "session_id"] {
-                if let Some(value) = command.get(key) {
                     object.insert(key.into(), value.clone());
                 }
             }
@@ -3867,7 +3972,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         match status {
             "completed" => {
                 checkpoint.command_index = checkpoint.command_index.saturating_add(1);
-                checkpoint.command_results.push(data.into());
+                checkpoint.command_results.push(data);
                 checkpoint.failure = None;
                 if checkpoint.is_coding_task() {
                     checkpoint.current_step = Some("verify".into());
@@ -3885,16 +3990,20 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.current_step = Some("cancelled".into());
                 checkpoint.next_step = None;
                 checkpoint.completed = true;
-                checkpoint.failure = Some(json!({"code":"cancelled","status":status}).into());
+                checkpoint.failure = Some(WorkflowFailure::new("cancelled", Some(status)));
             }
             "failed" | "timed_out" | "lost" => {
                 checkpoint.current_step = Some("failed".into());
                 checkpoint.next_step = None;
                 checkpoint.completed = true;
-                checkpoint.failure = Some(json!({
-                    "code":if status == "lost" { "SessionUnavailable" } else { "command_terminal" },
-                    "status":status
-                }).into());
+                checkpoint.failure = Some(WorkflowFailure::new(
+                    if status == "lost" {
+                        "SessionUnavailable"
+                    } else {
+                        "command_terminal"
+                    },
+                    Some(status),
+                ));
             }
             _ => return Ok(()),
         }
@@ -3944,8 +4053,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             mode,
             name,
             arguments,
-            request_id,
-            TaskId::new(next_public_handle("lb-task")),
+            TaskCallIdentity {
+                request_id,
+                task_id: TaskId::new(next_public_handle("lb-task")),
+                owner_session: None,
+            },
             project,
         )
     }
@@ -3955,13 +4067,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         mode: PermissionMode,
         name: &str,
         arguments: Value,
-        request_id: Option<&Value>,
-        task_id: TaskId,
+        identity: TaskCallIdentity<'_>,
         mut project: F,
     ) -> Result<Value, FacadeCallError>
     where
         F: FnMut(CurrentTaskStatus),
     {
+        let TaskCallIdentity {
+            request_id,
+            task_id,
+            owner_session,
+        } = identity;
         let kind = public_task_kind(name, &arguments);
         let summary = public_safe_summary(name, &arguments);
         if let Err(FacadeCallError::Denied(denied)) =
@@ -4001,7 +4117,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             CurrentTaskStatus::project(kind, summary, TaskExecutionState::Running)
                 .expect("Running is valid"),
         );
-        let result = self.dispatch_for_task(mode, name, arguments, request_id, &task_id);
+        let result = self.dispatch_for_task(
+            mode,
+            name,
+            arguments,
+            request_id,
+            &task_id,
+            owner_session.as_ref(),
+        );
         match &result {
             Ok(value) if value.get("isError").and_then(Value::as_bool) == Some(true) => project(
                 CurrentTaskStatus::project(
@@ -4039,6 +4162,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             arguments,
             request_id,
             &TaskId::new(next_public_handle("lb-task")),
+            None,
         )
     }
 
@@ -4049,10 +4173,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         arguments: Value,
         request_id: Option<&Value>,
         task_id: &TaskId,
+        owner_session: Option<&McpSessionId>,
     ) -> Result<Value, FacadeError> {
         match name {
             "workspace_context" => self.workspace_context(mode, arguments, request_id),
-            "agent_workflow" => self.agent_workflow(mode, arguments, request_id),
+            "agent_workflow" => {
+                self.agent_workflow(mode, arguments, request_id, task_id, owner_session)
+            }
             "filesystem" => self.adapter.filesystem(arguments),
             "exec_command" => self.exec_command(mode, arguments, request_id, task_id),
             "command_control" => self.command_control(arguments, request_id),
@@ -4112,7 +4239,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         );
         data.insert(
             "workspace_scope".into(),
-            Value::String("active_workspace".into()),
+            Value::String("structured_tools_active_workspace".into()),
         );
         data.insert(
             "ordinary_route_token".into(),
@@ -4125,6 +4252,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         data.insert("administrator_token_available".into(), Value::Bool(false));
         data.insert("selected_route".into(), Value::String("ordinary".into()));
         data.insert(
+            "authority".into(),
+            json!({
+                "desired_permission":permission_mode,
+                "observed_privilege":"unknown",
+                "observed_broker":"unknown",
+                "observed_uac":"unknown",
+                "effective_permission":if mode == PermissionMode::Elevated { "full" } else { permission_mode },
+                "reconciliation":"unavailable"
+            }),
+        );
+        data.insert(
             "shell_discovery".into(),
             discovery
                 .get("shells")
@@ -4135,13 +4273,6 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "capabilities".into(),
             json!({
                 "public_tools":public_tools,
-                "actions":{
-                    "agent_workflow":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"],
-                    "filesystem":["list","stat","read","write","search","copy","move","delete","hash"],
-                    "command_control":["poll","read","write","kill"],
-                    "task_control":["get","cancel"],
-                    "document_workflow":["inspect","create","convert","rebuild"]
-                },
                 "shells":discovery.get("shells").cloned().unwrap_or_else(|| json!({})),
                 "git":discovery.get("git").cloned().unwrap_or_else(|| json!({"available":false})),
                 "bundled_python":discovery.get("bundled_python").cloned().unwrap_or_else(|| json!({"available":false})),
@@ -4236,9 +4367,16 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         mode: PermissionMode,
         arguments: Value,
         request_id: Option<&Value>,
+        task_id: &TaskId,
+        owner_session: Option<&McpSessionId>,
     ) -> Result<Value, FacadeError> {
         let object = object_args(&arguments)?;
         let action = required_string(object, "action")?;
+        let workflow_context = WorkflowCallContext {
+            request_id,
+            task_id,
+            owner_session,
+        };
         if !matches!(
             action,
             "diagnose"
@@ -4254,11 +4392,32 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             return Err(invalid_argument());
         }
         if action == "resume" {
-            ensure_only_keys(object, &["action"])?;
-            return self.resume_agent_workflow(mode, request_id);
+            ensure_only_keys(object, &["action", "task_id"])?;
+            let durable_task_id = object
+                .get("task_id")
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(invalid_argument)
+                })
+                .transpose()?;
+            return self.resume_agent_workflow(
+                mode,
+                request_id,
+                task_id,
+                owner_session,
+                durable_task_id,
+            );
         }
         if let Some(phase) = object.get("phase").and_then(Value::as_str) {
-            return self.coding_agent_workflow_phase(mode, action, phase, object, request_id);
+            return self.coding_agent_workflow_phase(
+                mode,
+                action,
+                phase,
+                object,
+                &workflow_context,
+            );
         }
 
         let dry_run_requested = object
@@ -4289,8 +4448,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         {
             let mut prepared = object.clone();
             prepared.insert("phase".into(), Value::String("prepare".into()));
-            return self
-                .coding_agent_workflow_phase(mode, action, "prepare", &prepared, request_id);
+            return self.coding_agent_workflow_phase(
+                mode,
+                action,
+                "prepare",
+                &prepared,
+                &workflow_context,
+            );
         }
 
         if !dry_run_requested && !has_directory_changes && !has_commands {
@@ -4336,7 +4500,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                             Value::Object(expected_files_from_checkpoint(&checkpoint)),
                         );
                         return self.coding_agent_workflow_phase(
-                            mode, action, "edit", &edited, request_id,
+                            mode,
+                            action,
+                            "edit",
+                            &edited,
+                            &workflow_context,
                         );
                     }
                 }
@@ -4416,8 +4584,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         if has_work {
             ensure_checkpoint_slot_available(&self.adapter)?;
         }
-        let mut checkpoint = has_work
-            .then(|| WorkflowCheckpoint::new(next_public_handle("lb-workflow"), arguments.clone()));
+        let mut checkpoint = has_work.then(|| {
+            let mut checkpoint = WorkflowCheckpoint::new(task_id.to_string(), arguments.clone());
+            checkpoint.owner_session_id = owner_session.map(ToString::to_string);
+            checkpoint
+        });
         if let Some(checkpoint) = checkpoint.as_ref() {
             persist_agent_checkpoint(&self.adapter, checkpoint)?;
         }
@@ -4488,7 +4659,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             if let Some(checkpoint) = checkpoint.as_mut() {
                 checkpoint.directory_inflight = false;
                 checkpoint.directory_index = index + 1;
-                checkpoint.directory_results.push(result.into());
+                checkpoint.directory_results.push(result);
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
         }
@@ -4652,7 +4823,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.command_inflight = false;
                 checkpoint.current_session_id = None;
                 checkpoint.command_index = index + 1;
-                checkpoint.command_results.push(data.into());
+                checkpoint.command_results.push(data);
                 persist_agent_checkpoint(&self.adapter, checkpoint)?;
             }
         }
@@ -4702,8 +4873,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         action: &str,
         phase: &str,
         object: &Map<String, Value>,
-        request_id: Option<&Value>,
+        context: &WorkflowCallContext<'_>,
     ) -> Result<Value, FacadeError> {
+        let WorkflowCallContext {
+            request_id,
+            task_id: request_task_id,
+            owner_session,
+        } = *context;
         match phase {
             "prepare" => {
                 ensure_only_keys(object, &["action", "phase", "objective", "path"])?;
@@ -4726,26 +4902,21 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     json!({"path":selected_path}),
                     request_id,
                 )?;
-                let task_id = next_public_handle("lb-task");
                 let mut checkpoint = WorkflowCheckpoint::new_coding(
-                    task_id.clone(),
+                    request_task_id.to_string(),
                     Value::Object(object.clone()),
                     objective.to_string(),
                 );
+                checkpoint.owner_session_id = owner_session.map(ToString::to_string);
                 checkpoint.files_read = context
                     .get("files_read")
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default()
                     .into_iter()
-                    .map(Into::into)
                     .collect();
-                checkpoint.git_before = Some(stable_data(&git_before).into());
-                checkpoint.verification_plan = verification_plan
-                    .clone()
-                    .into_iter()
-                    .map(Into::into)
-                    .collect();
+                checkpoint.git_before = Some(stable_data(&git_before));
+                checkpoint.verification_plan = verification_plan.clone().into_iter().collect();
                 checkpoint.current_step = Some("prepare".into());
                 checkpoint.next_step = Some("edit".into());
                 persist_agent_checkpoint(&self.adapter, &checkpoint)?;
@@ -4753,7 +4924,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     json!({
                         "action":action,
                         "phase":"prepare",
-                        "workflow_id":task_id,
+                        "workflow_id":checkpoint.workflow_id,
                         "task_id":checkpoint.workflow_id,
                         "objective":objective,
                         "state":"prepared",
@@ -4788,7 +4959,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     .get("expected_files")
                     .and_then(Value::as_object)
                     .unwrap_or(&empty_expected);
-                let mut checkpoint = self.load_coding_checkpoint(task_id, action, request_id)?;
+                let mut checkpoint =
+                    self.load_coding_checkpoint(task_id, action, request_id, owner_session)?;
                 if checkpoint.completed
                     || checkpoint.current_step.as_deref() != Some("prepare")
                     || checkpoint.next_step.as_deref() != Some("edit")
@@ -4811,7 +4983,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     Ok(modified_files) => modified_files,
                     Err(error) => {
                         checkpoint.patch_inflight = false;
-                        checkpoint.failure = Some(json!({"code":error.code.as_str()}).into());
+                        checkpoint.failure =
+                            Some(WorkflowFailure::new(error.code.as_str(), None::<String>));
                         persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                         return Err(error);
                     }
@@ -4845,7 +5018,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "verify" => {
                 ensure_only_keys(object, &["action", "phase", "task_id"])?;
                 let task_id = required_string(object, "task_id")?;
-                let mut checkpoint = self.load_coding_checkpoint(task_id, action, request_id)?;
+                let mut checkpoint =
+                    self.load_coding_checkpoint(task_id, action, request_id, owner_session)?;
                 if checkpoint.completed {
                     return Ok(coding_checkpoint_result(
                         &checkpoint,
@@ -4889,7 +5063,6 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         .adapter
                         .coding_verification_plan(&selected_path)?
                         .into_iter()
-                        .map(Into::into)
                         .collect();
                     checkpoint.commands = checkpoint.verification_plan.clone();
                 }
@@ -4903,10 +5076,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         .as_object()
                         .ok_or_else(command_state_internal_error)?;
                     let command = required_workflow_string(step, "command")?;
-                    let shell: ShellSelector = serde_json::from_value(workflow_value(
+                    let shell: ShellSelector = serde_json::from_value(
                         step.get("shell")
-                            .unwrap_or(&WorkflowDatum::Text("cmd".into())),
-                    )?)
+                            .cloned()
+                            .unwrap_or_else(|| Value::String("cmd".into())),
+                    )
                     .map_err(|_| invalid_argument())?;
                     checkpoint.command_inflight = true;
                     checkpoint.current_session_id = None;
@@ -4934,12 +5108,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                                 checkpoint.current_step = Some("cancelled".into());
                                 checkpoint.next_step = None;
                                 checkpoint.completed = true;
-                                checkpoint.failure = Some(json!({"code":"cancelled"}).into());
+                                checkpoint.failure =
+                                    Some(WorkflowFailure::new("cancelled", None::<String>));
                             } else {
                                 checkpoint.current_step = Some("verify".into());
                                 checkpoint.next_step = Some("verify".into());
                                 checkpoint.failure =
-                                    Some(json!({"code":error.code.as_str()}).into());
+                                    Some(WorkflowFailure::new(error.code.as_str(), None::<String>));
                             }
                             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                             return Err(error);
@@ -4948,7 +5123,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     if result.get("isError").and_then(Value::as_bool) == Some(true) {
                         checkpoint.command_inflight = false;
                         checkpoint.failure =
-                            Some(json!({"code":"verification_failed","step":index}).into());
+                            Some(WorkflowFailure::at_step("verification_failed", index));
                         checkpoint.next_step = Some("verify".into());
                         persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                         return Ok(result);
@@ -4979,18 +5154,18 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     checkpoint.command_inflight = false;
                     checkpoint.current_session_id = None;
                     checkpoint.command_index = index + 1;
-                    checkpoint.command_results.push(data.clone().into());
+                    checkpoint.command_results.push(data.clone());
                     let evidence = json!({
-                        "kind":step.get("kind").and_then(WorkflowDatum::as_str).unwrap_or("project_gate"),
+                        "kind":step.get("kind").and_then(Value::as_str).unwrap_or("project_gate"),
                         "command":command,
                         "status":data.get("status").cloned().unwrap_or_else(|| Value::String("completed".into())),
                         "exit_code":data.get("exit_code").cloned().unwrap_or(Value::Null),
                         "output_ref":data.get("output_ref").cloned().unwrap_or(Value::Null)
                     });
                     if command.contains("build") {
-                        checkpoint.build_results.push(evidence.into());
+                        checkpoint.build_results.push(evidence);
                     } else {
-                        checkpoint.test_results.push(evidence.into());
+                        checkpoint.test_results.push(evidence);
                     }
                     persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                 }
@@ -5008,7 +5183,8 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "persist" => {
                 ensure_only_keys(object, &["action", "phase", "task_id"])?;
                 let task_id = required_string(object, "task_id")?;
-                let mut checkpoint = self.load_coding_checkpoint(task_id, action, request_id)?;
+                let mut checkpoint =
+                    self.load_coding_checkpoint(task_id, action, request_id, owner_session)?;
                 if checkpoint.current_session_id.is_some()
                     || checkpoint.command_inflight
                     || checkpoint.current_step.as_deref() != Some("verify")
@@ -5017,7 +5193,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     || checkpoint.command_index != checkpoint.verification_plan.len()
                     || checkpoint.command_results.len() != checkpoint.verification_plan.len()
                     || checkpoint.command_results.iter().any(|result| {
-                        result.get("status").and_then(WorkflowDatum::as_str) != Some("completed")
+                        result.get("status").and_then(Value::as_str) != Some("completed")
                     })
                 {
                     return Err(FacadeError::new(
@@ -5039,7 +5215,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         json!({"path":selected_path}),
                         request_id,
                     )?;
-                    checkpoint.git_after = Some(stable_data(&git_after).into());
+                    checkpoint.git_after = Some(stable_data(&git_after));
                     checkpoint.current_step = Some("persist".into());
                     checkpoint.next_step = None;
                     checkpoint.completed = true;
@@ -5061,11 +5237,12 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         task_id: &str,
         action: &str,
         request_id: Option<&Value>,
+        owner_session: Option<&McpSessionId>,
     ) -> Result<WorkflowCheckpoint, FacadeError> {
         let stored = self.adapter.load_workflow_checkpoint()?.ok_or_else(|| {
             FacadeError::new(FacadeErrorCode::NotFound, "coding task 不存在", false)
         })?;
-        let checkpoint: WorkflowCheckpoint =
+        let mut checkpoint: WorkflowCheckpoint =
             serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
         if !checkpoint.is_coding_task() || checkpoint.workflow_id != task_id {
             return Err(FacadeError::new(
@@ -5073,6 +5250,20 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 "coding task 不存在",
                 false,
             ));
+        }
+        if checkpoint.owner_session_id.as_deref() != owner_session.map(McpSessionId::as_str) {
+            let Some(owner_session) = owner_session else {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::TaskNotOwned,
+                    "coding task 不属于当前 MCP Session",
+                    false,
+                ));
+            };
+            // An explicit, unguessable TaskId is the durable resource capability.
+            // MCP transport sessions are shorter lived, so a phased call atomically
+            // transfers the checkpoint owner instead of creating parallel ownership.
+            checkpoint.owner_session_id = Some(owner_session.to_string());
+            persist_agent_checkpoint(&self.adapter, &checkpoint)?;
         }
         let original = workflow_object_args(&checkpoint.arguments)?;
         if original.get("action").and_then(Value::as_str) != Some(action) {
@@ -5152,7 +5343,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.command_inflight = false;
                 checkpoint.current_session_id = None;
                 checkpoint.command_index = checkpoint.command_index.saturating_add(1);
-                checkpoint.command_results.push(data.clone().into());
+                checkpoint.command_results.push(data.clone());
                 if let Some(output_ref) = data.get("output_ref").and_then(Value::as_str) {
                     if !checkpoint
                         .output_refs
@@ -5185,7 +5376,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.command_inflight = false;
                 checkpoint.current_session_id = None;
                 checkpoint.failure =
-                    Some(json!({"code":"verification_terminal","status":status}).into());
+                    Some(WorkflowFailure::new("verification_terminal", Some(status)));
                 checkpoint.current_step = Some("verify".into());
                 checkpoint.next_step = Some("verify".into());
                 persist_agent_checkpoint(&self.adapter, &checkpoint)?;
@@ -5207,12 +5398,38 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         &mut self,
         mode: PermissionMode,
         request_id: Option<&Value>,
+        request_task_id: &TaskId,
+        owner_session: Option<&McpSessionId>,
+        durable_task_id: Option<&str>,
     ) -> Result<Value, FacadeError> {
         let stored = self.adapter.load_workflow_checkpoint()?.ok_or_else(|| {
             FacadeError::new(FacadeErrorCode::NotFound, "没有可恢复的工作流", false)
         })?;
         let mut checkpoint: WorkflowCheckpoint =
             serde_json::from_value(stored).map_err(workflow_checkpoint_error)?;
+        if let Some(durable_task_id) = durable_task_id {
+            if checkpoint.workflow_id != durable_task_id {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::NotFound,
+                    "指定的 durable workflow 不存在或已回收",
+                    false,
+                ));
+            }
+        }
+        if checkpoint.owner_session_id.as_deref() != owner_session.map(McpSessionId::as_str) {
+            let Some(owner_session) = owner_session.filter(|_| durable_task_id.is_some()) else {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::TaskNotOwned,
+                    "工作流不属于当前 MCP Session；重连后必须使用 prepare 返回的 task_id",
+                    false,
+                ));
+            };
+            // The checkpoint remains the one mutable lifecycle owner. A caller that
+            // presents its stable TaskId capability after transport reconnect atomically
+            // transfers only the MCP-session owner field; no parallel workflow is created.
+            checkpoint.owner_session_id = Some(owner_session.to_string());
+            persist_agent_checkpoint(&self.adapter, &checkpoint)?;
+        }
         let original = workflow_object_args(&checkpoint.arguments)?;
         let action = required_string(&original, "action")?;
         if action == "resume" {
@@ -5262,7 +5479,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         action,
                         next_phase,
                         &synthesized,
-                        request_id,
+                        &WorkflowCallContext {
+                            request_id,
+                            task_id: request_task_id,
+                            owner_session,
+                        },
                     );
                 }
             }
@@ -5378,7 +5599,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                             "patch_applied":checkpoint.patch_applied,
                             "directory_changes":checkpoint.directory_results,
                             "commands":checkpoint.command_results,
-                            "current_command":data
+                            "current_execution":data
                         }),
                         "Agent workflow command is still running",
                     ));
@@ -5387,7 +5608,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     checkpoint.command_inflight = false;
                     checkpoint.current_session_id = None;
                     checkpoint.command_index = checkpoint.command_index.saturating_add(1);
-                    checkpoint.command_results.push(data.into());
+                    checkpoint.command_results.push(data);
                     persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                 }
                 _ => {
@@ -5429,7 +5650,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 .apply_directory_change(directory_action, directory_path)?;
             checkpoint.directory_inflight = false;
             checkpoint.directory_index = index + 1;
-            checkpoint.directory_results.push(result.into());
+            checkpoint.directory_results.push(result);
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
         }
 
@@ -5540,7 +5761,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 checkpoint.current_session_id = Some(session_id.to_string());
                 persist_agent_checkpoint(&self.adapter, &checkpoint)?;
                 let mut commands = checkpoint.command_results.clone();
-                commands.push(data.into());
+                commands.push(data);
                 return Ok(stable_success(
                     json!({
                         "action":"resume",
@@ -5560,7 +5781,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             checkpoint.command_inflight = false;
             checkpoint.current_session_id = None;
             checkpoint.command_index = index + 1;
-            checkpoint.command_results.push(data.into());
+            checkpoint.command_results.push(data);
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
         }
 
@@ -5882,21 +6103,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
 
 pub(crate) fn public_task_kind(name: &str, arguments: &Value) -> TaskKind {
     match name {
-        "exec_command" | "agent_workflow" | "command_control" | "task_control" => {
-            let text = arguments
+        "elevated_exec" => TaskKind::ElevatedOperation,
+        "exec_command" => command_task_kind(
+            arguments
                 .get("command")
-                .or_else(|| arguments.get("objective"))
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if text.contains("test") || text.contains("cargo test") || text.contains("vitest") {
-                TaskKind::Test
-            } else if text.contains("build") || text.contains("cargo build") {
-                TaskKind::Build
-            } else {
-                TaskKind::ExecuteCommand
-            }
-        }
+                .unwrap_or_default(),
+        ),
+        "agent_workflow" | "command_control" | "task_control" => TaskKind::Other,
         "filesystem" => match arguments.get("action").and_then(Value::as_str) {
             Some("search") => TaskKind::SearchCode,
             Some("write" | "copy" | "move" | "delete") => TaskKind::ModifyFile,
@@ -6156,15 +6370,12 @@ fn object_args(value: &Value) -> Result<&Map<String, Value>, FacadeError> {
     value.as_object().ok_or_else(invalid_argument)
 }
 
-fn workflow_value(value: &WorkflowDatum) -> Result<Value, FacadeError> {
-    serde_json::to_value(value).map_err(|_| workflow_checkpoint_error("workflow mapping failed"))
+fn workflow_value(value: &Value) -> Result<Value, FacadeError> {
+    Ok(value.clone())
 }
 
-fn workflow_object_args(value: &WorkflowDatum) -> Result<Map<String, Value>, FacadeError> {
-    workflow_value(value)?
-        .as_object()
-        .cloned()
-        .ok_or_else(invalid_argument)
+fn workflow_object_args(value: &Value) -> Result<Map<String, Value>, FacadeError> {
+    value.as_object().cloned().ok_or_else(invalid_argument)
 }
 
 fn ensure_checkpoint_slot_available<A: WorkspaceRuntimeAdapter>(
@@ -6230,8 +6441,33 @@ fn persist_agent_checkpoint<A: WorkspaceRuntimeAdapter>(
     adapter: &A,
     checkpoint: &WorkflowCheckpoint,
 ) -> Result<(), FacadeError> {
+    let mut checkpoint = checkpoint.clone();
+    let newly_redacted = sanitize_workflow_arguments(&mut checkpoint.arguments);
+    checkpoint
+        .redacted_stdin_command_indices
+        .extend(newly_redacted);
+    checkpoint.redacted_stdin_command_indices.sort_unstable();
+    checkpoint.redacted_stdin_command_indices.dedup();
     let value = serde_json::to_value(checkpoint).map_err(workflow_checkpoint_error)?;
     adapter.save_workflow_checkpoint(&value)
+}
+
+fn sanitize_workflow_arguments(arguments: &mut Value) -> Vec<usize> {
+    let mut redacted = Vec::new();
+    let commands = match arguments {
+        Value::Object(arguments) => arguments.get_mut("commands"),
+        _ => None,
+    };
+    if let Some(Value::Array(commands)) = commands {
+        for (index, command) in commands.iter_mut().enumerate() {
+            if let Value::Object(object) = command {
+                if object.remove("stdin").is_some() {
+                    redacted.push(index);
+                }
+            }
+        }
+    }
+    redacted
 }
 
 fn terminalize_legacy_checkpoint_failure<A: WorkspaceRuntimeAdapter>(
@@ -6249,7 +6485,7 @@ fn terminalize_legacy_checkpoint_failure<A: WorkspaceRuntimeAdapter>(
     checkpoint.patch_inflight = false;
     checkpoint.command_inflight = false;
     checkpoint.current_session_id = None;
-    checkpoint.failure = Some(json!({"code":code,"status":"failed"}).into());
+    checkpoint.failure = Some(WorkflowFailure::new(code, Some("failed")));
     persist_agent_checkpoint(adapter, checkpoint)
 }
 
@@ -6261,14 +6497,14 @@ fn expected_files_from_checkpoint(checkpoint: &WorkflowCheckpoint) -> Map<String
         };
         let Some(path) = object
             .get("path")
-            .and_then(WorkflowDatum::as_str)
+            .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
         else {
             continue;
         };
         let Some(identity) = object
             .get("content_sha256")
-            .and_then(WorkflowDatum::as_str)
+            .and_then(Value::as_str)
             .filter(|value| {
                 value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
             })
@@ -6296,12 +6532,12 @@ fn required_string<'a>(object: &'a Map<String, Value>, key: &str) -> Result<&'a 
 }
 
 fn required_workflow_string<'a>(
-    object: &'a std::collections::BTreeMap<String, WorkflowDatum>,
+    object: &'a Map<String, Value>,
     key: &str,
 ) -> Result<&'a str, FacadeError> {
     object
         .get(key)
-        .and_then(WorkflowDatum::as_str)
+        .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(invalid_argument)
 }
@@ -6384,6 +6620,7 @@ pub(crate) struct FilesystemRequest {
     pub(crate) max_results: usize,
     pub(crate) offset: u64,
     pub(crate) max_bytes: usize,
+    pub(crate) read_encoding: Option<String>,
     pub(crate) content: Option<Vec<u8>>,
     pub(crate) pattern: Option<String>,
     pub(crate) kind: Option<String>,
@@ -6395,22 +6632,6 @@ pub(crate) struct FilesystemRequest {
     pub(crate) sort_order: String,
     pub(crate) overwrite: bool,
     pub(crate) calculate_size: bool,
-}
-
-impl FilesystemRequest {
-    pub(crate) fn path_inputs(&self) -> [Option<&str>; 3] {
-        [
-            self.path.as_deref(),
-            self.source.as_deref(),
-            self.destination.as_deref(),
-        ]
-    }
-
-    pub(crate) fn content_base64(&self) -> Option<String> {
-        self.content
-            .as_ref()
-            .map(|content| STANDARD.encode(content))
-    }
 }
 
 pub(crate) fn parse_filesystem_request(
@@ -6429,6 +6650,7 @@ pub(crate) fn parse_filesystem_request(
         max_results: 1_000,
         offset: 0,
         max_bytes: 65_536,
+        read_encoding: None,
         content: None,
         pattern: None,
         kind: None,
@@ -6445,13 +6667,25 @@ pub(crate) fn parse_filesystem_request(
         "list" => {
             ensure_only_keys(
                 object,
-                &["action", "path", "recursive", "max_depth", "max_entries"],
+                &[
+                    "action",
+                    "path",
+                    "recursive",
+                    "max_depth",
+                    "max_entries",
+                    "sort_by",
+                    "sort_order",
+                ],
             )?;
             request.action = FilesystemAction::List;
             request.path = Some(required_string(object, "path")?.to_string());
             request.recursive = optional_bool(object, "recursive", false)?;
             request.max_depth = optional_u32(object, "max_depth", 16)?;
             request.max_entries = optional_usize(object, "max_entries", 1_000)?;
+            request.sort_by = optional_choice(object, "sort_by", &["path", "size", "modified"])?
+                .unwrap_or_else(|| "path".into());
+            request.sort_order = optional_choice(object, "sort_order", &["asc", "desc"])?
+                .unwrap_or_else(|| "asc".into());
         }
         "stat" => {
             ensure_only_keys(
@@ -6471,11 +6705,15 @@ pub(crate) fn parse_filesystem_request(
             request.max_entries = optional_usize(object, "max_entries", 10_000)?;
         }
         "read" => {
-            ensure_only_keys(object, &["action", "path", "offset", "max_bytes"])?;
+            ensure_only_keys(
+                object,
+                &["action", "path", "offset", "max_bytes", "encoding"],
+            )?;
             request.action = FilesystemAction::Read;
             request.path = Some(required_string(object, "path")?.to_string());
             request.offset = optional_u64(object, "offset", 0)?;
             request.max_bytes = optional_usize(object, "max_bytes", 65_536)?;
+            request.read_encoding = optional_choice(object, "encoding", &["utf8", "base64"])?;
         }
         "write" => {
             ensure_only_keys(
@@ -6517,7 +6755,7 @@ pub(crate) fn parse_filesystem_request(
             request.action = FilesystemAction::Search;
             request.path = Some(required_string(object, "path")?.to_string());
             request.pattern = Some(required_string(object, "pattern")?.to_string());
-            request.recursive = optional_bool(object, "recursive", true)?;
+            request.recursive = optional_bool(object, "recursive", false)?;
             request.max_depth = optional_u32(object, "max_depth", 16)?;
             request.max_entries = optional_usize(object, "max_entries", 10_000)?;
             request.max_results = optional_usize(object, "max_results", 1_000)?;
@@ -6606,7 +6844,7 @@ pub(crate) fn run_workspace_filesystem_with_authority(
         .with_cancellation(cancellation);
     let data = match request.action {
         FilesystemAction::List => {
-            let result = service
+            let mut result = service
                 .list(
                     request.path.as_deref().expect("list path parsed"),
                     request.recursive,
@@ -6614,6 +6852,7 @@ pub(crate) fn run_workspace_filesystem_with_authority(
                     request.max_entries,
                 )
                 .map_err(normalize_filesystem_error)?;
+            sort_filesystem_entries(&mut result.entries, &request.sort_by, &request.sort_order);
             serde_json::to_value(result).map_err(|_| command_state_internal_error())?
         }
         FilesystemAction::Stat => {
@@ -6628,13 +6867,27 @@ pub(crate) fn run_workspace_filesystem_with_authority(
             serde_json::to_value(result).map_err(|_| command_state_internal_error())?
         }
         FilesystemAction::Read => {
-            let result = service
+            let mut result = service
                 .read(
                     request.path.as_deref().expect("read path parsed"),
                     request.offset,
                     request.max_bytes,
                 )
                 .map_err(normalize_filesystem_error)?;
+            match request.read_encoding.as_deref() {
+                Some("base64") if result.encoding == "utf8" => {
+                    result.content = STANDARD.encode(result.content.as_bytes());
+                    result.encoding = "base64";
+                }
+                Some("utf8") if result.encoding == "base64" => {
+                    return Err(FacadeError::new(
+                        FacadeErrorCode::InvalidArgument,
+                        "requested utf8 encoding for non-UTF-8 file content",
+                        false,
+                    ));
+                }
+                _ => {}
+            }
             serde_json::to_value(result).map_err(|_| command_state_internal_error())?
         }
         FilesystemAction::Write => {
@@ -6719,6 +6972,23 @@ pub(crate) fn run_workspace_filesystem_with_authority(
     Ok(stable_success(data, "Filesystem operation completed"))
 }
 
+fn sort_filesystem_entries(
+    entries: &mut [crate::filesystem::service::FilesystemEntry],
+    sort_by: &str,
+    sort_order: &str,
+) {
+    match sort_by {
+        "size" => entries.sort_by_key(|entry| (entry.size, entry.path.clone())),
+        "modified" => {
+            entries.sort_by_key(|entry| (entry.modified_ms.unwrap_or(0), entry.path.clone()))
+        }
+        _ => entries.sort_by(|left, right| left.path.cmp(&right.path)),
+    }
+    if sort_order == "desc" {
+        entries.reverse();
+    }
+}
+
 #[cfg(test)]
 mod schema43_filesystem_facade_tests {
     use super::*;
@@ -6739,7 +7009,7 @@ mod schema43_filesystem_facade_tests {
 
     #[test]
     fn schema43_filesystem_is_flat_nine_core_contract() {
-        assert_eq!(AGENT_API_REVISION, 43);
+        assert_eq!(AGENT_API_REVISION, 47);
         assert_eq!(V1_CORE_TOOL_NAMES.len(), 9);
         assert_eq!(V1_CORE_TOOL_NAMES[2], "filesystem");
         let schema = public_tool_schema("filesystem");
@@ -6806,6 +7076,36 @@ mod schema43_filesystem_facade_tests {
         .unwrap();
         assert_eq!(read["structuredContent"]["data"]["content"], "hel");
         assert_eq!(read["structuredContent"]["data"]["eof"], false);
+        let read_base64 = run_workspace_filesystem(
+            &root,
+            json!({"action":"read","path":"note.txt","encoding":"base64"}),
+        )
+        .unwrap();
+        assert_eq!(
+            read_base64["structuredContent"]["data"]["encoding"],
+            "base64"
+        );
+        assert_eq!(
+            STANDARD
+                .decode(
+                    read_base64["structuredContent"]["data"]["content"]
+                        .as_str()
+                        .unwrap()
+                )
+                .unwrap(),
+            b"hello"
+        );
+
+        std::fs::write(root.join("larger.bin"), b"123456789").unwrap();
+        let sorted = run_workspace_filesystem(
+            &root,
+            json!({"action":"list","path":".","sort_by":"size","sort_order":"desc"}),
+        )
+        .unwrap();
+        assert_eq!(
+            sorted["structuredContent"]["data"]["entries"][0]["path"],
+            "larger.bin"
+        );
 
         let search = run_workspace_filesystem(
             &root,
@@ -6816,10 +7116,77 @@ mod schema43_filesystem_facade_tests {
             search["structuredContent"]["data"]["entries"][0]["path"],
             "note.txt"
         );
+        std::fs::create_dir(root.join("deep")).unwrap();
+        std::fs::write(root.join("deep/nested.txt"), b"nested").unwrap();
+        let non_recursive = run_workspace_filesystem(
+            &root,
+            json!({"action":"search","path":".","pattern":"*.txt"}),
+        )
+        .unwrap();
+        assert_eq!(
+            non_recursive["structuredContent"]["data"]["entries"],
+            json!([{
+                "path":"note.txt",
+                "kind":"file",
+                "size":5,
+                "modified_ms":non_recursive["structuredContent"]["data"]["entries"][0]["modified_ms"].clone()
+            }])
+        );
+        let recursive = run_workspace_filesystem(
+            &root,
+            json!({"action":"search","path":".","pattern":"*.txt","recursive":true}),
+        )
+        .unwrap();
+        assert_eq!(
+            recursive["structuredContent"]["data"]["entries"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
 
         let hash =
             run_workspace_filesystem(&root, json!({"action":"hash","path":"note.txt"})).unwrap();
         assert_eq!(hash["structuredContent"]["data"]["algorithm"], "sha256");
+
+        std::fs::write(root.join("format-source.txt"), b"format").unwrap();
+        let absolute_read = run_workspace_filesystem(
+            &root,
+            json!({"action":"read","path":root.join("format-source.txt").to_string_lossy()}),
+        )
+        .unwrap();
+        assert_eq!(
+            absolute_read["structuredContent"]["data"]["path"],
+            "format-source.txt"
+        );
+        let moved = run_workspace_filesystem(
+            &root,
+            json!({
+                "action":"move",
+                "source":root.join("format-source.txt").to_string_lossy(),
+                "destination":"format-destination.txt"
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            moved["structuredContent"]["data"]["path"],
+            "format-source.txt"
+        );
+        assert_eq!(
+            moved["structuredContent"]["data"]["destination"],
+            "format-destination.txt"
+        );
+        let deleted = run_workspace_filesystem(
+            &root,
+            json!({
+                "action":"delete",
+                "path":root.join("format-destination.txt").to_string_lossy()
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            deleted["structuredContent"]["data"]["path"],
+            "format-destination.txt"
+        );
 
         assert_eq!(
             run_workspace_filesystem(
@@ -6925,6 +7292,16 @@ fn normalize_runtime_error(error: CodingToolsRuntimeError) -> FacadeError {
             true,
         )
         .with_diagnostic(transport_unavailable("connection_unavailable", None)),
+        CodingToolsRuntimeError::RequestTimeout => FacadeError::new(
+            FacadeErrorCode::OperationTimedOut,
+            "命令控制请求已达到 wait_ms 时间预算",
+            true,
+        )
+        .with_diagnostic(ErrorDiagnostic::new(
+            DiagnosticErrorCode::Timeout,
+            DiagnosticPhase::Transport,
+            "request_deadline_expired",
+        )),
         CodingToolsRuntimeError::HttpStatus(status) => FacadeError::new(
             FacadeErrorCode::SessionUnavailable,
             "编码运行时传输返回异常 HTTP 状态",
@@ -6957,14 +7334,6 @@ fn normalize_runtime_error(error: CodingToolsRuntimeError) -> FacadeError {
             true,
         ),
     }
-}
-
-fn normalize_toolbox_error(error: ToolboxError) -> FacadeError {
-    let code = match error.kind {
-        ToolboxErrorKind::RuntimeUnavailable => FacadeErrorCode::RuntimeUnavailable,
-        ToolboxErrorKind::CapabilityUnavailable => FacadeErrorCode::CapabilityUnavailable,
-    };
-    FacadeError::new(code, "Toolbox executable unavailable", false)
 }
 
 fn runtime_fault_name(fault: &RuntimeFault) -> &'static str {
@@ -7085,6 +7454,31 @@ fn normalize_private_error(raw: &Value) -> FacadeError {
     FacadeError::new(public, "LocalBridge 工具执行失败", false)
 }
 
+fn normalize_git_error(raw: &Value) -> FacadeError {
+    let error = raw
+        .pointer("/structuredContent/error")
+        .and_then(Value::as_object);
+    let private_code = error
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .unwrap_or("GIT_ERROR");
+    let private_message = error
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("Git operation failed");
+    let code = match private_code {
+        "INVALID_ARGUMENT" => FacadeErrorCode::InvalidArgument,
+        "NOT_FOUND" => FacadeErrorCode::NotFound,
+        "OUTSIDE_WORKSPACE" => FacadeErrorCode::WorkspaceDenied,
+        "GIT_TIMEOUT" => FacadeErrorCode::ProcessTimedOut,
+        _ => FacadeErrorCode::ProcessFailed,
+    };
+    FacadeError::new(code, "Git 操作失败", false).with_details(json!({
+        "git_error_code":private_code,
+        "git_message":private_message
+    }))
+}
+
 fn session_unavailable() -> FacadeError {
     FacadeError::new(FacadeErrorCode::SessionUnavailable, "命令会话不可用", false)
 }
@@ -7092,7 +7486,7 @@ fn session_unavailable() -> FacadeError {
 fn coding_checkpoint_result(checkpoint: &WorkflowCheckpoint, state: &str, text: &str) -> Value {
     stable_success(
         json!({
-            "action":checkpoint.arguments.get("action").and_then(WorkflowDatum::as_str),
+            "action":checkpoint.arguments.get("action").and_then(Value::as_str),
             "phase":checkpoint.current_step,
             "workflow_id":checkpoint.workflow_id,
             "task_id":checkpoint.workflow_id,
@@ -7330,6 +7724,18 @@ fn drain_public_stderr_protocol_buffer(buffer: &mut String) -> String {
         break;
     }
     visible
+}
+
+fn trim_utf8_front(value: &mut String, max_bytes: usize) -> bool {
+    if value.len() <= max_bytes {
+        return false;
+    }
+    let mut start = value.len().saturating_sub(max_bytes);
+    while !value.is_char_boundary(start) {
+        start += 1;
+    }
+    value.drain(..start);
+    true
 }
 
 fn clixml_envelope_start(value: &str) -> Option<usize> {
@@ -7794,7 +8200,7 @@ mod tests {
             ("7z", "cmd", "7-Zip (a) 26.02"),
             ("jq --version", "cmd", "jq-1.8.2"),
             ("curl --version", "cmd", "curl "),
-            ("curl --version", "windows_powershell", "curl "),
+            ("curl.exe --version", "windows_powershell", "curl "),
         ] {
             let mut result = facade
                 .call_tool(
@@ -7877,11 +8283,25 @@ mod tests {
 
     struct FakeAdapter {
         catalog: Value,
+        checkpoint: std::sync::Arc<std::sync::Mutex<Option<Value>>>,
+    }
+
+    impl FakeAdapter {
+        fn new(catalog: Value) -> Self {
+            Self {
+                catalog,
+                checkpoint: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            }
+        }
     }
 
     impl WorkspaceRuntimeAdapter for FakeAdapter {
         fn negotiate(&mut self) -> Result<(), FacadeError> {
             validate_runtime_capabilities(&self.catalog)
+        }
+
+        fn validate_workspace_identity(&self) -> Result<(), FacadeError> {
+            Ok(())
         }
 
         fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {
@@ -7924,6 +8344,29 @@ mod tests {
                     "content_sha256":"a".repeat(64)
                 }]
             }))
+        }
+
+        fn coding_verification_plan(&self, _project_path: &str) -> Result<Vec<Value>, FacadeError> {
+            Ok(vec![json!({
+                "command":"echo verify",
+                "shell":"cmd",
+                "workdir":"."
+            })])
+        }
+
+        fn verify_coding_edit_preconditions(
+            &self,
+            _expected: &Map<String, Value>,
+        ) -> Result<(), FacadeError> {
+            Ok(())
+        }
+
+        fn apply_coding_patch(
+            &self,
+            _patch: &str,
+            _expected: &Map<String, Value>,
+        ) -> Result<Vec<String>, FacadeError> {
+            Ok(vec!["safe/doc.txt".into()])
         }
 
         fn apply_directory_change(
@@ -7995,6 +8438,30 @@ mod tests {
         fn has_running_execution(&self) -> bool {
             false
         }
+
+        fn load_workflow_checkpoint(&self) -> Result<Option<Value>, FacadeError> {
+            Ok(self
+                .checkpoint
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone())
+        }
+
+        fn save_workflow_checkpoint(&self, checkpoint: &Value) -> Result<(), FacadeError> {
+            *self
+                .checkpoint
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(checkpoint.clone());
+            Ok(())
+        }
+
+        fn clear_workflow_checkpoint(&self) -> Result<(), FacadeError> {
+            *self
+                .checkpoint
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            Ok(())
+        }
     }
 
     #[derive(Clone)]
@@ -8043,6 +8510,10 @@ mod tests {
             validate_runtime_capabilities(&self.catalog)
         }
 
+        fn validate_workspace_identity(&self) -> Result<(), FacadeError> {
+            Ok(())
+        }
+
         fn workspace_context(&mut self, _request_id: Option<&Value>) -> Result<Value, FacadeError> {
             if self.state.fails_at("workspace") {
                 return Err(FacadeError::new(
@@ -8064,6 +8535,44 @@ mod tests {
 
         fn project_context(&self, path: &str) -> Result<Value, FacadeError> {
             Ok(json!({"selected_path":path}))
+        }
+
+        fn coding_context(
+            &self,
+            _project_path: &str,
+            _objective: &str,
+        ) -> Result<Value, FacadeError> {
+            Ok(json!({
+                "instructions":[],
+                "important_files":["safe/doc.txt"],
+                "related_files":["safe/doc.txt"],
+                "relevant_ranges":[],
+                "files_read":[{
+                    "path":"safe/doc.txt",
+                    "start_line":1,
+                    "end_line":1,
+                    "content_sha256":"a".repeat(64)
+                }]
+            }))
+        }
+
+        fn coding_verification_plan(&self, _project_path: &str) -> Result<Vec<Value>, FacadeError> {
+            Ok(Vec::new())
+        }
+
+        fn verify_coding_edit_preconditions(
+            &self,
+            _expected: &Map<String, Value>,
+        ) -> Result<(), FacadeError> {
+            Ok(())
+        }
+
+        fn apply_coding_patch(
+            &self,
+            _patch: &str,
+            _expected: &Map<String, Value>,
+        ) -> Result<Vec<String>, FacadeError> {
+            Ok(vec!["safe/doc.txt".into()])
         }
 
         fn apply_directory_change(
@@ -8296,7 +8805,7 @@ mod tests {
         assert!(
             stable_data(&started)["workflow_id"]
                 .as_str()
-                .is_some_and(|value| value.starts_with("lb-workflow-"))
+                .is_some_and(|value| value.starts_with("lb-task-"))
         );
         assert_eq!(
             state
@@ -8412,8 +8921,7 @@ mod tests {
                 stored
                     .failure
                     .as_ref()
-                    .and_then(|failure| failure.get("status"))
-                    .and_then(WorkflowDatum::as_str),
+                    .and_then(|failure| failure.status.as_deref()),
                 Some("failed"),
                 "{stage}"
             );
@@ -8468,8 +8976,7 @@ mod tests {
             stored
                 .failure
                 .as_ref()
-                .and_then(|failure| failure.get("status"))
-                .and_then(WorkflowDatum::as_str),
+                .and_then(|failure| failure.status.as_deref()),
             Some("lost")
         );
         let aggregate = facade.task_aggregate_snapshot();
@@ -8622,7 +9129,7 @@ mod tests {
         let aggregate = facade.task_aggregate_snapshot();
         assert_eq!(aggregate["state"], "waiting");
         assert_eq!(aggregate["current_workflow"]["state"], "waiting");
-        assert!(aggregate["current_command"].is_null());
+        assert!(aggregate.get("current_command").is_none());
     }
 
     #[test]
@@ -8982,8 +9489,7 @@ mod tests {
             json!({"action":"bugfix","path":"."}),
             "existing".into(),
         );
-        c.git_before =
-            Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}).into());
+        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}));
         *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
         let mut f = AgentFacade::with_adapter(
             ResumeAdapter {
@@ -9022,7 +9528,7 @@ mod tests {
             json!({"action":"bugfix","path":"."}),
             "stale".into(),
         );
-        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-OLD"}).into());
+        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-OLD"}));
         *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
         *state.git_head.lock().unwrap() = "HEAD-NEW".into();
         let mut f = AgentFacade::with_adapter(
@@ -9059,8 +9565,7 @@ mod tests {
             json!({"action":"bugfix","path":"."}),
             "context".into(),
         );
-        c.git_before =
-            Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}).into());
+        c.git_before = Some(json!({"is_repo":true,"repository_root":".","head":"HEAD-STABLE"}));
         *state.checkpoint.lock().unwrap() = Some(serde_json::to_value(&c).unwrap());
         let mut f = AgentFacade::with_adapter(
             ResumeAdapter {
@@ -9126,13 +9631,8 @@ mod tests {
 
     #[test]
     fn schema41_document_create_existing_target_returns_file_changed() {
-        let mut f = AgentFacade::with_adapter(
-            FakeAdapter {
-                catalog: compatible_catalog(),
-            },
-            policy(),
-        )
-        .unwrap();
+        let mut f =
+            AgentFacade::with_adapter(FakeAdapter::new(compatible_catalog()), policy()).unwrap();
         let e = f
             .dispatch(
                 PermissionMode::Full,
@@ -9157,10 +9657,10 @@ mod tests {
         let wait = control["inputSchema"]["properties"]["wait_ms"]["description"]
             .as_str()
             .unwrap_or_default();
-        assert!(wait.contains("2000ms") && wait.contains("end-to-end"));
+        assert!(wait.contains("1000ms") && wait.contains("end-to-end"));
         assert_eq!(
             command_control_transport_timeout(500),
-            std::time::Duration::from_millis(2500)
+            std::time::Duration::from_millis(1500)
         );
     }
 
@@ -9306,19 +9806,14 @@ mod tests {
             FacadeErrorCode::RuntimeCapabilityMismatch
         );
         assert!(matches!(
-            AgentFacade::with_adapter(FakeAdapter { catalog: missing }, policy()),
+            AgentFacade::with_adapter(FakeAdapter::new(missing), policy()),
             Err(FacadeError {
                 code: FacadeErrorCode::RuntimeCapabilityMismatch,
                 ..
             })
         ));
         assert!(matches!(
-            AgentFacade::with_adapter(
-                FakeAdapter {
-                    catalog: incompatible
-                },
-                policy()
-            ),
+            AgentFacade::with_adapter(FakeAdapter::new(incompatible), policy()),
             Err(FacadeError {
                 code: FacadeErrorCode::RuntimeCapabilityMismatch,
                 ..
@@ -9537,7 +10032,7 @@ mod tests {
         assert_eq!(schema["additionalProperties"], false);
         assert_eq!(
             schema["properties"]["action"]["enum"],
-            json!(["poll", "read", "write", "kill"])
+            json!(["adopt", "poll", "read", "write", "kill"])
         );
         for property in [
             "action",
@@ -9614,7 +10109,7 @@ mod tests {
         let public_session =
             bind_test_session(&mut sessions, &task_state, "PRIVATE_SESSION_SECRET");
         let public_output =
-            sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET", &public_session);
+            sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET", &public_session, "stdout");
         assert!(public_session.starts_with("lb-session-"));
         assert!(public_output.starts_with("lb-output-"));
         assert_ne!(public_session, "PRIVATE_SESSION_SECRET");
@@ -9624,7 +10119,8 @@ mod tests {
     #[test]
     fn local_retained_output_handles_are_fifo_bounded_without_evicting_private_handles() {
         let mut sessions = PublicCommandSessions::default();
-        let private = sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET", "session-a");
+        let private =
+            sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET", "session-a", "stdout");
         let first = sessions.retain_local_output("stdout", "first".into());
         let mut latest = String::new();
         for index in 1..=MAX_LOCAL_RETAINED_OUTPUT_HANDLES {
@@ -9656,10 +10152,12 @@ mod tests {
                 execution_id: ExecutionId::new("expired-execution"),
                 started_at: Instant::now(),
                 pending_output: String::new(),
+                pending_output_truncated: false,
                 stderr_protocol_buffer: String::new(),
             },
         );
-        let output = sessions.public_output_for_private("expired-private-output", &public);
+        let output =
+            sessions.public_output_for_private("expired-private-output", &public, "stdout");
 
         sessions.reap_expired_mappings(&executions);
 
@@ -9878,6 +10376,33 @@ mod tests {
     }
 
     #[test]
+    fn git_error_is_not_projected_as_empty_success() {
+        let raw = json!({
+            "isError":true,
+            "structuredContent":{
+                "ok":false,
+                "error":{
+                    "code":"GIT_ERROR",
+                    "message":"fatal: ambiguous argument 'definitely-not-a-ref'"
+                }
+            }
+        });
+        let error = normalize_git_error(&raw);
+        assert_eq!(error.code, FacadeErrorCode::ProcessFailed);
+        let public = error.to_mcp_result();
+        assert_eq!(public["isError"], true);
+        assert_eq!(
+            public["structuredContent"]["error"]["details"]["git_error_code"],
+            "GIT_ERROR"
+        );
+        assert!(
+            public["structuredContent"]["error"]["details"]["git_message"]
+                .as_str()
+                .is_some_and(|message| message.contains("definitely-not-a-ref"))
+        );
+    }
+
+    #[test]
     fn image_success_content_is_rebuilt_without_private_item_fields() {
         let raw = json!({
             "content":[
@@ -9912,13 +10437,8 @@ mod tests {
 
     #[test]
     fn schema36_workspace_context_reports_mode_scope_and_capability_snapshot() {
-        let mut facade = AgentFacade::with_adapter(
-            FakeAdapter {
-                catalog: compatible_catalog(),
-            },
-            policy(),
-        )
-        .unwrap();
+        let mut facade =
+            AgentFacade::with_adapter(FakeAdapter::new(compatible_catalog()), policy()).unwrap();
         let result = facade
             .call_tool(
                 PermissionMode::Full,
@@ -9930,7 +10450,7 @@ mod tests {
             .unwrap();
         let data = stable_data(&result);
         assert_eq!(data["permission_mode"], "full");
-        assert_eq!(data["workspace_scope"], "active_workspace");
+        assert_eq!(data["workspace_scope"], "structured_tools_active_workspace");
         assert_eq!(data["ordinary_route_token"], "current_windows_user");
         assert_eq!(data["elevated_route_available"], false);
         assert!(
@@ -9945,13 +10465,8 @@ mod tests {
 
     #[test]
     fn schema39_exec_dry_run_completes_without_creating_public_session() {
-        let mut facade = AgentFacade::with_adapter(
-            FakeAdapter {
-                catalog: compatible_catalog(),
-            },
-            policy(),
-        )
-        .unwrap();
+        let mut facade =
+            AgentFacade::with_adapter(FakeAdapter::new(compatible_catalog()), policy()).unwrap();
         let result = facade
             .call_tool(
                 PermissionMode::Full,
@@ -9970,13 +10485,8 @@ mod tests {
 
     #[test]
     fn schema36_agent_dry_run_can_explain_process_restriction_in_edit() {
-        let mut facade = AgentFacade::with_adapter(
-            FakeAdapter {
-                catalog: compatible_catalog(),
-            },
-            policy(),
-        )
-        .unwrap();
+        let mut facade =
+            AgentFacade::with_adapter(FakeAdapter::new(compatible_catalog()), policy()).unwrap();
         let result = facade
             .call_tool(
                 PermissionMode::Edit,
@@ -10007,13 +10517,8 @@ mod tests {
 
     #[test]
     fn every_advertised_agent_and_document_action_has_an_executable_facade_contract() {
-        let mut facade = AgentFacade::with_adapter(
-            FakeAdapter {
-                catalog: compatible_catalog(),
-            },
-            policy(),
-        )
-        .unwrap();
+        let mut facade =
+            AgentFacade::with_adapter(FakeAdapter::new(compatible_catalog()), policy()).unwrap();
         for action in [
             "diagnose",
             "bugfix",
@@ -10086,32 +10591,6 @@ mod tests {
     }
 
     #[test]
-    fn cmd_rmdir_compatibility_parser_accepts_only_one_static_direct_target() {
-        assert_eq!(
-            direct_cmd_rmdir_target(r"rmdir /s /q test\document_workflow_probe").as_deref(),
-            Some(r"test\document_workflow_probe")
-        );
-        assert_eq!(
-            direct_cmd_rmdir_target(r#"RMDIR /q "test\probe with spaces" /s"#).as_deref(),
-            Some(r"test\probe with spaces")
-        );
-        for denied in [
-            r"echo rmdir /s /q test\probe",
-            r"rmdir /s /q test\one test\two",
-            r"rmdir /s /q %TEMP%\probe",
-            r"rmdir /s /q test\probe & echo done",
-            r"rmdir /x test\probe",
-            r#"rmdir /s /q "unterminated"#,
-        ] {
-            assert!(direct_cmd_rmdir_target(denied).is_none(), "{denied}");
-        }
-        assert_eq!(
-            rewrite_direct_cmd_rmdir(r"  RMDIR /s /q test\probe"),
-            r"  rd /s /q test\probe"
-        );
-    }
-
-    #[test]
     fn session_handles_are_opaque_terminal_monotonic_and_runtime_loss_is_stable() {
         let task_state = test_task_state("terminal-monotonic");
         let mut sessions = PublicCommandSessions::default();
@@ -10152,6 +10631,25 @@ mod tests {
                 outcome: TerminalOutcome::Lost,
                 ..
             })
+        ));
+
+        let cancelled = bind_test_session(&mut sessions, &task_state, "PRIVATE_CANCELLED");
+        task_state
+            .request_cancellation(&PublicSessionId::new(cancelled.clone()), "KILL")
+            .expect("record cancellation before touching the runtime");
+        sessions
+            .mark_error_terminal(&cancelled, &session_unavailable(), &task_state)
+            .expect("runtime disappearance settles through the execution owner");
+        let terminal = task_state
+            .execution_for_public_session(&PublicSessionId::new(cancelled))
+            .expect("cancelled execution remains authoritative");
+        assert!(matches!(
+            terminal.state,
+            ExecutionState::Terminal(ExecutionTerminal {
+                outcome: TerminalOutcome::Cancelled,
+                error_code: Some(ref code),
+                ..
+            }) if code == "ProcessCancelled"
         ));
     }
 
@@ -10392,5 +10890,28 @@ mod tests {
         ] {
             assert!(!public_patch_targets_valid(denied), "{denied}");
         }
+    }
+
+    #[test]
+    fn ordinary_commands_are_not_classified_from_argument_substrings() {
+        for command in [
+            "Write-Output test",
+            "Get-ChildItem D:\\project\\test",
+            "echo build-result",
+        ] {
+            assert_eq!(
+                public_task_kind("exec_command", &json!({"command":command})),
+                TaskKind::ExecuteCommand,
+                "{command}"
+            );
+        }
+        assert_eq!(
+            public_task_kind("exec_command", &json!({"command":"cargo test --workspace"})),
+            TaskKind::Test
+        );
+        assert_eq!(
+            public_task_kind("exec_command", &json!({"command":"npm run build"})),
+            TaskKind::Build
+        );
     }
 }

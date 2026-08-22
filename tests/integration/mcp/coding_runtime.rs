@@ -6,11 +6,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use localbridge_lib::execution::{CapabilityPolicy, DenyReason};
 use localbridge_lib::mcp::{
     CodingToolsPermissionMode, CodingToolsRuntime, CodingToolsRuntimeConfig,
     CodingToolsRuntimeError, GuardError, InternalBearer, McpGuard, ToolCallRequest,
 };
-use localbridge_lib::execution::{CapabilityPolicy, DenyReason};
 use localbridge_lib::state::{CurrentTaskStatus, PermissionMode};
 use serde_json::json;
 
@@ -75,7 +75,10 @@ fn visible_descendant_windows(root_pid: u32) -> Vec<String> {
         .args(["-NoProfile", "-Command", &script])
         .output()
         .expect("query managed process visible windows");
-    assert!(output.status.success(), "visible-window process query failed");
+    assert!(
+        output.status.success(),
+        "visible-window process query failed"
+    );
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .map(str::trim)
@@ -139,7 +142,10 @@ fn actual_bundled_runtime_is_authenticated_loopback_owned_and_secret_redacted() 
             json!({"session_id":managed_session,"signal":"KILL","wait_ms":1000,"max_output_bytes":4096}),
         )
         .expect("kill managed command no-console probe");
-    assert_ne!(killed.get("isError").and_then(|value| value.as_bool()), Some(true));
+    assert_ne!(
+        killed.get("isError").and_then(|value| value.as_bool()),
+        Some(true)
+    );
 
     let tools = runtime.list_tools().expect("tools/list");
     let catalog = tools
@@ -472,7 +478,10 @@ fn verbatim_execution_paths_are_denied_before_real_upstream_runtime() {
                 if denied.reason == DenyReason::VerbatimExecutionPath
         ));
     }
-    assert!(!sentinel.exists(), "denied command reached the real upstream runtime");
+    assert!(
+        !sentinel.exists(),
+        "denied command reached the real upstream runtime"
+    );
 
     drop(guard);
     cleanup_nested_git_workspace(&workspace);

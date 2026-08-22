@@ -6,6 +6,15 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 No user-visible changes yet.
 
+## [0.13.0] - 2026-08-23
+
+- 完成本轮 schema44 控制面缺陷修复，并将公开工具 API 提升至 revision 47；统一架构验收仍以项目状态记录为准。
+- 修复 durable workflow 与 detached command 跨 MCP Session 的恢复、观察和定向取消。
+- 统一 Task/Execution 终态、权限 Desired/Observed/Effective 投影及 workspace Path Authority。
+- 修复 filesystem 根目录访问、默认递归搜索、Git/document/output 错误分类和控制调用时间预算。
+- 五屏引导改为读取 revisioned 后端权限真相；更新检查和 GitHub Releases 返回类型化结果并固定官方发布源。
+- 重构本地/CI 测试基座并新增 ChatGPT 侧双 Session 黑盒回归。
+
 ## [0.1.2] - 2026-08-21
 
 ### Improved

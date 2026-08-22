@@ -11,6 +11,7 @@ enum OutputHandle {
     Private {
         private_output_ref: String,
         owner_public_session_id: String,
+        stream: String,
     },
     Local {
         stream: String,
@@ -31,6 +32,7 @@ impl OutputHandleRegistry {
         &mut self,
         private_output_ref: &str,
         owner_public_session_id: &str,
+        stream: &str,
     ) -> String {
         if let Some(public) = self.private_to_public.get(private_output_ref) {
             return public.clone();
@@ -48,6 +50,7 @@ impl OutputHandleRegistry {
             OutputHandle::Private {
                 private_output_ref: private_output_ref.to_owned(),
                 owner_public_session_id: owner_public_session_id.to_owned(),
+                stream: stream.to_owned(),
             },
         );
         self.private_order.push_back(public.clone());
@@ -85,6 +88,14 @@ impl OutputHandleRegistry {
         match self.handles.get(public_output_ref)? {
             OutputHandle::Private { .. } => None,
             OutputHandle::Local { stream, content } => Some((stream.clone(), content.clone())),
+        }
+    }
+
+    pub(crate) fn stream(&self, public_output_ref: &str) -> Option<String> {
+        match self.handles.get(public_output_ref)? {
+            OutputHandle::Private { stream, .. } | OutputHandle::Local { stream, .. } => {
+                Some(stream.clone())
+            }
         }
     }
 
@@ -137,9 +148,9 @@ mod tests {
     #[test]
     fn local_and_private_handles_have_independent_bounded_fifo_retention() {
         let mut registry = OutputHandleRegistry::default();
-        let private_first = registry.public_for_private("private-0", "session-a");
+        let private_first = registry.public_for_private("private-0", "session-a", "stdout");
         for index in 1..=MAX_PRIVATE_RETAINED_OUTPUT_HANDLES {
-            registry.public_for_private(&format!("private-{index}"), "session-a");
+            registry.public_for_private(&format!("private-{index}"), "session-a", "stdout");
         }
         assert!(registry.private(&private_first).is_none());
         assert_eq!(
@@ -161,8 +172,8 @@ mod tests {
     #[test]
     fn private_handles_reap_with_their_public_session_owner() {
         let mut registry = OutputHandleRegistry::default();
-        let a = registry.public_for_private("private-a", "session-a");
-        let b = registry.public_for_private("private-b", "session-b");
+        let a = registry.public_for_private("private-a", "session-a", "stdout");
+        let b = registry.public_for_private("private-b", "session-b", "stderr");
         registry.reap_owned_by(&["session-a".into()]);
         assert!(registry.private(&a).is_none());
         assert_eq!(registry.private(&b).as_deref(), Some("private-b"));

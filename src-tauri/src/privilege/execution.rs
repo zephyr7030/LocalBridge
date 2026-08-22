@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use windows_sys::Win32::Foundation::{
     CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
 };
+use windows_sys::Win32::Globalization::{GetOEMCP, MultiByteToWideChar};
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -223,8 +224,8 @@ pub(crate) fn run_elevated_exec(
         stdout_reader.join().unwrap_or_else(|_| (Vec::new(), true));
     let (stderr_bytes, stderr_truncated) =
         stderr_reader.join().unwrap_or_else(|_| (Vec::new(), true));
-    let stdout = redact_output(String::from_utf8_lossy(&stdout_bytes).into_owned(), &spec);
-    let stderr = redact_output(String::from_utf8_lossy(&stderr_bytes).into_owned(), &spec);
+    let stdout = redact_output(decode_process_output(&stdout_bytes), &spec);
+    let stderr = redact_output(decode_process_output(&stderr_bytes), &spec);
     Ok(ElevatedExecResult {
         outcome,
         exit_code,
@@ -345,6 +346,36 @@ fn claim_output_budget(remaining: &AtomicUsize, requested: usize) -> usize {
     }
 }
 
+fn decode_process_output(bytes: &[u8]) -> String {
+    if let Ok(utf8) = std::str::from_utf8(bytes) {
+        return utf8.to_string();
+    }
+    let Ok(byte_count) = i32::try_from(bytes.len()) else {
+        return String::from_utf8_lossy(bytes).into_owned();
+    };
+    let code_page = unsafe { GetOEMCP() };
+    let wide_count =
+        unsafe { MultiByteToWideChar(code_page, 0, bytes.as_ptr(), byte_count, null_mut(), 0) };
+    if wide_count <= 0 {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    let mut wide = vec![0u16; wide_count as usize];
+    if unsafe {
+        MultiByteToWideChar(
+            code_page,
+            0,
+            bytes.as_ptr(),
+            byte_count,
+            wide.as_mut_ptr(),
+            wide_count,
+        )
+    } != wide_count
+    {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    String::from_utf16_lossy(&wide)
+}
+
 fn redact_output(output: String, spec: &ElevatedExecSpec) -> String {
     if output.is_empty() {
         return output;
@@ -462,6 +493,29 @@ mod tests {
         assert!(result.stdout.contains("LB012_STRUCTURED"));
         assert!(result.stderr.is_empty());
         assert!(!result.truncated);
+    }
+
+    #[test]
+    fn localized_console_output_is_not_decoded_as_lossy_utf8() {
+        let result = run_elevated_exec(
+            ElevatedExecSpec {
+                program: r"C:\Windows\System32\whoami.exe".to_string(),
+                args: vec!["/user".to_string()],
+                workdir: Some(r"C:\Windows\Temp".to_string()),
+                timeout_ms: 5_000,
+                max_output_bytes: 4096,
+            },
+            ExecutionCancel::default(),
+        )
+        .unwrap();
+
+        assert_eq!(result.outcome, ElevatedExecOutcome::Completed);
+        assert!(result.stdout.contains("SID"), "{}", result.stdout);
+        assert!(
+            !result.stdout.contains('\u{fffd}'),
+            "localized whoami output contains UTF-8 replacement characters: {}",
+            result.stdout
+        );
     }
 
     #[test]

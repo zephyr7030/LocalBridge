@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -23,10 +23,7 @@ const RECENT_EVENT_LIMIT: usize = RECENT_DIAGNOSTIC_EVENT_LIMIT;
 static RECENT_USER_EVENTS: OnceLock<Mutex<VecDeque<DiagnosticEvent>>> = OnceLock::new();
 static RECENT_USER_OBSERVATIONS: OnceLock<Mutex<RecentUserObservationState>> = OnceLock::new();
 pub(crate) const REQUEST_DIAGNOSTIC_LIMIT: usize = 16;
-pub(crate) const MAX_ACTIVE_DIAGNOSTIC_REQUESTS: usize = 32;
-const ACTIVE_REQUEST_DIAGNOSTIC_LIMIT: usize = MAX_ACTIVE_DIAGNOSTIC_REQUESTS;
 static REQUEST_DIAGNOSTICS: OnceLock<Mutex<RequestDiagnosticState>> = OnceLock::new();
-static MCP_REQUEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticsOutageInput {
@@ -172,7 +169,6 @@ struct RecentUserObservationState {
 #[derive(Debug, Default)]
 struct RequestDiagnosticState {
     recovery_active: Option<ActiveRecoveryDiagnostic>,
-    active_requests: HashMap<String, ActiveRequestDiagnostic>,
     events: VecDeque<RequestDiagnosticEvent>,
 }
 
@@ -499,66 +495,23 @@ pub fn record_recovery_attempt_event(event: &RecoveryAttemptEvent) {
     }
 }
 
-fn mcp_active_key(request_key: &str, connection_id: &str) -> String {
-    format!("{connection_id}\u{0}{request_key}")
+fn mcp_diagnostic_request_id(request_key: &str, connection_id: &str) -> String {
+    format!("mcp:{connection_id}:{request_key}")
 }
 
 pub fn record_mcp_request_start(request_key: &str, connection_id: &str, tool: &str) {
-    let sequence = MCP_REQUEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let request_id = format!("req-mcp-{}-{sequence}", std::process::id());
-    let connection_id = connection_id.to_string();
-    let tool = tool.to_string();
-    let active = ActiveRequestDiagnostic {
-        attempt: 1,
-        request_id: request_id.clone(),
-        connection_id: connection_id.clone(),
-        tool: tool.clone(),
-        started_at: Instant::now(),
-    };
     let mut log = request_diagnostic_log()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let active_key = mcp_active_key(request_key, &connection_id);
-    if let Some(replaced) = log.active_requests.remove(&active_key) {
-        push_request_end(
-            &mut log,
-            replaced,
-            "lost",
-            Some(ErrorDiagnostic::new(
-                DiagnosticErrorCode::Unknown,
-                DiagnosticPhase::Mcp,
-                "request_tracking_replaced",
-            )),
-        );
-    }
-    if log.active_requests.len() >= ACTIVE_REQUEST_DIAGNOSTIC_LIMIT {
-        let oldest_key = log
-            .active_requests
-            .iter()
-            .min_by_key(|(_, active)| active.started_at)
-            .map(|(key, _)| key.clone());
-        if let Some(evicted) = oldest_key.and_then(|key| log.active_requests.remove(&key)) {
-            push_request_end(
-                &mut log,
-                evicted,
-                "lost",
-                Some(ErrorDiagnostic::new(
-                    DiagnosticErrorCode::Unknown,
-                    DiagnosticPhase::Mcp,
-                    "request_tracking_evicted",
-                )),
-            );
-        }
-    }
     push_request_event(
         &mut log,
         RequestDiagnosticEvent {
             kind: RequestDiagnosticKind::Start,
             timestamp_ms: timestamp_ms(),
-            request_id,
-            connection_id: connection_id.clone(),
+            request_id: mcp_diagnostic_request_id(request_key, connection_id),
+            connection_id: connection_id.to_string(),
             attempt: 1,
-            tool,
+            tool: tool.to_string(),
             outcome: None,
             error_code: None,
             phase: None,
@@ -567,19 +520,12 @@ pub fn record_mcp_request_start(request_key: &str, connection_id: &str, tool: &s
             duration_ms: None,
         },
     );
-    log.active_requests.insert(active_key, active);
 }
 
 pub fn record_mcp_request_result(request_key: &str, connection_id: &str, result: &Value) {
     let mut log = request_diagnostic_log()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(active) = log
-        .active_requests
-        .remove(&mcp_active_key(request_key, connection_id))
-    else {
-        return;
-    };
     let is_error = result
         .get("isError")
         .and_then(Value::as_bool)
@@ -606,14 +552,17 @@ pub fn record_mcp_request_result(request_key: &str, connection_id: &str, result:
             _ => "failed",
         }
     };
-    push_request_end_fields(
+    push_mcp_request_end(
         &mut log,
-        active,
-        outcome,
-        error_code,
-        phase,
-        cause,
-        http_status,
+        McpRequestEnd {
+            request_key,
+            connection_id,
+            outcome,
+            error_code,
+            phase,
+            cause,
+            http_status,
+        },
     );
 }
 
@@ -625,13 +574,48 @@ pub fn record_mcp_request_error(
     let mut log = request_diagnostic_log()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let Some(active) = log
-        .active_requests
-        .remove(&mcp_active_key(request_key, connection_id))
-    else {
-        return;
-    };
-    push_request_end(&mut log, active, "failed", Some(diagnostic));
+    push_mcp_request_end(
+        &mut log,
+        McpRequestEnd {
+            request_key,
+            connection_id,
+            outcome: "failed",
+            error_code: Some(diagnostic.error_code.as_str().to_string()),
+            phase: Some(diagnostic.phase.as_str().to_string()),
+            cause: Some(diagnostic.cause),
+            http_status: diagnostic.http_status,
+        },
+    );
+}
+
+struct McpRequestEnd<'a> {
+    request_key: &'a str,
+    connection_id: &'a str,
+    outcome: &'a str,
+    error_code: Option<String>,
+    phase: Option<String>,
+    cause: Option<String>,
+    http_status: Option<u16>,
+}
+
+fn push_mcp_request_end(log: &mut RequestDiagnosticState, end: McpRequestEnd<'_>) {
+    push_request_event(
+        log,
+        RequestDiagnosticEvent {
+            kind: RequestDiagnosticKind::End,
+            timestamp_ms: timestamp_ms(),
+            request_id: mcp_diagnostic_request_id(end.request_key, end.connection_id),
+            connection_id: end.connection_id.to_string(),
+            attempt: 1,
+            tool: String::new(),
+            outcome: Some(end.outcome.to_string()),
+            error_code: end.error_code,
+            phase: end.phase,
+            cause: end.cause,
+            http_status: end.http_status,
+            duration_ms: None,
+        },
+    );
 }
 
 fn push_request_end(
@@ -713,27 +697,6 @@ pub(crate) fn reset_request_diagnostics_for_test() {
     *request_diagnostic_log()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner) = RequestDiagnosticState::default();
-}
-
-#[cfg(test)]
-pub(crate) fn active_request_diagnostics_for_test() -> usize {
-    request_diagnostic_log()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .active_requests
-        .len()
-}
-
-#[cfg(test)]
-pub(crate) fn request_diagnostic_active_for_test(
-    request_key: &str,
-    connection_id: &str,
-) -> bool {
-    request_diagnostic_log()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .active_requests
-        .contains_key(&mcp_active_key(request_key, connection_id))
 }
 
 #[cfg(test)]

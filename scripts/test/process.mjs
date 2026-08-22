@@ -28,17 +28,19 @@ export function validateStages(stages) {
   return stages;
 }
 
-export function selectStages(stages, { only, from } = {}) {
+export function selectStages(stages, { only, from, through } = {}) {
   validateStages(stages);
   if (only) {
     const selected = stages.filter((stage) => stage.id === only);
     if (selected.length === 0) throw new Error(`unknown test stage: ${only}`);
     return selected;
   }
-  if (!from) return stages;
-  const index = stages.findIndex((stage) => stage.id === from);
-  if (index < 0) throw new Error(`unknown test stage: ${from}`);
-  return stages.slice(index);
+  const start = from ? stages.findIndex((stage) => stage.id === from) : 0;
+  if (start < 0) throw new Error(`unknown test stage: ${from}`);
+  const end = through ? stages.findIndex((stage) => stage.id === through) : stages.length - 1;
+  if (end < 0) throw new Error(`unknown test stage: ${through}`);
+  if (start > end) throw new Error(`test stage range is reversed: ${from} through ${through}`);
+  return stages.slice(start, end + 1);
 }
 
 export function runStage(stage, options = {}) {

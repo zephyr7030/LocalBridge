@@ -2,7 +2,7 @@
 
 > Current governance model: **schema44 Control Plane Refactor**
 > Effective: **2026-08-21**
-> Live sequence: **R1 → R2 → R3 → R4 → R5**
+> Live sequence and status: read from **`PROJECT_STATE.json`**
 
 The former LB-PR sequence and G0-G4 group gates are abolished as live governance. Their records remain historical evidence in Git history only.
 
@@ -59,9 +59,7 @@ Primary invariant:
 
 ## Current phase
 
-Read only from `PROJECT_STATE.json.current_phase`.
-
-At this transition the current phase is `R1 — Identity / Isolation`. R2-R5 remain blocked until the immediately preceding phase is accepted. No PR or G pointer exists anymore.
+`PROJECT_STATE.json.current_phase` is the only phase pointer. This document intentionally does not copy its value. No PR or G pointer exists anymore.
 
 ## Phase map
 
@@ -70,14 +68,16 @@ R1 Identity / Isolation
 → R2 Task / Execution Convergence
 → R3 Explicit Scheduler + Session Lifecycle
 → R4 Desired / Observed Convergence
-→ R5 Snapshot / Typed UI / Module Cleanup
+→ R5 Snapshot / Typed UI
+→ R6 Boundary Cleanup
+→ R7 Product Lifecycle
 ```
 
-Do not start the next phase automatically after acceptance.
+Follow the advancement rule in `AGENTS.md` and the live execution contract.
 
 ## Feature freeze
 
-Through completion of R3, do not expand concurrency surface with:
+Do not expand the concurrency surface outside the active contract with:
 
 - multi-window enhancement;
 - window observation/control;
@@ -85,7 +85,7 @@ Through completion of R3, do not expand concurrency surface with:
 - complex workflow expansion;
 - additional long-lived background execution capabilities.
 
-Update Checker is deferred and must not be inserted into the core refactor. Existing Filesystem work is bug-fix only during R1-R3.
+Feature scope and freezes are defined only by the live contract and `PROJECT_STATE.json`.
 
 ## Migration discipline
 

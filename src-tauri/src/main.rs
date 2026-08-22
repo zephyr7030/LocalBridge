@@ -75,10 +75,7 @@ fn handle_main_window_event(window: &tauri::Window<tauri::Wry>, event: &WindowEv
             }
             let backend = lifecycle.backend_handle();
             let app = window.app_handle().clone();
-            if backend
-                .spawn_shutdown_then(move |_| app.exit(0))
-                .is_err()
-            {
+            if backend.spawn_shutdown_then(move |_| app.exit(0)).is_err() {
                 window.app_handle().exit(1);
             }
         }
@@ -314,8 +311,7 @@ fn execute_fixed_window_e2e(
     if (logical_width - 780.0).abs() > 2.0 || (logical_height - 620.0).abs() > 2.0 {
         return Err(format!(
             "native client is {logical_width:.1}x{logical_height:.1} logical ({}x{} physical at {scale}x), expected 780x620 logical",
-            physical.width,
-            physical.height
+            physical.width, physical.height
         ));
     }
     if window
@@ -350,10 +346,12 @@ fn execute_fixed_window_e2e(
     let work_area = monitor.work_area();
     let expected_x = work_area.position.x
         + (i32::try_from(work_area.size.width).map_err(|_| "work area width overflow")?
-            - i32::try_from(outer_size.width).map_err(|_| "outer width overflow")?) / 2;
+            - i32::try_from(outer_size.width).map_err(|_| "outer width overflow")?)
+            / 2;
     let expected_y = work_area.position.y
         + (i32::try_from(work_area.size.height).map_err(|_| "work area height overflow")?
-            - i32::try_from(outer_size.height).map_err(|_| "outer height overflow")?) / 2;
+            - i32::try_from(outer_size.height).map_err(|_| "outer height overflow")?)
+            / 2;
     if (outer_position.x - expected_x).abs() > 3 || (outer_position.y - expected_y).abs() > 3 {
         return Err(format!(
             "first-created main window is not centered in monitor work area: actual=({}, {}) expected=({}, {})",
@@ -512,21 +510,27 @@ fn assert_fixed_window_e2e_metrics(
                 .as_deref()
                 .ok_or("dashboard card computed background missing")?;
             if card_background != "rgba(0, 0, 0, 0)" && card_background != "transparent" {
-                return Err(format!("dashboard card still has an independent background: {card_background}"));
+                return Err(format!(
+                    "dashboard card still has an independent background: {card_background}"
+                ));
             }
             let card_border = metrics
                 .dashboard_card_border_width_before_settings
                 .as_deref()
                 .ok_or("dashboard card computed border missing")?;
             if card_border != "0px" {
-                return Err(format!("dashboard card still has an independent border: {card_border}"));
+                return Err(format!(
+                    "dashboard card still has an independent border: {card_border}"
+                ));
             }
             let card_shadow = metrics
                 .dashboard_card_box_shadow_before_settings
                 .as_deref()
                 .ok_or("dashboard card computed shadow missing")?;
             if card_shadow != "none" && !card_shadow.is_empty() {
-                return Err(format!("dashboard card still has an independent shadow: {card_shadow}"));
+                return Err(format!(
+                    "dashboard card still has an independent shadow: {card_shadow}"
+                ));
             }
             let replace_delta =
                 (metrics.settings_replace_lefts[0] - metrics.settings_replace_lefts[1]).abs();
@@ -550,21 +554,27 @@ fn assert_fixed_window_e2e_metrics(
                 .as_deref()
                 .ok_or("Settings sheet computed clip path missing")?;
             if clip == "none" || !clip.contains("20px") {
-                return Err(format!("Settings scrollbar is not clipped by rounded shell: {clip}"));
+                return Err(format!(
+                    "Settings scrollbar is not clipped by rounded shell: {clip}"
+                ));
             }
             let gutter = metrics
                 .settings_sheet_scrollbar_gutter
                 .as_deref()
                 .ok_or("Settings sheet scrollbar gutter missing")?;
             if !gutter.contains("stable") {
-                return Err(format!("Settings scrollbar gutter is not stable/inset: {gutter}"));
+                return Err(format!(
+                    "Settings scrollbar gutter is not stable/inset: {gutter}"
+                ));
             }
             let overflow = metrics
                 .settings_sheet_overflow_y
                 .as_deref()
                 .ok_or("Settings sheet overflowY missing")?;
             if overflow != "auto" && overflow != "scroll" {
-                return Err(format!("Settings sheet is not a real scroll surface: {overflow}"));
+                return Err(format!(
+                    "Settings sheet is not a real scroll surface: {overflow}"
+                ));
             }
             let scrollbar_width = metrics.settings_scrollbar_width.as_deref().unwrap_or("");
             if scrollbar_width.is_empty() || scrollbar_width == "0px" || scrollbar_width == "auto" {

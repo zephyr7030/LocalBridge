@@ -1,12 +1,11 @@
-use std::path::Path;
-
 use crate::domain::{
     ExecutionRecord, ExecutionState, ExecutionTerminal, PublicSessionId, RpcRequestId, TaskId,
     TerminalOutcome,
 };
 
 use super::execution_registry::{ExecutionRegistry, ExecutionRegistryError};
-use super::workflow_checkpoint::WorkflowCheckpointStore;
+
+pub(crate) const COMMAND_CONTROL_TRANSPORT_HEADROOM_MS: u64 = 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommandControlAction {
@@ -101,6 +100,7 @@ pub(crate) enum RuntimeCommandControlError {
     InvalidRequest,
     SessionUnavailable,
     CapabilityMismatch,
+    TimedOut,
     Unavailable,
 }
 
@@ -122,7 +122,6 @@ pub(crate) struct CommandControlResult {
     pub(crate) exit_code: Option<i64>,
     pub(crate) signal: Option<String>,
     pub(crate) truncated: Option<bool>,
-    pub(crate) checkpoint_settled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +130,7 @@ pub(crate) enum CommandControlError {
     SessionUnavailable,
     RuntimeUnavailable,
     RuntimeCapabilityMismatch,
+    OperationTimedOut,
     ExecutionConflict,
 }
 
@@ -138,7 +138,6 @@ pub(crate) fn control_command_during_work(
     request: CommandControlRequest,
     executions: &ExecutionRegistry,
     runtime: &dyn RuntimeCommandControl,
-    workspace: &Path,
 ) -> Result<CommandControlResult, CommandControlError> {
     if request.action == CommandControlAction::Write
         && request.chars.as_deref().is_none_or(str::is_empty)
@@ -159,25 +158,78 @@ pub(crate) fn control_command_during_work(
         .runtime_handle
         .as_ref()
         .ok_or(CommandControlError::SessionUnavailable)?;
-    let observation = runtime
-        .control_command(&RuntimeCommandRequest {
-            runtime_handle: runtime_handle.as_str().to_string(),
-            action: request.action,
-            chars: request.chars,
-            signal: request.signal,
-            wait_ms: request.wait_ms.min(30_000),
-            request_id: request.request_id,
-        })
-        .map_err(map_runtime_error)?;
+    if request.action == CommandControlAction::Kill {
+        executions
+            .request_cancellation(
+                &request.public_session_id,
+                request.signal.unwrap_or(CommandKillSignal::Term).as_str(),
+            )
+            .map_err(map_execution_error)?;
+    }
+    let observation = match runtime.control_command(&RuntimeCommandRequest {
+        runtime_handle: runtime_handle.as_str().to_string(),
+        action: request.action,
+        chars: request.chars,
+        signal: request.signal,
+        wait_ms: request.wait_ms.min(30_000),
+        request_id: request.request_id,
+    }) {
+        Ok(observation) => observation,
+        Err(error) => {
+            let cancellation_signal = executions.cancellation_signal(&request.public_session_id);
+            if error == RuntimeCommandControlError::SessionUnavailable
+                && cancellation_signal.is_some()
+            {
+                let terminal = ExecutionTerminal {
+                    outcome: TerminalOutcome::Cancelled,
+                    exit_code: None,
+                    signal: cancellation_signal,
+                    output_refs: Vec::new(),
+                    error_code: Some("ProcessCancelled".to_string()),
+                    completed_at_ms: unix_time_ms(),
+                };
+                match executions.finish(&execution.id, terminal) {
+                    Ok(()) | Err(ExecutionRegistryError::AlreadyTerminal { .. }) => {}
+                    Err(error) => return Err(map_execution_error(error)),
+                }
+                let settled = executions
+                    .execution_for_public_session(&request.public_session_id)
+                    .ok_or(CommandControlError::SessionUnavailable)?;
+                let ExecutionState::Terminal(terminal) = &settled.state else {
+                    return Err(CommandControlError::ExecutionConflict);
+                };
+                return Ok(result_from_terminal(&settled, terminal));
+            }
+            if matches!(
+                error,
+                RuntimeCommandControlError::InvalidRequest
+                    | RuntimeCommandControlError::CapabilityMismatch
+            ) {
+                executions.clear_cancellation(&request.public_session_id);
+            }
+            return Err(map_runtime_error(error));
+        }
+    };
 
-    if let Some(outcome) = observation.status.terminal_outcome() {
+    let cancellation_signal = executions.cancellation_signal(&request.public_session_id);
+    let terminal_outcome = observation.status.terminal_outcome().map(|outcome| {
+        if cancellation_signal.is_some() {
+            TerminalOutcome::Cancelled
+        } else {
+            outcome
+        }
+    });
+    if let Some(outcome) = terminal_outcome {
         executions
             .finish(
                 &execution.id,
                 ExecutionTerminal {
                     outcome,
                     exit_code: observation.exit_code,
-                    signal: observation.signal.clone(),
+                    signal: observation
+                        .signal
+                        .clone()
+                        .or_else(|| cancellation_signal.clone()),
                     output_refs: Vec::new(),
                     error_code: terminal_error_code(outcome).map(str::to_string),
                     completed_at_ms: unix_time_ms(),
@@ -186,23 +238,20 @@ pub(crate) fn control_command_during_work(
             .map_err(map_execution_error)?;
     }
 
-    let checkpoint_settled = request.action != CommandControlAction::Kill
-        || observation.status == RuntimeCommandStatus::Running
-        || WorkflowCheckpointStore::for_workspace(workspace)
-            .and_then(|store| store.settle_command_kill(request.public_session_id.as_str()))
-            .is_ok();
-
     Ok(CommandControlResult {
-        status: observation.status,
+        status: if terminal_outcome == Some(TerminalOutcome::Cancelled) {
+            RuntimeCommandStatus::Cancelled
+        } else {
+            observation.status
+        },
         public_session_id: request.public_session_id,
         task_id: execution.task_id,
         stdout: observation.stdout,
         stderr: observation.stderr,
         elapsed_ms: unix_time_ms().saturating_sub(execution.started_at_ms),
         exit_code: observation.exit_code,
-        signal: observation.signal,
+        signal: observation.signal.or(cancellation_signal),
         truncated: observation.truncated,
-        checkpoint_settled,
     })
 }
 
@@ -228,7 +277,6 @@ fn result_from_terminal(
         exit_code: terminal.exit_code,
         signal: terminal.signal.clone(),
         truncated: None,
-        checkpoint_settled: true,
     }
 }
 
@@ -245,12 +293,11 @@ fn terminal_error_code(outcome: TerminalOutcome) -> Option<&'static str> {
 fn map_runtime_error(error: RuntimeCommandControlError) -> CommandControlError {
     match error {
         RuntimeCommandControlError::InvalidRequest => CommandControlError::InvalidRequest,
-        RuntimeCommandControlError::SessionUnavailable => {
-            CommandControlError::SessionUnavailable
-        }
+        RuntimeCommandControlError::SessionUnavailable => CommandControlError::SessionUnavailable,
         RuntimeCommandControlError::CapabilityMismatch => {
             CommandControlError::RuntimeCapabilityMismatch
         }
+        RuntimeCommandControlError::TimedOut => CommandControlError::OperationTimedOut,
         RuntimeCommandControlError::Unavailable => CommandControlError::RuntimeUnavailable,
     }
 }
@@ -294,6 +341,30 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct TimedOutRuntime;
+
+    impl RuntimeCommandControl for TimedOutRuntime {
+        fn control_command(
+            &self,
+            _request: &RuntimeCommandRequest,
+        ) -> Result<RuntimeCommandObservation, RuntimeCommandControlError> {
+            Err(RuntimeCommandControlError::TimedOut)
+        }
+    }
+
+    #[derive(Debug)]
+    struct DisappearedRuntime;
+
+    impl RuntimeCommandControl for DisappearedRuntime {
+        fn control_command(
+            &self,
+            _request: &RuntimeCommandRequest,
+        ) -> Result<RuntimeCommandObservation, RuntimeCommandControlError> {
+            Err(RuntimeCommandControlError::SessionUnavailable)
+        }
+    }
+
     #[test]
     fn terminal_observation_is_committed_by_control_plane_owner() {
         let root = std::env::temp_dir().join(format!(
@@ -302,8 +373,8 @@ mod tests {
             unix_time_ms()
         ));
         std::fs::create_dir_all(&root).expect("test workspace");
-        let registry = ExecutionRegistry::open_at(root.join("executions.json"))
-            .expect("execution registry");
+        let registry =
+            ExecutionRegistry::open_at(root.join("executions.json")).expect("execution registry");
         let public_session = PublicSessionId::new("public-1");
         let execution_id = registry
             .start(TaskId::new("task-1"), public_session.clone())
@@ -315,9 +386,12 @@ mod tests {
             .bind_runtime_handle(&execution_id, RuntimeCommandHandle::new("private-1"))
             .expect("bind runtime handle");
         let runtime = FakeRuntime(Mutex::new(Some(RuntimeCommandObservation {
-            status: RuntimeCommandStatus::Cancelled,
+            // Windows KILL may be reported by the runtime as a non-zero process
+            // exit. The ControlPlane-owned cancellation intent, not that adapter
+            // spelling, determines the domain terminal outcome.
+            status: RuntimeCommandStatus::Failed,
             exit_code: Some(1),
-            signal: Some("SIGKILL".into()),
+            signal: None,
             stdout: String::new(),
             stderr: String::new(),
             truncated: Some(false),
@@ -334,7 +408,6 @@ mod tests {
             },
             &registry,
             &runtime,
-            &root,
         )
         .expect("control result");
         assert_eq!(result.status, RuntimeCommandStatus::Cancelled);
@@ -348,6 +421,131 @@ mod tests {
                 ..
             })
         ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn kill_timeout_preserves_intent_until_poll_observes_one_cancelled_terminal() {
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-command-control-timeout-{}-{}",
+            std::process::id(),
+            unix_time_ms()
+        ));
+        std::fs::create_dir_all(&root).expect("test workspace");
+        let registry =
+            ExecutionRegistry::open_at(root.join("executions.json")).expect("execution registry");
+        let public_session = PublicSessionId::new("public-timeout");
+        let execution_id = registry
+            .start(TaskId::new("task-timeout"), public_session.clone())
+            .expect("start execution");
+        registry
+            .bind_runtime_handle(&execution_id, RuntimeCommandHandle::new("private-timeout"))
+            .expect("bind runtime handle");
+
+        let timed_out = control_command_during_work(
+            CommandControlRequest {
+                action: CommandControlAction::Kill,
+                chars: None,
+                signal: Some(CommandKillSignal::Kill),
+                wait_ms: 0,
+                request_id: RpcRequestId::String("kill-timeout".into()),
+                public_session_id: public_session.clone(),
+            },
+            &registry,
+            &TimedOutRuntime,
+        );
+        assert_eq!(timed_out, Err(CommandControlError::OperationTimedOut));
+        assert_eq!(
+            registry.cancellation_signal(&public_session).as_deref(),
+            Some("KILL")
+        );
+
+        let polled = control_command_during_work(
+            CommandControlRequest {
+                action: CommandControlAction::Poll,
+                chars: None,
+                signal: None,
+                wait_ms: 0,
+                request_id: RpcRequestId::String("poll-after-timeout".into()),
+                public_session_id: public_session.clone(),
+            },
+            &registry,
+            &FakeRuntime(Mutex::new(Some(RuntimeCommandObservation {
+                status: RuntimeCommandStatus::Failed,
+                exit_code: Some(1),
+                signal: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                truncated: Some(false),
+            }))),
+        )
+        .expect("poll result");
+        assert_eq!(polled.status, RuntimeCommandStatus::Cancelled);
+        assert!(matches!(
+            registry
+                .execution_for_public_session(&public_session)
+                .expect("execution")
+                .state,
+            ExecutionState::Terminal(ExecutionTerminal {
+                outcome: TerminalOutcome::Cancelled,
+                ..
+            })
+        ));
+        assert_eq!(registry.cancellation_signal(&public_session), None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn accepted_cancellation_wins_when_the_runtime_session_disappears_before_poll() {
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-command-control-disappeared-{}-{}",
+            std::process::id(),
+            unix_time_ms()
+        ));
+        std::fs::create_dir_all(&root).expect("test workspace");
+        let registry =
+            ExecutionRegistry::open_at(root.join("executions.json")).expect("execution registry");
+        let public_session = PublicSessionId::new("public-disappeared");
+        let execution_id = registry
+            .start(TaskId::new("task-disappeared"), public_session.clone())
+            .expect("start execution");
+        registry
+            .bind_runtime_handle(
+                &execution_id,
+                RuntimeCommandHandle::new("private-disappeared"),
+            )
+            .expect("bind runtime handle");
+        registry
+            .request_cancellation(&public_session, "KILL")
+            .expect("accept cancellation intent");
+
+        let polled = control_command_during_work(
+            CommandControlRequest {
+                action: CommandControlAction::Poll,
+                chars: None,
+                signal: None,
+                wait_ms: 0,
+                request_id: RpcRequestId::String("poll-disappeared".into()),
+                public_session_id: public_session.clone(),
+            },
+            &registry,
+            &DisappearedRuntime,
+        )
+        .expect("a disappeared cancelled session has one terminal outcome");
+
+        assert_eq!(polled.status, RuntimeCommandStatus::Cancelled);
+        assert_eq!(polled.signal.as_deref(), Some("KILL"));
+        assert!(matches!(
+            registry
+                .execution_for_public_session(&public_session)
+                .expect("execution")
+                .state,
+            ExecutionState::Terminal(ExecutionTerminal {
+                outcome: TerminalOutcome::Cancelled,
+                ..
+            })
+        ));
+        assert_eq!(registry.cancellation_signal(&public_session), None);
         let _ = std::fs::remove_dir_all(root);
     }
 }

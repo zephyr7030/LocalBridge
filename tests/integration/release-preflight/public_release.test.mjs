@@ -24,7 +24,7 @@ const manifest = '[verification]\ncompatibility_gate = "LB-000"\npackaging_gate 
 const sanitizedManifest = sanitizePublicText("runtime-manifest.toml", manifest);
 assert.equal(sanitizedManifest.includes("LB-018"), false);
 assert.equal(sanitizedManifest.includes("[privileged_broker]"), true);
-assert.equal(sanitizePublicText("runtime-policy.toml", 'status = "LB_007_STABLE_PUBLIC_POLICY"\n'), 'status = "LB_007_STABLE_PUBLIC_POLICY"\n');
+assert.equal(sanitizePublicText("runtime-policy.toml", 'status = "SCHEMA46_CURRENT_USER_EXECUTION_POLICY"\n'), 'status = "SCHEMA46_CURRENT_USER_EXECUTION_POLICY"\n');
 const publicPackage = JSON.parse(sanitizePublicText("package.json", JSON.stringify({ scripts: { dev: "vite", build: "vite build", test: "vitest run", "toolbox:prepare": "node scripts/prepare-toolbox.mjs", "verify:architecture:negative": "node private/PR_INDEX.json", "verify:lb001": "internal" } })));
 assert.deepEqual(Object.keys(publicPackage.scripts), ["dev", "build", "test", "toolbox:prepare"]);
 assert.equal(publicPackage.license, "MIT");

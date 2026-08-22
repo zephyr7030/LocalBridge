@@ -19,10 +19,6 @@ function walk(relative) {
   });
 }
 
-function requireText(relative, pattern, message) {
-  if (!pattern.test(read(relative))) failures.push(message);
-}
-
 function forbidText(relative, pattern, message) {
   if (pattern.test(read(relative))) failures.push(message);
 }
@@ -43,7 +39,6 @@ forbidTree(
   /\bserde_json::Value\b|\buse\s+serde_json::\{[^}]*\bValue\b/,
   "control plane contains opaque serde_json::Value state",
 );
-
 for (const relative of [
   "src-tauri/src/runtime",
   "src-tauri/src/privilege",
@@ -78,57 +73,14 @@ forbidTree(
   "parallel mutable permission truth remains",
 );
 
-requireText(
-  "src-tauri/src/mcp/facade.rs",
-  /"task_id":\{"type":"string","minLength":1/,
-  "task_control does not publish a task_id selector",
-);
-requireText("src-tauri/src/mcp/facade.rs", /TaskIdRequired/, "TaskIdRequired is missing");
-requireText("src-tauri/src/mcp/facade.rs", /TaskNotOwned/, "TaskNotOwned is missing");
-requireText(
-  "src-tauri/src/mcp/server.rs",
-  /cancel_queued_task\(&session_id, task_id\)/,
-  "task cancellation is not task scoped",
-);
-const server = read("src-tauri/src/mcp/server.rs");
-if ((server.match(/cancel_queued_by_session/g) ?? []).length !== 1) {
-  failures.push("session-wide queue cancellation escaped the explicit session-close path");
-}
-
-requireText(
-  "src-tauri/src/commands/error.rs",
-  /type\s+UiResult<T>\s*=\s*Result<T,\s*UiError>/,
-  "UI commands do not share the typed UiError boundary",
-);
 forbidTree(
   "src-tauri/src/commands",
   /(?:pub\s+async\s+fn|#\[tauri::command\])[\s\S]{0,240}->\s*Result<[^,>]+,\s*String>/,
   "a Tauri UI command exposes Result<T, String>",
 );
-requireText(
-  "src-tauri/src/commands/ui.rs",
-  /let\s+control_plane\s*=\s*lifecycle\.control_plane_snapshot\(\);/,
-  "main UI projection is not derived from one control-plane snapshot",
-);
-requireText(
-  "src-tauri/src/control_plane/resource_lifecycle.rs",
-  /RESOURCE_LIFECYCLE_POLICIES:\s*\[ResourceLifecyclePolicy;\s*9\]/,
-  "the required resource lifecycle catalog is incomplete",
-);
-requireText(
-  "src-tauri/src/control_plane/execution_registry.rs",
-  /PreserveTerminalAndMarkUnfinishedLost|lost_terminal\(\)/,
-  "execution restart recovery does not converge unfinished work to Lost",
-);
-requireText(
-  "src-tauri/src/mcp/server.rs",
-  /command_control_kill_is_not_blocked_by_unrelated_foreground_work/,
-  "command control has no executable proof that Work cannot block Control",
-);
-
 if (failures.length > 0) {
   for (const failure of failures) process.stderr.write(`schema44: ${failure}\n`);
   process.exit(1);
 }
 
-process.stdout.write("schema44 architecture residue verification passed\n");
+process.stdout.write("schema44 architecture residue scan passed; behavioral invariants run in the Rust test stage\n");

@@ -9,8 +9,6 @@ use sha2::{Digest, Sha256};
 
 use crate::runtime::run_bounded_command;
 
-use super::shell::ResolvedShellKind;
-
 const ARIA2C_SHA256: &str = "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2";
 const SEVEN_ZIP_SHA256: &str = "35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2";
 const JQ_SHA256: &str = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627";
@@ -34,18 +32,6 @@ impl Availability {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ToolboxErrorKind {
-    RuntimeUnavailable,
-    CapabilityUnavailable,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ToolboxError {
-    pub(crate) kind: ToolboxErrorKind,
-    pub(crate) tool: &'static str,
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct ToolboxResolver {
     bin_dir: PathBuf,
@@ -54,25 +40,6 @@ pub(crate) struct ToolboxResolver {
     seven_zip: Availability,
     jq: Availability,
     curl: Availability,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolboxTool {
-    Aria2c,
-    SevenZip,
-    Jq,
-    Curl,
-}
-
-impl ToolboxTool {
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Aria2c => "aria2c",
-            Self::SevenZip => "7z",
-            Self::Jq => "jq",
-            Self::Curl => "curl",
-        }
-    }
 }
 
 impl ToolboxResolver {
@@ -130,109 +97,6 @@ impl ToolboxResolver {
         }
         value
     }
-
-    pub(crate) fn rewrite_command(
-        &self,
-        kind: ResolvedShellKind,
-        command: &str,
-    ) -> Result<String, ToolboxError> {
-        let mut output = String::with_capacity(command.len());
-        let mut cursor = 0usize;
-        let mut command_target = true;
-        let mut quote = None;
-        let mut escaped = false;
-        while cursor < command.len() {
-            let ch = command[cursor..]
-                .chars()
-                .next()
-                .expect("cursor is on a character boundary");
-            if command_target {
-                if ch.is_whitespace() {
-                    output.push(ch);
-                    cursor += ch.len_utf8();
-                    continue;
-                }
-                if is_separator(ch) {
-                    output.push(ch);
-                    cursor += ch.len_utf8();
-                    command_target = true;
-                    continue;
-                }
-                let end = token_end(command, cursor);
-                let original = &command[cursor..end];
-                let token = unquote_token(original);
-                if let Some(tool) = toolbox_tool(token) {
-                    let path = self.executable(tool)?;
-                    output.push_str(&shell_executable(kind, &path));
-                } else {
-                    output.push_str(original);
-                }
-                cursor = end;
-                command_target = false;
-                continue;
-            }
-            output.push(ch);
-            cursor += ch.len_utf8();
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            match kind {
-                ResolvedShellKind::Cmd => {
-                    if ch == '^' {
-                        escaped = true;
-                    } else if ch == '"' {
-                        quote = if quote == Some('"') { None } else { Some('"') };
-                    } else if quote.is_none() && is_separator(ch) {
-                        command_target = true;
-                    }
-                }
-                ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
-                    if quote == Some('"') && ch == '`' {
-                        escaped = true;
-                    } else if quote == Some(ch) && matches!(ch, '\'' | '"') {
-                        quote = None;
-                    } else if quote.is_none() && matches!(ch, '\'' | '"') {
-                        quote = Some(ch);
-                    } else if quote.is_none() && ch == '`' {
-                        escaped = true;
-                    } else if quote.is_none() && is_separator(ch) {
-                        command_target = true;
-                    }
-                }
-            }
-        }
-        Ok(output)
-    }
-
-    fn executable(&self, tool: ToolboxTool) -> Result<PathBuf, ToolboxError> {
-        let availability = match tool {
-            ToolboxTool::Aria2c => self.aria2c,
-            ToolboxTool::SevenZip => self.seven_zip,
-            ToolboxTool::Jq => self.jq,
-            ToolboxTool::Curl => self.curl,
-        };
-        if availability != Availability::Ready {
-            return Err(ToolboxError {
-                kind: if availability == Availability::CapabilityMissing {
-                    ToolboxErrorKind::CapabilityUnavailable
-                } else {
-                    ToolboxErrorKind::RuntimeUnavailable
-                },
-                tool: tool.name(),
-            });
-        }
-        Ok(match tool {
-            ToolboxTool::Aria2c => self.bin_dir.join("aria2c.exe"),
-            ToolboxTool::SevenZip => self.bin_dir.join("7z.exe"),
-            ToolboxTool::Jq => self.bin_dir.join("jq.exe"),
-            ToolboxTool::Curl => self
-                .system32_dir
-                .as_ref()
-                .expect("ready curl has System32 path")
-                .join("curl.exe"),
-        })
-    }
 }
 
 fn bundled_availability(path: &Path, expected: &str) -> Availability {
@@ -282,63 +146,6 @@ fn curl_availability(path: &Path) -> Availability {
     }
 }
 
-fn toolbox_tool(token: &str) -> Option<ToolboxTool> {
-    let token = token.trim();
-    if token.eq_ignore_ascii_case("aria2c") || token.eq_ignore_ascii_case("aria2c.exe") {
-        Some(ToolboxTool::Aria2c)
-    } else if token.eq_ignore_ascii_case("7z") || token.eq_ignore_ascii_case("7z.exe") {
-        Some(ToolboxTool::SevenZip)
-    } else if token.eq_ignore_ascii_case("jq") || token.eq_ignore_ascii_case("jq.exe") {
-        Some(ToolboxTool::Jq)
-    } else if token.eq_ignore_ascii_case("curl") || token.eq_ignore_ascii_case("curl.exe") {
-        Some(ToolboxTool::Curl)
-    } else {
-        None
-    }
-}
-
-fn token_end(command: &str, start: usize) -> usize {
-    let mut quote = None;
-    for (offset, ch) in command[start..].char_indices() {
-        if let Some(expected) = quote {
-            if ch == expected {
-                quote = None;
-            }
-            continue;
-        }
-        if ch == '\'' || ch == '"' {
-            quote = Some(ch);
-        } else if offset > 0 && (ch.is_whitespace() || is_separator(ch)) {
-            return start + offset;
-        }
-    }
-    command.len()
-}
-
-fn unquote_token(token: &str) -> &str {
-    if token.len() >= 2 {
-        let first = token.as_bytes()[0];
-        let last = token.as_bytes()[token.len() - 1];
-        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-            return &token[1..token.len() - 1];
-        }
-    }
-    token
-}
-
-const fn is_separator(ch: char) -> bool {
-    matches!(ch, '&' | '|' | ';' | '\r' | '\n' | '(' | ')' | '{' | '}')
-}
-
-fn shell_executable(kind: ResolvedShellKind, path: &Path) -> String {
-    match kind {
-        ResolvedShellKind::Cmd => format!("\"{}\"", path.to_string_lossy()),
-        ResolvedShellKind::PowerShellCore | ResolvedShellKind::WindowsPowerShell => {
-            format!("& '{}'", path.to_string_lossy().replace('\'', "''"))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,61 +162,13 @@ mod tests {
     }
 
     #[test]
-    fn trusted_targets_are_rewritten_without_touching_inert_arguments() {
+    fn child_path_exposes_trusted_tools_without_rewriting_shell_text() {
         let resolver = ready();
-        let cmd = resolver
-            .rewrite_command(
-                ResolvedShellKind::Cmd,
-                "echo jq && jq . a.json | aria2c.exe --version",
-            )
-            .unwrap();
-        assert!(cmd.contains("echo jq"));
-        assert!(cmd.contains(r#""C:\LocalBridge\runtime\toolbox\bin\jq.exe""#));
-        assert!(cmd.contains(r#""C:\LocalBridge\runtime\toolbox\bin\aria2c.exe""#));
-        let powershell = resolver
-            .rewrite_command(
-                ResolvedShellKind::WindowsPowerShell,
-                "curl --version | jq .",
-            )
-            .unwrap();
-        assert!(powershell.starts_with(r"& 'C:\Windows\System32\curl.exe'"));
-        assert!(powershell.contains(r"| & 'C:\LocalBridge\runtime\toolbox\bin\jq.exe'"));
-    }
-
-    #[test]
-    fn quoted_toolbox_names_after_literal_separators_remain_inert() {
-        let resolver = ready();
-        let cmd = resolver
-            .rewrite_command(
-                ResolvedShellKind::Cmd,
-                r#"echo "jq | aria2c & 7z ; curl" && 7z --help"#,
-            )
-            .unwrap();
-        assert!(cmd.contains(r#""jq | aria2c & 7z ; curl""#));
-        assert!(cmd.ends_with(r#"&& "C:\LocalBridge\runtime\toolbox\bin\7z.exe" --help"#));
-
-        let powershell = resolver
-            .rewrite_command(
-                ResolvedShellKind::WindowsPowerShell,
-                "Write-Output 'jq | aria2c & 7z ; curl'; jq .",
-            )
-            .unwrap();
-        assert!(powershell.contains("'jq | aria2c & 7z ; curl'"));
-        assert!(powershell.ends_with(r"; & 'C:\LocalBridge\runtime\toolbox\bin\jq.exe' ."));
-    }
-
-    #[test]
-    fn curl_capability_failure_is_typed_and_bundled_missing_is_runtime_unavailable() {
-        let mut resolver = ready();
-        resolver.curl = Availability::CapabilityMissing;
-        let curl = resolver
-            .rewrite_command(ResolvedShellKind::Cmd, "curl --version")
-            .unwrap_err();
-        assert_eq!(curl.kind, ToolboxErrorKind::CapabilityUnavailable);
-        resolver.aria2c = Availability::Missing;
-        let aria = resolver
-            .rewrite_command(ResolvedShellKind::Cmd, "aria2c.exe --version")
-            .unwrap_err();
-        assert_eq!(aria.kind, ToolboxErrorKind::RuntimeUnavailable);
+        let path = resolver.child_path();
+        assert!(path.starts_with(r"C:\LocalBridge\runtime\toolbox\bin;C:\Windows\System32"));
+        let discovery = resolver.discovery();
+        for tool in ["aria2c", "7z", "jq", "curl"] {
+            assert_eq!(discovery[tool]["status"], "ready");
+        }
     }
 }

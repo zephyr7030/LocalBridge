@@ -135,7 +135,8 @@ schema/
 └─ runtime-policy/
 
 scripts/
-├─ verify-architecture/
+├─ test/
+├─ verify-schema44/
 ├─ verify-runtime-manifest/
 ├─ diff-upstream-surface/
 ├─ verify-ui-language/

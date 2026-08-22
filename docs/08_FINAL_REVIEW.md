@@ -1,5 +1,9 @@
 # 08 — Final Predevelopment Review
 
+> Historical pre-schema44 review record. Its Shell classifier, PowerShell autoload, governance,
+> and acceptance statements are superseded by `runtime-policy.toml` schema 7,
+> `docs/ADR-0001_POLICY_ENFORCEMENT.md`, and `PROJECT_STATE.json`.
+
 Review date: 2026-08-10  
 Baseline: `LocalBridge-Dev-Preflight-v15-FINAL`  
 Result: **PASS — ready for G0 / LB-000**

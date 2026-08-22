@@ -155,29 +155,29 @@ LB-011 Broker 基础协议仅包含 `Ping` / `Shutdown`，不包含管理员执�
 
 开发构建不得把 `target\\debug` 直接声明为受保护安装目录，也不得关闭 Broker trust check。`debug_assertions` 下仍只接受当前 LocalBridge 可执行文件的精确 canonical sibling `localbridge-privileged-broker.exe`；在 `runas` 前以只读且仅允许 `FILE_SHARE_READ` 的句柄 pin 住已验证 Broker，并保持该句柄跨越 `ShellExecuteExW` 返回，阻止 elevation handoff 期间的 overwrite/delete/replacement。该开发 seam 不接受 PATH 或环境变量指定任意 Broker。非 debug/release 构建完全不使用此 seam，继续要求 canonical Program Files sibling、可信 owner/DACL，以及从安装目录到受保护根祖先链上逐项拒绝当前普通用户危险写/删/改 ACL 权限。
 
-### Schema30 workspace write 与 PowerShell capability 边界
+### Schema46 Structured workspace 与普通 Shell 权限边界
 
-active workspace 是**授权根**，不是只读根。Edit/Full 对授权根内普通文件与目录的 reviewed read/write 都是合法能力；禁止的是改变 WorkspaceRegistry、切换 active workspace、扩大授权根或越界访问。结构化目录 mutation 固定为 `agent_workflow.directory_changes[]`，每项只有 `action/path`，action 仅 `create_directory` / `remove_empty_directory`，使目录创建与空目录清理无需借 shell/process exec 完成。所有 path 都必须 active-workspace-relative 并经过 final-identity/reparse 检查；absolute、`..`、junction/symlink/reparse escape 必须 fail-closed。
+active workspace 是结构化 Filesystem/Document/Git/Workflow 操作的**授权根**，不是只读根。Edit/Full 对授权根内普通文件与目录的 read/write 都是合法能力；禁止的是改变 WorkspaceRegistry、切换 active workspace、扩大授权根或越界访问。所有结构化 path 都必须经过统一 WorkspaceResolver、final-identity 与 reparse 检查。
 
-PowerShell provider mutation 与“允许工作区写入”不是同一件事。由于 `Alias:`/`Function:` 等 provider 可改变命令解析面，`New-Item`、`Set-Item`、`Set-Content` 等通用 provider mutation 可以继续 conservative review-required；不得为了允许 `D:\project\test` 而整体放宽它们。反之，也不得因为这组 shell cmdlet 被严格审查，就让 Edit/Full 失去结构化 workspace write 能力。
+普通 Shell 是另一种权限模型：Full 明确运行于当前 Windows 用户令牌，Shell、脚本、解释器、编译产物与所有后代拥有相同 OS 权限。LocalBridge 不再根据首层 command text 声称能够限制后代能力；因此 `New-Item`、动态调用、脚本和原生命令不会生成另一份权限真相。需要严格 workspace 边界时必须使用结构化工具，而不是从 Shell 文本推断路径授权。
 
-PowerShell 标准 cmdlet baseline 必须来自固定/身份验证的系统模块或等价可信来源；任意 module autoload 继续关闭，用户可控 `PSModulePath` 不得重定向 preload。`Get-Location`、`Get-ChildItem`、`Test-Path` 等基础能力必须可用，否则 explicit `windows_powershell`/`auto` 不能称为可用 shell backend。
+PowerShell 解析只选择可信安装位置中的 executable；模块、provider、alias 与语言行为保持该 Windows 用户的原生语义。输出编码前缀只负责稳定 UTF-8 transport，不充当权限边界。
 
 `agent_workflow.path` 只选择 active workspace 内 nested project context，不是 control-plane。它不得改变 active workspace；repo/project discovery 最多向上到 active workspace root，并与 `git_workflow` 使用等价 resolver 语义。
 
 ### Schema33 Windows 系统管理 / 管理员 Token 权限边界
 
-Windows OS system management 与 LocalBridge 自身 `control-plane` 是两个权限域。`reg.exe`、`sc.exe`、`schtasks.exe`、`netsh.exe`、`bcdedit.exe`、`dism.exe` 等系统管理目标不得借 Full 越过管理员边界，但也不得在管理员模式被全局禁用。
+Windows OS system management 与 LocalBridge 自身 `control-plane` 是两个权限域。普通 Shell 中的系统工具使用当前用户令牌：OS 允许的查询/操作直接执行，需要管理员令牌的操作由 OS 拒绝。LocalBridge 不再按可执行文件名制造一个可被脚本绕过的平行权限层。
 
-- Edit/Full 始终受 active workspace 文件边界；Edit 无普通 process exec，Full 只有当前普通用户 token 的 workspace 相关 process exec；
+- Edit 无普通 process exec；Full 的结构化文件操作受 active workspace 边界，普通 Shell 则明确拥有当前用户 token 的完整 OS 能力；
 - Elevated 的 ordinary route 仍是普通用户 token，不能因为 Broker Active 而静默提权；
 - 用户完成固定风险警告、红色确认按钮完整 9000ms 倒计时、明确确认和 Windows UAC 后，Active Broker 提供独立 administrator route；
 - administrator route 在管理员 Token 范围内允许 workspace 外全文件系统访问、general direct program、可信逻辑 PowerShell/cmd 命令与系统维护；不再把管理员能力收缩成少量 whoami/System32 profile；
-- 对明确的 System32 system-management utility 仍要验证可信 executable identity，避免 PATH/workspace 同名程序冒充；可信 shell 通过逻辑 selector 解析，MCP 不得直接指定任意 shell executable path；
+- administrator route 对结构化 System32 目标继续验证可信 executable identity；可信 shell 通过逻辑 selector 解析，MCP 不得直接指定任意管理员 shell executable path；
 - LocalBridge 主程序、MCP、Tunnel 与 ordinary route 仍不整体提权；
 - PermissionMode、管理员警告/UAC批准、Broker activation、WorkspaceRegistry/active workspace、credential、Tunnel/MCP/runtime/PEP/Broker policy、LocalBridge autostart 等 LocalBridge control-plane 仍永久 deny。
 
-因此权限模型是：**Full = workspace-bound 普通用户执行；Elevated = 用户明确授权后的管理员 Token 范围系统能力；LocalBridge 自身控制面仍不可由 MCP/AI 修改。系统修改产生的后果必须在授权前明确知悉并由用户自主承担。**
+因此权限模型是：**Edit = workspace-bound 结构化能力；Full = 当前 Windows 用户执行；Elevated = Full 加用户明确授权后的结构化管理员 Token 能力；LocalBridge 自身控制面仍不可由 MCP/AI 修改。**
 
 ### Schema26 管理员模式安全确认
 
@@ -256,8 +256,8 @@ MCP 无权变更 registry/active root。
 - 无自动 crash upload。
 
 
-### Schema36 Shell classification / explain 安全边界
+### Schema46 Shell execution / structured authority 安全边界
 
-Full 的普通开发、查询和诊断命令默认走 ordinary current-user route；是否需要管理员 route 由真实 executable、参数语义、目标对象和操作类型决定，不能仅靠关键词或 shell 表面语法。`where cmd`、`where pwsh`、`echo %PATH%`、literal `Get-Command <name>` 等只读发现不能仅因命令名被升级。真实系统管理、LocalBridge control-plane、动态命令构造、provider/command-engine mutation 继续 fail-closed。
+Full 的任意 Shell、脚本、解释器、构建工具与全部后代统一走 ordinary current-user route；authority 不根据 executable、参数、别名、重定向、provider 或首层 shell 语法改变。结构化 filesystem/document/Git/image 继续由 active-workspace Path Authority fail-closed；该模型不得用于解析或补偿 Shell command text。需要管理员令牌的工作只能进入独立的 reviewed Broker route。
 
-policy explain/dry_run 和 capability snapshot 都是 non-authorizing projection；调用时 mandatory PEP 仍重新授权。错误解释只允许返回稳定 rule category/remediation，不返回 matcher 私有细节、nonce、secret 或可用于绕过策略的内部状态。管理员模式安全确认必须由 backend challenge identity + monotonic not-before 重新校验；early/stale/replayed confirm 永远不能触发 UAC。
+policy explain/dry_run 和 capability snapshot 都是 non-authorizing projection；调用时 mandatory PEP 仍按 Effective Permission、显式 transitive capability 与 route 重新授权。ordinary Shell explain 必须如实显示 `current_windows_user`，不能声称已从首层文本推断后代权限。管理员模式安全确认必须由 backend challenge identity + monotonic not-before 重新校验；early/stale/replayed confirm 永远不能触发 UAC。
