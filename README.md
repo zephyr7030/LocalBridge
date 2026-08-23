@@ -1,51 +1,58 @@
 # LocalBridge
 
-让网页端 ChatGPT 直接读取、修改和运行你的 Windows 本地项目。
+## 让 ChatGPT 直接参与本地开发与 Windows 维护
 
-LocalBridge 把 ChatGPT 和本地开发环境连接起来：不需要反复复制代码、上传文件，也不需要为了让 AI 碰到本地项目而额外搭一整套 Docker / Python 环境。安装后选择项目目录、完成连接配置，就可以直接在 ChatGPT 里继续开发。
+LocalBridge 将 ChatGPT 插件与 Windows 本地环境连接起来。无需反复上传文件或复制命令，就能让 ChatGPT 阅读和修改项目、运行开发任务，并协助完成常见的系统检查与维护工作。
 
----
-
-## 🚀 它主要解决什么问题？
-
-### 🧠 网页 ChatGPT 也能直接做本地开发
-
-不再来回复制粘贴。ChatGPT 可以直接读取项目、搜索代码、修改文件、查看 Git 状态、运行测试和开发命令，适合日常修 Bug、重构、补功能和排查问题。
-
-### 📁 文件操作不必全靠 Shell
-
-LocalBridge 提供结构化文件能力，可直接查找、读取、写入、复制、移动、删除和校验文件。常见文件工作不再需要 AI 临时拼接一长串 Shell 命令。
-
-### 🔐 给 AI 的权限可以明确控制
-
-提供编辑、完整、管理员三种权限模式。日常操作可以限制在当前项目；需要管理员能力时，必须经过明确的风险确认和 Windows UAC。Runtime API Key 保存在 Windows 安全凭据中，不写入普通配置文件。
-
-### 🧰 安装即用，少折腾环境
-
-Python、Coding Runtime、Tunnel 和常用辅助工具随 LocalBridge 一起管理，不依赖系统 Python，也不要求安装 Docker。面向普通 Windows 11 x64 用户，尽量把环境问题留在应用内部解决。
-
-### 💤 后台运行尽量安静
-
-支持托盘后台运行、开机启动和运行时自动恢复。正常 GUI、后台服务和受管命令不会不断弹出控制台窗口；Tunnel 或本地运行时短暂异常时会尝试自动恢复。
+安装包约 **21 MB**，内置 Python、Coding Runtime、Tunnel 和常用工具，无需另外配置系统 Python、Node.js、Rust 或 Docker。
 
 ---
 
-## 📦 下载和使用
+## 一个插件，连接完整的本地工作流
 
-普通使用不需要准备开发环境。
+- 阅读、搜索和修改项目文件
+- 运行测试、构建及开发命令
+- 查看 Git 状态、提交记录和代码差异
+- 管理后台命令与长时间任务
+- 检查 Windows 服务、日志和运行环境
+- 执行常见系统诊断与管理员维护操作
 
-1. 打开右侧 **[Releases](../../releases)**，下载最新的 `LocalBridge_0.13.0_x64-setup.exe`。
-2. 安装后按向导填写 Tunnel ID、Runtime API Key，并选择要授权的本地项目目录。
-3. 按应用提示在 ChatGPT 中创建 **Local Bridge** 自定义连接器。
-4. 之后即可直接让 ChatGPT 读取、修改和运行该项目。
+无论是修复 Bug、重构项目、排查构建问题，还是检查 Windows 运行状态，都可以直接在 ChatGPT 对话中继续完成。
 
-> 当前版本面向 **Windows 11 x64**。完整模式下启动的开发进程拥有当前 Windows 用户本身的系统权限；管理员操作仅通过显式 Broker + UAC 路线提供。更完整的边界说明见 [SECURITY.md](SECURITY.md)。
+## 轻量安装，工具内置
+
+LocalBridge 将运行所需的工具统一放入安装包，不依赖系统 PATH，也不会在使用过程中临时安装 Python 包。
+
+- 内置固定版本的 Python Embedded Runtime
+- 内置 Coding Runtime 和 OpenAI Tunnel 客户端
+- 不需要安装 pip、venv 或 Docker
+- 运行工具随 LocalBridge 版本统一更新，避免环境漂移
+- 无遥测、无使用统计、无崩溃信息上传
+
+当前提供 Windows 安装版。“自包含”表示无需额外准备开发运行环境，不代表免安装 Portable 版本。
 
 ---
 
-## 🛠️ 从源码构建（可选）
+## 下载与使用
 
-仅开发者需要：
+当前支持 **Windows 11 x64**。
+
+1. 前往 **[Releases](../../releases)**，下载 `LocalBridge_0.13.0_x64-setup.exe`。
+2. 安装后选择本地项目并完成连接设置。
+3. 根据应用引导创建 **Local Bridge** ChatGPT 插件连接。
+4. 回到 ChatGPT，开始处理本地开发或系统维护任务。
+
+## 权限与安全
+
+LocalBridge 提供编辑、完整和管理员三种权限模式。管理员操作通过明确确认和 Windows UAC 启用；Runtime API Key 保存在 Windows 安全凭据中，不写入普通配置文件。
+
+完整的权限边界和安全设计见 [SECURITY.md](SECURITY.md)。
+
+---
+
+## 从源码构建
+
+仅开发者需要准备 Node.js 和 Rust：
 
 ```powershell
 npm ci
@@ -57,6 +64,6 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
 
 ---
 
-## 📄 License
+## License
 
 LocalBridge 自有源码使用 [MIT License](LICENSE)。第三方组件保持各自许可证，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
