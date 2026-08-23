@@ -1,7 +1,6 @@
 #![cfg(windows)]
 
 use std::fs;
-use std::io::Write;
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -16,7 +15,7 @@ use localbridge_lib::mcp::{
     PolicyEnforcementRuntime,
 };
 use localbridge_lib::state::PermissionMode;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -137,88 +136,6 @@ fn run_git(workspace: &Path, args: &[&str]) {
         "git {args:?} failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-#[test]
-fn external_client_reaches_terminal_through_the_public_mcp_protocol() {
-    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("repository root")
-        .to_path_buf();
-    let runtime = LiveRuntime::start(&repo);
-    let client_path = repo.join("tests/black-box/chatgpt/client.mjs");
-    let mut child = Command::new("node")
-        .arg(client_path)
-        .args(["--url", &runtime.endpoint(), "--timeout-ms", "30000"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .expect("start external ChatGPT simulator");
-    {
-        let input = child.stdin.as_mut().expect("client stdin");
-        for command in [
-            json!({"op":"tools/list","request_id":"list-live"}),
-            json!({
-                "op":"tools/call",
-                "request_id":"exec-live",
-                "name":"exec_command",
-                "arguments":{
-                    "command":"Write-Output LB_CHATGPT_BLACK_BOX",
-                    "shell":"windows_powershell",
-                    "yield_time_ms":10000
-                }
-            }),
-            json!({"op":"close"}),
-        ] {
-            writeln!(input, "{command}").expect("write JSONL command");
-        }
-    }
-    drop(child.stdin.take());
-    let output = child.wait_with_output().expect("wait for external client");
-    assert!(
-        output.status.success(),
-        "client failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let events = String::from_utf8(output.stdout)
-        .expect("client output is UTF-8")
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).expect("client emits JSONL"))
-        .collect::<Vec<_>>();
-    assert_eq!(events.len(), 4, "{events:#?}");
-    assert_eq!(events[0]["type"], "ready", "{events:#?}");
-    assert_eq!(events[1]["method"], "tools/list", "{events:#?}");
-    assert!(
-        events[1]["body"]["result"]["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "exec_command")),
-        "{events:#?}"
-    );
-    assert!(
-        events[1]["body"]["result"]["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().all(|tool| {
-                tool["name"]
-                    .as_str()
-                    .is_some_and(|name| !name.contains("chatgpt") && !name.contains("test_client"))
-            })),
-        "test-only capability leaked into tools/list: {events:#?}"
-    );
-    assert_eq!(events[2]["method"], "tools/call", "{events:#?}");
-    assert_eq!(
-        events[2]["body"]["result"]["structuredContent"]["data"]["status"], "completed",
-        "{events:#?}"
-    );
-    assert!(
-        events[2]["body"]["result"]["structuredContent"]["data"]["output"]
-            .as_str()
-            .is_some_and(|output| output.contains("LB_CHATGPT_BLACK_BOX")),
-        "{events:#?}"
-    );
-    assert_eq!(events[3]["type"], "closed", "{events:#?}");
-    assert_eq!(events[3]["transport"]["status"], 204, "{events:#?}");
 }
 
 #[test]

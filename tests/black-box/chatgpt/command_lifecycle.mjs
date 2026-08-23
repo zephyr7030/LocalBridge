@@ -8,6 +8,20 @@ export function publicCommandIsPending(response) {
   );
 }
 
+export async function settleAcceptedPublicCommand({ initialResponse, ...driver }) {
+  if (!publicCommandIsPending(initialResponse)) return initialResponse;
+  const publicSessionId =
+    driver.publicSessionId ??
+    initialResponse?.body?.result?.structuredContent?.data?.session_id;
+  if (!publicSessionId) {
+    const error = new Error("pending public command response has no stable session_id");
+    error.code = "PublicSessionIdMissing";
+    error.response = initialResponse;
+    throw error;
+  }
+  return drivePublicCommandToTerminal({ ...driver, publicSessionId });
+}
+
 export async function drivePublicCommandToTerminal({
   callTool,
   publicSessionId,
@@ -41,4 +55,3 @@ export async function drivePublicCommandToTerminal({
   error.lastResponse = response;
   throw error;
 }
-

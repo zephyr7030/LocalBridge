@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   drivePublicCommandToTerminal,
   publicCommandIsPending,
+  settleAcceptedPublicCommand,
 } from "./command_lifecycle.mjs";
 
 function response({ status, errorCode } = {}) {
@@ -75,3 +76,21 @@ test("terminal driver has one explicit wall-clock deadline", async () => {
   );
 });
 
+test("accepted command settlement reuses its stable public session identity", async () => {
+  const initial = response({ status: "running" });
+  initial.body.result.structuredContent.data.session_id = "lb-session-initial";
+  const completed = response({ status: "completed" });
+  const calls = [];
+  assert.equal(
+    await settleAcceptedPublicCommand({
+      initialResponse: initial,
+      callTool: async (...args) => {
+        calls.push(args);
+        return completed;
+      },
+      requestPrefix: "settle",
+    }),
+    completed,
+  );
+  assert.equal(calls[0][1].session_id, "lb-session-initial");
+});

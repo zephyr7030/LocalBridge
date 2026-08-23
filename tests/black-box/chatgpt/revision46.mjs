@@ -6,7 +6,10 @@ import {
   emptyLoopbackPreconnect,
   singleChunkedRequestFetch,
 } from "./client.mjs";
-import { drivePublicCommandToTerminal } from "./command_lifecycle.mjs";
+import {
+  drivePublicCommandToTerminal,
+  settleAcceptedPublicCommand,
+} from "./command_lifecycle.mjs";
 
 function argumentsFrom(argv) {
   const options = {};
@@ -145,7 +148,12 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
       },
       "absolute-redirection",
     );
-    assert.equal(assertSuccess(absoluteWrite).status, "completed", explain(absoluteWrite));
+    const absoluteTerminal = await settleAcceptedPublicCommand({
+      initialResponse: absoluteWrite,
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      requestPrefix: "absolute-redirection-poll",
+    });
+    assert.equal(assertSuccess(absoluteTerminal).status, "completed", explain(absoluteTerminal));
     const relativeWrite = await toolCall(
       client,
       "exec_command",
@@ -157,7 +165,12 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
       },
       "relative-redirection",
     );
-    assert.equal(assertSuccess(relativeWrite).status, "completed", explain(relativeWrite));
+    const relativeTerminal = await settleAcceptedPublicCommand({
+      initialResponse: relativeWrite,
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      requestPrefix: "relative-redirection-poll",
+    });
+    assert.equal(assertSuccess(relativeTerminal).status, "completed", explain(relativeTerminal));
     for (const [requestId, path] of [
       ["absolute-stat", "absolute-equivalence.txt"],
       ["relative-stat", "relative-equivalence.txt"],
@@ -190,8 +203,17 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
       { command: "sc query EventLog", shell: "cmd", yield_time_ms: 10_000 },
       "direct-current-user",
     );
-    const directCurrentUserData = assertSuccess(directCurrentUser);
-    assert.equal(directCurrentUserData.status, "completed", explain(directCurrentUser));
+    const directCurrentUserTerminal = await settleAcceptedPublicCommand({
+      initialResponse: directCurrentUser,
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      requestPrefix: "direct-current-user-poll",
+    });
+    const directCurrentUserData = assertSuccess(directCurrentUserTerminal);
+    assert.equal(
+      directCurrentUserData.status,
+      "completed",
+      explain(directCurrentUserTerminal),
+    );
     assert.match(
       directCurrentUserData.output,
       /SERVICE_NAME:\s*EventLog/i,
@@ -208,16 +230,21 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
       },
       "descendant-current-user",
     );
-    const descendantCurrentUserData = assertSuccess(descendantCurrentUser);
+    const descendantCurrentUserTerminal = await settleAcceptedPublicCommand({
+      initialResponse: descendantCurrentUser,
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      requestPrefix: "descendant-current-user-poll",
+    });
+    const descendantCurrentUserData = assertSuccess(descendantCurrentUserTerminal);
     assert.equal(
       descendantCurrentUserData.status,
       "completed",
-      explain(descendantCurrentUser),
+      explain(descendantCurrentUserTerminal),
     );
     assert.match(
       descendantCurrentUserData.output,
       /SERVICE_NAME:\s*EventLog/i,
-      explain(descendantCurrentUser),
+      explain(descendantCurrentUserTerminal),
     );
     report.checks.descendant_process_authority = "PASS_CURRENT_USER_PARITY";
 
@@ -434,8 +461,13 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
       },
       "stream-probe",
     );
-    const streamData = assertSuccess(streamProbe);
-    assert.equal(streamData.status, "completed", explain(streamProbe));
+    const streamTerminal = await settleAcceptedPublicCommand({
+      initialResponse: streamProbe,
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      requestPrefix: "stream-probe-poll",
+    });
+    const streamData = assertSuccess(streamTerminal);
+    assert.equal(streamData.status, "completed", explain(streamTerminal));
     const stdoutRef = streamData.output_refs.stdout;
     const mismatchedStream = await toolCall(
       client,

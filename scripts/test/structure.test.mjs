@@ -71,4 +71,5 @@ test("black-box scenarios reuse the shared command terminal driver", () => {
   const source = readFileSync(revisionScenarioPath, "utf8");
   assert.match(source, /from "\.\/command_lifecycle\.mjs"/);
   assert.equal(source.includes("function pollToTerminal"), false);
+  assert.equal(source.match(/initialResponse:/g)?.length, 5);
 });
