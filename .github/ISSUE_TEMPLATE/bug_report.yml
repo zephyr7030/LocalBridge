@@ -1,0 +1,47 @@
+name: Bug report
+description: 报告可复现的 LocalBridge 缺陷
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "请勿提交 API Key、Tunnel 凭据、Token、私钥、完整日志或其他敏感信息。安全问题请使用 SECURITY.md 中的私下报告渠道。"
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 说明实际行为与期望行为。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 使用最小、非敏感的复现步骤。
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: LocalBridge 版本
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows 版本
+      placeholder: Windows 11 x64
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 权限模式
+      options: [编辑模式, 完整模式, 管理员模式, 不确定]
+    validations:
+      required: true
+  - type: textarea
+    id: sanitized
+    attributes:
+      label: 已脱敏的诊断信息（可选）
+      description: 只粘贴确认不含凭据、用户名路径、机器标识和隐私数据的最小片段。

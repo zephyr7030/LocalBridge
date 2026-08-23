@@ -1,0 +1,107 @@
+[package]
+name = "localbridge"
+version = "0.13.0"
+description = "LocalBridge desktop shell"
+authors = ["LocalBridge"]
+edition = "2024"
+rust-version = "1.85"
+autobins = false
+default-run = "localbridge"
+
+[lib]
+name = "localbridge_lib"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "localbridge"
+path = "src/main.rs"
+
+[[bin]]
+name = "localbridge-privileged-broker"
+path = "bin/privileged-broker/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22.1"
+image = { version = "0.25.9", default-features = false, features = ["png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+semver = { version = "1", features = ["serde"] }
+sha2 = "0.10"
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+toml = "0.9"
+ureq = { version = "3.3", features = ["platform-verifier"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Cryptography",
+  "Win32_Security_Credentials",
+  "Win32_Storage_FileSystem",
+  "Win32_System_JobObjects",
+  "Win32_System_IO",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
+  "Win32_System_Com",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+] }
+
+[[test]]
+name = "lb003_settings_persistence"
+path = "../tests/unit/settings/settings_persistence.rs"
+
+[[test]]
+name = "lb003_workspace_registry"
+path = "../tests/unit/workspace/workspace_registry.rs"
+
+[[test]]
+name = "lb003_migration_matrix"
+path = "../tests/migrations/migration_matrix.rs"
+
+[[test]]
+name = "lb004_runtime_contracts"
+path = "../tests/unit/runtime/runtime_contracts.rs"
+
+[[test]]
+name = "lb004_process_supervisor"
+path = "../tests/integration/process/process_supervisor.rs"
+
+[[test]]
+name = "lb005_credentials"
+path = "../tests/unit/credentials/credential_store.rs"
+
+[[test]]
+name = "lb006_coding_runtime"
+path = "../tests/integration/mcp/coding_runtime.rs"
+
+[[test]]
+name = "lb007_policy_contracts"
+path = "../tests/unit/policy/policy_contracts.rs"
+
+[[test]]
+name = "lb007_policy_enforcement"
+path = "../tests/integration/policy/policy_enforcement.rs"
+
+[[test]]
+name = "lb011_broker_ipc"
+path = "../tests/integration/privilege/broker_ipc.rs"
+
+[[test]]
+name = "lb019pre_release_no_console"
+path = "../tests/integration/packaging/lb019pre_release_no_console.rs"
+
+[[test]]
+name = "chatgpt_black_box"
+path = "../tests/black-box/chatgpt/live_client.rs"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"

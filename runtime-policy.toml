@@ -1,0 +1,123 @@
+schema_version = 7
+runtime_version = "0.2.2"
+status = "SCHEMA46_CURRENT_USER_EXECUTION_POLICY"
+
+edit_allowed_tools = ["server_info", "check_exec_environment", "get_default_cwd", "set_default_cwd", "read_file", "list_dir", "list_files", "search_text", "apply_patch", "git_status", "git_diff", "git_log", "git_show", "git_blame", "view_image"]
+full_allowed_tools = ["server_info", "check_exec_environment", "get_default_cwd", "set_default_cwd", "read_file", "list_dir", "list_files", "search_text", "apply_patch", "exec_command", "write_stdin", "kill_session", "read_output", "git_status", "git_diff", "git_log", "git_show", "git_blame", "view_image"]
+elevated_allowed_tools = ["server_info", "check_exec_environment", "get_default_cwd", "set_default_cwd", "read_file", "list_dir", "list_files", "search_text", "apply_patch", "exec_command", "write_stdin", "kill_session", "read_output", "git_status", "git_diff", "git_log", "git_show", "git_blame", "view_image", "elevated_exec"]
+blocked_tools = ["request_permissions"]
+
+[localbridge_public]
+edit_tools = ["workspace_context", "agent_workflow", "filesystem", "git_workflow", "document_workflow", "view_image"]
+full_tools = ["workspace_context", "agent_workflow", "filesystem", "exec_command", "command_control", "task_control", "git_workflow", "document_workflow", "view_image"]
+elevated_tools = ["workspace_context", "agent_workflow", "filesystem", "exec_command", "command_control", "task_control", "git_workflow", "document_workflow", "view_image"]
+unknown_action = "deny"
+network = "deny_unreviewed"
+privilege = "broker_only"
+control_plane = "deny_always"
+
+[capabilities]
+unknown = "deny"
+process_exec_in_edit = "deny"
+process_exec_in_full = "current_user_token"
+elevated_exec_in_edit = "deny"
+elevated_exec_in_full = "deny"
+elevated_exec_in_elevated = "allow_if_reviewed_and_broker_active"
+workflow_with_process_exec_in_edit = "deny"
+control_plane = "deny_always"
+
+[enforcement]
+tools_list_filter = "ux_only"
+tools_call_check = "mandatory"
+implementation = "first_party_rust_mcp_guard"
+privileged_route = "broker_only"
+upstream_direct_tunnel_target = "forbidden"
+unknown_tool = "deny"
+request_permissions = "deny_always"
+transitive_tool_capability_declaration = "required"
+
+[upstream_coding_tools]
+permission_mode = "policy_neutral_behind_authenticated_guard"
+dangerously_skip_all_permissions = true
+telemetry = "disabled"
+telemetry_environment = ["CODING_TOOLS_MCP_TELEMETRY=off", "DO_NOT_TRACK=1"]
+listener = "loopback_ephemeral"
+internal_auth = "runtime_generated_bearer_required"
+direct_external_exposure = false
+authority_owner = "localbridge_guard_only"
+
+[elevation]
+whole_app_elevation = "forbidden"
+uac = "explicit_user_action"
+ttl = "none"
+automatic_background_uac = "forbidden"
+broker_network_listener = "forbidden"
+
+[defaults]
+edit_unknown_tool = "deny"
+full_unknown_tool = "deny"
+elevated_unknown_tool = "deny"
+
+
+[elevated_exec]
+enabled = true
+canonical_request = "structured_program_args"
+shell_true_default = false
+requires_broker = true
+requires_explicit_elevated_mode = true
+timeout_required = true
+output_limit_required = true
+cancellation_required = true
+redaction_required = true
+review_model = "exact_trusted_program_and_args"
+arbitrary_programs = "deny"
+shells_and_interpreters = "deny"
+control_plane_mutation = "deny_always"
+workdir_policy = "deny_unless_reviewed"
+reviewed_actions = ["windows_whoami_identity"]
+
+[administrator_gateway]
+route = "broker_only"
+token_scope = "administrator_token"
+direct_process = "structured_absolute_program_argv"
+shell = "trusted_logical_selector_only"
+filesystem = "structured_absolute_path_broker"
+system_management_identity = "exact_system32"
+arbitrary_shell_executable_path = "deny"
+control_plane_mutation = "deny_always"
+
+
+[credentials]
+plaintext_persistence = "deny_always"
+cli_argument_secret = "deny_always"
+frontend_persistence = "deny_always"
+diagnostic_secret = "deny_always"
+secure_backend_required = true
+
+[workspace_registry]
+remembered_projects_are_authorized_roots = false
+max_active_authorized_roots = 1
+mcp_mutation = "deny_always"
+filesystem_delete_on_remove = "deny_always"
+auto_select_other_after_active_remove = false
+
+[recovery_v13]
+automatic_reconnect = true
+attempts = 5
+backoff_seconds = [1, 2, 5, 10, 30]
+initial_failure_counts_as_attempt = false
+stop_after_exhaustion = true
+user_attention_event_after_exhaustion = true
+user_attention_event_once_per_generation = true
+manual_retry_starts_new_generation = true
+ui_notification_before_exhaustion = "deny"
+
+[ui_dependency_policy]
+apple_inspired = true
+native_css_only = true
+ui_component_library_for_visuals = "deny"
+animation_library_for_visuals = "deny"
+icon_package_for_visuals = "deny"
+css_framework_for_visuals = "deny"
+bundled_font_for_visuals = "deny"
+system_font_stack = true
