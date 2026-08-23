@@ -7818,9 +7818,15 @@ mod tests {
             cancel_started.elapsed() < Duration::from_secs(2),
             "task_control cancel blocked behind the facade execution mutex"
         );
+        let cancel_data = &cancel.body["result"]["structuredContent"]["data"];
         assert_eq!(
-            cancel.body["result"]["structuredContent"]["data"]["state"], "idle",
+            cancel_data["cancellation_requested"], true,
             "{:#?}",
+            cancel.body
+        );
+        assert!(
+            matches!(cancel_data["state"].as_str(), Some("active" | "idle")),
+            "the cancellation ACK must publish its truthful instantaneous lifecycle: {:#?}",
             cancel.body
         );
         assert!(
@@ -7836,7 +7842,22 @@ mod tests {
             call_started.elapsed() < Duration::from_secs(5),
             "task_control cancellation did not interrupt the long command"
         );
-        assert!(result.body.get("result").is_some() || result.body.get("error").is_some());
+        assert_eq!(result.body["result"]["isError"], true, "{:#?}", result.body);
+        assert_eq!(
+            result.body["result"]["structuredContent"]["error"]["code"], "ProcessCancelled",
+            "{:#?}",
+            result.body
+        );
+        assert_eq!(
+            result.body["result"]["structuredContent"]["data"]["status"], "cancelled",
+            "{:#?}",
+            result.body
+        );
+        assert_eventually(
+            "cancelled foreground task did not converge to Idle",
+            Duration::from_secs(2),
+            || pep.current_task_projection().latest_snapshot() == CurrentTaskStatus::Idle,
+        );
 
         let mut coding = pep
             .stop()
