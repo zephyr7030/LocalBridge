@@ -1249,14 +1249,12 @@ impl FilesystemService {
         validate_walk_bounds(max_depth, max_entries)?;
         let source_path = self
             .authority
-            .resolve_existing(source)
+            .resolve_existing_entry(source)
             .map_err(map_path_error)?;
         let source_display = self.display_path(&source_path)?;
         let initial_metadata =
             fs::symlink_metadata(&source_path).map_err(|_| FilesystemError::Io)?;
-        if metadata_is_reparse(&initial_metadata) {
-            return Err(FilesystemError::OutsideAuthority);
-        }
+        let initial_is_reparse = metadata_is_reparse(&initial_metadata);
         let destination_path = self
             .authority
             .resolve_missing_leaf(destination)
@@ -1272,7 +1270,9 @@ impl FilesystemService {
                     .ok_or(FilesystemError::OutsideAuthority)?,
             )?;
             let desired_access = DELETE
-                | if initial_metadata.is_file() {
+                | if initial_is_reparse {
+                    0
+                } else if initial_metadata.is_file() {
                     FILE_GENERIC_READ
                 } else if initial_metadata.is_dir() {
                     FILE_LIST_DIRECTORY
@@ -1281,22 +1281,20 @@ impl FilesystemService {
                 };
             let source_handle = self
                 .authority
-                .open_move_root_validated_handle(&source_path, desired_access)
+                .open_move_entry_validated_handle(&source_path, desired_access)
                 .map_err(map_path_error)?;
             self.reject_broker_aliased_mutation_handle(&source_handle)?;
             let stable_source = source_handle.final_path().to_path_buf();
             let source_metadata =
                 fs::symlink_metadata(&stable_source).map_err(|_| FilesystemError::Io)?;
-            if metadata_is_reparse(&source_metadata) {
-                return Err(FilesystemError::OutsideAuthority);
-            }
-            if source_metadata.is_dir() && !recursive {
+            let source_is_reparse = metadata_is_reparse(&source_metadata);
+            if source_metadata.is_dir() && !source_is_reparse && !recursive {
                 return Err(FilesystemError::InvalidArgument);
             }
             if destination_path.exists() && !overwrite {
                 return Err(FilesystemError::AlreadyExists);
             }
-            if source_metadata.is_dir() && destination_path.exists() {
+            if source_metadata.is_dir() && !source_is_reparse && destination_path.exists() {
                 return Err(FilesystemError::AlreadyExists);
             }
             let parent_handle = self.open_mutation_parent(&destination_path)?;
@@ -1314,10 +1312,9 @@ impl FilesystemService {
                         0
                     };
                     drop(source_handle);
-                    let committed = destination_parent.join(&destination_leaf);
                     let final_destination = self
                         .authority
-                        .revalidate_opened_path(&committed)
+                        .resolve_existing_entry(destination)
                         .map_err(map_path_error)?;
                     return Ok(FilesystemMutationResult {
                         path: source_display,
@@ -1330,6 +1327,10 @@ impl FilesystemService {
                 Err(error) => return Err(map_rename_error(error)),
             }
             drop(parent_handle);
+
+            if source_is_reparse {
+                return Err(FilesystemError::Unsupported);
+            }
 
             if source_metadata.is_file() {
                 let mut source_file = source_handle.into_file();
@@ -1472,7 +1473,7 @@ impl FilesystemService {
         validate_walk_bounds(max_depth, max_entries)?;
         let target = self
             .authority
-            .resolve_existing(path)
+            .resolve_existing_entry(path)
             .map_err(map_path_error)?;
         let display_path = self.display_path(&target)?;
         if self.authority.scope() == PathAuthorityScope::ActiveWorkspace
@@ -1481,16 +1482,16 @@ impl FilesystemService {
             return Err(FilesystemError::OutsideAuthority);
         }
         let metadata = fs::symlink_metadata(&target).map_err(|_| FilesystemError::Io)?;
-        if metadata_is_reparse(&metadata) {
-            return Err(FilesystemError::OutsideAuthority);
-        }
+        let target_is_reparse = metadata_is_reparse(&metadata);
         #[cfg(windows)]
         {
             use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_LIST_DIRECTORY};
             let _parent_guard = self
                 .open_directory_chain(target.parent().ok_or(FilesystemError::OutsideAuthority)?)?;
             let desired_access = DELETE
-                | if metadata.is_dir() {
+                | if target_is_reparse {
+                    0
+                } else if metadata.is_dir() {
                     FILE_LIST_DIRECTORY
                 } else if metadata.is_file() {
                     0
@@ -1499,16 +1500,14 @@ impl FilesystemService {
                 };
             let target_handle = self
                 .authority
-                .open_validated_handle(&target, desired_access)
+                .open_entry_validated_handle(&target, desired_access)
                 .map_err(map_path_error)?;
             self.reject_broker_aliased_mutation_handle(&target_handle)?;
             let stable_target = target_handle.final_path().to_path_buf();
             let stable_metadata =
                 fs::symlink_metadata(&stable_target).map_err(|_| FilesystemError::Io)?;
-            if metadata_is_reparse(&stable_metadata) {
-                return Err(FilesystemError::OutsideAuthority);
-            }
-            if stable_metadata.is_dir() {
+            let stable_is_reparse = metadata_is_reparse(&stable_metadata);
+            if stable_metadata.is_dir() && !stable_is_reparse {
                 if recursive {
                     let mut scanned = 0usize;
                     self.delete_directory_contents_secure(
@@ -1525,7 +1524,7 @@ impl FilesystemService {
                 {
                     return Err(FilesystemError::InvalidArgument);
                 }
-            } else if !stable_metadata.is_file() {
+            } else if !stable_is_reparse && !stable_metadata.is_file() {
                 return Err(FilesystemError::Unsupported);
             }
             delete_raw_handle(target_handle.raw_handle()).map_err(|error| {
@@ -1700,12 +1699,12 @@ impl FilesystemService {
             self.check_cancelled()?;
             let path = child.path();
             let metadata = fs::symlink_metadata(&path).map_err(|_| FilesystemError::Io)?;
-            if metadata_is_reparse(&metadata) {
-                return Err(FilesystemError::OutsideAuthority);
-            }
+            let is_reparse = metadata_is_reparse(&metadata);
             use windows_sys::Win32::Storage::FileSystem::{DELETE, FILE_LIST_DIRECTORY};
             let access = DELETE
-                | if metadata.is_dir() {
+                | if is_reparse {
+                    0
+                } else if metadata.is_dir() {
                     FILE_LIST_DIRECTORY
                 } else if metadata.is_file() {
                     0
@@ -1714,15 +1713,13 @@ impl FilesystemService {
                 };
             let handle = self
                 .authority
-                .open_move_root_validated_handle(&path, access)
+                .open_move_entry_validated_handle(&path, access)
                 .map_err(map_path_error)?;
             self.reject_broker_aliased_mutation_handle(&handle)?;
             let stable = handle.final_path().to_path_buf();
             let stable_metadata = fs::symlink_metadata(&stable).map_err(|_| FilesystemError::Io)?;
-            if metadata_is_reparse(&stable_metadata) {
-                return Err(FilesystemError::OutsideAuthority);
-            }
-            if stable_metadata.is_dir() {
+            let stable_is_reparse = metadata_is_reparse(&stable_metadata);
+            if stable_metadata.is_dir() && !stable_is_reparse {
                 self.preflight_directory_delete(
                     &stable,
                     depth + 1,
@@ -1731,7 +1728,7 @@ impl FilesystemService {
                     max_entries,
                     pending,
                 )?;
-            } else if !stable_metadata.is_file() {
+            } else if !stable_is_reparse && !stable_metadata.is_file() {
                 return Err(FilesystemError::Unsupported);
             }
             pending.push(handle);
@@ -3072,6 +3069,62 @@ mod tests {
         fs::remove_dir(root.join("reparse/zlink")).unwrap();
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn delete_junction_removes_entry_without_touching_referent() {
+        let root = workspace("delete-junction-entry");
+        let target = root.join("target");
+        let link = root.join("link");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("keep.txt"), b"keep").unwrap();
+        create_junction(&link, &target);
+        let service = FilesystemService::active_workspace(&root).unwrap();
+        service.delete("link", true, 8, 100).unwrap();
+        assert!(!link.exists());
+        assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn recursive_delete_treats_junction_as_leaf() {
+        let root = workspace("recursive-delete-junction");
+        let target = root.join("target");
+        let parent = root.join("parent");
+        let link = parent.join("link");
+        fs::create_dir(&target).unwrap();
+        fs::create_dir(&parent).unwrap();
+        fs::write(target.join("keep.txt"), b"keep").unwrap();
+        fs::write(parent.join("ordinary.txt"), b"ordinary").unwrap();
+        create_junction(&link, &target);
+        let service = FilesystemService::active_workspace(&root).unwrap();
+        service.delete("parent", true, 8, 100).unwrap();
+        assert!(!parent.exists());
+        assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn move_junction_renames_entry_without_touching_referent() {
+        let root = workspace("move-junction-entry");
+        let target = root.join("target");
+        let link = root.join("link");
+        let moved = root.join("moved-link");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("keep.txt"), b"keep").unwrap();
+        create_junction(&link, &target);
+        let service = FilesystemService::active_workspace(&root).unwrap();
+        service
+            .move_path("link", "moved-link", false, false, 8, 100)
+            .unwrap();
+        assert!(!link.exists());
+        assert!(metadata_is_reparse(&fs::symlink_metadata(&moved).unwrap()));
+        assert_eq!(fs::read(target.join("keep.txt")).unwrap(), b"keep");
+        fs::remove_dir(&moved).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(windows)]

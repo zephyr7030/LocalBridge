@@ -370,6 +370,37 @@ impl WorkspaceResolver {
             .ok_or(PathAuthorityError::OutsideAuthority)
     }
 
+    /// Resolve the directory entry named by `raw` without following the final
+    /// reparse point. Ancestors remain authority-validated, so mutation callers
+    /// operate on the entry itself rather than accidentally on its referent.
+    pub fn resolve_existing_entry(&self, raw: &str) -> Result<PathBuf, PathAuthorityError> {
+        let candidate = self.input_path(raw)?;
+        if self.scope == PathAuthorityScope::ActiveWorkspace
+            && !lexical_path_starts_with(
+                &candidate,
+                self.execution_root
+                    .as_ref()
+                    .expect("active workspace authority has execution root"),
+            )
+        {
+            return Err(PathAuthorityError::OutsideAuthority);
+        }
+        if std::fs::symlink_metadata(&candidate).is_err() {
+            return Err(PathAuthorityError::NotFound);
+        }
+        let parent = candidate.parent().ok_or(PathAuthorityError::InvalidPath)?;
+        let final_parent = self.revalidate_opened_path(parent)?;
+        let name = candidate
+            .file_name()
+            .filter(|value| !value.is_empty())
+            .ok_or(PathAuthorityError::InvalidPath)?;
+        let entry = final_parent.join(name);
+        self.validate_root_identity()?;
+        self.allows_canonical(&entry)
+            .then_some(entry)
+            .ok_or(PathAuthorityError::OutsideAuthority)
+    }
+
     pub fn resolve_missing_leaf(&self, raw: &str) -> Result<PathBuf, PathAuthorityError> {
         let candidate = self.input_path(raw)?;
         if self.scope == PathAuthorityScope::ActiveWorkspace
@@ -383,7 +414,7 @@ impl WorkspaceResolver {
             return Err(PathAuthorityError::OutsideAuthority);
         }
         if std::fs::symlink_metadata(&candidate).is_ok() {
-            return self.resolve_existing(raw);
+            return self.resolve_existing_entry(raw);
         }
         let parent = candidate.parent().ok_or(PathAuthorityError::InvalidPath)?;
         let final_parent = self.revalidate_opened_path(parent)?;
@@ -477,6 +508,29 @@ impl WorkspaceResolver {
     }
 
     #[cfg(windows)]
+    pub(crate) fn open_entry_validated_handle(
+        &self,
+        path: &Path,
+        desired_access: u32,
+    ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        self.open_validated_handle_with_share_mode(
+            path,
+            desired_access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            true,
+        )
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn open_move_entry_validated_handle(
+        &self,
+        path: &Path,
+        desired_access: u32,
+    ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        self.open_validated_handle_with_share_mode(path, desired_access, FILE_SHARE_READ, true)
+    }
+
+    #[cfg(windows)]
     pub(crate) fn open_write_locked_validated_handle(
         &self,
         path: &Path,
@@ -495,6 +549,17 @@ impl WorkspaceResolver {
         path: &Path,
         desired_access: u32,
         share_mode: u32,
+    ) -> Result<ValidatedPathHandle, PathAuthorityError> {
+        self.open_validated_handle_with_share_mode(path, desired_access, share_mode, false)
+    }
+
+    #[cfg(windows)]
+    fn open_validated_handle_with_share_mode(
+        &self,
+        path: &Path,
+        desired_access: u32,
+        share_mode: u32,
+        allow_terminal_reparse: bool,
     ) -> Result<ValidatedPathHandle, PathAuthorityError> {
         self.validate_root_identity()?;
         let wide = path
@@ -525,7 +590,9 @@ impl WorkspaceResolver {
                 std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
             )
         };
-        if tagged == 0 || tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        if tagged == 0
+            || (!allow_terminal_reparse && tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        {
             unsafe { CloseHandle(handle) };
             return Err(if tagged == 0 {
                 PathAuthorityError::InvalidPath
@@ -535,6 +602,7 @@ impl WorkspaceResolver {
         }
         if self.scope == PathAuthorityScope::ActiveWorkspace
             && tag.FileAttributes & FILE_ATTRIBUTE_DIRECTORY == 0
+            && tag.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT == 0
         {
             let mut information = BY_HANDLE_FILE_INFORMATION::default();
             if unsafe { GetFileInformationByHandle(handle, &mut information) } == 0 {

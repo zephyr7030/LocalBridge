@@ -10,6 +10,7 @@ const MAX_RETAINED_REQUEST_ERRORS: usize = 256;
 pub(crate) enum RequestCancellationTarget {
     Runtime(RpcRequestId),
     WorkspaceFilesystem(FilesystemCancellation),
+    PrivilegedFilesystem(String),
     PrivilegedExecution(String),
 }
 

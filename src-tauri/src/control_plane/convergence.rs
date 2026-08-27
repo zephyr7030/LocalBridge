@@ -166,10 +166,17 @@ pub enum AuthorityReconciliation {
     BrokerUnavailable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuredPathAuthority {
+    ActiveWorkspace,
+    AdministratorBroker,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveAuthority {
     pub configured: PermissionMode,
     pub execution: PermissionMode,
+    pub structured_paths: StructuredPathAuthority,
     pub elevated_active: bool,
     pub reconciliation: AuthorityReconciliation,
 }
@@ -365,6 +372,7 @@ pub fn derive_authority(configured: PermissionMode, broker: &PrivilegeState) -> 
         return EffectiveAuthority {
             configured,
             execution: configured,
+            structured_paths: StructuredPathAuthority::ActiveWorkspace,
             elevated_active: false,
             reconciliation: AuthorityReconciliation::Converged,
         };
@@ -373,18 +381,21 @@ pub fn derive_authority(configured: PermissionMode, broker: &PrivilegeState) -> 
         PrivilegeState::Active { .. } => EffectiveAuthority {
             configured,
             execution: PermissionMode::Elevated,
+            structured_paths: StructuredPathAuthority::AdministratorBroker,
             elevated_active: true,
             reconciliation: AuthorityReconciliation::Converged,
         },
         PrivilegeState::Requested | PrivilegeState::AwaitingUac => EffectiveAuthority {
             configured,
             execution: PermissionMode::Full,
+            structured_paths: StructuredPathAuthority::ActiveWorkspace,
             elevated_active: false,
             reconciliation: AuthorityReconciliation::AwaitingAuthorization,
         },
         PrivilegeState::Disabled | PrivilegeState::Faulted(_) => EffectiveAuthority {
             configured,
             execution: PermissionMode::Full,
+            structured_paths: StructuredPathAuthority::ActiveWorkspace,
             elevated_active: false,
             reconciliation: AuthorityReconciliation::BrokerUnavailable,
         },
@@ -512,10 +523,40 @@ mod tests {
         );
         assert_eq!(snapshot.desired.permission, PermissionMode::Elevated);
         assert_eq!(snapshot.effective.authority.execution, PermissionMode::Full);
+        assert_eq!(
+            snapshot.effective.authority.structured_paths,
+            StructuredPathAuthority::ActiveWorkspace
+        );
         assert!(!snapshot.effective.authority.elevated_active);
         assert_eq!(
             snapshot.effective.authority.reconciliation,
             AuthorityReconciliation::BrokerUnavailable
+        );
+    }
+
+    #[test]
+    fn effective_authority_owns_structured_path_route() {
+        let full = derive_authority(PermissionMode::Full, &PrivilegeState::Disabled);
+        assert_eq!(
+            full.structured_paths,
+            StructuredPathAuthority::ActiveWorkspace
+        );
+
+        let awaiting = derive_authority(PermissionMode::Elevated, &PrivilegeState::AwaitingUac);
+        assert_eq!(
+            awaiting.structured_paths,
+            StructuredPathAuthority::ActiveWorkspace
+        );
+
+        let active = derive_authority(
+            PermissionMode::Elevated,
+            &PrivilegeState::Active {
+                broker_generation: GenerationId::new(91),
+            },
+        );
+        assert_eq!(
+            active.structured_paths,
+            StructuredPathAuthority::AdministratorBroker
         );
     }
 
@@ -568,6 +609,10 @@ mod tests {
         );
         assert!(snapshot.effective.work_is_authorized());
         assert!(snapshot.effective.authority.elevated_active);
+        assert_eq!(
+            snapshot.effective.authority.structured_paths,
+            StructuredPathAuthority::AdministratorBroker
+        );
     }
 
     #[test]
