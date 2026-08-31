@@ -26,7 +26,7 @@ def _windows_force_kill_tree(process: subprocess.Popen[bytes]) -> None:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=0.5,
+            timeout=0.25,
             check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -43,6 +43,12 @@ def terminate_process_group(
     *,
     force: bool = False,
 ) -> None:
+    """Request termination without owning the lifecycle wait budget.
+
+    Callers that expose a wait contract must observe the process against their
+    own single deadline. Keeping waits here used to reset that budget once for
+    TERM, once for tree kill, and once again for pipe cleanup.
+    """
     if not hasattr(os, "killpg"):
         if os.name == "nt":
             if not force and signum == signal.SIGINT:
@@ -50,34 +56,26 @@ def terminate_process_group(
                 if event is not None:
                     try:
                         process.send_signal(event)
-                        process.wait(timeout=0.15)
                         return
-                    except (OSError, subprocess.TimeoutExpired):
+                    except OSError:
                         pass
-            if not force:
-                try:
-                    process.terminate()
-                    process.wait(timeout=0.15)
-                    return
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
+            # shell=True inserts cmd.exe between the session and the requested
+            # program. Terminating only that root loses ownership of a still
+            # running child and leaves its inherited pipes open. Windows has no
+            # group TERM primitive, so terminate the owned tree in one action.
             _windows_force_kill_tree(process)
-            try:
-                process.wait(timeout=0.35)
-            except subprocess.TimeoutExpired:
-                try:
-                    process.kill()
-                except OSError:
-                    pass
             return
         try:
             if force:
                 process.kill()
             else:
                 process.terminate()
-            process.wait(timeout=1)
-        except Exception:
-            process.kill()
+        except OSError:
+            if not force:
+                try:
+                    process.kill()
+                except OSError:
+                    pass
         return
     try:
         os.killpg(process.pid, signum)
@@ -85,13 +83,6 @@ def terminate_process_group(
         return
     except Exception:
         process.terminate()
-    try:
-        process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, HARD_KILL_SIGNAL)
-        except Exception:
-            process.kill()
 
 def spawn_process(
     command: Any,
@@ -171,6 +162,8 @@ class ExecSession:
     buffer_limit: int = SESSION_BUFFER_BYTES
     lock: threading.Lock = field(default_factory=threading.Lock)
     reader_threads: list[threading.Thread] = field(default_factory=list)
+    watchdog_thread: threading.Thread | None = None
+    watchdog_stop: threading.Event = field(default_factory=threading.Event)
     started_at: float = field(default_factory=time.time)
     completed_at: float | None = None
     closed: bool = False
@@ -307,6 +300,7 @@ class ExecSession:
         code = self.process.poll()
         if code is None:
             return
+        self.watchdog_stop.set()
         self.drain_readers()
         self.exit_code = code
         self.terminating = False
@@ -324,6 +318,14 @@ class ExecSession:
             if remaining <= 0:
                 break
             thread.join(timeout=remaining)
+
+    def drain_watchdog(self, timeout: float = 0.2) -> None:
+        thread = self.watchdog_thread
+        if thread is None or thread is threading.current_thread():
+            return
+        thread.join(timeout=max(0.0, timeout))
+        if not thread.is_alive():
+            self.watchdog_thread = None
 
     def retained_output_bytes(self) -> bytes:
         with self.lock:
@@ -345,6 +347,190 @@ class ExecSession:
             if stream == "stderr":
                 return bytes(self.stderr), self.stderr_start_offset, self.stderr_total_bytes, self.stderr_dropped_bytes
         raise ValueError(f"Unknown output stream: {stream}")
+
+
+@dataclass
+class RetainedExecOutput:
+    """Terminal output snapshot without process, pipe, or thread ownership."""
+
+    session_id: str
+    warnings: list[str]
+    stdout: bytearray
+    stderr: bytearray
+    stdout_start_offset: int
+    stderr_start_offset: int
+    stdout_cursor: int
+    stderr_cursor: int
+    stdout_total_bytes: int
+    stderr_total_bytes: int
+    stdout_dropped_bytes: int
+    stderr_dropped_bytes: int
+    completed_at: float
+    exit_code: int | None
+    signal_name: str | None
+    timed_out: bool
+    output_encoding: str
+    lock: Any = field(repr=False)
+
+    @classmethod
+    def capture(cls, session: ExecSession, registry_lock: Any) -> RetainedExecOutput:
+        session.refresh_status()
+        if session.process.poll() is None:
+            raise ValueError("cannot retain output for a running process")
+        session.close_stdin()
+        session.drain_readers(timeout=0.2)
+        session.drain_watchdog(timeout=0.2)
+        for stream in (session.process.stdout, session.process.stderr):
+            if stream is not None and not stream.closed:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        session.reader_threads.clear()
+        with session.lock:
+            retained = cls(
+                session_id=session.session_id,
+                warnings=list(session.warnings),
+                stdout=bytearray(session.stdout),
+                stderr=bytearray(session.stderr),
+                stdout_start_offset=session.stdout_start_offset,
+                stderr_start_offset=session.stderr_start_offset,
+                stdout_cursor=session.stdout_cursor,
+                stderr_cursor=session.stderr_cursor,
+                stdout_total_bytes=session.stdout_total_bytes,
+                stderr_total_bytes=session.stderr_total_bytes,
+                stdout_dropped_bytes=session.stdout_dropped_bytes,
+                stderr_dropped_bytes=session.stderr_dropped_bytes,
+                completed_at=session.completed_at or time.time(),
+                exit_code=session.exit_code,
+                signal_name=session.signal_name,
+                timed_out=session.timed_out,
+                output_encoding=session.output_encoding,
+                # Retained output has no independent lifecycle owner. Reuse
+                # the Runtime registry's re-entrant lock so a retained record
+                # does not allocate one Windows synchronization handle per
+                # completed command.
+                lock=registry_lock,
+            )
+        release_terminal_process_resources(session)
+        return retained
+
+    @property
+    def retained_bytes(self) -> int:
+        with self.lock:
+            return len(self.stdout) + len(self.stderr)
+
+    def refresh_status(self) -> None:
+        return
+
+    def snapshot_since_cursor(self, max_output_bytes: int) -> dict[str, Any]:
+        with self.lock:
+            stdout_omitted = max(0, self.stdout_start_offset - self.stdout_cursor)
+            stderr_omitted = max(0, self.stderr_start_offset - self.stderr_cursor)
+            stdout_start = max(0, self.stdout_cursor - self.stdout_start_offset)
+            stderr_start = max(0, self.stderr_cursor - self.stderr_start_offset)
+            stdout_bytes = bytes(self.stdout[stdout_start:])
+            stderr_bytes = bytes(self.stderr[stderr_start:])
+            self.stdout_cursor = self.stdout_total_bytes
+            self.stderr_cursor = self.stderr_total_bytes
+        stdout_truncation = truncate_output_bytes_tail(
+            stdout_bytes, max_output_bytes, encoding=self.output_encoding
+        )
+        stderr_truncation = truncate_output_bytes_tail(
+            stderr_bytes, max_output_bytes, encoding=self.output_encoding
+        )
+        status = "timeout" if self.timed_out else "terminated" if self.signal_name is not None else "exited"
+        payload: dict[str, Any] = {
+            "session_id": self.session_id,
+            "status": status,
+            "exit_code": self.exit_code,
+            "signal": self.signal_name,
+            "timed_out": self.timed_out,
+            "stdout": stdout_truncation.content,
+            "stderr": stderr_truncation.content,
+            "stdout_truncated": stdout_truncation.truncated,
+            "stderr_truncated": stderr_truncation.truncated,
+            "stdout_truncated_by": stdout_truncation.truncated_by,
+            "stderr_truncated_by": stderr_truncation.truncated_by,
+            "stdout_output_lines": stdout_truncation.output_lines,
+            "stderr_output_lines": stderr_truncation.output_lines,
+            "stdout_output_bytes": stdout_truncation.output_bytes,
+            "stderr_output_bytes": stderr_truncation.output_bytes,
+            "stdout_dropped_bytes": self.stdout_dropped_bytes,
+            "stderr_dropped_bytes": self.stderr_dropped_bytes,
+            "stdout_omitted_bytes": stdout_omitted,
+            "stderr_omitted_bytes": stderr_omitted,
+            "truncated": (
+                stdout_truncation.truncated
+                or stderr_truncation.truncated
+                or stdout_omitted > 0
+                or stderr_omitted > 0
+            ),
+            "ok": True,
+        }
+        warnings = list(self.warnings)
+        if stdout_truncation.truncated:
+            warnings.append(f"stdout truncated from tail by {stdout_truncation.truncated_by}")
+        if stderr_truncation.truncated:
+            warnings.append(f"stderr truncated from tail by {stderr_truncation.truncated_by}")
+        if stdout_omitted > 0:
+            warnings.append("stdout cursor skipped dropped bytes")
+        if stderr_omitted > 0:
+            warnings.append("stderr cursor skipped dropped bytes")
+        if warnings:
+            payload["warnings"] = warnings
+        return payload
+
+    def retained_output_bytes(self) -> bytes:
+        with self.lock:
+            stdout = bytes(self.stdout)
+            stderr = bytes(self.stderr)
+        sections: list[bytes] = []
+        if stdout:
+            sections.extend([b"--- stdout ---\n", stdout])
+        if stderr:
+            if sections:
+                sections.append(b"\n")
+            sections.extend([b"--- stderr ---\n", stderr])
+        return b"".join(sections)
+
+    def retained_stream_bytes(self, stream: str) -> tuple[bytes, int, int, int]:
+        with self.lock:
+            if stream == "stdout":
+                return bytes(self.stdout), self.stdout_start_offset, self.stdout_total_bytes, self.stdout_dropped_bytes
+            if stream == "stderr":
+                return bytes(self.stderr), self.stderr_start_offset, self.stderr_total_bytes, self.stderr_dropped_bytes
+        raise ValueError(f"Unknown output stream: {stream}")
+
+
+def release_terminal_process_resources(session: ExecSession) -> None:
+    """Release every OS owner after terminal metadata and output are copied."""
+
+    process = session.process
+    if process.returncode is None:
+        raise ValueError("cannot release resources for a running process")
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(process, name, None)
+        if stream is not None and not stream.closed:
+            try:
+                stream.close()
+            except OSError:
+                pass
+        setattr(process, name, None)
+    if session.pty_master_fd is not None:
+        try:
+            os.close(session.pty_master_fd)
+        except OSError:
+            pass
+        session.pty_master_fd = None
+    if os.name == "nt":
+        handle = getattr(process, "_handle", None)
+        if handle is not None:
+            try:
+                handle.Close()
+            except OSError:
+                pass
+            process._handle = None
 
 
 def start_reader_threads(session: ExecSession) -> None:
@@ -401,24 +587,24 @@ def start_session_watchdog(session: ExecSession) -> None:
 
     def watchdog() -> None:
         delay = max(0.0, session.timeout_at - time.time()) if session.timeout_at is not None else 0.0
-        try:
-            session.process.wait(timeout=delay)
-        except subprocess.TimeoutExpired:
-            pass
-        else:
-            session.refresh_status()
-            return
+        deadline = time.time() + delay
+        while session.process.poll() is None and time.time() < deadline:
+            if session.watchdog_stop.wait(timeout=min(0.05, max(0.0, deadline - time.time()))):
+                return
         if session.process.poll() is not None or session.timed_out:
+            session.refresh_status()
             return
         session.timed_out = True
         terminate_process_group(session.process, signal.SIGTERM)
         session.refresh_status()
 
-    threading.Thread(
+    thread = threading.Thread(
         target=watchdog,
         name=f"coding-tools-watchdog-{session.session_id}",
         daemon=True,
-    ).start()
+    )
+    session.watchdog_thread = thread
+    thread.start()
 
 
 def _trim_buffer(

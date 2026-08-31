@@ -213,6 +213,16 @@ pub(crate) fn control_command_during_work(
     };
 
     let cancellation_signal = executions.cancellation_signal(&request.public_session_id);
+    if request.action == CommandControlAction::Kill
+        && observation.status == RuntimeCommandStatus::Running
+    {
+        // The cancellation request is accepted and remains owned by the
+        // ExecutionRegistry, but no terminal process fact was observed within
+        // this call's wait budget. Returning `running` would make the kill
+        // response contradict that accepted intent and skip the caller's
+        // terminal poll path.
+        return Err(CommandControlError::OperationTimedOut);
+    }
     let terminal_outcome = observation.status.terminal_outcome().map(|outcome| {
         if cancellation_signal.is_some() {
             TerminalOutcome::Cancelled
@@ -493,6 +503,62 @@ mod tests {
             })
         ));
         assert_eq!(registry.cancellation_signal(&public_session), None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn accepted_kill_without_terminal_observation_returns_timeout_not_running() {
+        let root = std::env::temp_dir().join(format!(
+            "localbridge-command-control-running-kill-{}-{}",
+            std::process::id(),
+            unix_time_ms()
+        ));
+        std::fs::create_dir_all(&root).expect("test workspace");
+        let registry =
+            ExecutionRegistry::open_at(root.join("executions.json")).expect("execution registry");
+        let public_session = PublicSessionId::new("public-running-kill");
+        let execution_id = registry
+            .start(TaskId::new("task-running-kill"), public_session.clone())
+            .expect("start execution");
+        registry
+            .bind_runtime_handle(
+                &execution_id,
+                RuntimeCommandHandle::new("private-running-kill"),
+            )
+            .expect("bind runtime handle");
+
+        let result = control_command_during_work(
+            CommandControlRequest {
+                action: CommandControlAction::Kill,
+                chars: None,
+                signal: Some(CommandKillSignal::Kill),
+                wait_ms: 0,
+                request_id: RpcRequestId::String("kill-running".into()),
+                public_session_id: public_session.clone(),
+            },
+            &registry,
+            &FakeRuntime(Mutex::new(Some(RuntimeCommandObservation {
+                status: RuntimeCommandStatus::Running,
+                exit_code: None,
+                signal: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                truncated: Some(false),
+            }))),
+        );
+
+        assert_eq!(result, Err(CommandControlError::OperationTimedOut));
+        assert_eq!(
+            registry.cancellation_signal(&public_session).as_deref(),
+            Some("KILL")
+        );
+        assert!(matches!(
+            registry
+                .execution_for_public_session(&public_session)
+                .expect("execution")
+                .state,
+            ExecutionState::Running
+        ));
         let _ = std::fs::remove_dir_all(root);
     }
 

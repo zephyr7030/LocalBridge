@@ -61,6 +61,7 @@ from .processes import (
     HARD_KILL_SIGNAL,
     SESSION_BUFFER_BYTES,
     ExecSession,
+    RetainedExecOutput,
     decode_output_bytes,
     spawn_process,
     start_reader_threads,
@@ -1046,7 +1047,9 @@ def process_group_popen_kwargs() -> dict[str, Any]:
     if hasattr(os, "setsid"):
         return {"start_new_session": True}
     if os.name == "nt":
-        creation_flag = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        creation_flag = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
+            subprocess, "CREATE_NO_WINDOW", 0
+        )
         if creation_flag:
             return {"creationflags": creation_flag}
     return {}
@@ -1262,8 +1265,8 @@ class Runtime:
         self.fallback_runtime_dir = fallback_runtime_dir_for_workspace(self.workspace.root, self.server_instance_id)
         self.default_cwd = self.workspace.root
         self.sessions: dict[str, ExecSession] = {}
-        self.output_sessions: dict[str, ExecSession] = {}
-        self.sessions_lock = threading.Lock()
+        self.output_sessions: dict[str, RetainedExecOutput] = {}
+        self.sessions_lock = threading.RLock()
         self.starting_sessions = 0
         self._closed = False
         self.http_session_id = secrets.token_urlsafe(24)
@@ -2632,13 +2635,6 @@ class Runtime:
             output_encoding=output_encoding,
         )
 
-    def _remember_output_session(self, session: ExecSession) -> None:
-        session.refresh_status()
-        with self.sessions_lock:
-            self.output_sessions.pop(session.session_id, None)
-            self.output_sessions[session.session_id] = session
-            self._evict_retained_locked()
-
     def _retained_output_bytes_locked(self) -> int:
         return sum(session.retained_bytes for session in self.sessions.values()) + sum(
             session.retained_bytes for session in self.output_sessions.values()
@@ -2653,13 +2649,17 @@ class Runtime:
             oldest = self.output_sessions.pop(next(iter(self.output_sessions)))
             retained -= oldest.retained_bytes
 
-    def _complete_session(self, session: ExecSession) -> None:
+    def _complete_session(self, session: ExecSession) -> RetainedExecOutput | None:
         session.refresh_status()
         if session.process.poll() is None:
-            return
+            return None
+        retained = RetainedExecOutput.capture(session, self.sessions_lock)
         with self.sessions_lock:
             self.sessions.pop(session.session_id, None)
-        self._remember_output_session(session)
+            self.output_sessions.pop(session.session_id, None)
+            self.output_sessions[session.session_id] = retained
+            self._evict_retained_locked()
+        return retained
 
     def _prune_sessions(self) -> None:
         with self.sessions_lock:
@@ -2679,7 +2679,7 @@ class Runtime:
                 self.output_sessions.pop(session_id, None)
             self._evict_retained_locked()
 
-    def _get_output_session(self, session_id: str) -> ExecSession:
+    def _get_output_session(self, session_id: str) -> ExecSession | RetainedExecOutput:
         self._prune_sessions()
         with self.sessions_lock:
             session = self.sessions.get(session_id) or self.output_sessions.get(session_id)
@@ -2687,10 +2687,11 @@ class Runtime:
             raise ToolFailure("SESSION_NOT_FOUND", "Output session not found.", category="runtime")
         return session
 
-    def _format_session_output(self, session: ExecSession, payload: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    def _format_session_output(self, session: ExecSession | RetainedExecOutput, payload: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
         terminal = payload.get("status") != "running"
-        if terminal:
-            self._complete_session(session)
+        output_session = session
+        if terminal and isinstance(session, ExecSession):
+            output_session = self._complete_session(session) or session
         if payload.get("status") == "running":
             payload["next_action"] = {
                 "tool": "write_stdin",
@@ -2723,8 +2724,6 @@ class Runtime:
         if truncated:
             if not truncated_streams:
                 truncated_streams.append(output_stream)
-            if terminal:
-                self._remember_output_session(session)
             payload["output_ref"] = output_ref
             payload["output_stream"] = output_stream
             payload["output_refs"] = output_refs
@@ -2743,9 +2742,7 @@ class Runtime:
                 "verbosity must be one of: summary, preview, full.",
                 category="validation",
             )
-        if terminal and not truncated:
-            self._remember_output_session(session)
-        payload["summary"] = self._session_output_summary(session, payload)
+        payload["summary"] = self._session_output_summary(output_session, payload)
         payload["output_ref"] = output_ref
         payload["output_stream"] = output_stream
         payload["output_refs"] = output_refs
@@ -2773,7 +2770,7 @@ class Runtime:
         if verbosity == "preview":
             preview_limit = int(args.get("preview_bytes", EXEC_PREVIEW_BYTES))
             preview, preview_truncated = truncate_bytes(
-                session.retained_output_bytes(), preview_limit, encoding=session.output_encoding
+                output_session.retained_output_bytes(), preview_limit, encoding=output_session.output_encoding
             )
             compact["preview"] = preview
             compact["preview_truncated"] = preview_truncated
@@ -2782,7 +2779,7 @@ class Runtime:
                 preview_streams = [
                     stream
                     for stream in ("stdout", "stderr")
-                    if session.retained_stream_bytes(stream)[2] > 0
+                    if output_session.retained_stream_bytes(stream)[2] > 0
                 ]
                 compact["truncated_output_streams"] = preview_streams
                 preview_actions = [read_output_action(output_refs[stream]) for stream in preview_streams]
@@ -2791,7 +2788,7 @@ class Runtime:
                     compact["next_action"] = preview_actions[0]
         return compact
 
-    def _session_output_summary(self, session: ExecSession, payload: dict[str, Any]) -> str:
+    def _session_output_summary(self, session: ExecSession | RetainedExecOutput, payload: dict[str, Any]) -> str:
         retained = decode_output_bytes(session.retained_output_bytes(), session.output_encoding)
         lines = retained.splitlines()
         tail = next((line.strip() for line in reversed(lines) if line.strip()), "")
@@ -2869,6 +2866,11 @@ class Runtime:
         session = self._get_session(session_id)
         session.refresh_status()
         chars = str(args.get("chars", ""))
+        if isinstance(session, RetainedExecOutput):
+            if chars:
+                raise ToolFailure("SESSION_CLOSED", "Session is closed; stdin write blocked.", category="runtime")
+            payload = session.snapshot_since_cursor(int(args.get("max_output_bytes", 65536)))
+            return self._format_session_output(session, payload, args)
         if session.process.poll() is not None:
             if chars:
                 raise ToolFailure("SESSION_CLOSED", "Session is closed; stdin write blocked.", category="runtime")
@@ -2898,12 +2900,18 @@ class Runtime:
         except subprocess.TimeoutExpired:
             pass
         session.refresh_status()
-        session.drain_readers()
         return session.process.poll() is not None
 
     def kill_session(self, args: dict[str, Any]) -> dict[str, Any]:
         session_id = str(args.get("session_id", ""))
         session = self._get_session(session_id)
+        if isinstance(session, RetainedExecOutput):
+            payload = session.snapshot_since_cursor(int(args.get("max_output_bytes", 65536)))
+            payload.update({"killed": False, "status": "exited", "evicted": True, "signal_sent": None})
+            payload = self._format_session_output(session, payload, args)
+            with self.sessions_lock:
+                self.output_sessions.pop(session_id, None)
+            return payload
         signal_name = str(args.get("signal", "TERM"))
         force = signal_name == "KILL"
         signum = {"TERM": signal.SIGTERM, "KILL": HARD_KILL_SIGNAL, "INT": signal.SIGINT}.get(
@@ -2912,13 +2920,19 @@ class Runtime:
         )
         evict = True
         if session.process.poll() is None:
+            wait_seconds = max(0.0, min(int(args.get("wait_ms", 5000)), 30_000) / 1000.0)
+            deadline = time.monotonic() + wait_seconds
             session.terminating = True
             terminate_process_group(session.process, signum, force=force)
-            exited = self._wait_for_session_exit(session, int(args.get("wait_ms", 5000)) / 1000.0)
+            # TERM gets only a bounded grace period. A single monotonic
+            # deadline owns TERM -> KILL -> terminal observation, so no
+            # signal or socket stage can reset wait_ms.
+            term_grace = 0.0 if force else min(0.2, max(0.0, deadline - time.monotonic()))
+            exited = self._wait_for_session_exit(session, term_grace)
             if not exited and not force:
                 force = True
                 terminate_process_group(session.process, HARD_KILL_SIGNAL, force=True)
-                exited = self._wait_for_session_exit(session, int(args.get("kill_wait_ms", 2000)) / 1000.0)
+                exited = self._wait_for_session_exit(session, max(0.0, deadline - time.monotonic()))
             if exited:
                 killed = True
                 status = "killed" if force else "terminated"
@@ -2960,7 +2974,7 @@ class Runtime:
         if session_id is not None:
             self.cancel_session(session_id)
 
-    def _get_session(self, session_id: str) -> ExecSession:
+    def _get_session(self, session_id: str) -> ExecSession | RetainedExecOutput:
         self._prune_sessions()
         with self.sessions_lock:
             session = self.sessions.get(session_id) or self.output_sessions.get(session_id)

@@ -37,10 +37,113 @@ fn production_update_projection_exposes_the_official_release_source() {
 }
 
 #[test]
+fn main_projection_json_contract_matches_the_frontend_fixture() {
+    let projection = MainProjection {
+        authority_status: "ready",
+        runtime_status: "ready",
+        settings_status: "ready",
+        connection_status: "ready",
+        activity_status: "ready",
+        update_status: "ready",
+        permission: Some("admin"),
+        effective_permission: Some("full"),
+        permission_reconciliation: Some("awaiting_authorization"),
+        elevated_active: Some(false),
+        privilege: Some("requested"),
+        local_environment_service: Some("online"),
+        tunnel_service: Some("recovering"),
+        coding_service: Some("online"),
+        onboarding_ready: Some(false),
+        current_project: Some("D:/project/LocalBridge".into()),
+        projects: Some(vec![ProjectProjection {
+            id: "workspace-1".into(),
+            path: "D:/project/LocalBridge".into(),
+            active: true,
+        }]),
+        current_task: Some(TaskProjection {
+            kind: "command",
+            summary: Some("running a local command".into()),
+            state: "running",
+            elapsed_ms: Some(1200),
+        }),
+        current_activity: Some(CurrentActivityProjection {
+            kind: "command",
+            state: "waiting_input",
+            summary: Some("waiting for input".into()),
+            elapsed_ms: Some(1200),
+            step: None,
+            progress_current: None,
+            progress_total: None,
+        }),
+        last_activity: Some(LastActivityProjection {
+            kind: "modify",
+            summary: Some("policy rejected edit".into()),
+            outcome: "blocked",
+            completed_at_ms: 1000,
+        }),
+        projection_revision: 49,
+        tunnel_id: Some("tunnel_01401401401401401401401401401401".into()),
+        runtime_key_saved: Some(true),
+        auto_start: Some(true),
+        close_window_continue_running: Some(true),
+        reconnect: Some(ReconnectProjection { generation: 3 }),
+        update: Some(UpdateProjection {
+            state: "current",
+            current_version: "0.13.0".into(),
+            latest_version: None,
+            release_url: Some("https://github.com/zephyr7030/LocalBridge/releases".into()),
+            operation_id: Some("update-1".into()),
+            attempt: None,
+            retryable: true,
+        }),
+        active_faults: vec![UiFaultProjection {
+            code: "Authority.BrokerUnavailable".into(),
+            category: "authorization",
+            message: "Privilege broker is unavailable".into(),
+            retryable: true,
+        }],
+    };
+    let backend = serde_json::to_value(projection).unwrap();
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/ui/main_projection.json"
+    )))
+    .unwrap();
+    assert_eq!(backend, fixture);
+}
+
+#[test]
+fn unavailable_and_stale_sections_never_become_live_ui_business_state() {
+    let unavailable = ProjectionSection::<u8>::unavailable();
+    assert_eq!(projection_section_code(&unavailable), "unavailable");
+    assert_eq!(ready_section_value(&unavailable), None);
+
+    let stale = ProjectionSection::stale(Some(PermissionMode::Elevated));
+    assert_eq!(projection_section_code(&stale), "stale");
+    assert_eq!(ready_section_value(&stale), None);
+
+    let faulted = ProjectionSection::faulted(Some(RuntimeState::Ready));
+    assert_eq!(projection_section_code(&faulted), "fault");
+    assert_eq!(ready_section_value(&faulted), None);
+}
+
+#[test]
 fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     assert_eq!(permission_code(PermissionMode::Edit), "edit");
     assert_eq!(permission_code(PermissionMode::Full), "full");
     assert_eq!(permission_code(PermissionMode::Elevated), "admin");
+    assert_eq!(
+        authority_reconciliation_code(AuthorityReconciliation::Converged),
+        "converged"
+    );
+    assert_eq!(
+        authority_reconciliation_code(AuthorityReconciliation::AwaitingAuthorization),
+        "awaiting_authorization"
+    );
+    assert_eq!(
+        authority_reconciliation_code(AuthorityReconciliation::BrokerUnavailable),
+        "broker_unavailable"
+    );
     assert_eq!(privilege_code(&PrivilegeState::Disabled), "off");
     assert_eq!(privilege_code(&PrivilegeState::Requested), "requested");
     assert_eq!(privilege_code(&PrivilegeState::AwaitingUac), "awaiting");
@@ -114,26 +217,35 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
     ] {
         assert_eq!(local_environment_service_code(&state), expected);
     }
+    assert_eq!(terminal_outcome_code(TerminalOutcome::Blocked), "blocked");
     let rendered = serde_json::to_string(&MainProjection {
-        permission: "admin",
-        effective_permission: "admin",
-        elevated_active: true,
-        privilege: "active",
-        local_environment_service: "online",
-        tunnel_service: "online",
-        coding_service: "online",
+        authority_status: "ready",
+        runtime_status: "ready",
+        settings_status: "ready",
+        connection_status: "ready",
+        activity_status: "ready",
+        update_status: "ready",
+        permission: Some("admin"),
+        effective_permission: Some("admin"),
+        permission_reconciliation: Some("converged"),
+        elevated_active: Some(true),
+        privilege: Some("active"),
+        local_environment_service: Some("online"),
+        tunnel_service: Some("online"),
+        coding_service: Some("online"),
+        onboarding_ready: Some(true),
         current_project: None,
-        projects: vec![],
+        projects: Some(vec![]),
         current_task: None,
         current_activity: None,
         last_activity: None,
         projection_revision: 7,
         tunnel_id: Some("tunnel_01401401401401401401401401401401".to_owned()),
-        runtime_key_saved: true,
-        auto_start: true,
-        close_window_continue_running: true,
+        runtime_key_saved: Some(true),
+        auto_start: Some(true),
+        close_window_continue_running: Some(true),
         reconnect: None,
-        update: UpdateProjection {
+        update: Some(UpdateProjection {
             state: "current",
             current_version: "0.1.1".into(),
             latest_version: None,
@@ -141,7 +253,7 @@ fn presentation_codes_are_stable_and_never_direct_internal_enum_names() {
             operation_id: Some("update-1".into()),
             attempt: None,
             retryable: true,
-        },
+        }),
         active_faults: vec![],
     })
     .unwrap();

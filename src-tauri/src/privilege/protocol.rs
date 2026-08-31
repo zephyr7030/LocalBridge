@@ -1,9 +1,10 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const BROKER_PROTOCOL_VERSION: u16 = 2;
+pub const BROKER_PROTOCOL_VERSION: u16 = 3;
 pub const MAX_BROKER_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const SESSION_NONCE_BYTES: usize = 32;
 pub const MAX_ELEVATED_ARGS: usize = 128;
@@ -13,6 +14,7 @@ pub const MAX_ELEVATED_OUTPUT_BYTES: u32 = 1024 * 1024;
 pub const MAX_ELEVATED_REQUEST_ID_BYTES: usize = 128;
 pub const MAX_PRIVILEGED_FILE_BYTES: usize = 24 * 1024;
 pub const MAX_ADMINISTRATOR_FILESYSTEM_CONTENT_BYTES: usize = 1024 * 1024;
+pub const MAX_ADMINISTRATOR_FILESYSTEM_EDIT_BYTES: usize = 4 * 1024 * 1024;
 const BROKER_PIPE_PREFIX: &str = r"\\.\pipe\LocalBridge-Privileged-";
 
 fn is_windows_verbatim_path(value: &str) -> bool {
@@ -296,7 +298,10 @@ pub enum AdministratorFilesystemAction {
     Stat,
     Read,
     Write,
+    Replace,
+    Patch,
     Search,
+    SearchContent,
     Copy,
     Move,
     Delete,
@@ -332,6 +337,9 @@ pub enum AdministratorFilesystemErrorCode {
     NotFound,
     OutsideAuthority,
     AlreadyExists,
+    FileChanged,
+    PatchConflict,
+    AmbiguousMatch,
     LimitExceeded,
     Cancelled,
     Unsupported,
@@ -366,7 +374,21 @@ pub struct AdministratorFilesystemSpec {
     pub offset: u64,
     pub max_bytes: u32,
     pub content_base64: Option<String>,
+    #[serde(default)]
+    pub expected_sha256: Option<String>,
+    #[serde(default)]
+    pub old: Option<String>,
+    #[serde(default)]
+    pub new: Option<String>,
+    #[serde(default)]
+    pub patch: Option<String>,
+    #[serde(default)]
+    pub expected_files: BTreeMap<String, String>,
     pub pattern: Option<String>,
+    #[serde(default = "default_true")]
+    pub case_sensitive: bool,
+    #[serde(default = "default_administrator_max_file_bytes")]
+    pub max_file_bytes: u32,
     pub kind: Option<AdministratorFilesystemKind>,
     pub min_size: Option<u64>,
     pub max_size: Option<u64>,
@@ -376,6 +398,14 @@ pub struct AdministratorFilesystemSpec {
     pub sort_order: AdministratorFilesystemSortOrder,
     pub overwrite: bool,
     pub calculate_size: bool,
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+const fn default_administrator_max_file_bytes() -> u32 {
+    1024 * 1024
 }
 
 impl AdministratorFilesystemSpec {
@@ -400,6 +430,8 @@ impl AdministratorFilesystemSpec {
             && self.max_results <= 10_000
             && self.max_bytes > 0
             && self.max_bytes <= 1024 * 1024
+            && self.max_file_bytes > 0
+            && self.max_file_bytes <= 16 * 1024 * 1024
             && self
                 .min_size
                 .zip(self.max_size)
@@ -418,6 +450,26 @@ impl AdministratorFilesystemSpec {
                 && !value.as_bytes().contains(&0)
                 && !value.contains(['\n', '\r'])
         });
+        let bounded_edit_text = |value: &String| {
+            value.len() <= MAX_ADMINISTRATOR_FILESYSTEM_EDIT_BYTES && !value.as_bytes().contains(&0)
+        };
+        let edit_valid = self
+            .old
+            .as_ref()
+            .is_none_or(|value| !value.is_empty() && bounded_edit_text(value))
+            && self.new.as_ref().is_none_or(bounded_edit_text)
+            && self
+                .patch
+                .as_ref()
+                .is_none_or(|value| !value.is_empty() && bounded_edit_text(value))
+            && self.expected_sha256.as_deref().is_none_or(valid_sha256)
+            && self.expected_files.len() <= 1_000
+            && self.expected_files.iter().all(|(path, hash)| {
+                !path.is_empty()
+                    && path.len() <= MAX_ELEVATED_STRING_BYTES
+                    && !path.as_bytes().contains(&0)
+                    && valid_sha256(hash)
+            });
         let workspace_binding_valid = match (
             self.workspace_root.as_deref(),
             self.workspace_identity.as_deref(),
@@ -428,7 +480,8 @@ impl AdministratorFilesystemSpec {
                     && !identity.is_empty()
                     && identity.len() <= 128
                     && !identity.as_bytes().contains(&0)
-                    && !self.workspace_fields.is_empty()
+                    && (!self.workspace_fields.is_empty()
+                        || self.action == AdministratorFilesystemAction::Patch)
                     && self
                         .workspace_fields
                         .iter()
@@ -452,10 +505,16 @@ impl AdministratorFilesystemSpec {
             || !bounds_valid
             || !content_valid
             || !pattern_valid
+            || !edit_valid
             || !workspace_binding_valid
         {
             return Err(BrokerProtocolError::MalformedFrame);
         }
+        let edit_fields_empty = self.expected_sha256.is_none()
+            && self.old.is_none()
+            && self.new.is_none()
+            && self.patch.is_none()
+            && self.expected_files.is_empty();
         let shape_valid = match self.action {
             AdministratorFilesystemAction::List
             | AdministratorFilesystemAction::Stat
@@ -472,12 +531,47 @@ impl AdministratorFilesystemSpec {
                     && self.max_size.is_none()
                     && self.modified_after_ms.is_none()
                     && self.modified_before_ms.is_none()
+                    && edit_fields_empty
             }
             AdministratorFilesystemAction::Write => {
                 self.path.is_some()
                     && self.source.is_none()
                     && self.destination.is_none()
                     && self.content_base64.is_some()
+                    && self.pattern.is_none()
+                    && self.kind.is_none()
+                    && self.min_size.is_none()
+                    && self.max_size.is_none()
+                    && self.modified_after_ms.is_none()
+                    && self.modified_before_ms.is_none()
+                    && edit_fields_empty
+            }
+            AdministratorFilesystemAction::Replace => {
+                self.path.is_some()
+                    && self.source.is_none()
+                    && self.destination.is_none()
+                    && self.content_base64.is_none()
+                    && self.expected_sha256.is_some()
+                    && self.old.is_some()
+                    && self.new.is_some()
+                    && self.patch.is_none()
+                    && self.expected_files.is_empty()
+                    && self.pattern.is_none()
+                    && self.kind.is_none()
+                    && self.min_size.is_none()
+                    && self.max_size.is_none()
+                    && self.modified_after_ms.is_none()
+                    && self.modified_before_ms.is_none()
+            }
+            AdministratorFilesystemAction::Patch => {
+                self.path.is_none()
+                    && self.source.is_none()
+                    && self.destination.is_none()
+                    && self.content_base64.is_none()
+                    && self.expected_sha256.is_none()
+                    && self.old.is_none()
+                    && self.new.is_none()
+                    && self.patch.is_some()
                     && self.pattern.is_none()
                     && self.kind.is_none()
                     && self.min_size.is_none()
@@ -491,6 +585,20 @@ impl AdministratorFilesystemSpec {
                     && self.destination.is_none()
                     && self.content_base64.is_none()
                     && self.pattern.is_some()
+                    && edit_fields_empty
+            }
+            AdministratorFilesystemAction::SearchContent => {
+                self.path.is_some()
+                    && self.source.is_none()
+                    && self.destination.is_none()
+                    && self.content_base64.is_none()
+                    && self.pattern.is_some()
+                    && self.kind.is_none()
+                    && self.min_size.is_none()
+                    && self.max_size.is_none()
+                    && self.modified_after_ms.is_none()
+                    && self.modified_before_ms.is_none()
+                    && edit_fields_empty
             }
             AdministratorFilesystemAction::Copy | AdministratorFilesystemAction::Move => {
                 self.path.is_none()
@@ -503,6 +611,7 @@ impl AdministratorFilesystemSpec {
                     && self.max_size.is_none()
                     && self.modified_after_ms.is_none()
                     && self.modified_before_ms.is_none()
+                    && edit_fields_empty
             }
         };
         shape_valid
@@ -517,6 +626,14 @@ pub struct AdministratorFilesystemEntry {
     pub kind: String,
     pub size: u64,
     pub modified_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdministratorFilesystemContentMatch {
+    pub path: String,
+    pub line: u32,
+    pub column: u32,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -553,6 +670,22 @@ pub enum AdministratorFilesystemResult {
         bytes: u64,
         changed: bool,
     },
+    Edit {
+        action: AdministratorFilesystemAction,
+        path: Option<String>,
+        affected_files: Vec<String>,
+        sha256: Option<String>,
+        changed: bool,
+    },
+    ContentMatches {
+        action: AdministratorFilesystemAction,
+        matches: Vec<AdministratorFilesystemContentMatch>,
+        scanned_entries: u32,
+        scanned_files: u32,
+        skipped_binary_files: u32,
+        skipped_oversized_files: u32,
+        truncated: bool,
+    },
     Hash {
         path: String,
         algorithm: String,
@@ -575,6 +708,10 @@ fn valid_privileged_absolute_path(value: &str) -> bool {
         && !path
             .components()
             .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 pub fn valid_elevated_request_id(value: &str) -> bool {

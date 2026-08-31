@@ -237,7 +237,7 @@ fn unknown_public_actions_and_public_policy_widening_fail_closed() {
             "elevated_tools = [\"workspace_context\", \"filesystem\", \"git_workflow\", \"document_workflow\", \"view_image\"]",
         );
     let narrowed = CapabilityPolicy::from_toml(&narrowed).expect("stricter policy remains valid");
-    assert!(!narrowed.public_tool_allowed_for_list(PermissionMode::Full, "exec_command"));
+    assert!(!narrowed.public_tool_allowed_in_mode(PermissionMode::Full, "exec_command"));
     assert!(
         !narrowed
             .decide_public(

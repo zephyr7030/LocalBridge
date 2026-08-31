@@ -515,6 +515,8 @@ fn publish_control_plane_observation(
         outage: runtime.outage.as_ref().map(|outage| OutageProjection {
             generation: outage.generation,
             operation_id: outage.request_id.clone(),
+            component: outage.component,
+            fault: outage.fault.clone(),
             user_attention_required: outage.user_attention_required,
         }),
     };
@@ -528,6 +530,7 @@ fn publish_control_plane_observation(
         effective: convergence.effective.authority.execution,
         broker: broker.clone(),
         elevated_active: convergence.effective.authority.elevated_active,
+        reconciliation: convergence.effective.authority.reconciliation,
     });
     let workspace = ProjectionSection::ready(WorkspaceProjection {
         desired_id: convergence

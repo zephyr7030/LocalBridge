@@ -489,7 +489,7 @@ impl CapabilityPolicy {
         }
     }
 
-    pub fn public_tool_allowed_for_list(&self, mode: PermissionMode, tool_name: &str) -> bool {
+    pub fn public_tool_allowed_in_mode(&self, mode: PermissionMode, tool_name: &str) -> bool {
         let allowed = match mode {
             PermissionMode::Edit => &self.public_edit_allowed,
             PermissionMode::Full => &self.public_full_allowed,
@@ -651,7 +651,10 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                 "stat" => "stat",
                 "read" => "read",
                 "write" => "write",
+                "replace" => "replace",
+                "patch" => "patch",
                 "search" => "search",
+                "search_content" => "search_content",
                 "copy" => "copy",
                 "move" => "move",
                 "delete" => "delete",
@@ -659,7 +662,7 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                 _ => return None,
             };
             let (capability, task_kind, declaration) = match filesystem_action {
-                "search" => (
+                "search" | "search_content" => (
                     Capability::Read,
                     TaskKind::SearchCode,
                     PublicCapabilityDeclaration::READ,

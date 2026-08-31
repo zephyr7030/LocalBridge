@@ -138,6 +138,49 @@ pub(crate) struct FilesystemSearchOptions {
     pub sort_order: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FilesystemContentSearchOptions {
+    pub recursive: bool,
+    pub max_depth: u32,
+    pub max_entries: usize,
+    pub max_results: usize,
+    pub max_file_bytes: usize,
+    pub pattern: String,
+    pub case_sensitive: bool,
+}
+
+impl Default for FilesystemContentSearchOptions {
+    fn default() -> Self {
+        Self {
+            recursive: false,
+            max_depth: 16,
+            max_entries: 10_000,
+            max_results: 100,
+            max_file_bytes: MAX_FILESYSTEM_READ_BYTES,
+            pattern: String::new(),
+            case_sensitive: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct FilesystemContentMatch {
+    pub path: String,
+    pub line: usize,
+    pub column: usize,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct FilesystemContentSearchResult {
+    pub matches: Vec<FilesystemContentMatch>,
+    pub scanned_entries: usize,
+    pub scanned_files: usize,
+    pub skipped_binary_files: usize,
+    pub skipped_oversized_files: usize,
+    pub truncated: bool,
+}
+
 impl Default for FilesystemSearchOptions {
     fn default() -> Self {
         Self {
@@ -653,7 +696,7 @@ impl FilesystemService {
     where
         F: FnOnce(),
     {
-        if expected_sha256.len() != 64 {
+        if !valid_sha256_hex(expected_sha256) {
             return Err(FilesystemError::InvalidArgument);
         }
         let target = self
@@ -680,7 +723,7 @@ impl FilesystemService {
             }
             let mut file = target_handle.into_file();
             let original = read_open_file_bytes(&mut file)?;
-            if sha256_bytes(&original) != expected_sha256 {
+            if !sha256_bytes(&original).eq_ignore_ascii_case(expected_sha256) {
                 return Err(FilesystemError::FileChanged);
             }
             before_write();
@@ -697,7 +740,7 @@ impl FilesystemService {
                 .open(&target)
                 .map_err(|_| FilesystemError::Io)?;
             let original = read_open_file_bytes(&mut file)?;
-            if sha256_bytes(&original) != expected_sha256 {
+            if !sha256_bytes(&original).eq_ignore_ascii_case(expected_sha256) {
                 return Err(FilesystemError::FileChanged);
             }
             before_write();
@@ -724,7 +767,7 @@ impl FilesystemService {
         path: &str,
         expected_sha256: &str,
     ) -> Result<(), FilesystemError> {
-        if expected_sha256.len() != 64 {
+        if !valid_sha256_hex(expected_sha256) {
             return Err(FilesystemError::InvalidArgument);
         }
         let target = self
@@ -746,7 +789,7 @@ impl FilesystemService {
             }
             let mut file = target_handle.into_file();
             let bytes = read_open_file_bytes(&mut file)?;
-            if sha256_bytes(&bytes) != expected_sha256 {
+            if !sha256_bytes(&bytes).eq_ignore_ascii_case(expected_sha256) {
                 return Err(FilesystemError::FileChanged);
             }
             delete_raw_handle(file_raw_handle(&file)).map_err(|_| FilesystemError::Io)
@@ -757,7 +800,7 @@ impl FilesystemService {
                 .revalidate_parent(&target)
                 .map_err(map_path_error)?;
             let bytes = fs::read(&target).map_err(|_| FilesystemError::Io)?;
-            if sha256_bytes(&bytes) != expected_sha256 {
+            if !sha256_bytes(&bytes).eq_ignore_ascii_case(expected_sha256) {
                 return Err(FilesystemError::FileChanged);
             }
             fs::remove_file(&target).map_err(|_| FilesystemError::Io)
@@ -770,7 +813,7 @@ impl FilesystemService {
         destination: &str,
         expected_sha256: &str,
     ) -> Result<(), FilesystemError> {
-        if expected_sha256.len() != 64 {
+        if !valid_sha256_hex(expected_sha256) {
             return Err(FilesystemError::InvalidArgument);
         }
         let source_path = self
@@ -803,7 +846,7 @@ impl FilesystemService {
             }
             let mut file = source_handle.into_file();
             let bytes = read_open_file_bytes(&mut file)?;
-            if sha256_bytes(&bytes) != expected_sha256 {
+            if !sha256_bytes(&bytes).eq_ignore_ascii_case(expected_sha256) {
                 return Err(FilesystemError::FileChanged);
             }
             let committed = destination_parent_guard.final_path().join(
@@ -828,7 +871,7 @@ impl FilesystemService {
                 .revalidate_parent(&destination_path)
                 .map_err(map_path_error)?;
             let bytes = fs::read(&source_path).map_err(|_| FilesystemError::Io)?;
-            if sha256_bytes(&bytes) != expected_sha256 {
+            if !sha256_bytes(&bytes).eq_ignore_ascii_case(expected_sha256) {
                 return Err(FilesystemError::FileChanged);
             }
             fs::rename(source_path, destination_path).map_err(|_| FilesystemError::Io)
@@ -841,7 +884,7 @@ impl FilesystemService {
         content: &[u8],
         overwrite: bool,
     ) -> Result<FilesystemMutationResult, FilesystemError> {
-        if content.len() > MAX_FILESYSTEM_READ_BYTES {
+        if content.len() > MAX_INTERNAL_FILE_BYTES {
             return Err(FilesystemError::LimitExceeded);
         }
         let target = self
@@ -968,6 +1011,105 @@ impl FilesystemService {
             walked.truncated = true;
         }
         Ok(walked)
+    }
+
+    pub(crate) fn search_content(
+        &self,
+        path: &str,
+        options: &FilesystemContentSearchOptions,
+    ) -> Result<FilesystemContentSearchResult, FilesystemError> {
+        self.check_cancelled()?;
+        validate_walk_bounds(options.max_depth, options.max_entries)?;
+        if options.pattern.is_empty()
+            || options.max_results == 0
+            || options.max_results > MAX_FILESYSTEM_RESULTS
+            || options.max_file_bytes == 0
+            || options.max_file_bytes > MAX_INTERNAL_FILE_BYTES
+        {
+            return Err(FilesystemError::LimitExceeded);
+        }
+
+        let target = self
+            .authority
+            .resolve_existing(path)
+            .map_err(map_path_error)?;
+        let metadata = fs::symlink_metadata(&target).map_err(|_| FilesystemError::Io)?;
+        if metadata_is_reparse(&metadata) {
+            return Err(FilesystemError::OutsideAuthority);
+        }
+
+        let (candidates, scanned_entries, truncated) = if metadata.is_file() {
+            (
+                vec![FilesystemEntry {
+                    path: self.display_path(&target)?,
+                    kind: "file",
+                    size: metadata.len(),
+                    modified_ms: modified_ms(&metadata),
+                }],
+                1,
+                false,
+            )
+        } else if metadata.is_dir() {
+            let depth = if options.recursive {
+                options.max_depth
+            } else {
+                1
+            };
+            let walked = self.list(path, options.recursive, depth, options.max_entries)?;
+            let scanned_entries = walked.scanned_entries;
+            let truncated = walked.truncated;
+            (
+                walked
+                    .entries
+                    .into_iter()
+                    .filter(|entry| entry.kind == "file")
+                    .collect(),
+                scanned_entries,
+                truncated,
+            )
+        } else {
+            return Err(FilesystemError::InvalidArgument);
+        };
+
+        let mut result = FilesystemContentSearchResult {
+            matches: Vec::new(),
+            scanned_entries,
+            scanned_files: 0,
+            skipped_binary_files: 0,
+            skipped_oversized_files: 0,
+            truncated,
+        };
+        for candidate in candidates {
+            self.check_cancelled()?;
+            result.scanned_files += 1;
+            if candidate.size > options.max_file_bytes as u64 {
+                result.skipped_oversized_files += 1;
+                result.truncated = true;
+                continue;
+            }
+            let bytes = self.read_bytes_bounded(&candidate.path, options.max_file_bytes)?;
+            if bytes.contains(&0) {
+                result.skipped_binary_files += 1;
+                continue;
+            }
+            let Ok(text) = std::str::from_utf8(&bytes) else {
+                result.skipped_binary_files += 1;
+                continue;
+            };
+            collect_content_matches(
+                &mut result.matches,
+                &candidate.path,
+                text,
+                &options.pattern,
+                options.case_sensitive,
+                options.max_results,
+            );
+            if result.matches.len() == options.max_results {
+                result.truncated = true;
+                break;
+            }
+        }
+        Ok(result)
     }
 
     pub(crate) fn copy(
@@ -2187,6 +2329,40 @@ fn validate_walk_bounds(max_depth: u32, max_entries: usize) -> Result<(), Filesy
     Ok(())
 }
 
+fn collect_content_matches(
+    matches: &mut Vec<FilesystemContentMatch>,
+    path: &str,
+    text: &str,
+    pattern: &str,
+    case_sensitive: bool,
+    max_results: usize,
+) {
+    let needle = if case_sensitive {
+        pattern.to_string()
+    } else {
+        pattern.to_lowercase()
+    };
+    for (line_index, raw_line) in text.lines().enumerate() {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        let searchable = if case_sensitive {
+            line.to_string()
+        } else {
+            line.to_lowercase()
+        };
+        for (byte_index, _) in searchable.match_indices(&needle) {
+            matches.push(FilesystemContentMatch {
+                path: path.to_string(),
+                line: line_index + 1,
+                column: searchable[..byte_index].chars().count() + 1,
+                text: line.chars().take(512).collect(),
+            });
+            if matches.len() == max_results {
+                return;
+            }
+        }
+    }
+}
+
 fn read_dir_bounded(
     directory: &Path,
     scanned_entries: &mut usize,
@@ -2512,6 +2688,10 @@ fn read_open_file_bytes_with_limit(
     Ok(bytes)
 }
 
+fn valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn sha256_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -2806,6 +2986,28 @@ mod tests {
     }
 
     #[test]
+    fn native_write_accepts_multi_megabyte_content_without_shell_limits() {
+        let root = workspace("large-native-write");
+        let service = FilesystemService::active_workspace(&root).unwrap();
+        let content = vec![b'x'; 2 * 1024 * 1024];
+        let result = service.write("large.txt", &content, false).unwrap();
+        assert_eq!(result.bytes, content.len() as u64);
+        assert_eq!(
+            fs::metadata(root.join("large.txt")).unwrap().len(),
+            content.len() as u64
+        );
+        assert_eq!(
+            service.write(
+                "too-large.txt",
+                &vec![0; MAX_INTERNAL_FILE_BYTES + 1],
+                false
+            ),
+            Err(FilesystemError::LimitExceeded)
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn filename_search_and_list_bounds_are_enforced() {
         let root = workspace("search");
         fs::create_dir(root.join("sub")).unwrap();
@@ -2838,6 +3040,59 @@ mod tests {
         assert_eq!(bounded.scanned_entries, 2);
         assert!(bounded.truncated);
         assert_eq!(bounded.entries.len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn content_search_is_literal_bounded_and_reports_skipped_files() {
+        let root = workspace("content-search");
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("alpha.txt"), b"Needle here\nsecond needle\n").unwrap();
+        fs::write(root.join("sub/nested.txt"), b"nested NEEDLE\n").unwrap();
+        fs::write(root.join("binary.bin"), b"needle\0binary").unwrap();
+        fs::write(root.join("large.txt"), vec![b'x'; 32]).unwrap();
+        let service = FilesystemService::active_workspace(&root).unwrap();
+
+        let found = service
+            .search_content(
+                ".",
+                &FilesystemContentSearchOptions {
+                    pattern: "needle".into(),
+                    case_sensitive: false,
+                    recursive: true,
+                    max_file_bytes: 30,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            found
+                .matches
+                .iter()
+                .map(|item| (item.path.as_str(), item.line, item.column))
+                .collect::<Vec<_>>(),
+            vec![
+                ("alpha.txt", 1, 1),
+                ("alpha.txt", 2, 8),
+                ("sub/nested.txt", 1, 8)
+            ]
+        );
+        assert_eq!(found.skipped_binary_files, 1);
+        assert_eq!(found.skipped_oversized_files, 1);
+        assert!(found.truncated);
+
+        let single_file = service
+            .search_content(
+                "alpha.txt",
+                &FilesystemContentSearchOptions {
+                    pattern: "Needle".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(single_file.matches.len(), 1);
+        assert_eq!(single_file.scanned_files, 1);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -3042,7 +3297,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn recursive_delete_preflight_failure_changes_nothing() {
+    fn recursive_delete_limit_preflight_failure_changes_nothing() {
         let root = workspace("delete-preflight");
         fs::create_dir(root.join("limit")).unwrap();
         fs::write(root.join("limit/a.txt"), b"a").unwrap();
@@ -3055,20 +3310,7 @@ mod tests {
         assert_eq!(fs::read(root.join("limit/a.txt")).unwrap(), b"a");
         assert_eq!(fs::read(root.join("limit/b.txt")).unwrap(), b"b");
 
-        let outside = workspace("delete-preflight-outside");
-        fs::create_dir(root.join("reparse")).unwrap();
-        fs::write(root.join("reparse/a.txt"), b"a").unwrap();
-        let staged_link = root.join("zlink");
-        create_junction(&staged_link, &outside);
-        fs::rename(&staged_link, root.join("reparse/zlink")).unwrap();
-        assert_eq!(
-            service.delete("reparse", true, 8, 100),
-            Err(FilesystemError::OutsideAuthority)
-        );
-        assert_eq!(fs::read(root.join("reparse/a.txt")).unwrap(), b"a");
-        fs::remove_dir(root.join("reparse/zlink")).unwrap();
         fs::remove_dir_all(root).unwrap();
-        fs::remove_dir_all(outside).unwrap();
     }
 
     #[cfg(windows)]

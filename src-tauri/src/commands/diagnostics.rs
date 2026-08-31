@@ -3,31 +3,31 @@ use tauri::{AppHandle, Manager};
 
 use super::error::{UiError, UiResult};
 use crate::app::DesktopLifecycle;
-use crate::credentials::{CredentialStore, WindowsCredentialStore};
+use crate::control_plane::snapshot::ProjectionAvailability;
 use crate::diagnostics::{
-    BrokerDiagnosticState, DiagnosticCheck, DiagnosticEvent, DiagnosticsOutageInput,
-    DiagnosticsRuntimeInput, DiagnosticsSnapshot, build_snapshot, export_snapshot,
-    materialize_log_directory,
+    BrokerDiagnosticState, DiagnosticCheck, DiagnosticEvent, DiagnosticFault,
+    DiagnosticsOutageInput, DiagnosticsRuntimeInput, DiagnosticsSnapshot, build_snapshot,
+    export_snapshot, materialize_log_directory,
 };
-use crate::settings::SettingsStore;
-use crate::workspace::WorkspaceValidator;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticsViewProjection {
+    projection_revision: u64,
+    log_revision: u64,
     checks: Vec<DiagnosticCheck>,
     privilege: BrokerDiagnosticState,
     active_workspace_path: Option<String>,
     recent_events: Vec<DiagnosticEvent>,
+    active_faults: Vec<DiagnosticFault>,
 }
 
 #[tauri::command]
 pub async fn get_diagnostics(app: AppHandle) -> UiResult<DiagnosticsViewProjection> {
     tauri::async_runtime::spawn_blocking(move || -> UiResult<DiagnosticsViewProjection> {
         let lifecycle = app.state::<DesktopLifecycle>();
-        let snapshot = get_diagnostics_snapshot_blocking(&lifecycle)?;
-        let active_workspace_path = active_workspace_path(&app)?;
-        Ok(project_diagnostics_view(snapshot, active_workspace_path))
+        let (projection_revision, snapshot) = get_diagnostics_snapshot_blocking(&lifecycle)?;
+        Ok(project_diagnostics_view(projection_revision, snapshot))
     })
     .await
     .map_err(|_| UiError::internal("Ui.DiagnosticsReadJoinFailed", "诊断状态后台任务异常"))?
@@ -36,78 +36,100 @@ pub async fn get_diagnostics(app: AppHandle) -> UiResult<DiagnosticsViewProjecti
 
 fn get_diagnostics_snapshot_blocking(
     lifecycle: &DesktopLifecycle,
-) -> UiResult<DiagnosticsSnapshot> {
-    let metadata = WindowsCredentialStore::default()
-        .runtime_api_key_metadata()
-        .map_err(|_| "无法读取Runtime API Key状态".to_string())?;
+) -> UiResult<(u64, DiagnosticsSnapshot)> {
     let install_root = production_install_root()?;
-    let runtime = lifecycle.runtime_snapshot();
+    let control_plane = lifecycle.control_plane_snapshot();
+    let runtime_section = &control_plane.runtime;
+    let runtime = runtime_section.value();
+    let workspace = &control_plane.workspace;
     let diagnostics_runtime = DiagnosticsRuntimeInput {
-        active: runtime.active,
-        state: runtime.state,
-        active_workspace: runtime.configured_workspace,
-        outage: runtime.outage.map(|outage| DiagnosticsOutageInput {
-            generation: outage.generation,
-            request_id: outage.request_id,
-            component: outage.component,
-            fault: outage.fault,
-            user_attention_required: outage.user_attention_required,
-        }),
+        available: runtime_section.availability() == ProjectionAvailability::Ready,
+        stale: runtime_section.is_stale(),
+        active: runtime.map(|runtime| runtime.active),
+        state: runtime.map(|runtime| runtime.state.clone()),
+        active_workspace: (workspace.availability() == ProjectionAvailability::Ready
+            && !workspace.is_stale())
+        .then(|| {
+            workspace
+                .value()
+                .and_then(|value| value.observed_path.as_ref())
+        })
+        .flatten()
+        .map(std::path::PathBuf::from),
+        outage: runtime
+            .and_then(|runtime| runtime.outage.as_ref())
+            .map(|outage| DiagnosticsOutageInput {
+                generation: outage.generation,
+                request_id: outage.operation_id.clone(),
+                component: outage.component,
+                fault: outage.fault.clone(),
+                user_attention_required: outage.user_attention_required,
+            }),
     };
-    let broker = lifecycle.privilege().refresh_broker_state();
-    lifecycle.publish_current_observation();
-    Ok(build_snapshot(
+    let authority = &control_plane.authority;
+    let privilege = (authority.availability() == ProjectionAvailability::Ready
+        && !authority.is_stale())
+    .then(|| authority.value().map(|value| &value.broker))
+    .flatten();
+    let settings = &control_plane.settings;
+    let runtime_key_present = (settings.availability() == ProjectionAvailability::Ready
+        && !settings.is_stale())
+    .then(|| settings.value().map(|value| value.runtime_key_saved))
+    .flatten();
+    let mut snapshot = build_snapshot(
         &install_root,
         &diagnostics_runtime,
-        &broker,
-        metadata.has_runtime_key,
-    ))
+        privilege,
+        runtime_key_present,
+    );
+    snapshot.active_faults = control_plane
+        .active_faults
+        .iter()
+        .map(|fault| DiagnosticFault {
+            code: fault.error.code.clone(),
+            category: fault.error.category,
+            message: fault.error.message.clone(),
+            retryable: fault.error.retryable,
+        })
+        .collect();
+    Ok((control_plane.revision, snapshot))
 }
 
 fn project_diagnostics_view(
+    projection_revision: u64,
     snapshot: DiagnosticsSnapshot,
-    active_workspace_path: Option<String>,
 ) -> DiagnosticsViewProjection {
     DiagnosticsViewProjection {
+        projection_revision,
+        log_revision: snapshot.revision,
         checks: snapshot
             .checks
             .into_iter()
             .filter(|check| check.code != "runtime_key")
             .collect(),
         privilege: snapshot.broker.state,
-        active_workspace_path,
+        active_workspace_path: snapshot.active_workspace_path,
         recent_events: snapshot.recent_events,
+        active_faults: snapshot.active_faults,
     }
 }
 
-fn active_workspace_path(app: &AppHandle) -> UiResult<Option<String>> {
-    let settings = SettingsStore::new(
-        app.path()
-            .app_data_dir()
-            .map_err(|_| "无法定位应用数据目录".to_string())?
-            .join("settings.json"),
-    )
-    .load()
-    .map_err(|_| "无法读取设置".to_string())?;
-    let Some(entry) = settings.workspace.active_entry() else {
-        return Ok(None);
-    };
-    let validated = WorkspaceValidator
-        .validate(&entry.display_path)
-        .map_err(|_| "当前项目已无法访问".to_string())?;
-    if entry.validated_identity.as_str() != validated.identity().as_str() {
-        return Err(UiError::from("项目身份已变化，请重新添加"));
-    }
-    Ok(Some(
-        validated.execution_path().to_string_lossy().into_owned(),
-    ))
+#[tauri::command]
+pub async fn wait_diagnostics_change(since_revision: u64, app: AppHandle) -> UiResult<u64> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<u64> {
+        let lifecycle = app.state::<DesktopLifecycle>();
+        Ok(lifecycle.wait_projection_change_after(since_revision))
+    })
+    .await
+    .map_err(|_| UiError::internal("Ui.DiagnosticsWaitJoinFailed", "诊断状态唤醒后台任务异常"))?
+    .map_err(UiError::from_string)
 }
 
 #[tauri::command]
 pub async fn open_logs(app: AppHandle) -> UiResult<()> {
     tauri::async_runtime::spawn_blocking(move || -> UiResult<()> {
         let lifecycle = app.state::<DesktopLifecycle>();
-        let snapshot = get_diagnostics_snapshot_blocking(&lifecycle)?;
+        let (_, snapshot) = get_diagnostics_snapshot_blocking(&lifecycle)?;
         let root = app
             .path()
             .app_data_dir()
@@ -129,7 +151,7 @@ pub async fn open_logs(app: AppHandle) -> UiResult<()> {
 pub async fn export_diagnostics(app: AppHandle) -> UiResult<String> {
     tauri::async_runtime::spawn_blocking(move || -> UiResult<String> {
         let lifecycle = app.state::<DesktopLifecycle>();
-        let snapshot = get_diagnostics_snapshot_blocking(&lifecycle)?;
+        let (_, snapshot) = get_diagnostics_snapshot_blocking(&lifecycle)?;
         let root = app
             .path()
             .app_data_dir()

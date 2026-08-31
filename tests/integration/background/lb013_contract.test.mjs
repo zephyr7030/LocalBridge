@@ -17,13 +17,15 @@ const normalized = (value) => value.replace(/\s+/g, " ");
 
 if ((config.app?.windows ?? []).length !== 0) throw new Error("LB-013 background startup still has a static Tauri main window");
 if (!main.includes('windows_subsystem = "windows"')) throw new Error("LB-013 LocalBridge app binary can still expose a console window");
-for (const required of ["StartupMode::from_args", "creates_main_window_at_startup", "ensure_main_window", "install_tray", "CloseRequested", "prevent_close", "close_window_continue_running", "backend_handle", "spawn_shutdown_then", ".hide()"])
+for (const required of ["StartupMode::from_args", "creates_main_window_at_startup", "ensure_main_window", "install_tray", "CloseRequested", "prevent_close", "close_window_continue_running", "backend_handle", "spawn_shutdown_then", ".destroy()", "keep_background_process_alive", "RunEvent::ExitRequested", "api.prevent_exit()"])
   if (!main.includes(required)) throw new Error(`LB-013 entry lifecycle missing: ${required}`);
 const closeHandlerStart = main.indexOf("fn handle_main_window_event");
 const closeHandlerEnd = main.indexOf("#[cfg(debug_assertions)]", closeHandlerStart);
 const closeHandler = main.slice(closeHandlerStart, closeHandlerEnd);
 if (!closeHandler.includes("if lifecycle.close_window_continue_running()") || !closeHandler.includes("spawn_shutdown_then(move |_| app.exit(0))"))
-  throw new Error("LB-013 CloseRequested does not implement cached hide-vs-orderly-exit policy");
+  throw new Error("LB-013 CloseRequested does not implement cached destroy-vs-orderly-exit policy");
+if (!closeHandler.includes("window.destroy()") || closeHandler.includes("window.hide()"))
+  throw new Error("LB-013 background close retains a hidden WebView2 owner");
 if (closeHandler.includes("SettingsStore::new") || closeHandler.includes("lifecycle.shutdown()"))
   throw new Error("LB-013 CloseRequested performs blocking settings/lifecycle work on the UI event path");
 const modeGuard = main.indexOf("creates_main_window_at_startup");
@@ -58,7 +60,7 @@ for (const forbidden of ["enforce_main_window_metrics(window.app_handle())", "se
 if (main.includes("WindowEvent::Resized") || main.includes("window.maximize()") || main.includes("window.unmaximize()"))
   throw new Error("LB-013 fixed window still carries resize/maximize runtime behavior");
 if (/notification|toast|banner/i.test(`${main}\n${tray}\n${background}`)) throw new Error("LB-013 added pre-exhaustion notification surface");
-for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required", "ShowFinalErrorWindow", "ProductionRuntimeOwner", "runtime: Arc<Mutex<ProductionRuntimeOwner>>", "ProductionRuntimeOwner::default()", "start_production_runtime", "ProductionRuntimeDriver::new_owned", "WindowsCredentialStore::default", "with_privileged_execution", "self.privilege.gateway()", "owner.activate_boxed(runtime)?", "shutdown_in_security_order(Some(&mut *runtime), privilege)"])
+for (const required of ["RecoveryOutcome::Exhausted", "user_attention_required", "ShowFinalErrorWindow", "ProductionRuntimeOwner", "runtime: Arc<Mutex<ProductionRuntimeOwner>>", "ProductionRuntimeOwner::default()", "start_production_runtime", "ProductionRuntimeDriver::new_owned", "WindowsCredentialStore::default", "with_privileged_execution", "self.privilege.gateway()", "owner.activate_boxed(runtime)?", "shutdown_in_security_order(active.as_deref_mut(), &self.privilege)"])
   if (!normalized(background).includes(normalized(required))) throw new Error(`LB-013 recovery attention gate missing: ${required}`);
 if (background.includes("Mutex<Option<Box<dyn ExitRuntime")) throw new Error("LB-013 still permits the production lifecycle owner itself to be absent");
 if (!main.includes("DesktopLifecycle::new(PrivilegeController::new())")) throw new Error("LB-013 production app setup does not construct the runtime owner");
@@ -93,7 +95,7 @@ if (!/select_frozen_ico_frame\(FROZEN_TRAY_ICON_ICO, 1\.25\)[\s\S]*?\.size,[\s\r
 const disableStart = privilege.indexOf("pub fn disable");
 const disableEnd = privilege.indexOf("pub fn refresh_broker_state", disableStart);
 const disable = privilege.slice(disableStart, disableEnd);
-if (!(disable.indexOf("gate_open.store(false") >= 0 && disable.indexOf("session.shutdown") > disable.indexOf("gate_open.store(false")))
+if (!(disable.indexOf("self.shared.replace(BrokerLifecycle::Disabled)") >= 0 && disable.indexOf("session.shutdown") > disable.indexOf("self.shared.replace(BrokerLifecycle::Disabled)")))
   throw new Error("LB-013 privilege disable does not close gate before Broker shutdown");
 if (!orchestrator.includes("pub fn stop_tunnel_for_exit") || !orchestrator.includes("pub fn finish_exit_after_tunnel"))
   throw new Error("LB-013 production runtime has no staged security-order shutdown");
@@ -119,4 +121,4 @@ for (const id of ["EXEC-PREAUTH-LB013-001", "EXEC-PREAUTH-LB013-002", "EXEC-PREA
   if (!record || record.user_audit_status !== "PENDING" || record.does_not_expand_future_pr_writable_paths !== true)
     throw new Error(`LB-013 preauthorization record invalid: ${id}`);
 }
-console.log("LB013_CONTRACT=PASS background_no_window=true logical_fixed_window=780x620 native_dpi_scaling=true inverse_webview_zoom=false physical_pixel_lock=false resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true dpi_change_webview_sync=true close_policy=persisted_v4 hide_or_async_exit=true lifecycle_ui_thread_blocking=false tray_exit_async=true tray_frozen_ico=true tray_native_dpi_frame=true tray_resample_hack=false exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=5");
+console.log("LB013_CONTRACT=PASS background_no_window=true logical_fixed_window=780x620 native_dpi_scaling=true inverse_webview_zoom=false physical_pixel_lock=false resizable=false maximizable=false decorations=false webview_edge_bound_at_creation=true dpi_change_webview_sync=true close_policy=persisted_v4 destroy_or_async_exit=true hidden_webview_owner=false lifecycle_ui_thread_blocking=false tray_exit_async=true tray_frozen_ico=true tray_native_dpi_frame=true tray_resample_hack=false exit_order=true production_owner_at_app_setup=true runtime_owner_nonoptional=true actual_adapter_shutdown_test=true recovery_silent_until_exhaustion=true preauth_pending=5");

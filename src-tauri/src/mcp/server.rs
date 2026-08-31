@@ -1,6 +1,6 @@
-use std::collections::BTreeSet;
 #[cfg(test)]
 use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpListener, TcpStream};
@@ -64,7 +64,7 @@ use super::facade::{
     FacadeCallError, FacadeDenied, FacadeError, FacadeErrorCode, FilesystemAction,
     FilesystemRequest, TaskCallIdentity, normalize_path_authority_error, parse_filesystem_request,
     public_command_stderr, public_error_output_schema, public_safe_summary, public_task_kind,
-    public_tools_for_policy, run_workspace_filesystem_with_authority, stable_command_error,
+    run_workspace_filesystem_with_authority, stable_command_error, stable_public_tool_catalog,
     stable_success, validate_workspace_context_probe,
 };
 use super::http::{McpCancellationClient, McpHealthClient};
@@ -1000,20 +1000,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 None,
             );
         };
-        let mode = policy_effective_state(
-            desired_state,
-            privileged,
-            observed_workspace,
-            observed_connection,
-        )
-        .authority
-        .execution;
-        let current_signature = {
-            let policy = public_policy
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            effective_tool_catalog_signature(&policy, mode)
-        };
+        let current_signature = stable_tool_catalog_signature();
         let session_id = McpSessionId::new(session);
         let Some(stored) = sessions.get(&session_id) else {
             return write_mcp_http_error(
@@ -1131,20 +1118,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 None,
             );
         };
-        let mode = policy_effective_state(
-            desired_state,
-            privileged,
-            observed_workspace,
-            observed_connection,
-        )
-        .authority
-        .execution;
-        let tool_catalog_signature = {
-            let policy = public_policy
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            effective_tool_catalog_signature(&policy, mode)
-        };
+        let tool_catalog_signature = stable_tool_catalog_signature();
         let session = new_session_id();
         match sessions.insert_bounded(
             SessionRecord::new(
@@ -1196,20 +1170,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
     let Some(stored_session) = stored_session else {
         return write_mcp_http_error(&mut stream, 404, mcp_unavailable("session_not_found"), None);
     };
-    let mode = policy_effective_state(
-        desired_state,
-        privileged,
-        observed_workspace,
-        observed_connection,
-    )
-    .authority
-    .execution;
-    let current_signature = {
-        let policy = public_policy
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        effective_tool_catalog_signature(&policy, mode)
-    };
+    let current_signature = stable_tool_catalog_signature();
     if stored_session.tool_catalog_signature != current_signature {
         let _ = sessions.update(&session_id, |stored| {
             stored.tool_catalog_signature = current_signature;
@@ -1270,18 +1231,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
     match method {
         "ping" => write_rpc_result(&mut stream, id, json!({}), Some(session)),
         "tools/list" => {
-            let mode = policy_effective_state(
-                desired_state,
-                privileged,
-                observed_workspace,
-                observed_connection,
-            )
-            .authority
-            .execution;
-            let policy = public_policy
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let result = effective_tool_catalog(&policy, mode);
+            let result = stable_tool_catalog();
             write_rpc_result(&mut stream, id, result, Some(session))
         }
         "tools/call" => {
@@ -2784,18 +2734,16 @@ const fn task_kind_name(kind: TaskKind) -> &'static str {
     }
 }
 
-fn effective_tool_catalog(policy: &CapabilityPolicy, mode: PermissionMode) -> Value {
-    let mut result = public_tools_for_policy(policy, mode);
-    if policy.privileged_tool_visible(mode, "elevated_exec") {
-        append_elevated_exec_tool(&mut result);
-    }
+fn stable_tool_catalog() -> Value {
+    let mut result = stable_public_tool_catalog();
+    append_elevated_exec_tool(&mut result);
     result
 }
 
-fn effective_tool_catalog_signature(policy: &CapabilityPolicy, mode: PermissionMode) -> String {
+fn stable_tool_catalog_signature() -> String {
     serde_json::to_string(&json!({
         "api_revision": AGENT_API_REVISION,
-        "catalog": effective_tool_catalog(policy, mode)
+        "catalog": stable_tool_catalog()
     }))
     .expect("LocalBridge public tool catalog signature is serializable")
 }
@@ -2824,8 +2772,10 @@ fn filesystem_task_kind(action: FilesystemAction) -> TaskKind {
         | FilesystemAction::Stat
         | FilesystemAction::Read
         | FilesystemAction::Hash => TaskKind::ReadFile,
-        FilesystemAction::Search => TaskKind::SearchCode,
+        FilesystemAction::Search | FilesystemAction::SearchContent => TaskKind::SearchCode,
         FilesystemAction::Write
+        | FilesystemAction::Replace
+        | FilesystemAction::Patch
         | FilesystemAction::Copy
         | FilesystemAction::Move
         | FilesystemAction::Delete => TaskKind::ModifyFile,
@@ -3466,6 +3416,7 @@ fn administrator_filesystem_spec(
                 workspace_fields.push(AdministratorWorkspacePathField::Destination);
             }
         }
+        FilesystemAction::Patch => {}
         _ => {
             if validate_workspace_side_path(
                 authority,
@@ -3511,7 +3462,8 @@ fn administrator_filesystem_spec(
     let max_bytes = u32::try_from(request.max_bytes).map_err(|_| {
         FacadeError::new(FacadeErrorCode::InvalidArgument, "文件系统参数无效", false)
     })?;
-    let workspace_identity = if workspace_fields.is_empty() {
+    let workspace_bound = !workspace_fields.is_empty() || request.action == FilesystemAction::Patch;
+    let workspace_identity = if !workspace_bound {
         None
     } else {
         Some(authority.workspace_identity_token().ok_or_else(|| {
@@ -3524,7 +3476,10 @@ fn administrator_filesystem_spec(
             FilesystemAction::Stat => AdministratorFilesystemAction::Stat,
             FilesystemAction::Read => AdministratorFilesystemAction::Read,
             FilesystemAction::Write => AdministratorFilesystemAction::Write,
+            FilesystemAction::Replace => AdministratorFilesystemAction::Replace,
+            FilesystemAction::Patch => AdministratorFilesystemAction::Patch,
             FilesystemAction::Search => AdministratorFilesystemAction::Search,
+            FilesystemAction::SearchContent => AdministratorFilesystemAction::SearchContent,
             FilesystemAction::Copy => AdministratorFilesystemAction::Copy,
             FilesystemAction::Move => AdministratorFilesystemAction::Move,
             FilesystemAction::Delete => AdministratorFilesystemAction::Delete,
@@ -3533,8 +3488,7 @@ fn administrator_filesystem_spec(
         path,
         source,
         destination,
-        workspace_root: (!workspace_fields.is_empty())
-            .then(|| workspace.to_string_lossy().into_owned()),
+        workspace_root: workspace_bound.then(|| workspace.to_string_lossy().into_owned()),
         workspace_identity,
         workspace_fields,
         recursive: request.recursive,
@@ -3547,7 +3501,31 @@ fn administrator_filesystem_spec(
             .content
             .as_ref()
             .map(|content| base64::engine::general_purpose::STANDARD.encode(content)),
+        expected_sha256: request.expected_sha256.clone(),
+        old: request.old.clone(),
+        new: request.new.clone(),
+        patch: request.patch.clone(),
+        expected_files: request
+            .expected_files
+            .as_ref()
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|(path, hash)| {
+                        hash.as_str().map(|hash| (path.clone(), hash.to_string()))
+                    })
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default(),
         pattern: request.pattern.clone(),
+        case_sensitive: request.case_sensitive,
+        max_file_bytes: u32::try_from(request.max_file_bytes).map_err(|_| {
+            FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "invalid max_file_bytes",
+                false,
+            )
+        })?,
         kind: request.kind.as_deref().map(|kind| match kind {
             "file" => AdministratorFilesystemKind::File,
             "directory" => AdministratorFilesystemKind::Directory,
@@ -3642,6 +3620,19 @@ fn administrator_filesystem_error_result(code: AdministratorFilesystemErrorCode)
             "目标文件系统对象已存在",
             false,
         ),
+        AdministratorFilesystemErrorCode::FileChanged => (
+            FacadeErrorCode::FileChanged,
+            "目标文件自读取后已发生变化",
+            false,
+        ),
+        AdministratorFilesystemErrorCode::PatchConflict => (
+            FacadeErrorCode::PatchConflict,
+            "编辑上下文与当前文件不匹配",
+            false,
+        ),
+        AdministratorFilesystemErrorCode::AmbiguousMatch => {
+            (FacadeErrorCode::AmbiguousMatch, "编辑匹配不唯一", false)
+        }
         AdministratorFilesystemErrorCode::Cancelled => (
             FacadeErrorCode::ProcessCancelled,
             "文件系统操作已取消",
@@ -4610,6 +4601,7 @@ fn write_response(
 mod tests {
     use super::super::test_support::*;
     use super::*;
+    use crate::mcp::V1_CORE_TOOL_NAMES;
 
     #[test]
     fn task_cancel_selection_is_explicit_and_session_local() {
@@ -4668,6 +4660,112 @@ mod tests {
             task_terminal_outcome(&previously_owned_session_lost),
             TerminalOutcome::Lost
         );
+    }
+
+    #[test]
+    fn public_tool_schemas_remain_complete_across_long_multi_tool_sessions() {
+        fn listed_names(response: &ClientResponse) -> Vec<&str> {
+            response.body["result"]["tools"]
+                .as_array()
+                .expect("tools/list array")
+                .iter()
+                .map(|tool| tool["name"].as_str().expect("public tool name"))
+                .collect()
+        }
+
+        let fixture = PublicRuntimeFixture::start(PermissionMode::Full);
+        let pep = fixture.runtime();
+        let initialized = initialize(pep.port(), 40_000);
+        let session = initialized.session.expect("downstream MCP session");
+        assert_eq!(
+            post(
+                pep.port(),
+                Some(&session),
+                &json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
+            )
+            .status,
+            202
+        );
+        assert_eq!(get_sse(pep.port(), &session).status, 200);
+
+        let expected = V1_CORE_TOOL_NAMES
+            .iter()
+            .copied()
+            .chain(std::iter::once("elevated_exec"))
+            .collect::<Vec<_>>();
+        let mut next_id = 40_001u64;
+        for turn in 0..32 {
+            if turn == 8 {
+                pep.set_permission_mode(PermissionMode::Edit);
+            } else if turn == 20 {
+                pep.set_permission_mode(PermissionMode::Full);
+            }
+            let (name, arguments) = match turn % 4 {
+                0 => ("workspace_context", json!({"detail":"compact"})),
+                1 => ("filesystem", json!({"action":"stat","path":"probe.txt"})),
+                2 => (
+                    "document_workflow",
+                    json!({"action":"inspect","path":"probe.txt","max_lines":8}),
+                ),
+                _ => ("git_workflow", json!({"action":"status","path":"."})),
+            };
+            let response = public_tool_call(pep.port(), &session, next_id, name, arguments);
+            next_id += 1;
+            assert_eq!(response.status, 200, "turn={turn} tool={name}");
+
+            if turn % 4 == 3 {
+                let listed = post(
+                    pep.port(),
+                    Some(&session),
+                    &json!({"jsonrpc":"2.0","id":next_id,"method":"tools/list","params":{}}),
+                );
+                next_id += 1;
+                assert_eq!(listed_names(&listed), expected, "turn={turn}");
+            }
+        }
+
+        pep.set_permission_mode(PermissionMode::Edit);
+        let context = public_tool_call(
+            pep.port(),
+            &session,
+            next_id,
+            "workspace_context",
+            json!({"detail":"compact"}),
+        );
+        let capabilities = &context.body["result"]["structuredContent"]["data"]["capabilities"];
+        assert_eq!(capabilities["tool_schema_projection"], "stable");
+        assert_eq!(
+            capabilities["public_tools"].as_array().unwrap().len(),
+            expected.len()
+        );
+        assert!(
+            !capabilities["policy_allowed_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|name| name == "exec_command")
+        );
+        let denied = public_tool_call(
+            pep.port(),
+            &session,
+            next_id + 1,
+            "exec_command",
+            json!({"command":"echo must-not-run","shell":"cmd"}),
+        );
+        assert_tool_error(&denied, "PolicyDenied");
+        let listed = post(
+            pep.port(),
+            Some(&session),
+            &json!({"jsonrpc":"2.0","id":next_id + 2,"method":"tools/list","params":{}}),
+        );
+        assert_eq!(listed_names(&listed), expected);
+        assert_eq!(
+            get_sse(pep.port(), &session).status,
+            204,
+            "permission changes must not announce a schema deletion"
+        );
+
+        fixture.shutdown();
     }
 
     fn http_read_error(raw: &[u8]) -> HttpReadError {
@@ -5216,6 +5314,17 @@ mod tests {
                         truncated: false,
                     }
                 }
+                AdministratorFilesystemAction::SearchContent => {
+                    AdministratorFilesystemResult::ContentMatches {
+                        action: spec.action,
+                        matches: Vec::new(),
+                        scanned_entries: 0,
+                        scanned_files: 0,
+                        skipped_binary_files: 0,
+                        skipped_oversized_files: 0,
+                        truncated: false,
+                    }
+                }
                 AdministratorFilesystemAction::Stat => AdministratorFilesystemResult::Stat {
                     path: spec.path.unwrap(),
                     kind: "file".into(),
@@ -5243,6 +5352,16 @@ mod tests {
                         path: spec.path.or(spec.source).unwrap(),
                         destination: spec.destination,
                         bytes: 0,
+                        changed: true,
+                    }
+                }
+                AdministratorFilesystemAction::Replace | AdministratorFilesystemAction::Patch => {
+                    AdministratorFilesystemResult::Edit {
+                        action: spec.action,
+                        path: spec.path,
+                        affected_files: Vec::new(),
+                        sha256: (spec.action == AdministratorFilesystemAction::Replace)
+                            .then(|| "0".repeat(64)),
                         changed: true,
                     }
                 }
@@ -7440,12 +7559,12 @@ mod tests {
             .iter()
             .filter_map(|tool| tool["name"].as_str())
             .collect::<Vec<_>>();
-        assert_eq!(edit_tool_names.len(), 8);
+        assert_eq!(edit_tool_names.len(), 10);
         assert!(edit_tool_names.contains(&"agent_workflow"));
         assert!(edit_tool_names.contains(&"elevated_exec"));
         assert!(edit_tool_names.contains(&"task_control"));
         for process_tool in ["exec_command", "command_control"] {
-            assert!(!edit_tool_names.contains(&process_tool));
+            assert!(edit_tool_names.contains(&process_tool));
         }
 
         let read_started = Instant::now();
@@ -7554,11 +7673,12 @@ mod tests {
             &json!({"jsonrpc":"2.0","id":"narrowed-tools","method":"tools/list","params":{}}),
         );
         assert!(
-            !narrowed_tools.body["result"]["tools"]
+            narrowed_tools.body["result"]["tools"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|tool| tool["name"] == "exec_command")
+                .any(|tool| tool["name"] == "exec_command"),
+            "policy changes must not remove a public schema"
         );
         let reinitialized = initialize(pep.port(), 6);
         let new_session = reinitialized.session.unwrap();

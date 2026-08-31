@@ -1,7 +1,6 @@
+use std::collections::{BTreeMap, HashSet};
 #[cfg(test)]
 use std::path::Path;
-
-use serde_json::{Map, Value};
 
 use super::service::{FilesystemError, FilesystemService};
 use crate::workspace::context::sha256_hex;
@@ -38,6 +37,28 @@ enum PatchOperation {
     },
 }
 
+#[derive(Debug)]
+enum AppliedChange {
+    Replace {
+        path: String,
+        before: Vec<u8>,
+        after: Vec<u8>,
+    },
+    Move {
+        source: String,
+        destination: String,
+        content: Vec<u8>,
+    },
+    Add {
+        path: String,
+        content: Vec<u8>,
+    },
+    Delete {
+        path: String,
+        content: Vec<u8>,
+    },
+}
+
 impl CodingEditService {
     #[cfg(test)]
     pub(crate) fn new(workspace: &Path) -> Result<Self, CodingEditError> {
@@ -55,22 +76,21 @@ impl CodingEditService {
 
     pub(crate) fn verify_expected_files(
         &self,
-        expected: &Map<String, Value>,
+        expected: &BTreeMap<String, String>,
     ) -> Result<(), CodingEditError> {
         for (path, identity) in expected {
-            let expected = identity
-                .as_str()
-                .filter(|value| value.len() == 64)
-                .ok_or(CodingEditError::InvalidPath)?;
+            if identity.len() != 64 || !identity.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(CodingEditError::InvalidPath);
+            }
+            let expected = identity.as_str();
             let bytes = self.read_file(path)?;
-            if sha256_hex(&bytes) != expected {
+            if !sha256_hex(&bytes).eq_ignore_ascii_case(expected) {
                 return Err(CodingEditError::FileChanged);
             }
         }
         Ok(())
     }
 
-    #[allow(dead_code)] // schema41 internal semantic surface; retained for exact replacement callers.
     pub(crate) fn replace_exact(
         &self,
         path: &str,
@@ -80,15 +100,10 @@ impl CodingEditService {
     ) -> Result<String, CodingEditError> {
         let bytes = self.read_file(path)?;
         self.require_identity(&bytes, expected_sha256)?;
-        let text = std::str::from_utf8(&bytes).map_err(|_| CodingEditError::PatchConflict)?;
-        let count = text.match_indices(old).count();
-        if count == 0 {
-            return Err(CodingEditError::PatchConflict);
-        }
-        if count > 1 {
-            return Err(CodingEditError::AmbiguousMatch);
-        }
-        let updated = text.replacen(old, new, 1).into_bytes();
+        let updated = apply_text_hunks_preserving_format(
+            &bytes,
+            &[(normalize_patch_text(old), normalize_patch_text(new))],
+        )?;
         self.filesystem
             .replace_file_if_sha256(path, expected_sha256, &updated)
             .map_err(map_filesystem_error)?;
@@ -151,7 +166,7 @@ impl CodingEditService {
 
     pub(crate) fn apply_patch_preconditions(
         &self,
-        expected: &Map<String, Value>,
+        expected: &BTreeMap<String, String>,
     ) -> Result<(), CodingEditError> {
         self.verify_expected_files(expected)
     }
@@ -159,17 +174,36 @@ impl CodingEditService {
     pub(crate) fn apply_patch(
         &self,
         patch: &str,
-        expected: &Map<String, Value>,
+        expected: &BTreeMap<String, String>,
     ) -> Result<Vec<String>, CodingEditError> {
+        self.apply_patch_with_expected(patch, Some(expected))
+    }
+
+    pub(crate) fn apply_patch_to_current(
+        &self,
+        patch: &str,
+    ) -> Result<Vec<String>, CodingEditError> {
+        self.apply_patch_with_expected(patch, None)
+    }
+
+    fn apply_patch_with_expected(
+        &self,
+        patch: &str,
+        expected: Option<&BTreeMap<String, String>>,
+    ) -> Result<Vec<String>, CodingEditError> {
+        if let Some(expected) = expected {
+            self.verify_expected_files(expected)?;
+        }
         let operations = parse_patch(patch)?;
         if operations.is_empty() {
             return Err(CodingEditError::PatchConflict);
         }
 
-        let mut updates = Vec::<(String, Option<String>, Vec<u8>, String)>::new();
+        let mut updates = Vec::<(String, Option<String>, Vec<u8>, Vec<u8>, String)>::new();
         let mut adds = Vec::<(String, Vec<u8>)>::new();
-        let mut deletes = Vec::<(String, String)>::new();
+        let mut deletes = Vec::<(String, Vec<u8>, String)>::new();
         let mut modified = Vec::<String>::new();
+        let mut mutation_paths = HashSet::<String>::new();
 
         for operation in operations {
             match operation {
@@ -178,27 +212,20 @@ impl CodingEditService {
                     destination,
                     hunks,
                 } => {
-                    let identity = expected
-                        .get(&path)
-                        .and_then(Value::as_str)
-                        .ok_or(CodingEditError::FileChanged)?;
                     let bytes = self.read_file(&path)?;
-                    self.require_identity(&bytes, identity)?;
-                    let mut text = std::str::from_utf8(&bytes)
-                        .map_err(|_| CodingEditError::PatchConflict)?
-                        .to_string();
-                    for (old, new) in &hunks {
-                        let count = text.match_indices(old.as_str()).count();
-                        if count == 0 {
-                            return Err(CodingEditError::PatchConflict);
-                        }
-                        if count > 1 {
-                            return Err(CodingEditError::AmbiguousMatch);
-                        }
-                        text = text.replacen(old.as_str(), new.as_str(), 1);
-                    }
+                    let identity = match expected {
+                        Some(expected) => expected
+                            .get(&path)
+                            .ok_or(CodingEditError::FileChanged)?
+                            .clone(),
+                        None => sha256_hex(&bytes),
+                    };
+                    self.require_identity(&bytes, &identity)?;
+                    let updated = apply_text_hunks_preserving_format(&bytes, &hunks)?;
+                    register_mutation_path(&mut mutation_paths, &path)?;
                     let target = match destination.as_deref() {
                         Some(destination) if destination != path => {
+                            register_mutation_path(&mut mutation_paths, destination)?;
                             self.filesystem
                                 .validate_new_file_path(destination)
                                 .map_err(map_filesystem_error)?;
@@ -208,9 +235,10 @@ impl CodingEditService {
                         Some(_) => None,
                     };
                     modified.push(target.clone().unwrap_or_else(|| path.clone()));
-                    updates.push((path, target, text.into_bytes(), identity.to_string()));
+                    updates.push((path, target, bytes, updated, identity));
                 }
                 PatchOperation::Add { path, content } => {
+                    register_mutation_path(&mut mutation_paths, &path)?;
                     self.filesystem
                         .validate_new_file_path(&path)
                         .map_err(map_filesystem_error)?;
@@ -218,41 +246,111 @@ impl CodingEditService {
                     adds.push((path, content));
                 }
                 PatchOperation::Delete { path } => {
-                    let identity = expected
-                        .get(&path)
-                        .and_then(Value::as_str)
-                        .ok_or(CodingEditError::FileChanged)?;
                     let bytes = self.read_file(&path)?;
-                    self.require_identity(&bytes, identity)?;
+                    let identity = match expected {
+                        Some(expected) => expected
+                            .get(&path)
+                            .ok_or(CodingEditError::FileChanged)?
+                            .clone(),
+                        None => sha256_hex(&bytes),
+                    };
+                    self.require_identity(&bytes, &identity)?;
+                    register_mutation_path(&mut mutation_paths, &path)?;
                     modified.push(path.clone());
-                    deletes.push((path, identity.to_string()));
+                    deletes.push((path, bytes, identity));
                 }
             }
         }
 
-        for (source, destination, updated, identity) in updates {
-            self.filesystem
-                .replace_file_if_sha256(&source, &identity, &updated)
-                .map_err(map_filesystem_error)?;
-            if let Some(destination) = destination {
+        let mut applied = Vec::<AppliedChange>::new();
+        let commit = (|| -> Result<(), CodingEditError> {
+            for (source, destination, before, updated, identity) in updates {
                 self.filesystem
-                    .move_file_if_sha256(&source, &destination, &sha256_hex(&updated))
+                    .replace_file_if_sha256(&source, &identity, &updated)
                     .map_err(map_filesystem_error)?;
+                applied.push(AppliedChange::Replace {
+                    path: source.clone(),
+                    before,
+                    after: updated.clone(),
+                });
+                if let Some(destination) = destination {
+                    self.filesystem
+                        .move_file_if_sha256(&source, &destination, &sha256_hex(&updated))
+                        .map_err(map_filesystem_error)?;
+                    applied.push(AppliedChange::Move {
+                        source,
+                        destination,
+                        content: updated,
+                    });
+                }
             }
-        }
-        for (target, content) in adds {
-            self.filesystem
-                .create_file_for_edit(&target, &content)
-                .map_err(map_filesystem_error)?;
-        }
-        for (target, identity) in deletes {
-            self.filesystem
-                .delete_file_if_sha256(&target, &identity)
-                .map_err(map_filesystem_error)?;
+            for (target, content) in adds {
+                self.filesystem
+                    .create_file_for_edit(&target, &content)
+                    .map_err(map_filesystem_error)?;
+                applied.push(AppliedChange::Add {
+                    path: target,
+                    content,
+                });
+            }
+            for (target, content, identity) in deletes {
+                self.filesystem
+                    .delete_file_if_sha256(&target, &identity)
+                    .map_err(map_filesystem_error)?;
+                applied.push(AppliedChange::Delete {
+                    path: target,
+                    content,
+                });
+            }
+            Ok(())
+        })();
+        if let Err(error) = commit {
+            if self.rollback_changes(applied).is_err() {
+                return Err(CodingEditError::Io);
+            }
+            return Err(error);
         }
         modified.sort();
         modified.dedup();
         Ok(modified)
+    }
+
+    fn rollback_changes(&self, changes: Vec<AppliedChange>) -> Result<(), CodingEditError> {
+        let mut failed = false;
+        for change in changes.into_iter().rev() {
+            let result = match change {
+                AppliedChange::Replace {
+                    path,
+                    before,
+                    after,
+                } => self
+                    .filesystem
+                    .replace_file_if_sha256(&path, &sha256_hex(&after), &before),
+                AppliedChange::Move {
+                    source,
+                    destination,
+                    content,
+                } => self.filesystem.move_file_if_sha256(
+                    &destination,
+                    &source,
+                    &sha256_hex(&content),
+                ),
+                AppliedChange::Add { path, content } => self
+                    .filesystem
+                    .delete_file_if_sha256(&path, &sha256_hex(&content)),
+                AppliedChange::Delete { path, content } => {
+                    self.filesystem.create_file_for_edit(&path, &content)
+                }
+            };
+            if result.is_err() {
+                failed = true;
+            }
+        }
+        if failed {
+            Err(CodingEditError::Io)
+        } else {
+            Ok(())
+        }
     }
 
     fn read_file(&self, path: &str) -> Result<Vec<u8>, CodingEditError> {
@@ -262,14 +360,78 @@ impl CodingEditService {
     }
 
     fn require_identity(&self, bytes: &[u8], expected_sha256: &str) -> Result<(), CodingEditError> {
-        if expected_sha256.len() != 64 {
+        if expected_sha256.len() != 64
+            || !expected_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
             return Err(CodingEditError::InvalidPath);
         }
-        if sha256_hex(bytes) != expected_sha256 {
+        if !sha256_hex(bytes).eq_ignore_ascii_case(expected_sha256) {
             return Err(CodingEditError::FileChanged);
         }
         Ok(())
     }
+}
+
+fn register_mutation_path(paths: &mut HashSet<String>, path: &str) -> Result<(), CodingEditError> {
+    let identity = path.replace('\\', "/").to_lowercase();
+    if paths.insert(identity) {
+        Ok(())
+    } else {
+        Err(CodingEditError::PatchConflict)
+    }
+}
+
+pub(crate) fn normalize_patch_text(value: &str) -> String {
+    value.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+pub(crate) fn apply_text_hunks_preserving_format(
+    bytes: &[u8],
+    hunks: &[(String, String)],
+) -> Result<Vec<u8>, CodingEditError> {
+    let decoded = std::str::from_utf8(bytes).map_err(|_| CodingEditError::PatchConflict)?;
+    let (bom, body) = decoded
+        .strip_prefix('\u{feff}')
+        .map_or(("", decoded), |body| ("\u{feff}", body));
+    let line_ending = if body.find("\r\n").is_some_and(|crlf| {
+        body.find('\n')
+            .is_none_or(|lf| crlf <= lf.saturating_sub(1))
+    }) {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let mut text = body.replace("\r\n", "\n").replace('\r', "\n");
+    for (old, new) in hunks {
+        let (needle, replacement) = if text.match_indices(old.as_str()).next().is_none() {
+            match old.strip_suffix('\n') {
+                Some(without_final_newline)
+                    if !without_final_newline.is_empty()
+                        && text.ends_with(without_final_newline) =>
+                {
+                    (
+                        without_final_newline,
+                        new.strip_suffix('\n').unwrap_or(new.as_str()),
+                    )
+                }
+                _ => (old.as_str(), new.as_str()),
+            }
+        } else {
+            (old.as_str(), new.as_str())
+        };
+        let count = text.match_indices(needle).count();
+        if count == 0 {
+            return Err(CodingEditError::PatchConflict);
+        }
+        if count > 1 {
+            return Err(CodingEditError::AmbiguousMatch);
+        }
+        text = text.replacen(needle, replacement, 1);
+    }
+    if line_ending == "\r\n" {
+        text = text.replace('\n', "\r\n");
+    }
+    Ok(format!("{bom}{text}").into_bytes())
 }
 
 fn map_filesystem_error(error: FilesystemError) -> CodingEditError {
@@ -441,11 +603,8 @@ mod tests {
         let root = workspace("patch");
         fs::write(root.join("a.txt"), b"before\ncontext\n").unwrap();
         let service = CodingEditService::new(&root).unwrap();
-        let mut expected = Map::new();
-        expected.insert(
-            "a.txt".into(),
-            Value::String(sha256_hex(b"before\ncontext\n")),
-        );
+        let mut expected = BTreeMap::new();
+        expected.insert("a.txt".into(), sha256_hex(b"before\ncontext\n"));
         let changed = service
             .apply_patch(
                 "*** Begin Patch\n*** Update File: a.txt\n@@\n-before\n+after\n context\n*** End Patch",
@@ -464,6 +623,102 @@ mod tests {
             ),
             Err(CodingEditError::FileChanged)
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn apply_patch_preserves_utf8_bom_and_crlf() {
+        let root = workspace("patch-format");
+        let before = b"\xef\xbb\xbfbefore\r\ncontext\r\n";
+        fs::write(root.join("a.txt"), before).unwrap();
+        let service = CodingEditService::new(&root).unwrap();
+        let mut expected = BTreeMap::new();
+        expected.insert("a.txt".into(), sha256_hex(before));
+
+        service
+            .apply_patch(
+                "*** Begin Patch\n*** Update File: a.txt\n@@\n-before\n+after\n context\n*** End Patch",
+                &expected,
+            )
+            .unwrap();
+
+        assert_eq!(
+            fs::read(root.join("a.txt")).unwrap(),
+            b"\xef\xbb\xbfafter\r\ncontext\r\n"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn apply_patch_preserves_missing_final_newline() {
+        let root = workspace("patch-no-final-newline");
+        fs::write(root.join("a.txt"), b"before").unwrap();
+        let service = CodingEditService::new(&root).unwrap();
+        let mut expected = BTreeMap::new();
+        expected.insert("a.txt".into(), sha256_hex(b"before"));
+
+        service
+            .apply_patch(
+                "*** Begin Patch\n*** Update File: a.txt\n@@\n-before\n+after\n*** End Patch",
+                &expected,
+            )
+            .unwrap();
+
+        assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"after");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_final_newline_fallback_only_matches_the_file_end() {
+        let root = workspace("patch-no-final-newline-boundary");
+        fs::write(root.join("a.txt"), b"before suffix").unwrap();
+        let service = CodingEditService::new(&root).unwrap();
+        let mut expected = BTreeMap::new();
+        expected.insert("a.txt".into(), sha256_hex(b"before suffix"));
+
+        assert_eq!(
+            service.apply_patch(
+                "*** Begin Patch\n*** Update File: a.txt\n@@\n-before\n+after\n*** End Patch",
+                &expected,
+            ),
+            Err(CodingEditError::PatchConflict)
+        );
+        assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"before suffix");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn multi_file_patch_rolls_back_prior_files_when_a_later_commit_fails() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        };
+
+        let root = workspace("patch-rollback");
+        let first = b"first-before\n";
+        let second = b"second-before\n";
+        fs::write(root.join("a.txt"), first).unwrap();
+        fs::write(root.join("b.txt"), second).unwrap();
+        let service = CodingEditService::new(&root).unwrap();
+        let mut expected = BTreeMap::new();
+        expected.insert("a.txt".into(), sha256_hex(first));
+        expected.insert("b.txt".into(), sha256_hex(second));
+        let writer = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(root.join("b.txt"))
+            .unwrap();
+
+        let result = service.apply_patch(
+            "*** Begin Patch\n*** Update File: a.txt\n@@\n-first-before\n+first-after\n*** Update File: b.txt\n@@\n-second-before\n+second-after\n*** End Patch",
+            &expected,
+        );
+
+        assert_eq!(result, Err(CodingEditError::FileChanged));
+        assert_eq!(fs::read(root.join("a.txt")).unwrap(), first);
+        assert_eq!(fs::read(root.join("b.txt")).unwrap(), second);
+        drop(writer);
         let _ = fs::remove_dir_all(root);
     }
 

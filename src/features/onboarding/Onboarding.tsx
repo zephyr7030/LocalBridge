@@ -41,10 +41,7 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     : runtimeKeyFocused
       ? savedRuntimeKeyMask
       : "";
-  const allGreen = main !== null
-    && main.localEnvironmentService === "online"
-    && main.codingService === "online"
-    && main.tunnelService === "online";
+  const allGreen = main?.onboardingReady === true;
 
   useEffect(() => () => {
     for (const timer of Object.values(copyTimers.current)) {
@@ -92,7 +89,7 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     void Promise.all([onboardingApi.read(), bridge.read()]).then(([onboarding, projection]) => {
       setState(onboarding);
       setMain(projection);
-      const active = projection.projects.find((item) => item.active);
+      const active = projection.projects?.find((item) => item.active);
       if (active) setRememberedProject(active.id);
     }).catch(() => setError("无法读取项目设置"));
   }, []);
@@ -123,7 +120,7 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     return () => { cancelled = true; };
   }, [step]);
 
-  const chosenProject = useMemo(() => main?.projects.find((item) => item.id === rememberedProject) ?? null, [main, rememberedProject]);
+  const chosenProject = useMemo(() => main?.projects?.find((item) => item.id === rememberedProject) ?? null, [main, rememberedProject]);
 
   const saveConnection = async () => {
     setError(null);
@@ -197,11 +194,8 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     setError(null);
     try {
       await bridge.setAccess(mode);
-      const [nextState, nextMain] = await Promise.all([onboardingApi.read(), bridge.read()]);
-      if (nextState.permission !== mode || nextMain.permission !== mode) {
-        throw new Error("后端权限状态尚未收敛");
-      }
-      setState(nextState);
+      const nextMain = await bridge.read();
+      if (nextMain.permission !== mode) throw new Error("后端权限期望值尚未更新");
       setMain(nextMain);
     } catch (value) {
       setError(messageFrom(value, "权限模式未更新"));
@@ -263,10 +257,10 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
 
   if (step === 3) return (<>
     <WizardFrame step={3} title="项目与权限" footer={<><button className="secondary" disabled={preparingProject} onClick={() => setStep(2)}>返回</button><button className="primary" disabled={preparingProject || (!selectedFolder && !rememberedProject)} onClick={() => void saveProjectAndPermission()}>{preparingProject ? "正在启动…" : "继续"}</button></>}>
-      {main?.projects.length ? <div className="onboarding-field"><label htmlFor="remembered-project">已保存项目</label><select id="remembered-project" value={rememberedProject} onChange={(event) => { setRememberedProject(event.target.value); setSelectedFolder(""); }}><option value="">选择项目</option>{main.projects.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select></div> : null}
+      {main?.projects?.length ? <div className="onboarding-field"><label htmlFor="remembered-project">已保存项目</label><select id="remembered-project" value={rememberedProject} onChange={(event) => { setRememberedProject(event.target.value); setSelectedFolder(""); }}><option value="">选择项目</option>{main.projects.map((item) => <option key={item.id} value={item.id}>{item.path}</option>)}</select></div> : null}
       <div className="onboarding-folder-row"><button className="secondary" onClick={() => void chooseFolder()}>选择项目文件夹</button><span className="onboarding-selected-folder">{selectedFolder || chosenProject?.path || "尚未选择"}</span></div>
-      <div className="onboarding-permissions">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} disabled={preparingProject || main === null} className={`choice onboarding-permission ${mode === "admin" ? "admin-choice" : ""} ${state.permission === mode ? "selected" : ""}`} aria-pressed={state.permission === mode} onClick={() => void choosePermission(mode)}><strong>{accessText[mode]}</strong><small>{mode === "edit" ? "读取、搜索和修改项目文件" : mode === "full" ? "允许运行测试、编译和其他本地命令" : "在完整模式基础上允许显式管理员操作"}</small></button>)}</div>
-      {state.permission === "admin" ? <p className="onboarding-hint">管理员模式会请求 Windows 管理员授权。</p> : null}
+      <div className="onboarding-permissions">{(["edit", "full", "admin"] as AccessCode[]).map((mode) => <button key={mode} disabled={preparingProject || main?.authorityStatus !== "ready"} className={`choice onboarding-permission ${mode === "admin" ? "admin-choice" : ""} ${main?.permission === mode ? "selected" : ""}`} aria-pressed={main?.permission === mode} onClick={() => void choosePermission(mode)}><strong>{accessText[mode]}</strong><small>{mode === "edit" ? "读取、搜索和修改项目文件" : mode === "full" ? "允许运行测试、编译和其他本地命令" : "在完整模式基础上允许显式管理员操作"}</small></button>)}</div>
+      {main?.permission === "admin" ? <p className="onboarding-hint">{main.permissionReconciliation === "converged" ? "管理员模式已生效。" : main.permissionReconciliation === "awaiting_authorization" ? "管理员模式正在等待 Windows 授权。" : main.permissionReconciliation === "broker_unavailable" ? "管理员模式尚未生效，管理员服务当前不可用。" : "管理员权限状态暂不可用。"}</p> : null}
       {error && <p className="onboarding-error" role="alert">{error}</p>}
     </WizardFrame>
     {adminWarningOpen && <AdminModeWarning onCancel={() => setAdminWarningOpen(false)} onConfirm={() => { setAdminWarningOpen(false); void applyPermission("admin"); }} />}

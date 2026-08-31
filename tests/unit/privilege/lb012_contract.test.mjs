@@ -4,20 +4,22 @@ const read = (path) => readFileSync(path, "utf8");
 const control = read("src-tauri/src/privilege/control.rs");
 const state = read("src-tauri/src/state/privilege.rs");
 const policyToml = read("runtime-policy.toml");
-const policy = read("src-tauri/src/mcp/policy.rs");
+const policy = read("src-tauri/src/execution/policy.rs");
 const guard = read("src-tauri/src/mcp/guard.rs");
 const server = read("src-tauri/src/mcp/server.rs");
-const shell = read("src-tauri/src/mcp/shell.rs");
+const shell = read("src-tauri/src/execution/shell.rs");
 const execution = read("src-tauri/src/privilege/execution.rs");
 const filesystem = read("src-tauri/src/privilege/filesystem.rs");
 const orchestrator = read("src-tauri/src/runtime/orchestrator.rs");
+const driver = read("src-tauri/src/mcp/driver.rs");
 const main = read("src-tauri/src/main.rs");
 const lib = read("src-tauri/src/lib.rs");
 const tauri = read("src-tauri/tauri.conf.json");
 const facade = read("src-tauri/src/mcp/facade.rs");
-const toolbox = read("src-tauri/src/mcp/toolbox.rs");
+const toolbox = read("src-tauri/src/execution/toolbox.rs");
 const runtimeManifest = read("runtime-manifest.toml");
 const toolboxPrepare = read("scripts/prepare-toolbox.mjs");
+const releasePrepare = read("scripts/prepare-lb018-resources.mjs");
 const thirdPartyNotices = read("THIRD_PARTY_NOTICES.md");
 const packageJson = JSON.parse(read("package.json"));
 
@@ -38,18 +40,18 @@ for (const source of [main, lib, orchestrator]) {
     throw new Error("LB-012 normal/background runtime can directly trigger UAC");
   }
 }
-if (!orchestrator.includes("privileged_execution: None")) throw new Error("LB-012 production runtime does not default privileged route to None");
-if (!orchestrator.includes("with_privileged_execution") || !orchestrator.includes("start_with_privilege")) throw new Error("LB-012 explicit stable-adapter privileged injection missing");
+if (!driver.includes("privileged_execution: None")) throw new Error("LB-012 production runtime does not default privileged route to None");
+if (!driver.includes("with_privileged_execution") || !server.includes("start_with_privilege")) throw new Error("LB-012 explicit stable-adapter privileged injection missing");
 
 const disableStart = control.indexOf("pub fn disable");
 const disableEnd = control.indexOf("pub fn refresh_broker_state", disableStart);
 const disable = control.slice(disableStart, disableEnd);
-const closeGate = disable.indexOf("gate_open.store(false");
+const closeGate = disable.indexOf("self.shared.replace(BrokerLifecycle::Disabled)");
 const shutdown = disable.indexOf("session.shutdown");
 if (!(closeGate >= 0 && shutdown > closeGate)) throw new Error("LB-012 disable does not close call gate before Broker shutdown");
 for (const method of ["start_execute", "poll_execute", "cancel_execute", "filesystem"]) {
   const start = control.indexOf(`fn ${method}`, control.indexOf("impl PrivilegedExecution for PrivilegedExecutionGateway"));
-  if (start < 0 || !control.slice(start, start + 700).includes("require_gate()?")) throw new Error(`LB-012 ${method} does not re-check Active gate`);
+  if (start < 0 || !control.slice(start, start + 700).includes("self.with_session")) throw new Error(`LB-012 ${method} does not re-check Active lifecycle`);
 }
 
 for (const required of [
@@ -78,7 +80,7 @@ if (!policy.includes('if name == "elevated_exec"') || !policy.includes("Capabili
 for (const required of ["decide_request", "reviewed_elevated_exec", "reviewed_elevated_program", "GetSystemDirectoryW", "whoami.exe", "ElevatedExecNotReviewed"]) {
   if (!policy.includes(required)) throw new Error(`LB-012 reviewed elevated_exec enforcement missing: ${required}`);
 }
-for (const required of ["reviewed_administrator_process", "reviewed_administrator_shell", "reviewed_administrator_filesystem", "trusted_system_program", "administrator_shell_executable", "explicit_control_plane_reference"]) {
+for (const required of ["reviewed_administrator_process", "reviewed_administrator_shell", "reviewed_administrator_filesystem", "trusted_system_program", "administrator_shell_dynamic_target_construction", "explicit_control_plane_reference"]) {
   if (!policy.includes(required)) throw new Error(`LB-012 schema33 administrator review missing: ${required}`);
 }
 if (!guard.includes('name != "elevated_exec"') || !guard.includes("PrivilegedRouteNotAvailable")) throw new Error("LB-012 ordinary upstream route does not reserve elevated_exec");
@@ -119,23 +121,24 @@ const ordinaryHighestCoreStart = shell.indexOf("fn highest_core(", brokerResolve
 if (brokerResolverStart < 0 || ordinaryHighestCoreStart <= brokerResolverStart || shell.slice(brokerResolverStart, ordinaryHighestCoreStart).includes("probe_powershell_core")) {
   throw new Error("LB-012 Broker shell resolver executes a version probe under the ordinary token");
 }
-if (/Command::new|powershell\.exe|cmd\.exe/i.test(filesystem)) throw new Error("LB-012 privileged filesystem is shell/process backed");
+const filesystemRuntime = filesystem.slice(0, filesystem.indexOf("#[cfg(all(test, windows))]"));
+if (/Command::new|powershell\.exe|cmd\.exe/i.test(filesystemRuntime)) throw new Error("LB-012 privileged filesystem production path is shell/process backed");
 const toolsListStart = server.indexOf('"tools/list" =>');
 const toolsCallStart = server.indexOf('"tools/call" =>', toolsListStart);
 if (toolsListStart < 0 || toolsCallStart <= toolsListStart) throw new Error("LB-012 tools/list branch missing");
 const toolsList = server.slice(toolsListStart, toolsCallStart);
-const catalogStart = server.indexOf("fn effective_tool_catalog(");
-const catalogEnd = server.indexOf("fn effective_tool_catalog_signature(", catalogStart);
+const catalogStart = server.indexOf("fn stable_tool_catalog(");
+const catalogEnd = server.indexOf("fn stable_tool_catalog_signature(", catalogStart);
 const effectiveCatalog = server.slice(catalogStart, catalogEnd);
 if (
-  !toolsList.includes("effective_tool_catalog(&policy, mode)") ||
+  !toolsList.includes("stable_tool_catalog()") ||
   catalogStart < 0 ||
   catalogEnd <= catalogStart ||
   effectiveCatalog.includes("accepts_privileged_calls()") ||
-  !effectiveCatalog.includes('privileged_tool_visible(mode, "elevated_exec")') ||
+  effectiveCatalog.includes("public_tool_allowed_in_mode") ||
   !effectiveCatalog.includes("append_elevated_exec_tool(&mut result)")
 ) {
-  throw new Error("LB-012 tools/list does not stably advertise elevated_exec independently of Broker state");
+  throw new Error("LB-012 tools/list schema catalog depends on live permission or Broker capability");
 }
 const gatewayImplStart = control.indexOf("impl PrivilegedExecutionGateway");
 const gatewayStateStart = control.indexOf("pub fn state(&self) -> PrivilegeState", gatewayImplStart);
@@ -163,7 +166,7 @@ if (execution.includes("std::process::Command") || execution.includes("Command::
 if (/requireAdministrator|highestAvailable/i.test(tauri)) throw new Error("LB-012 whole LocalBridge app requests elevation");
 
 for (const required of [
-  "pub const V1_CORE_TOOL_NAMES: [&str; 8]",
+  "pub const V1_CORE_TOOL_NAMES: [&str; 9]",
   "CapabilityUnavailable",
   "ToolboxResolver::probe(runtime.install_root())",
   '"PATH":self.toolbox.child_path()',
@@ -194,7 +197,7 @@ for (const required of [
   'capability_missing_error = "CapabilityUnavailable"',
 ]) if (!runtimeManifest.includes(required)) throw new Error(`LB-012 schema42 Toolbox manifest missing: ${required}`);
 if (packageJson.scripts?.["toolbox:prepare"] !== "node scripts/prepare-toolbox.mjs") throw new Error("LB-012 Toolbox build preparation script missing");
-if (!tauri.includes('"beforeDevCommand": "npm run dev"') || !tauri.includes('"beforeBuildCommand": "npm run toolbox:prepare && npm run build"') || !tauri.includes('"target/toolbox-stage/": "runtime/toolbox/"')) throw new Error("LB-012 Toolbox is not build-only packaged resource");
+if (!tauri.includes('"beforeDevCommand": "npm run dev"') || !tauri.includes('"beforeBuildCommand": "node scripts/prepare-lb018-resources.mjs && npm run build"') || !tauri.includes('"target/toolbox-stage/": "runtime/toolbox/"') || !releasePrepare.includes('scripts/prepare-toolbox.mjs')) throw new Error("LB-012 Toolbox is not build-only packaged resource");
 for (const pin of [
   "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",
   "081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a",

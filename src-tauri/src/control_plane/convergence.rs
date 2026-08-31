@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use serde::{Deserialize, Serialize};
+
 use crate::state::{PermissionMode, PrivilegeState, RuntimeState};
 use crate::tunnel::TunnelId;
 use crate::workspace::WorkspaceId;
@@ -159,7 +161,8 @@ pub struct ObservedState {
     pub connection: Option<ConnectionProfile>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AuthorityReconciliation {
     Converged,
     AwaitingAuthorization,

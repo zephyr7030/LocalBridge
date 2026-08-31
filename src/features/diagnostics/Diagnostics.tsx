@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { uiErrorMessage } from "../../bridge";
 import { diagnosticsApi, type DiagnosticsViewProjection } from "./api";
 import "./diagnostics.css";
 
@@ -10,6 +11,7 @@ const brokerText = {
   awaiting: "等待系统授权",
   active: "已启用",
   fault: "故障",
+  unavailable: "状态暂不可用",
 } as const;
 
 export function Diagnostics({ onClose }: { onClose: () => void }) {
@@ -18,9 +20,25 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
   const [exportedPath, setExportedPath] = useState<string | null>(null);
 
   useEffect(() => {
-    void diagnosticsApi.read().then(setSnapshot).catch((value) => {
-      setError(typeof value === "string" ? value : "无法读取诊断状态");
-    });
+    let cancelled = false;
+    void (async () => {
+      let revision = 0;
+      while (!cancelled) {
+        try {
+          const next = await diagnosticsApi.read();
+          if (cancelled) return;
+          setSnapshot(next);
+          setError(null);
+          revision = next.projectionRevision;
+          await diagnosticsApi.waitForChange(revision);
+        } catch (value) {
+          if (cancelled) return;
+          setError(uiErrorMessage(value, "无法读取诊断状态"));
+          try { await diagnosticsApi.waitForChange(revision); } catch { /* next backend wake/read retries */ }
+        }
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const exportReport = async () => {
@@ -28,7 +46,7 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
     try {
       setExportedPath(await diagnosticsApi.exportReport());
     } catch (value) {
-      setError(typeof value === "string" ? value : "无法导出诊断信息");
+      setError(uiErrorMessage(value, "无法导出诊断信息"));
     }
   };
 
@@ -38,6 +56,7 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
         <h2>诊断</h2>
         {!snapshot ? <p className="diagnostics-muted">正在检查…</p> : (
           <>
+            {snapshot.activeFaults.length ? <div className="diagnostics-section"><h3>需要处理</h3><div className="diagnostics-checks">{snapshot.activeFaults.map((fault) => <div className="diagnostics-check" key={fault.code}><span className="diagnostics-dot error" aria-hidden="true"/><div><strong>{fault.message}</strong><small>{fault.code}{fault.retryable ? " · 可重试" : ""}</small></div></div>)}</div></div> : null}
             <div className="diagnostics-section">
               <h3>运行状态</h3>
               <div className="diagnostics-checks">{snapshot.checks.map((check) => (
@@ -46,7 +65,7 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
                   <div><strong>{check.label}</strong><small>{check.detail}</small></div>
                 </div>
               ))}</div>
-              <div className="diagnostics-check"><span className={`diagnostics-dot ${snapshot.privilege === "active" ? "ok" : snapshot.privilege === "fault" ? "error" : "warning"}`} aria-hidden="true" /><div><strong>管理员权限</strong><small>{brokerText[snapshot.privilege]}</small></div></div>
+              <div className="diagnostics-check"><span className={`diagnostics-dot ${snapshot.privilege === "active" ? "ok" : snapshot.privilege === "fault" ? "error" : snapshot.privilege === "unavailable" ? "unknown" : "warning"}`} aria-hidden="true" /><div><strong>管理员权限</strong><small>{brokerText[snapshot.privilege]}</small></div></div>
             </div>
             <div className="diagnostics-section">
               <h3>项目</h3>
@@ -61,7 +80,7 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
         {error ? <p className="diagnostics-error" role="alert">{error}</p> : null}
         {exportedPath ? <p className="diagnostics-exported">已导出到：{exportedPath}</p> : null}
         <div className="dialog-actions diagnostics-actions">
-          <button className="secondary" onClick={() => void diagnosticsApi.openLogs().catch((value) => setError(typeof value === "string" ? value : "无法打开日志"))}>打开日志</button>
+          <button className="secondary" onClick={() => void diagnosticsApi.openLogs().catch((value) => setError(uiErrorMessage(value, "无法打开日志")))}>生成并打开日志</button>
           <button className="secondary" onClick={() => void exportReport()}>导出诊断</button>
           <button className="primary" onClick={onClose}>完成</button>
         </div>

@@ -22,17 +22,18 @@ pub(crate) use filesystem::{
     run_privileged_filesystem,
 };
 pub use protocol::{
-    AdministratorFilesystemAction, AdministratorFilesystemEntry, AdministratorFilesystemErrorCode,
-    AdministratorFilesystemKind, AdministratorFilesystemResult, AdministratorFilesystemSortBy,
-    AdministratorFilesystemSortOrder, AdministratorFilesystemSpec, AdministratorWorkspacePathField,
-    BROKER_PROTOCOL_VERSION, BrokerProtocolError, BrokerReady, BrokerRejectCode, BrokerRequest,
-    BrokerRequestEnvelope, BrokerResponse, BrokerResponseEnvelope, BrokerSession,
-    ElevatedExecOutcome, ElevatedExecResult, ElevatedExecSpec,
-    MAX_ADMINISTRATOR_FILESYSTEM_CONTENT_BYTES, MAX_BROKER_FRAME_BYTES, MAX_ELEVATED_ARGS,
-    MAX_ELEVATED_OUTPUT_BYTES, MAX_ELEVATED_REQUEST_ID_BYTES, MAX_ELEVATED_STRING_BYTES,
-    MAX_ELEVATED_TIMEOUT_MS, MAX_PRIVILEGED_FILE_BYTES, PrivilegedFilesystemAction,
-    PrivilegedFilesystemResult, PrivilegedFilesystemSpec, SESSION_NONCE_BYTES, ServerHello,
-    SessionNonce, decode_frame, encode_frame, valid_elevated_request_id,
+    AdministratorFilesystemAction, AdministratorFilesystemContentMatch,
+    AdministratorFilesystemEntry, AdministratorFilesystemErrorCode, AdministratorFilesystemKind,
+    AdministratorFilesystemResult, AdministratorFilesystemSortBy, AdministratorFilesystemSortOrder,
+    AdministratorFilesystemSpec, AdministratorWorkspacePathField, BROKER_PROTOCOL_VERSION,
+    BrokerProtocolError, BrokerReady, BrokerRejectCode, BrokerRequest, BrokerRequestEnvelope,
+    BrokerResponse, BrokerResponseEnvelope, BrokerSession, ElevatedExecOutcome, ElevatedExecResult,
+    ElevatedExecSpec, MAX_ADMINISTRATOR_FILESYSTEM_CONTENT_BYTES, MAX_BROKER_FRAME_BYTES,
+    MAX_ELEVATED_ARGS, MAX_ELEVATED_OUTPUT_BYTES, MAX_ELEVATED_REQUEST_ID_BYTES,
+    MAX_ELEVATED_STRING_BYTES, MAX_ELEVATED_TIMEOUT_MS, MAX_PRIVILEGED_FILE_BYTES,
+    PrivilegedFilesystemAction, PrivilegedFilesystemResult, PrivilegedFilesystemSpec,
+    SESSION_NONCE_BYTES, ServerHello, SessionNonce, decode_frame, encode_frame,
+    valid_elevated_request_id,
 };
 #[cfg(windows)]
 pub use windows::{

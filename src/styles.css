@@ -86,6 +86,8 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .service-status-dot.status-fault{background:var(--status-fault)}
 .service-status-dot.status-unknown{background:var(--status-unknown)}
 .service-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;margin:0 0 10px}
+.fault-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 14px;padding:12px 14px;border:1px solid rgba(215,0,21,.22);border-radius:12px;background:#fff0f1;color:#7d0010}
+.fault-banner p{margin:3px 0 0;color:#7d0010;overflow-wrap:anywhere}
 .secondary.service-restart{background:#fff5df;border-color:rgba(182,106,0,.28);color:var(--admin-accent)}
 .secondary.service-stop{background:#fff0f1;border-color:rgba(215,0,21,.25);color:var(--status-fault)}
 .task-row,.last-tool-row{display:grid;grid-template-columns:8px minmax(0,1fr) max-content;align-items:center;column-gap:10px;min-height:26px;padding:2px;font-size:var(--font-body)}
@@ -95,17 +97,19 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .activity-elapsed,.last-tool-age{grid-column:3;flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums;color:#6e6e73}
 .activity-dot-spacer{width:8px;height:8px}
 .last-activity-left.outcome-completed{color:var(--status-ready)}
-.last-activity-left.outcome-failed,.last-activity-left.outcome-lost{color:var(--status-fault)}
+.last-activity-left.outcome-failed,.last-activity-left.outcome-blocked,.last-activity-left.outcome-lost{color:var(--status-fault)}
 .last-activity-left.outcome-cancelled{color:#6e6e73}
 .last-activity-left.outcome-timed_out{color:var(--status-starting)}
 .activity-dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:var(--status-unknown)}
 .activity-dot.task-idle,.activity-dot.task-cancelled{background:var(--status-unknown)}
 .activity-dot.task-running{background:var(--status-ready);animation:task-pulse 1.35s ease-in-out infinite}
 .activity-dot.task-waiting{background:var(--status-starting)}
+.activity-dot.task-waiting_input{background:var(--status-starting);animation:task-pulse 1.35s ease-in-out infinite}
+.activity-dot.task-cancelling{background:var(--status-fault);animation:task-pulse 1.35s ease-in-out infinite}
 .activity-dot.task-blocked,.activity-dot.task-failed{background:var(--status-fault)}
 @keyframes task-pulse{0%,100%{opacity:.45;transform:scale(.88)}50%{opacity:1;transform:scale(1)}}
 @media (prefers-reduced-motion: reduce){
-  .activity-dot.task-running{animation:none;opacity:1;transform:none}
+  .activity-dot.task-running,.activity-dot.task-waiting_input,.activity-dot.task-cancelling{animation:none;opacity:1;transform:none}
   .ghost,.secondary,.primary,.choice{transition:none}
 }
 .sheet-backdrop,.dialog-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.24);display:grid;place-items:center;padding:20px;z-index:10}
@@ -138,6 +142,7 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .settings-summary>.settings-replace{grid-column:3;justify-self:start}
 .settings-summary>.settings-delete-cancel{grid-column:2;justify-self:start}
 .settings-summary>.settings-confirm-delete{grid-column:3;justify-self:start;background:#fff0f1;border-color:rgba(215,0,21,.25);color:var(--status-fault)}
+.settings-status{margin:9px 0 0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.45}
 .saved{color:#248a3d;font-size:var(--font-body)}
 .error{color:#c9342f;font-size:var(--font-body);margin-top:10px}
 .project-list{display:grid;gap:8px;margin-top:12px}

@@ -27,6 +27,7 @@ use localbridge_lib::privilege::{
     decode_frame, encode_frame, random_session_nonce,
 };
 use localbridge_lib::state::{PermissionMode, PrivilegeState};
+use localbridge_lib::workspace::WorkspaceValidator;
 use serde_json::{Value, json};
 
 const BROKER_EXE: &str = env!("CARGO_BIN_EXE_localbridge-privileged-broker");
@@ -410,7 +411,14 @@ fn schema43_admin_fs_spec(action: AdministratorFilesystemAction) -> Administrato
         offset: 0,
         max_bytes: 65_536,
         content_base64: None,
+        expected_sha256: None,
+        old: None,
+        new: None,
+        patch: None,
+        expected_files: Default::default(),
         pattern: None,
+        case_sensitive: true,
+        max_file_bytes: 1024 * 1024,
         kind: None,
         min_size: None,
         max_size: None,
@@ -424,7 +432,7 @@ fn schema43_admin_fs_spec(action: AdministratorFilesystemAction) -> Administrato
 }
 
 #[test]
-fn schema43_actual_broker_structured_filesystem_covers_all_nine_actions() {
+fn schema49_actual_broker_structured_filesystem_covers_all_twelve_actions() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -462,11 +470,16 @@ fn schema43_actual_broker_structured_filesystem_covers_all_nine_actions() {
     let mut hash = schema43_admin_fs_spec(AdministratorFilesystemAction::Hash);
     hash.path = Some(source.to_string_lossy().into_owned());
     let hash = session.structured_filesystem(hash).unwrap().unwrap();
-    assert!(matches!(
-        hash,
-        localbridge_lib::privilege::AdministratorFilesystemResult::Hash { ref sha256, .. }
-            if sha256 == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-    ));
+    let source_sha256 = match hash {
+        localbridge_lib::privilege::AdministratorFilesystemResult::Hash { sha256, .. } => {
+            assert_eq!(
+                sha256,
+                "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+            );
+            sha256
+        }
+        other => panic!("unexpected hash result: {other:?}"),
+    };
 
     let mut list = schema43_admin_fs_spec(AdministratorFilesystemAction::List);
     list.path = Some(root.to_string_lossy().into_owned());
@@ -488,18 +501,66 @@ fn schema43_actual_broker_structured_filesystem_covers_all_nine_actions() {
             if entries.iter().any(|entry| entry.path.ends_with("source.txt"))
     ));
 
+    let mut replace = schema43_admin_fs_spec(AdministratorFilesystemAction::Replace);
+    replace.path = Some(source.to_string_lossy().into_owned());
+    replace.expected_sha256 = Some(source_sha256);
+    replace.old = Some("hello".into());
+    replace.new = Some("HELLO".into());
+    let replace = session.structured_filesystem(replace).unwrap().unwrap();
+    let replaced_sha256 = match replace {
+        localbridge_lib::privilege::AdministratorFilesystemResult::Edit {
+            sha256: Some(sha256),
+            ..
+        } => sha256,
+        other => panic!("unexpected replace result: {other:?}"),
+    };
+    assert_eq!(fs::read(&source).unwrap(), b"HELLO");
+
+    let mut content_search = schema43_admin_fs_spec(AdministratorFilesystemAction::SearchContent);
+    content_search.path = Some(root.to_string_lossy().into_owned());
+    content_search.pattern = Some("hello".into());
+    content_search.case_sensitive = false;
+    content_search.recursive = true;
+    let content_search = session
+        .structured_filesystem(content_search)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        content_search,
+        localbridge_lib::privilege::AdministratorFilesystemResult::ContentMatches { ref matches, .. }
+            if matches.iter().any(|item| item.path.ends_with("source.txt") && item.line == 1)
+    ));
+
+    let validated = WorkspaceValidator.validate(&root).unwrap();
+    let mut patch = schema43_admin_fs_spec(AdministratorFilesystemAction::Patch);
+    patch.workspace_root = Some(validated.execution_path().to_string_lossy().into_owned());
+    patch.workspace_identity = Some(validated.identity().as_str().to_owned());
+    patch.patch = Some(
+        "*** Begin Patch\n*** Update File: source.txt\n@@\n-HELLO\n+patched\n*** End Patch".into(),
+    );
+    patch
+        .expected_files
+        .insert("source.txt".into(), replaced_sha256);
+    let patch = session.structured_filesystem(patch).unwrap().unwrap();
+    assert!(matches!(
+        patch,
+        localbridge_lib::privilege::AdministratorFilesystemResult::Edit { ref affected_files, .. }
+            if affected_files == &["source.txt"]
+    ));
+    assert_eq!(fs::read(&source).unwrap(), b"patched");
+
     let mut copy = schema43_admin_fs_spec(AdministratorFilesystemAction::Copy);
     copy.source = Some(source.to_string_lossy().into_owned());
     copy.destination = Some(copied.to_string_lossy().into_owned());
     session.structured_filesystem(copy).unwrap().unwrap();
-    assert_eq!(fs::read(&copied).unwrap(), b"hello");
+    assert_eq!(fs::read(&copied).unwrap(), b"patched");
 
     let mut move_spec = schema43_admin_fs_spec(AdministratorFilesystemAction::Move);
     move_spec.source = Some(copied.to_string_lossy().into_owned());
     move_spec.destination = Some(moved.to_string_lossy().into_owned());
     session.structured_filesystem(move_spec).unwrap().unwrap();
     assert!(!copied.exists());
-    assert_eq!(fs::read(&moved).unwrap(), b"hello");
+    assert_eq!(fs::read(&moved).unwrap(), b"patched");
 
     let mut delete = schema43_admin_fs_spec(AdministratorFilesystemAction::Delete);
     delete.path = Some(moved.to_string_lossy().into_owned());

@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 #[cfg(debug_assertions)]
 use tauri::WebviewWindow;
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 fn main() {
     #[cfg(debug_assertions)]
@@ -35,7 +35,7 @@ fn main() {
         SingleInstanceAcquire::Primary(primary) => primary,
         SingleInstanceAcquire::Secondary => return,
     };
-    localbridge_lib::build_app()
+    let app = localbridge_lib::build_app()
         .setup(move |app| {
             let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
             let app_data_dir = app.path().app_data_dir()?;
@@ -54,8 +54,18 @@ fn main() {
             Ok(())
         })
         .on_window_event(handle_main_window_event)
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("LocalBridge 启动失败");
+    app.run(keep_background_process_alive);
+}
+
+fn keep_background_process_alive(_app: &tauri::AppHandle, event: RunEvent) {
+    if let RunEvent::ExitRequested {
+        code: None, api, ..
+    } = event
+    {
+        api.prevent_exit();
+    }
 }
 
 fn handle_main_window_event(window: &tauri::Window<tauri::Wry>, event: &WindowEvent) {
@@ -66,11 +76,11 @@ fn handle_main_window_event(window: &tauri::Window<tauri::Wry>, event: &WindowEv
         WindowEvent::CloseRequested { api, .. } => {
             api.prevent_close();
             let Some(lifecycle) = window.app_handle().try_state::<DesktopLifecycle>() else {
-                let _ = window.hide();
+                let _ = window.destroy();
                 return;
             };
             if lifecycle.close_window_continue_running() {
-                let _ = window.hide();
+                let _ = window.destroy();
                 return;
             }
             let backend = lifecycle.backend_handle();
@@ -247,7 +257,7 @@ fn fixed_window_e2e_view() -> Option<FixedWindowE2eView> {
 
 #[cfg(debug_assertions)]
 fn run_fixed_window_e2e(view: FixedWindowE2eView) {
-    localbridge_lib::build_app()
+    let app = localbridge_lib::build_app()
         .setup(move |app| {
             let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
             let app_data = app.path().app_data_dir()?;
@@ -286,8 +296,9 @@ fn run_fixed_window_e2e(view: FixedWindowE2eView) {
             Ok(())
         })
         .on_window_event(handle_main_window_event)
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("LocalBridge fixed-window E2E failed");
+    app.run(keep_background_process_alive);
 }
 
 #[cfg(debug_assertions)]
@@ -377,9 +388,17 @@ fn execute_fixed_window_e2e(
         .eval("document.querySelector('[aria-label=\"关闭\"]')?.click();")
         .map_err(|error| format!("click close: {error}"))?;
     wait_for_fixed_window_state(Duration::from_secs(4), || {
-        window.is_visible().ok() == Some(false)
+        window
+            .app_handle()
+            .get_webview_window(MAIN_WINDOW_LABEL)
+            .is_none()
     })
-    .ok_or("custom close control did not reach CloseRequested close-to-hide behavior")?;
+    .ok_or("custom close control did not destroy the main WebView")?;
+    let reopened = ensure_main_window(window.app_handle())
+        .map_err(|error| format!("recreate main WebView after close: {error}"))?;
+    if reopened.label() != MAIN_WINDOW_LABEL {
+        return Err("recreated main WebView has the wrong identity".into());
+    }
 
     let dashboard_geometry = if matches!(view, FixedWindowE2eView::Dashboard) {
         format!(
@@ -390,7 +409,7 @@ fn execute_fixed_window_e2e(
         String::new()
     };
     Ok(format!(
-        "logical={}x{} physical={}x{} webview={}x{} native_scale={} dpr={} decorations=false resizable=false maximizable=false chrome=edge-to-edge controls=drag,minimize,close minimize_click=true close_hide=true{}",
+        "logical={}x{} physical={}x{} webview={}x{} native_scale={} dpr={} decorations=false resizable=false maximizable=false chrome=edge-to-edge controls=drag,minimize,close minimize_click=true close_destroy=true reopen_recreates_webview=true{}",
         logical_width.round(),
         logical_height.round(),
         physical.width,

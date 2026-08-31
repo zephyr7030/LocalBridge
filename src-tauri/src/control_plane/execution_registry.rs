@@ -409,6 +409,7 @@ impl ExecutionRegistry {
             match &execution.state {
                 ExecutionState::Queued | ExecutionState::Running => {
                     execution.last_observed_at_ms = terminal.completed_at_ms;
+                    execution.runtime_handle = None;
                     execution.state = ExecutionState::Terminal(sanitize_terminal(terminal));
                     Ok(())
                 }
@@ -905,8 +906,18 @@ mod tests {
             .start(TaskId::new("task"), PublicSessionId::new("session"))
             .unwrap();
         registry
+            .bind_runtime_handle(&execution, RuntimeCommandHandle::new("runtime-session"))
+            .unwrap();
+        registry
             .finish(&execution, terminal(TerminalOutcome::Completed))
             .unwrap();
+        let record = registry
+            .execution_for_public_session(&PublicSessionId::new("session"))
+            .unwrap();
+        assert!(
+            record.runtime_handle.is_none(),
+            "terminal execution must not retain a private runtime resource handle"
+        );
         assert_eq!(
             registry.finish(&execution, terminal(TerminalOutcome::Failed)),
             Err(ExecutionRegistryError::AlreadyTerminal {

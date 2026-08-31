@@ -17,9 +17,10 @@ use super::error::{UiError, UiResult};
 use crate::app::{DesktopLifecycle, STARTUP_PROFILE_FILE_NAME, StartupProfileStore};
 use crate::commands::ui;
 use crate::control_plane::convergence::ConnectionProfile;
+use crate::control_plane::snapshot::OnboardingReadiness;
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::settings::SettingsStore;
-use crate::state::{PermissionMode, RuntimeState};
+use crate::state::RuntimeState;
 
 pub const OPENAI_TUNNEL_SETTINGS_URL: &str =
     "https://platform.openai.com/settings/organization/tunnels";
@@ -29,23 +30,8 @@ pub const CHATGPT_CUSTOM_CONNECTOR_URL: &str = "https://chatgpt.com/plugins#sett
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OnboardingReadiness {
-    local_environment: bool,
-    coding_service: bool,
-    openai_tunnel: bool,
-}
-
-impl OnboardingReadiness {
-    fn all_ready(&self) -> bool {
-        self.local_environment && self.coding_service && self.openai_tunnel
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct OnboardingState {
     complete: bool,
-    permission: &'static str,
     projection_revision: u64,
     connection_configured: bool,
     runtime_key_saved: bool,
@@ -265,47 +251,16 @@ fn project_state(lifecycle: &DesktopLifecycle) -> UiResult<OnboardingState> {
     let snapshot = lifecycle.control_plane_snapshot();
     let settings = snapshot.settings.value();
     let connection = snapshot.connection.value();
-    let runtime = snapshot.runtime.value();
     Ok(OnboardingState {
         complete: settings.is_some_and(|settings| settings.onboarding_complete),
-        permission: snapshot
-            .authority
-            .value()
-            .map(|authority| match authority.desired {
-                PermissionMode::Edit => "edit",
-                PermissionMode::Full => "full",
-                PermissionMode::Elevated => "admin",
-            })
-            .unwrap_or("edit"),
         projection_revision: snapshot.revision,
         connection_configured: connection
             .is_some_and(|connection| connection.desired_tunnel_id.is_some()),
         runtime_key_saved: settings.is_some_and(|settings| settings.runtime_key_saved),
         runtime_key_length: settings.and_then(|settings| settings.runtime_key_length),
         tunnel_id: connection.and_then(|connection| connection.desired_tunnel_id.clone()),
-        readiness: readiness(runtime),
+        readiness: snapshot.onboarding_readiness(),
     })
-}
-
-fn readiness(
-    runtime: Option<&crate::control_plane::snapshot::RuntimeProjection>,
-) -> OnboardingReadiness {
-    let local_environment = runtime
-        .and_then(|runtime| runtime.local_environment_available)
-        .unwrap_or(false);
-    let state = runtime
-        .map(|runtime| &runtime.state)
-        .unwrap_or(&RuntimeState::Stopped);
-    let coding_service = matches!(
-        state,
-        RuntimeState::StartingTunnel | RuntimeState::WaitingTunnelReady | RuntimeState::Ready
-    );
-    let openai_tunnel = matches!(state, RuntimeState::Ready);
-    OnboardingReadiness {
-        local_environment,
-        coding_service,
-        openai_tunnel,
-    }
 }
 
 fn app_data_dir(app: &AppHandle) -> UiResult<PathBuf> {

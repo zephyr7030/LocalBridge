@@ -1,16 +1,20 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
+use crate::filesystem::edit::{
+    CodingEditError, CodingEditService, apply_text_hunks_preserving_format, normalize_patch_text,
+};
 use crate::filesystem::service::{
-    FilesystemCancellation, FilesystemError, FilesystemMutationResult, FilesystemSearchOptions,
-    FilesystemService,
+    FilesystemCancellation, FilesystemContentSearchOptions, FilesystemError,
+    FilesystemMutationResult, FilesystemSearchOptions, FilesystemService, MAX_INTERNAL_FILE_BYTES,
 };
 
 use super::{
-    AdministratorFilesystemAction, AdministratorFilesystemEntry, AdministratorFilesystemErrorCode,
-    AdministratorFilesystemKind, AdministratorFilesystemResult, AdministratorFilesystemSortBy,
-    AdministratorFilesystemSortOrder, AdministratorFilesystemSpec, AdministratorWorkspacePathField,
-    PrivilegedFilesystemAction, PrivilegedFilesystemResult, PrivilegedFilesystemSpec,
+    AdministratorFilesystemAction, AdministratorFilesystemContentMatch,
+    AdministratorFilesystemEntry, AdministratorFilesystemErrorCode, AdministratorFilesystemKind,
+    AdministratorFilesystemResult, AdministratorFilesystemSortBy, AdministratorFilesystemSortOrder,
+    AdministratorFilesystemSpec, AdministratorWorkspacePathField, PrivilegedFilesystemAction,
+    PrivilegedFilesystemResult, PrivilegedFilesystemSpec,
 };
 
 pub(crate) fn run_privileged_filesystem(
@@ -218,6 +222,74 @@ pub(crate) fn run_administrator_filesystem_with_cancellation(
                 .map_err(administrator_filesystem_error)?;
             Ok(administrator_mutation(spec.action, result))
         }
+        AdministratorFilesystemAction::Replace => {
+            let path = administrator_path(&spec)?;
+            let original = service
+                .read_bytes_bounded(path, MAX_INTERNAL_FILE_BYTES)
+                .map_err(administrator_filesystem_error)?;
+            let updated = apply_text_hunks_preserving_format(
+                &original,
+                &[(
+                    normalize_patch_text(
+                        spec.old
+                            .as_deref()
+                            .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                    ),
+                    normalize_patch_text(
+                        spec.new
+                            .as_deref()
+                            .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                    ),
+                )],
+            )
+            .map_err(administrator_coding_edit_error)?;
+            service
+                .replace_file_if_sha256(
+                    path,
+                    spec.expected_sha256
+                        .as_deref()
+                        .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                    &updated,
+                )
+                .map_err(administrator_filesystem_error)?;
+            let hash = service.hash(path).map_err(administrator_filesystem_error)?;
+            Ok(AdministratorFilesystemResult::Edit {
+                action: spec.action,
+                path: Some(hash.path),
+                affected_files: Vec::new(),
+                sha256: Some(hash.sha256),
+                changed: true,
+            })
+        }
+        AdministratorFilesystemAction::Patch => {
+            let workspace_root = spec
+                .workspace_root
+                .as_deref()
+                .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?;
+            let authority = crate::workspace::WorkspaceResolver::active_workspace(
+                std::path::Path::new(workspace_root),
+            )
+            .map_err(|_| AdministratorFilesystemErrorCode::OutsideAuthority)?;
+            let edit = CodingEditService::with_authority(authority)
+                .map_err(administrator_coding_edit_error)?;
+            let patch = spec
+                .patch
+                .as_deref()
+                .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?;
+            let affected_files = if spec.expected_files.is_empty() {
+                edit.apply_patch_to_current(patch)
+            } else {
+                edit.apply_patch(patch, &spec.expected_files)
+            }
+            .map_err(administrator_coding_edit_error)?;
+            Ok(AdministratorFilesystemResult::Edit {
+                action: spec.action,
+                path: None,
+                affected_files,
+                sha256: None,
+                changed: true,
+            })
+        }
         AdministratorFilesystemAction::Search => {
             let options = FilesystemSearchOptions {
                 recursive: spec.recursive,
@@ -259,6 +331,51 @@ pub(crate) fn run_administrator_filesystem_with_cancellation(
                     .map(administrator_entry)
                     .collect(),
                 scanned_entries: u32::try_from(result.scanned_entries)
+                    .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                truncated: result.truncated,
+            })
+        }
+        AdministratorFilesystemAction::SearchContent => {
+            let result = service
+                .search_content(
+                    administrator_path(&spec)?,
+                    &FilesystemContentSearchOptions {
+                        recursive: spec.recursive,
+                        max_depth: spec.max_depth,
+                        max_entries: spec.max_entries as usize,
+                        max_results: spec.max_results as usize,
+                        max_file_bytes: spec.max_file_bytes as usize,
+                        pattern: spec
+                            .pattern
+                            .clone()
+                            .ok_or(AdministratorFilesystemErrorCode::InvalidArgument)?,
+                        case_sensitive: spec.case_sensitive,
+                    },
+                )
+                .map_err(administrator_filesystem_error)?;
+            Ok(AdministratorFilesystemResult::ContentMatches {
+                action: spec.action,
+                matches: result
+                    .matches
+                    .into_iter()
+                    .map(|item| {
+                        Ok(AdministratorFilesystemContentMatch {
+                            path: item.path,
+                            line: u32::try_from(item.line)
+                                .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                            column: u32::try_from(item.column)
+                                .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                            text: item.text,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, AdministratorFilesystemErrorCode>>()?,
+                scanned_entries: u32::try_from(result.scanned_entries)
+                    .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                scanned_files: u32::try_from(result.scanned_files)
+                    .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                skipped_binary_files: u32::try_from(result.skipped_binary_files)
+                    .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
+                skipped_oversized_files: u32::try_from(result.skipped_oversized_files)
                     .map_err(|_| AdministratorFilesystemErrorCode::LimitExceeded)?,
                 truncated: result.truncated,
             })
@@ -385,11 +502,22 @@ fn administrator_filesystem_error(error: FilesystemError) -> AdministratorFilesy
         FilesystemError::NotFound => AdministratorFilesystemErrorCode::NotFound,
         FilesystemError::OutsideAuthority => AdministratorFilesystemErrorCode::OutsideAuthority,
         FilesystemError::AlreadyExists => AdministratorFilesystemErrorCode::AlreadyExists,
-        FilesystemError::FileChanged => AdministratorFilesystemErrorCode::AlreadyExists,
+        FilesystemError::FileChanged => AdministratorFilesystemErrorCode::FileChanged,
         FilesystemError::LimitExceeded => AdministratorFilesystemErrorCode::LimitExceeded,
         FilesystemError::Cancelled => AdministratorFilesystemErrorCode::Cancelled,
         FilesystemError::Unsupported => AdministratorFilesystemErrorCode::Unsupported,
         FilesystemError::Io => AdministratorFilesystemErrorCode::Io,
+    }
+}
+
+fn administrator_coding_edit_error(error: CodingEditError) -> AdministratorFilesystemErrorCode {
+    match error {
+        CodingEditError::InvalidPath => AdministratorFilesystemErrorCode::OutsideAuthority,
+        CodingEditError::NotFound => AdministratorFilesystemErrorCode::NotFound,
+        CodingEditError::FileChanged => AdministratorFilesystemErrorCode::FileChanged,
+        CodingEditError::PatchConflict => AdministratorFilesystemErrorCode::PatchConflict,
+        CodingEditError::AmbiguousMatch => AdministratorFilesystemErrorCode::AmbiguousMatch,
+        CodingEditError::Io => AdministratorFilesystemErrorCode::Io,
     }
 }
 
@@ -467,7 +595,14 @@ mod tests {
             offset: 0,
             max_bytes: 65_536,
             content_base64: None,
+            expected_sha256: None,
+            old: None,
+            new: None,
+            patch: None,
+            expected_files: Default::default(),
             pattern: None,
+            case_sensitive: true,
+            max_file_bytes: 1024 * 1024,
             kind: None,
             min_size: None,
             max_size: None,
@@ -641,7 +776,14 @@ mod tests {
             offset: 0,
             max_bytes: 65_536,
             content_base64: None,
+            expected_sha256: None,
+            old: None,
+            new: None,
+            patch: None,
+            expected_files: Default::default(),
             pattern: None,
+            case_sensitive: true,
+            max_file_bytes: 1024 * 1024,
             kind: None,
             min_size: None,
             max_size: None,

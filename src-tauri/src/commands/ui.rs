@@ -10,10 +10,12 @@ use crate::app::{
     StartupProfileStore, manual_stop_services,
 };
 use crate::control_plane::convergence::{
-    ConnectionProfile, DesiredWorkspace, PermissionReconcileAction, RuntimeReconcileAction,
-    ServiceIntent,
+    AuthorityReconciliation, ConnectionProfile, DesiredWorkspace, PermissionReconcileAction,
+    RuntimeReconcileAction, ServiceIntent,
 };
-use crate::control_plane::snapshot::{ControlPlaneSnapshot, TaskAggregate};
+use crate::control_plane::snapshot::{
+    ControlPlaneSnapshot, ProjectionAvailability, ProjectionSection, TaskAggregate,
+};
 use crate::control_plane::update::UpdateStartError;
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::domain::{
@@ -34,25 +36,33 @@ use windows_sys::Win32::UI::Shell::ShellExecuteW;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MainProjection {
-    permission: &'static str,
-    effective_permission: &'static str,
-    elevated_active: bool,
-    privilege: &'static str,
-    local_environment_service: &'static str,
-    tunnel_service: &'static str,
-    coding_service: &'static str,
+    authority_status: &'static str,
+    runtime_status: &'static str,
+    settings_status: &'static str,
+    connection_status: &'static str,
+    activity_status: &'static str,
+    update_status: &'static str,
+    permission: Option<&'static str>,
+    effective_permission: Option<&'static str>,
+    permission_reconciliation: Option<&'static str>,
+    elevated_active: Option<bool>,
+    privilege: Option<&'static str>,
+    local_environment_service: Option<&'static str>,
+    tunnel_service: Option<&'static str>,
+    coding_service: Option<&'static str>,
+    onboarding_ready: Option<bool>,
     current_project: Option<String>,
-    projects: Vec<ProjectProjection>,
+    projects: Option<Vec<ProjectProjection>>,
     current_task: Option<TaskProjection>,
     current_activity: Option<CurrentActivityProjection>,
     last_activity: Option<LastActivityProjection>,
     projection_revision: u64,
     tunnel_id: Option<String>,
-    runtime_key_saved: bool,
-    auto_start: bool,
-    close_window_continue_running: bool,
+    runtime_key_saved: Option<bool>,
+    auto_start: Option<bool>,
+    close_window_continue_running: Option<bool>,
     reconnect: Option<ReconnectProjection>,
-    update: UpdateProjection,
+    update: Option<UpdateProjection>,
     active_faults: Vec<UiFaultProjection>,
 }
 
@@ -293,34 +303,36 @@ pub async fn ui_ready(app: AppHandle) -> UiResult<()> {
 
 fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainProjection> {
     let control_plane = lifecycle.control_plane_snapshot();
-    let runtime = control_plane.runtime.value();
-    let authority = control_plane.authority.value();
-    let settings = control_plane.settings.value();
-    let task_aggregate = control_plane.activity.value();
-    let projects = settings
-        .map(|settings| {
-            settings
-                .projects
-                .iter()
-                .map(|project| ProjectProjection {
-                    id: project.id.clone(),
-                    path: project
-                        .accessible_path
-                        .clone()
-                        .unwrap_or_else(|| "项目已无法访问".to_string()),
-                    active: project.active,
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let runtime = ready_section_value(&control_plane.runtime);
+    let authority = ready_section_value(&control_plane.authority);
+    let settings = ready_section_value(&control_plane.settings);
+    let task_aggregate = ready_section_value(&control_plane.activity);
+    let projects = settings.map(|settings| {
+        settings
+            .projects
+            .iter()
+            .map(|project| ProjectProjection {
+                id: project.id.clone(),
+                path: project
+                    .accessible_path
+                    .clone()
+                    .unwrap_or_else(|| "项目已无法访问".to_string()),
+                active: project.active,
+            })
+            .collect::<Vec<_>>()
+    });
     let current_project = projects
-        .iter()
+        .as_ref()
+        .into_iter()
+        .flatten()
         .find(|project| project.active)
         .map(|project| project.path.clone());
-    let runtime_state = runtime
-        .map(|runtime| &runtime.state)
-        .unwrap_or(&RuntimeState::Stopped);
-    let (tunnel_service, coding_service) = service_codes(runtime_state);
+    let runtime_state = runtime.map(|runtime| &runtime.state);
+    let (tunnel_service, coding_service) = runtime_state
+        .map(service_codes)
+        .map_or((None, None), |(tunnel, coding)| {
+            (Some(tunnel), Some(coding))
+        });
     let reconnect = runtime
         .and_then(|runtime| runtime.outage.as_ref())
         .and_then(|outage| {
@@ -331,23 +343,22 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
                 })
         });
     Ok(MainProjection {
-        permission: permission_code(
-            authority
-                .map(|authority| authority.desired)
-                .unwrap_or(PermissionMode::Edit),
-        ),
-        effective_permission: permission_code(
-            authority
-                .map(|authority| authority.effective)
-                .unwrap_or(PermissionMode::Edit),
-        ),
-        elevated_active: authority.is_some_and(|authority| authority.elevated_active),
-        privilege: authority
-            .map(|authority| privilege_code(&authority.broker))
-            .unwrap_or("off"),
-        local_environment_service: local_environment_service_code(runtime_state),
+        authority_status: projection_section_code(&control_plane.authority),
+        runtime_status: projection_section_code(&control_plane.runtime),
+        settings_status: projection_section_code(&control_plane.settings),
+        connection_status: projection_section_code(&control_plane.connection),
+        activity_status: projection_section_code(&control_plane.activity),
+        update_status: projection_section_code(&control_plane.update),
+        permission: authority.map(|authority| permission_code(authority.desired)),
+        effective_permission: authority.map(|authority| permission_code(authority.effective)),
+        permission_reconciliation: authority
+            .map(|authority| authority_reconciliation_code(authority.reconciliation)),
+        elevated_active: authority.map(|authority| authority.elevated_active),
+        privilege: authority.map(|authority| privilege_code(&authority.broker)),
+        local_environment_service: runtime_state.map(local_environment_service_code),
         tunnel_service,
         coding_service,
+        onboarding_ready: runtime.map(|_| control_plane.onboarding_readiness().all_ready()),
         current_project,
         projects,
         current_task: task_aggregate.and_then(|aggregate| {
@@ -359,19 +370,36 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
         current_activity: task_aggregate.and_then(current_activity_projection),
         last_activity: task_aggregate.and_then(last_activity_projection),
         projection_revision: control_plane.revision,
-        tunnel_id: control_plane
-            .connection
-            .value()
+        tunnel_id: ready_section_value(&control_plane.connection)
             .and_then(|connection| connection.desired_tunnel_id.clone()),
-        runtime_key_saved: settings.is_some_and(|settings| settings.runtime_key_saved),
-        auto_start: settings.is_some_and(|settings| settings.auto_start),
+        runtime_key_saved: settings.map(|settings| settings.runtime_key_saved),
+        auto_start: settings.map(|settings| settings.auto_start),
         close_window_continue_running: settings
-            .map(|settings| settings.close_window_continue_running)
-            .unwrap_or(true),
+            .map(|settings| settings.close_window_continue_running),
         reconnect,
-        update: update_projection(control_plane.update.value()),
+        update: ready_section_value(&control_plane.update)
+            .map(|update| update_projection(Some(update))),
         active_faults: ui_faults(&control_plane),
     })
+}
+
+fn projection_section_code<T>(section: &ProjectionSection<T>) -> &'static str {
+    match section.availability() {
+        ProjectionAvailability::Ready if !section.is_stale() && section.value().is_some() => {
+            "ready"
+        }
+        ProjectionAvailability::Fault => "fault",
+        ProjectionAvailability::TemporarilyUnavailable if section.is_stale() => "stale",
+        ProjectionAvailability::Ready | ProjectionAvailability::TemporarilyUnavailable => {
+            "unavailable"
+        }
+    }
+}
+
+fn ready_section_value<T>(section: &ProjectionSection<T>) -> Option<&T> {
+    (projection_section_code(section) == "ready")
+        .then(|| section.value())
+        .flatten()
 }
 
 #[tauri::command]
@@ -1111,6 +1139,14 @@ fn privilege_code(value: &PrivilegeState) -> &'static str {
         PrivilegeState::Faulted(_) => "fault",
     }
 }
+
+fn authority_reconciliation_code(value: AuthorityReconciliation) -> &'static str {
+    match value {
+        AuthorityReconciliation::Converged => "converged",
+        AuthorityReconciliation::AwaitingAuthorization => "awaiting_authorization",
+        AuthorityReconciliation::BrokerUnavailable => "broker_unavailable",
+    }
+}
 fn service_codes(state: &RuntimeState) -> (&'static str, &'static str) {
     match state {
         RuntimeState::Stopped => ("off", "off"),
@@ -1244,7 +1280,8 @@ fn task_projection_from_aggregate(
 fn terminal_outcome_code(outcome: TerminalOutcome) -> &'static str {
     match outcome {
         TerminalOutcome::Completed => "completed",
-        TerminalOutcome::Failed | TerminalOutcome::Blocked => "failed",
+        TerminalOutcome::Failed => "failed",
+        TerminalOutcome::Blocked => "blocked",
         TerminalOutcome::Cancelled => "cancelled",
         TerminalOutcome::TimedOut => "timed_out",
         TerminalOutcome::Lost => "lost",

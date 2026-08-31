@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, privilegeText, serviceVisualState, taskText, updateStatusText } from "../presentation";
+import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionReconciliationText, privilegeText, serviceVisualState, taskText, updateStatusText } from "../presentation";
 
 describe("LB-015 presentation", () => {
   it("maps frozen Chinese wording", () => {
@@ -30,6 +30,7 @@ describe("LB-015 presentation", () => {
   it("keeps schema42 current state separate from command history", () => {
     const base = { kind: "other" as const, summary: null, elapsedMs: null, step: null, progressCurrent: null, progressTotal: null };
     expect(currentActivityText(null)).toBe("空闲");
+    expect(currentActivityText(null, "unavailable")).toBe("任务状态暂不可用");
     expect(currentActivityText({ ...base, state: "waiting" })).toBe("任务等待继续");
     expect(currentActivityText({ ...base, state: "running" })).toBe("任务执行中…");
     expect(currentActivityText({ ...base, kind: "command", state: "running" })).toBe("运行命令…");
@@ -39,6 +40,18 @@ describe("LB-015 presentation", () => {
     const last = { kind: "git" as const, summary: "status", outcome: "completed" as const, completedAtMs: 1 };
     expect(lastActivityAction(last)).toBe("Git 操作");
     expect(lastActivityOutcome(last)).toBe("成功");
+    expect(lastActivityOutcome({ ...last, outcome: "blocked" })).toBe("已阻止");
+  });
+  it("shows desired, effective, and reconciliation without optimistic permission state", () => {
+    const fixture = {
+      authorityStatus: "ready",
+      permission: "admin",
+      effectivePermission: "full",
+      permissionReconciliation: "awaiting_authorization",
+    } as unknown as Parameters<typeof permissionReconciliationText>[0];
+    expect(permissionReconciliationText(fixture)).toContain("期望：管理员模式");
+    expect(permissionReconciliationText(fixture)).toContain("当前：完整模式");
+    expect(permissionReconciliationText(fixture)).toContain("等待 Windows 授权");
   });
   it("renders typed update lifecycle without guessing availability", () => {
     const base = { currentVersion: "1.0.0", latestVersion: null, releaseUrl: "https://github.com/owner/repo/releases", operationId: null, attempt: null, retryable: true };

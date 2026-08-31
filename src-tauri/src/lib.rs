@@ -51,6 +51,7 @@ macro_rules! localbridge_invoke_handler {
             commands::onboarding::prepare_onboarding_project,
             commands::onboarding::complete_onboarding,
             commands::diagnostics::get_diagnostics,
+            commands::diagnostics::wait_diagnostics_change,
             commands::diagnostics::open_logs,
             commands::diagnostics::export_diagnostics,
             $($extra),*

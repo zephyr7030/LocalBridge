@@ -13,6 +13,10 @@ use localbridge_lib::mcp::{
 };
 use localbridge_lib::state::{CurrentTaskStatus, PermissionMode};
 use serde_json::json;
+use windows_sys::Win32::Foundation::CloseHandle;
+use windows_sys::Win32::System::Threading::{
+    GetProcessHandleCount, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 const SYNTHETIC_BEARER: &str = "LB006_INTERNAL_BEARER_SYNTHETIC_DO_NOT_LEAK_9b7a4c11";
 
@@ -85,6 +89,36 @@ fn visible_descendant_windows(root_pid: u32) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
         .collect()
+}
+
+fn descendant_processes(root_pid: u32) -> Vec<String> {
+    let script = format!(
+        "$all=Get-CimInstance Win32_Process; $ids=@({root_pid}); $out=@(); for($i=0;$i -lt 4;$i++){{ $next=@(); foreach($id in $ids){{ foreach($p in $all | Where-Object {{$_.ParentProcessId -eq $id}}){{ $out += ($p.ProcessId.ToString()+'|'+$p.Name); $next += $p.ProcessId }} }}; $ids=$next }}; $out"
+    );
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .expect("query managed process descendants");
+    assert!(output.status.success(), "descendant process query failed");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn process_handle_count(pid: u32) -> u32 {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    assert!(
+        !process.is_null(),
+        "open process {pid} for handle-count probe"
+    );
+    let mut count = 0;
+    let queried = unsafe { GetProcessHandleCount(process, &mut count) };
+    let _ = unsafe { CloseHandle(process) };
+    assert_ne!(queried, 0, "query process {pid} handle count");
+    count
 }
 
 #[test]
@@ -203,6 +237,88 @@ fn actual_bundled_runtime_is_authenticated_loopback_owned_and_secret_redacted() 
     );
     drop(runtime);
     fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn terminal_commands_release_process_resources_while_retained_output_remains_readable() {
+    let root = repo_root();
+    let workspace = create_workspace("terminal-resources");
+    let mut runtime = CodingToolsRuntime::start(
+        config(&root, &workspace, free_port()),
+        InternalBearer::new("LB006_TERMINAL_RESOURCE_BEARER").unwrap(),
+        Duration::from_secs(10),
+    )
+    .expect("bundled coding runtime for terminal resource regression");
+
+    let run_terminal = |runtime: &mut CodingToolsRuntime, marker: &str| {
+        runtime
+            .call_tool(
+                "exec_command",
+                json!({
+                    "cmd":format!("echo {marker}"),
+                    "timeout_ms":5000,
+                    "yield_time_ms":5000,
+                    "max_output_bytes":4096,
+                    "verbosity":"full"
+                }),
+            )
+            .expect("quick command must reach terminal")
+    };
+
+    let initial_active_processes = runtime.active_processes().unwrap();
+    run_terminal(&mut runtime, "LB_TERMINAL_WARMUP");
+    std::thread::sleep(Duration::from_millis(250));
+    let baseline = process_handle_count(runtime.process_snapshot().pid);
+
+    let mut last = serde_json::Value::Null;
+    for index in 0..24 {
+        last = run_terminal(&mut runtime, &format!("LB_TERMINAL_{index}"));
+    }
+    let output_ref = last["structuredContent"]["output_refs"]["stdout"]
+        .as_str()
+        .expect("terminal command exposes retained stdout reference");
+    let retained = runtime
+        .call_tool(
+            "read_output",
+            json!({"output_ref":output_ref,"offset":0,"limit":4096}),
+        )
+        .expect("retained terminal output must remain readable");
+    assert!(
+        retained["structuredContent"]["content"]
+            .as_str()
+            .is_some_and(|content| content.contains("LB_TERMINAL_23")),
+        "retained output lost after releasing process owner: {retained:#}"
+    );
+
+    std::thread::sleep(Duration::from_millis(250));
+    let after = process_handle_count(runtime.process_snapshot().pid);
+    assert!(
+        after <= baseline + 8,
+        "terminal command registry retained OS handles: baseline={baseline}, after={after}"
+    );
+    let process_cleanup_started = std::time::Instant::now();
+    let process_cleanup_deadline = process_cleanup_started + Duration::from_secs(1);
+    let active_processes = loop {
+        let active = runtime.active_processes().unwrap();
+        if active <= initial_active_processes
+            || std::time::Instant::now() >= process_cleanup_deadline
+        {
+            break active;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(
+        active_processes,
+        initial_active_processes,
+        "terminal commands added a persistent Job process after {:?}; descendants={:?}",
+        process_cleanup_started.elapsed(),
+        descendant_processes(runtime.process_snapshot().pid)
+    );
+
+    runtime.stop().expect("stop terminal resource runtime");
+    assert_eq!(runtime.active_processes().unwrap(), 0);
+    drop(runtime);
+    fs::remove_dir_all(workspace).expect("cleanup terminal resource workspace");
 }
 
 #[test]

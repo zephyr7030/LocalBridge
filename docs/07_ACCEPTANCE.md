@@ -364,3 +364,8 @@
 | A358 | filesystem task integration | 大型结构化文件操作复用现有 TaskAggregate/task_control；不得新增 filesystem session、第二套 task API、task history、pause/snapshot/rollback |
 | A359 | P0 packaged no-console | primary WindowsProcessSupervisor 真实 managed spawn 使用 `CREATE_NO_WINDOW`；configured foreground/background/recovery/Tunnel reconnect/autostart/managed command child 的 release-style 行为无意外 console；只检查源码 token 不得作为 PASS |
 | A360 | v0.1.1 release sequence | LB-019PRE 完成实现与 targeted/runtime Gate 后必须 fresh G2 generation40 PASS，再 fresh G3 generation24 PASS，再生成 v0.1.1 RC；generation38/39 历史 FAIL 保留且不得改写；LB-019 clean-machine/reboot E2E PASS 后才允许发布最终 GitHub v0.1.1 |
+| A361 | schema49 structured editing and content search | schema49 显式 supersede A353 的 action 限制：`filesystem` 增加 identity-bound `replace`、事务型 `patch` 与 bounded UTF-8 literal `search_content`；三者复用同一 WorkspaceResolver/Path Authority，Elevated 路径复用 typed Broker 协议，禁止退回 Shell/私有 Python 或逐文件无回滚提交。 |
+| A362 | revisioned UI availability | 主界面、引导页与诊断页只消费同一 ControlPlaneSnapshot revision；runtime/authority/settings/connection/activity/update 分区必须显式投影 `ready/stale/unavailable/fault`，缺失分区不得伪造成 edit/off/idle/false 或空项目列表。 |
+| A363 | diagnostics single owner and live binding | 日志 revision、用户事件与请求诊断由一个 DiagnosticsStore 持有；读取诊断不得刷新 Broker 或写控制面，前端以 control-plane revision 唤醒并展示 active faults，用户导出采用 bounded retention。 |
+| A364 | background resource release | 关闭主窗口且后台继续运行时销毁 WebView，托盘重开时创建新 WebView；command terminal 后必须先保留 bounded output snapshot，再立即释放 process/pipe/thread/PTY OS owner，输出保留不得复用 Session 注册表锁。 |
+| A365 | stable model-visible tool catalog | public tools/list 与 capability schema 在权限、Broker 状态及长对话期间保持完整稳定；实时 policy 仅在 tools/call 执行门判定，不得通过删除 schema 伪装为能力不存在。 |

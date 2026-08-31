@@ -42,8 +42,10 @@ fn complete_runtime(root: &Path) {
 
 fn runtime(state: RuntimeState, outage: Option<DiagnosticsOutageInput>) -> DiagnosticsRuntimeInput {
     DiagnosticsRuntimeInput {
-        active: !matches!(state, RuntimeState::Stopped),
-        state,
+        available: true,
+        stale: false,
+        active: Some(!matches!(&state, RuntimeState::Stopped)),
+        state: Some(state),
         active_workspace: Some(PathBuf::from(r"C:\project\redacted")),
         outage,
     }
@@ -56,12 +58,12 @@ fn typed_checks_and_broker_generation_expose_no_broker_internals() {
     let snapshot = build_snapshot(
         root.path(),
         &runtime(RuntimeState::Ready, None),
-        &PrivilegeState::Active {
+        Some(&PrivilegeState::Active {
             broker_generation: GenerationId::new(7),
-        },
-        true,
+        }),
+        Some(true),
     );
-    assert_eq!(snapshot.schema_version, 1);
+    assert_eq!(snapshot.schema_version, 2);
     assert!(
         snapshot
             .checks
@@ -87,6 +89,72 @@ fn typed_checks_and_broker_generation_expose_no_broker_internals() {
 }
 
 #[test]
+fn unavailable_control_plane_sections_are_not_fabricated_as_stopped_or_disabled() {
+    let root = TempDir::new("unavailable");
+    complete_runtime(root.path());
+    let snapshot = build_snapshot(
+        root.path(),
+        &DiagnosticsRuntimeInput {
+            available: false,
+            stale: false,
+            active: None,
+            state: None,
+            active_workspace: None,
+            outage: None,
+        },
+        None,
+        None,
+    );
+    assert_eq!(snapshot.broker.state, BrokerDiagnosticState::Unavailable);
+    for code in ["runtime_key", "coding_service", "openai_tunnel"] {
+        assert_eq!(
+            snapshot
+                .checks
+                .iter()
+                .find(|check| check.code == code)
+                .unwrap()
+                .level,
+            DiagnosticLevel::Unknown
+        );
+    }
+}
+
+#[test]
+fn one_log_owner_revisions_real_changes_and_deduplicates_stable_observations() {
+    let store = DiagnosticsStore::default();
+    store.mutate(|state| {
+        state.recent_events.push_front(DiagnosticEvent {
+            level: DiagnosticLevel::Ok,
+            message: "ready".into(),
+            timestamp_ms: 1,
+        });
+        true
+    });
+    let first = store.read().revision;
+    assert_eq!(first, 1);
+    store.mutate(|_| false);
+    assert_eq!(store.read().revision, first);
+    store.mutate(|state| {
+        state.requests.events.push_front(RequestDiagnosticEvent {
+            kind: RequestDiagnosticKind::Start,
+            timestamp_ms: 2,
+            request_id: "request-revision".into(),
+            connection_id: "session-revision".into(),
+            attempt: 1,
+            tool: "workspace_context".into(),
+            outcome: None,
+            error_code: None,
+            phase: None,
+            cause: None,
+            http_status: None,
+            duration_ms: None,
+        });
+        true
+    });
+    assert_eq!(store.read().revision, 2);
+}
+
+#[test]
 fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverable_does_not_fake_history()
  {
     let root = TempDir::new("reconnect");
@@ -103,8 +171,8 @@ fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverab
                 user_attention_required: true,
             }),
         ),
-        &PrivilegeState::Requested,
-        true,
+        Some(&PrivilegeState::Requested),
+        Some(true),
     );
     let reconnect = exhausted.reconnect.unwrap();
     assert_eq!(reconnect.generation, 11);
@@ -136,8 +204,8 @@ fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverab
                 user_attention_required: true,
             }),
         ),
-        &PrivilegeState::Faulted(PrivilegeFault::BrokerExited),
-        false,
+        Some(&PrivilegeState::Faulted(PrivilegeFault::BrokerExited)),
+        Some(false),
     );
     assert!(nonrecoverable.reconnect.unwrap().attempts.is_empty());
 }
@@ -180,15 +248,23 @@ fn recent_user_events_are_backend_typed_bounded_timestamped_and_redacted() {
 fn user_triggered_export_contains_allowlisted_projection_only() {
     let root = TempDir::new("export");
     complete_runtime(root.path());
-    let snapshot = build_snapshot(
+    let mut snapshot = build_snapshot(
         root.path(),
         &runtime(RuntimeState::Ready, None),
-        &PrivilegeState::Disabled,
-        true,
+        Some(&PrivilegeState::Disabled),
+        Some(true),
     );
+    snapshot.active_faults.push(DiagnosticFault {
+        code: "Runtime.Unavailable".into(),
+        category: ErrorCategory::Unavailable,
+        message: "Runtime is unavailable".into(),
+        retryable: true,
+    });
     let path = export_snapshot(root.path(), &snapshot).unwrap();
     let text = fs::read_to_string(path).unwrap();
     assert!(text.contains("schemaVersion"));
+    assert!(text.contains("activeFaults"));
+    assert!(text.contains("Runtime.Unavailable"));
     assert!(!text.contains(r"C:\project\redacted"));
     for forbidden in [
         "Runtime API Key",
@@ -220,8 +296,8 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     let first = build_snapshot(
         root.path(),
         &runtime(RuntimeState::Ready, None),
-        &PrivilegeState::Disabled,
-        true,
+        Some(&PrivilegeState::Disabled),
+        Some(true),
     );
     assert_eq!(first.request_diagnostics.len(), 1);
     assert_eq!(
@@ -252,8 +328,8 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     let retry = build_snapshot(
         root.path(),
         &runtime(RuntimeState::Ready, None),
-        &PrivilegeState::Disabled,
-        true,
+        Some(&PrivilegeState::Disabled),
+        Some(true),
     );
     let retry_start = retry
         .request_diagnostics
@@ -285,8 +361,8 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     let recovered = build_snapshot(
         root.path(),
         &runtime(RuntimeState::Ready, None),
-        &PrivilegeState::Disabled,
-        true,
+        Some(&PrivilegeState::Disabled),
+        Some(true),
     );
     let retry_end = recovered
         .request_diagnostics
@@ -305,8 +381,8 @@ fn schema42_request_diagnostics_keep_retry_correlation_and_export_engineering_fi
     let reread = build_snapshot(
         root.path(),
         &runtime(RuntimeState::Ready, None),
-        &PrivilegeState::Disabled,
-        true,
+        Some(&PrivilegeState::Disabled),
+        Some(true),
     );
     assert_eq!(
         reread.request_diagnostics.len(),
@@ -395,8 +471,8 @@ fn materialized_log_directory_contains_a_redacted_diagnostics_artifact() {
     let snapshot = build_snapshot(
         root.path(),
         &runtime(RuntimeState::Ready, None),
-        &PrivilegeState::Disabled,
-        true,
+        Some(&PrivilegeState::Disabled),
+        Some(true),
     );
     let directory = materialize_log_directory(root.path(), &snapshot).unwrap();
     assert_eq!(directory, root.path().join("diagnostics"));
@@ -420,4 +496,23 @@ fn materialized_log_directory_contains_a_redacted_diagnostics_artifact() {
     ] {
         assert!(!text.contains(forbidden));
     }
+}
+
+#[test]
+fn diagnostic_exports_have_bounded_persistent_retention() {
+    let root = TempDir::new("export-retention");
+    complete_runtime(root.path());
+    let snapshot = build_snapshot(
+        root.path(),
+        &runtime(RuntimeState::Ready, None),
+        Some(&PrivilegeState::Disabled),
+        Some(true),
+    );
+    for _ in 0..(DIAGNOSTIC_EXPORT_RETENTION + 5) {
+        export_snapshot(root.path(), &snapshot).unwrap();
+    }
+    let retained = fs::read_dir(root.path().join("diagnostics"))
+        .unwrap()
+        .count();
+    assert_eq!(retained, DIAGNOSTIC_EXPORT_RETENTION);
 }

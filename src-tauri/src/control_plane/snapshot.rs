@@ -5,9 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{ExecutionRecord, PersistentFault, TaskRecord, UpdateLifecycle};
 use crate::settings::AppData;
-use crate::state::{PermissionMode, PrivilegeState, RuntimeState, TaskKind};
+use crate::state::{
+    PermissionMode, PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState, TaskKind,
+};
 use crate::workspace::WorkspaceValidator;
 
+use super::convergence::AuthorityReconciliation;
 use super::scheduler::SchedulerSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +104,39 @@ pub struct RuntimeProjection {
     pub outage: Option<OutageProjection>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardingReadiness {
+    pub local_environment: bool,
+    pub coding_service: bool,
+    pub openai_tunnel: bool,
+}
+
+impl OnboardingReadiness {
+    pub fn from_runtime(runtime: &ProjectionSection<RuntimeProjection>) -> Self {
+        if runtime.availability() != ProjectionAvailability::Ready || runtime.is_stale() {
+            return Self::default();
+        }
+        let Some(runtime) = runtime.value() else {
+            return Self::default();
+        };
+        Self {
+            local_environment: runtime.local_environment_available.unwrap_or(false),
+            coding_service: matches!(
+                runtime.state,
+                RuntimeState::StartingTunnel
+                    | RuntimeState::WaitingTunnelReady
+                    | RuntimeState::Ready
+            ),
+            openai_tunnel: matches!(runtime.state, RuntimeState::Ready),
+        }
+    }
+
+    pub const fn all_ready(self) -> bool {
+        self.local_environment && self.coding_service && self.openai_tunnel
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LastToolProjection {
     pub kind: TaskKind,
@@ -112,6 +148,8 @@ pub struct LastToolProjection {
 pub struct OutageProjection {
     pub generation: u64,
     pub operation_id: String,
+    pub component: RuntimeComponent,
+    pub fault: RuntimeFault,
     pub user_attention_required: bool,
 }
 
@@ -121,6 +159,7 @@ pub struct AuthorityProjection {
     pub effective: PermissionMode,
     pub broker: PrivilegeState,
     pub elevated_active: bool,
+    pub reconciliation: AuthorityReconciliation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,6 +291,12 @@ pub struct ControlPlaneSnapshot {
     pub activity: ProjectionSection<TaskAggregate>,
     pub update: ProjectionSection<UpdateLifecycle>,
     pub active_faults: Vec<PersistentFault>,
+}
+
+impl ControlPlaneSnapshot {
+    pub fn onboarding_readiness(&self) -> OnboardingReadiness {
+        OnboardingReadiness::from_runtime(&self.runtime)
+    }
 }
 
 impl Default for ControlPlaneSnapshot {
@@ -454,6 +499,27 @@ mod tests {
         assert_eq!(second.revision, first.revision + 1);
         assert!(!first.settings.value.unwrap().auto_start);
         assert!(second.settings.value.unwrap().auto_start);
+    }
+
+    #[test]
+    fn onboarding_readiness_requires_one_fresh_runtime_projection() {
+        let runtime = RuntimeProjection {
+            active: true,
+            state: RuntimeState::Ready,
+            local_environment_available: Some(true),
+            current_task_elapsed_ms: None,
+            last_tool: None,
+            outage: None,
+        };
+        assert!(
+            OnboardingReadiness::from_runtime(&ProjectionSection::ready(runtime.clone()))
+                .all_ready()
+        );
+        assert!(
+            !OnboardingReadiness::from_runtime(&ProjectionSection::stale(Some(runtime)))
+                .all_ready()
+        );
+        assert!(!OnboardingReadiness::from_runtime(&ProjectionSection::unavailable()).all_ready());
     }
 
     #[test]
