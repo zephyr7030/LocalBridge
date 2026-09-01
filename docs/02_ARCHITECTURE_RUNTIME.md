@@ -113,8 +113,8 @@ running → completed | failed | timed_out | cancelled | lost
 
 ```text
 agent_workflow: diagnose / bugfix / feature / refactor / test_failure / build_release / document / resume / custom
-task_control: get / cancel
-document_workflow: inspect / create / convert / rebuild
+task_control: list / get / cancel
+document_workflow: inspect / search / create / edit / convert / rebuild
 ```
 
 未来若新增 action，必须先有实现、typed contract、PEP classification 与测试再进入 public schema；禁止“先暴露、后实现”。
@@ -126,7 +126,7 @@ Schema33 起，路径授权按模式分层。Edit/Full 的 workspace-bound publi
 ```text
 exec_command.workdir
 git_workflow.path / paths
-document_workflow.path
+document_workflow.path / source
 view_image.path
 ```
 

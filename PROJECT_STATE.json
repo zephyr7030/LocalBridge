@@ -270,5 +270,5 @@
     "verified_invariants": [],
     "verification_note": "The descendant authority inconsistency is resolved by one explicit current-user Shell authority owner, not by a fabricated sandbox. Unified acceptance remains invalid because real cloud Tunnel behavior was not exercised and P1-03, P1-17, P1-33 through P1-34, and P1-37 through P1-38 remain PARTIAL in ARCHITECTURE_AUDIT_FINDINGS.md."
   },
-  "next_action": "Commit the locally verified remediation, export and verify one fresh public snapshot, rebuild the v0.13.0 package from that exact commit, then run one final GitHub CI and publish the release without restoring unified architecture acceptance."
+  "next_action": "Commit the locally verified remediation, export and verify one fresh public snapshot, rebuild the v0.1.4 package from that exact commit, then run one final GitHub CI and publish the release without restoring unified architecture acceptance."
 }

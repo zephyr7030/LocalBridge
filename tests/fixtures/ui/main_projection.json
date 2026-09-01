@@ -62,7 +62,7 @@
   },
   "update": {
     "state": "current",
-    "currentVersion": "0.13.0",
+    "currentVersion": "0.1.4",
     "latestVersion": null,
     "releaseUrl": "https://github.com/zephyr7030/LocalBridge/releases",
     "operationId": "update-1",

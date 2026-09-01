@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..");
 const artifacts = resolve(root, "release-artifacts/LB-019PRE");
-const PRODUCT_VERSION = "0.13.0";
+const PRODUCT_VERSION = "0.1.4";
 const NO_CONSOLE_SCENARIOS = [
   "configured_foreground_runtime_start",
   "background_launch",

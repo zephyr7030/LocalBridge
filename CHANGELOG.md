@@ -6,7 +6,14 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 No user-visible changes yet.
 
-## [0.13.0] - 2026-08-23
+## [0.1.4] - 2026-09-01
+
+- 将 `document_workflow` 收敛为 `inspect / search / create / edit / convert / rebuild` 六个稳定 action，并统一经过 typed `DocumentIR`。
+- 文档局部编辑仅保留 replace、insert-before、insert-after、delete 四种原子操作；编辑和整体重建均使用 SHA-256 乐观并发保护。
+- 增加原生 DOCX 创建、读取、搜索和编辑，以及 PDF 读取、搜索和转 TXT/Markdown；不支持的有损修改会明确拒绝。
+- 修复启动和恢复期间权限、工作区、活动与故障投影不一致的问题，使前端继续只消费同一 revision 的后端快照。
+
+## [0.1.3] - 2026-08-23
 
 - 完成本轮 schema44 控制面缺陷修复，并将公开工具 API 提升至 revision 47；统一架构验收仍以项目状态记录为准。
 - 修复 durable workflow 与 detached command 跨 MCP Session 的恢复、观察和定向取消。

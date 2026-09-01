@@ -809,9 +809,23 @@ fn classify_public_action(tool_name: &str, arguments: &Value) -> Option<PublicAc
                 TaskKind::ReadFile,
                 PublicCapabilityDeclaration::READ,
             )),
+            "search" => Some(public_descriptor(
+                "document_workflow",
+                "search",
+                Capability::Read,
+                TaskKind::ReadFile,
+                PublicCapabilityDeclaration::READ,
+            )),
             "create" => Some(public_descriptor(
                 "document_workflow",
                 "create",
+                Capability::Write,
+                TaskKind::ModifyFile,
+                PublicCapabilityDeclaration::workflow(true, false, false, false, false),
+            )),
+            "edit" => Some(public_descriptor(
+                "document_workflow",
+                "edit",
                 Capability::Write,
                 TaskKind::ModifyFile,
                 PublicCapabilityDeclaration::workflow(true, false, false, false, false),

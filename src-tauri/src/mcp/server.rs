@@ -6149,12 +6149,16 @@ mod tests {
             inspect.body["result"]["structuredContent"]["data"]["text"],
             "alpha\nbeta\n"
         );
+        let document_sha256 = inspect.body["result"]["structuredContent"]["data"]["sha256"]
+            .as_str()
+            .expect("inspect returns the mutation identity")
+            .to_string();
         let rebuild = public_tool_call(
             pep.port(),
             &session,
             611,
             "document_workflow",
-            json!({"action":"rebuild","path":"schema27.txt","content":"gamma\ndelta\n"}),
+            json!({"action":"rebuild","path":"schema27.txt","content":"gamma\ndelta\n","expected_sha256":document_sha256}),
         );
         assert_eq!(
             rebuild.body["result"]["structuredContent"]["ok"], true,
@@ -6484,20 +6488,18 @@ mod tests {
                     .find(|tool| tool["name"] == "document_workflow")
             })
             .expect("fresh serving instance exposes document_workflow");
-        assert!(
-            served_document["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("rebuild requires an existing path+content"))
+        assert_eq!(
+            served_document["inputSchema"]["properties"]["action"]["enum"],
+            json!(["inspect", "search", "create", "edit", "convert", "rebuild"])
         );
-        assert!(
-            served_document["inputSchema"]["properties"]["path"]["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("already exist"))
+        assert_eq!(
+            served_document["inputSchema"]["properties"]["expected_sha256"]["minLength"],
+            64
         );
-        assert!(
-            served_document["inputSchema"]["properties"]["content"]["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("rebuild"))
+        assert_eq!(
+            served_document["inputSchema"]["properties"]["edits"]["items"]["properties"]["operation"]
+                ["enum"],
+            json!(["replace", "insert_before", "insert_after", "delete"])
         );
         let served_git = served_tools.body["result"]["tools"]
             .as_array()
@@ -7107,18 +7109,18 @@ mod tests {
             &session,
             770,
             "document_workflow",
-            json!({"action":"inspect","path":"range.txt","start_line":5,"end_line":5}),
+            json!({"action":"inspect","path":"range.txt","start_block":5,"max_blocks":1}),
         );
         assert_eq!(
             one_line.body["result"]["structuredContent"]["data"]["text"],
-            "line5\n"
+            "line5"
         );
         assert_eq!(
-            one_line.body["result"]["structuredContent"]["data"]["start_line"],
+            one_line.body["result"]["structuredContent"]["data"]["start_block"],
             5
         );
         assert_eq!(
-            one_line.body["result"]["structuredContent"]["data"]["end_line"],
+            one_line.body["result"]["structuredContent"]["data"]["end_block"],
             5
         );
         let three_lines = public_tool_call(
@@ -7126,18 +7128,18 @@ mod tests {
             &session,
             771,
             "document_workflow",
-            json!({"action":"inspect","path":"range.txt","start_line":1,"end_line":3}),
+            json!({"action":"inspect","path":"range.txt","start_block":1,"max_blocks":3}),
         );
         assert_eq!(
             three_lines.body["result"]["structuredContent"]["data"]["text"],
-            "line1\nline2\nline3\n"
+            "line1\nline2\nline3"
         );
         let invalid_range = public_tool_call(
             pep.port(),
             &session,
             772,
             "document_workflow",
-            json!({"action":"inspect","path":"range.txt","start_line":5,"end_line":3}),
+            json!({"action":"inspect","path":"range.txt","start_block":0,"max_blocks":3}),
         );
         assert_eq!(
             invalid_range.body["result"]["structuredContent"]["error"]["code"], "InvalidArgument",
@@ -7149,11 +7151,11 @@ mod tests {
             &session,
             773,
             "document_workflow",
-            json!({"action":"inspect","path":"range.txt","start_line":999,"end_line":1000}),
+            json!({"action":"inspect","path":"range.txt","start_block":999,"max_blocks":2}),
         );
         assert_eq!(
             past_eof.body["result"]["structuredContent"]["error"]["code"], "InvalidArgument",
-            "a document range beyond EOF must not produce start_line > end_line: {:#?}",
+            "a document block range beyond EOF must fail explicitly: {:#?}",
             past_eof.body
         );
 

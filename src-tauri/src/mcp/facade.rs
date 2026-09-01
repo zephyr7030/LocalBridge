@@ -17,6 +17,10 @@ use crate::diagnostics::error::{
     DiagnosticErrorCode, DiagnosticPhase, ErrorDiagnostic, from_canonical_code,
     transport_unavailable,
 };
+use crate::document::{
+    DocumentEditOperation, DocumentError, DocumentFormat, DocumentRequest, DocumentResult,
+    DocumentService,
+};
 use crate::domain::{
     ExecutionId, ExecutionState, ExecutionTerminal, McpSessionId, PublicSessionId,
     RuntimeCommandHandle, TaskId, TerminalOutcome,
@@ -42,7 +46,7 @@ use crate::execution::verification::VerificationPlanner;
 use crate::filesystem::edit::{CodingEditError, CodingEditService};
 use crate::filesystem::service::{
     FilesystemCancellation, FilesystemContentSearchOptions, FilesystemError,
-    FilesystemSearchOptions, FilesystemService, MAX_INTERNAL_FILE_BYTES,
+    FilesystemSearchOptions, FilesystemService,
 };
 use crate::workspace::context::ContextService;
 use crate::workspace::git_adapter::handle_git_tool_with_authority;
@@ -54,7 +58,7 @@ use crate::workspace::path_authority::{
 type WorkflowCheckpoint = StoredWorkflowCheckpoint<Value>;
 
 pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 49;
+pub const AGENT_API_REVISION: u32 = 50;
 pub const V1_CORE_TOOL_NAMES: [&str; 9] = [
     "workspace_context",
     "agent_workflow",
@@ -518,18 +522,23 @@ fn public_tool_schema(name: &str) -> Value {
             }),
         ),
         "document_workflow" => (
-            "Inspect, create, convert, or rebuild UTF-8 workspace documents. inspect requires path; create requires path+content; convert requires source+path; rebuild requires an existing path+content.",
+            "Inspect, search, create, edit, convert, or rebuild TXT, Markdown, DOCX, and PDF workspace documents through one DocumentIR pipeline. edit and rebuild require expected_sha256; PDF is read-only and can be converted to TXT or Markdown.",
             json!({
                 "type":"object",
                 "properties":{
-                    "action":{"type":"string","enum":["inspect","create","convert","rebuild"],"description":"Action-specific required fields are documented on path/source/content."},
-                    "path":{"type":"string","description":"Required for inspect/create/convert/rebuild. rebuild requires this target to already exist."},
+                    "action":{"type":"string","enum":["inspect","search","create","edit","convert","rebuild"],"description":"Selects the strict action-specific argument contract."},
+                    "path":{"type":"string","description":"Target document path. Required for every action; for convert this is the new output path."},
                     "source":{"type":"string","description":"Required only for convert."},
-                    "content":{"type":"string","description":"Required for create and rebuild."},
-                    "start_line":{"type":"integer","minimum":1},
-                    "end_line":{"type":"integer","minimum":1},
-                    "max_lines":{"type":"integer","minimum":1},
-                    "max_bytes":{"type":"integer","minimum":1}
+                    "content":{"type":"string","description":"Required for create and rebuild. Interpreted using source_format."},
+                    "source_format":{"type":"string","enum":["text","markdown"],"description":"Optional for create/rebuild; defaults to markdown for .md/.docx targets and text for .txt targets."},
+                    "expected_sha256":{"type":"string","minLength":64,"maxLength":64,"description":"Required for edit and rebuild. Use the sha256 returned by inspect/search."},
+                    "edits":{"type":"array","minItems":1,"description":"Required only for edit. Operations are applied to one DocumentIR and committed once.","items":{"type":"object","properties":{"operation":{"type":"string","enum":["replace","insert_before","insert_after","delete"]},"block_id":{"type":"string","pattern":"^block-[1-9][0-9]*$"},"content":{"type":"string","description":"Required except for delete; one DocumentIR block, so newline characters are rejected."}},"required":["operation","block_id"],"additionalProperties":false}},
+                    "query":{"type":"string","minLength":1,"description":"Required only for search."},
+                    "case_sensitive":{"type":"boolean","description":"Optional search matching mode; defaults false."},
+                    "max_results":{"type":"integer","minimum":1,"maximum":1000,"description":"Optional search result limit; defaults 100."},
+                    "start_block":{"type":"integer","minimum":1,"description":"Optional inspect starting DocumentIR block; defaults 1."},
+                    "max_blocks":{"type":"integer","minimum":1,"maximum":10000,"description":"Optional inspect block limit; defaults 200."},
+                    "max_bytes":{"type":"integer","minimum":1,"maximum":1048576,"description":"Optional inspect text budget; defaults 1 MiB."}
                 },
                 "required":["action"],
                 "additionalProperties":false
@@ -747,21 +756,23 @@ fn public_tool_output_schema(name: &str) -> Value {
         "document_workflow" => json!({
             "type":"object",
             "properties":{
-                "action":{"type":"string","enum":["create","convert","rebuild"]},
+                "action":{"type":"string","enum":["inspect","search","create","edit","convert","rebuild"]},
                 "path":{"type":"string"},
                 "source":{"type":"string"},
+                "format":{"type":"string","enum":["text","markdown","docx","pdf"]},
+                "source_format":{"type":"string","enum":["text","markdown","docx","pdf"]},
+                "sha256":{"type":"string","minLength":64,"maxLength":64},
+                "source_sha256":{"type":"string","minLength":64,"maxLength":64},
                 "text":{"type":"string"},
-                "encoding":{"type":"string"},
-                "start_line":{"type":"integer"},
-                "end_line":{"type":["integer","null"]},
-                "total_lines":{"type":"integer"},
+                "blocks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["paragraph","heading","list_item","blank"]},"text":{"type":"string"},"level":{"type":"integer","minimum":1,"maximum":6}},"required":["id","kind","text"],"additionalProperties":false}},
+                "matches":{"type":"array","items":{"type":"object","properties":{"block_id":{"type":"string"},"block_index":{"type":"integer","minimum":1},"excerpt":{"type":"string"}},"required":["block_id","block_index","excerpt"],"additionalProperties":false}},
+                "start_block":{"type":"integer","minimum":1},
+                "end_block":{"type":["integer","null"],"minimum":1},
+                "total_blocks":{"type":"integer","minimum":0},
                 "total_bytes":{"type":"integer"},
-                "bytes_read":{"type":"integer"},
+                "bytes":{"type":"integer","minimum":0},
                 "truncated":{"type":"boolean"},
-                "eof":{"type":"boolean"},
-                "created":{"type":"boolean"},
-                "converted":{"type":"boolean"},
-                "rebuilt":{"type":"boolean"}
+                "applied_edits":{"type":"integer","minimum":1}
             },
             "additionalProperties":false
         }),
@@ -1405,12 +1416,15 @@ pub trait WorkspaceRuntimeAdapter {
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError>;
-    fn inspect_document(
-        &mut self,
-        arguments: Value,
-        request_id: Option<&Value>,
-    ) -> Result<Value, FacadeError>;
-    fn apply_document_patch(
+    fn execute_document(&self, request: DocumentRequest) -> Result<DocumentResult, FacadeError> {
+        let _ = request;
+        Err(FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "文档服务不可用",
+            false,
+        ))
+    }
+    fn apply_workflow_patch(
         &mut self,
         arguments: Value,
         request_id: Option<&Value>,
@@ -2639,126 +2653,14 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         Ok(normalize_git_success(action, &raw))
     }
 
-    fn inspect_document(
-        &mut self,
-        arguments: Value,
-        _request_id: Option<&Value>,
-    ) -> Result<Value, FacadeError> {
-        let object = arguments.as_object().ok_or_else(invalid_argument)?;
-        let relative = required_string(object, "path")?;
-        let raw = FilesystemService::from_authority(self.workspace_authority.clone())
-            .map_err(normalize_filesystem_error)?
-            .read_bytes_bounded(relative, 16 * 1024 * 1024)
-            .map_err(|error| match error {
-                FilesystemError::NotFound | FilesystemError::Io => {
-                    FacadeError::new(FacadeErrorCode::NotFound, "文档不可读", false)
-                }
-                other => normalize_filesystem_error(other),
-            })?;
-        let source = std::str::from_utf8(&raw).map_err(|_| {
-            FacadeError::new(FacadeErrorCode::InvalidArgument, "文档不是 UTF-8", false)
-        })?;
-        let start = object
-            .get("start_line")
-            .and_then(Value::as_u64)
-            .unwrap_or(1) as usize;
-        let requested_end = object
-            .get("end_line")
-            .and_then(Value::as_u64)
-            .map(|v| v as usize);
-        if requested_end.is_some_and(|end| start > end) {
-            return Err(invalid_argument());
-        }
-        let max_lines = object
-            .get("max_lines")
-            .and_then(Value::as_u64)
-            .unwrap_or(10_000) as usize;
-        let max_bytes = object
-            .get("max_bytes")
-            .and_then(Value::as_u64)
-            .unwrap_or(1_048_576) as usize;
-        let lines = if source.is_empty() {
-            Vec::new()
-        } else {
-            source.split_inclusive('\n').collect::<Vec<_>>()
-        };
-        let total_lines = lines.len();
-        if start == 0 {
-            return Err(FacadeError::new(
-                FacadeErrorCode::InvalidArgument,
-                "start_line 必须大于等于 1",
-                false,
-            )
-            .with_details(json!({"field":"start_line","minimum":1,"actual":start})));
-        }
-        if total_lines == 0 {
-            return Ok(stable_success(
-                json!({
-                    "text":"",
-                    "path":relative,
-                    "encoding":"utf-8",
-                    "start_line":1,
-                    "end_line":Value::Null,
-                    "total_lines":0,
-                    "total_bytes":raw.len(),
-                    "bytes_read":0,
-                    "truncated":false,
-                    "eof":true
-                }),
-                "Document inspected",
-            ));
-        }
-        if start > total_lines && total_lines > 0 {
-            return Err(FacadeError::new(
-                FacadeErrorCode::InvalidArgument,
-                "请求的文档行范围超出文件末尾",
-                false,
-            )
-            .with_details(json!({
-                "field":"start_line",
-                "requested_start_line":start,
-                "total_lines":total_lines
-            })));
-        }
-        let natural_end = start.saturating_add(max_lines.saturating_sub(1));
-        let end = requested_end
-            .unwrap_or(natural_end)
-            .min(natural_end)
-            .min(total_lines);
-        let mut text = if start <= end && start > 0 {
-            lines[start - 1..end].concat()
-        } else {
-            String::new()
-        };
-        let mut truncated =
-            document_range_was_truncated(start, requested_end, max_lines, total_lines);
-        if text.len() > max_bytes {
-            let mut boundary = max_bytes.min(text.len());
-            while boundary > 0 && !text.is_char_boundary(boundary) {
-                boundary -= 1;
-            }
-            text.truncate(boundary);
-            truncated = true;
-        }
-        let bytes_read = text.len();
-        Ok(stable_success(
-            json!({
-                "text":text,
-                "path":relative,
-                "encoding":"utf-8",
-                "start_line":start,
-                "end_line":end,
-                "total_lines":total_lines,
-                "total_bytes":raw.len(),
-                "bytes_read":bytes_read,
-                "truncated":truncated,
-                "eof":end >= total_lines
-            }),
-            "Document inspected",
-        ))
+    fn execute_document(&self, request: DocumentRequest) -> Result<DocumentResult, FacadeError> {
+        DocumentService::with_authority(self.workspace_authority.clone())
+            .map_err(normalize_document_error)?
+            .execute(request)
+            .map_err(normalize_document_error)
     }
 
-    fn apply_document_patch(
+    fn apply_workflow_patch(
         &mut self,
         arguments: Value,
         _request_id: Option<&Value>,
@@ -3319,19 +3221,6 @@ fn public_stderr_page(
         }),
         "Command output read",
     ))
-}
-
-fn document_range_was_truncated(
-    start: usize,
-    requested_end: Option<usize>,
-    max_lines: usize,
-    total_lines: usize,
-) -> bool {
-    let requested_actual_end = requested_end.unwrap_or(total_lines).min(total_lines);
-    let limited_end = start
-        .saturating_add(max_lines.saturating_sub(1))
-        .min(total_lines);
-    limited_end < requested_actual_end
 }
 
 fn command_summary(status: &str) -> &'static str {
@@ -4697,7 +4586,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             }
             legacy_checkpoint_try!(
                 self.adapter
-                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)
+                    .apply_workflow_patch(json!({"patch":patch,"dry_run":false}), request_id)
             );
             applied_patch = true;
             if let Some(checkpoint) = checkpoint.as_mut() {
@@ -5680,7 +5569,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             checkpoint.patch_inflight = true;
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
             self.adapter
-                .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
+                .apply_workflow_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
             checkpoint.patch_inflight = false;
             checkpoint.patch_applied = true;
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
@@ -5981,122 +5870,92 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
     fn document_workflow(
         &mut self,
         arguments: Value,
-        request_id: Option<&Value>,
+        _request_id: Option<&Value>,
     ) -> Result<Value, FacadeError> {
         let object = object_args(&arguments)?;
-        match required_string(object, "action")? {
+        let request = match required_string(object, "action")? {
             "inspect" => {
+                ensure_only_keys(
+                    object,
+                    &["action", "path", "start_block", "max_blocks", "max_bytes"],
+                )?;
+                DocumentRequest::Inspect {
+                    path: required_string(object, "path")?.to_string(),
+                    start_block: optional_usize(object, "start_block", 1)?,
+                    max_blocks: optional_usize(object, "max_blocks", 200)?,
+                    max_bytes: optional_usize(object, "max_bytes", 1_048_576)?,
+                }
+            }
+            "search" => {
+                ensure_only_keys(
+                    object,
+                    &["action", "path", "query", "case_sensitive", "max_results"],
+                )?;
+                DocumentRequest::Search {
+                    path: required_string(object, "path")?.to_string(),
+                    query: required_string(object, "query")?.to_string(),
+                    case_sensitive: optional_bool(object, "case_sensitive", false)?,
+                    max_results: optional_usize(object, "max_results", 100)?,
+                }
+            }
+            "create" => {
+                ensure_only_keys(object, &["action", "path", "content", "source_format"])?;
+                let path = required_string(object, "path")?;
+                DocumentRequest::Create {
+                    path: path.to_string(),
+                    content: required_document_content(object)?.to_string(),
+                    source_format: document_source_format(object, path)?,
+                }
+            }
+            "edit" => {
+                ensure_only_keys(object, &["action", "path", "expected_sha256", "edits"])?;
+                DocumentRequest::Edit {
+                    path: required_string(object, "path")?.to_string(),
+                    expected_sha256: required_string(object, "expected_sha256")?.to_string(),
+                    edits: document_edits(object)?,
+                }
+            }
+            "convert" => {
+                ensure_only_keys(object, &["action", "source", "path"])?;
+                DocumentRequest::Convert {
+                    source: required_string(object, "source")?.to_string(),
+                    path: required_string(object, "path")?.to_string(),
+                }
+            }
+            "rebuild" => {
                 ensure_only_keys(
                     object,
                     &[
                         "action",
                         "path",
-                        "start_line",
-                        "end_line",
-                        "max_lines",
-                        "max_bytes",
+                        "content",
+                        "source_format",
+                        "expected_sha256",
                     ],
                 )?;
                 let path = required_string(object, "path")?;
-                if let (Some(start), Some(end)) = (
-                    object.get("start_line").and_then(Value::as_u64),
-                    object.get("end_line").and_then(Value::as_u64),
-                ) {
-                    if start > end {
-                        return Err(invalid_argument());
-                    }
+                DocumentRequest::Rebuild {
+                    path: path.to_string(),
+                    content: required_document_content(object)?.to_string(),
+                    source_format: document_source_format(object, path)?,
+                    expected_sha256: required_string(object, "expected_sha256")?.to_string(),
                 }
-                let mut private = json!({"path":path});
-                for key in ["start_line", "end_line", "max_lines", "max_bytes"] {
-                    if let Some(value) = object.get(key) {
-                        private[key] = value.clone();
-                    }
-                }
-                self.adapter.inspect_document(private, request_id)
             }
-            "create" => {
-                ensure_only_keys(object, &["action", "path", "content"])?;
-                let requested = required_string(object, "path")?;
-                match self.adapter.normalize_workspace_path(requested, false) {
-                    Ok(_) => {
-                        return Err(FacadeError::new(
-                            FacadeErrorCode::FileChanged,
-                            "document target already exists",
-                            false,
-                        ));
-                    }
-                    Err(error) if error.code == FacadeErrorCode::NotFound => {}
-                    Err(error) => return Err(error),
-                }
-                let path = self.adapter.normalize_workspace_path(requested, true)?;
-                let content = object
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .ok_or_else(invalid_argument)?;
-                let patch = document_add_patch(&path, content);
-                if let Err(error) = self
-                    .adapter
-                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)
-                {
-                    if error.code == FacadeErrorCode::ProcessFailed
-                        && self.adapter.normalize_workspace_path(&path, false).is_ok()
-                    {
-                        return Err(FacadeError::new(
-                            FacadeErrorCode::FileChanged,
-                            "document target was created concurrently",
-                            false,
-                        ));
-                    }
-                    return Err(error);
-                }
-                Ok(stable_success(
-                    json!({"action":"create","path":path,"created":true}),
-                    "Document created",
-                ))
-            }
-            "convert" => {
-                ensure_only_keys(object, &["action", "source", "path"])?;
-                let source = required_string(object, "source")?;
-                let path = self
-                    .adapter
-                    .normalize_workspace_path(required_string(object, "path")?, true)?;
-                let inspected = self.adapter.inspect_document(
-                    json!({"path":source,"start_line":1,"max_lines":100000,"max_bytes":MAX_INTERNAL_FILE_BYTES}),
-                    request_id,
-                )?;
-                let content = stable_document_text(&inspected)?;
-                let patch = document_add_patch(&path, content);
-                self.adapter
-                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
-                Ok(stable_success(
-                    json!({"action":"convert","source":source,"path":path,"converted":true}),
-                    "Document converted",
-                ))
-            }
-            "rebuild" => {
-                ensure_only_keys(object, &["action", "path", "content"])?;
-                let path = self
-                    .adapter
-                    .normalize_workspace_path(required_string(object, "path")?, false)?;
-                let content = object
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .ok_or_else(invalid_argument)?;
-                let inspected = self.adapter.inspect_document(
-                    json!({"path":path,"start_line":1,"max_lines":100000,"max_bytes":MAX_INTERNAL_FILE_BYTES}),
-                    request_id,
-                )?;
-                let existing = stable_document_text(&inspected)?;
-                let patch = document_rebuild_patch(&path, existing, content);
-                self.adapter
-                    .apply_document_patch(json!({"patch":patch,"dry_run":false}), request_id)?;
-                Ok(stable_success(
-                    json!({"action":"rebuild","path":path,"rebuilt":true}),
-                    "Document rebuilt",
-                ))
-            }
-            _ => Err(invalid_argument()),
-        }
+            _ => return Err(invalid_argument()),
+        };
+        let action = match &request {
+            DocumentRequest::Inspect { .. } => "inspect",
+            DocumentRequest::Search { .. } => "search",
+            DocumentRequest::Create { .. } => "create",
+            DocumentRequest::Edit { .. } => "edit",
+            DocumentRequest::Convert { .. } => "convert",
+            DocumentRequest::Rebuild { .. } => "rebuild",
+        };
+        let result = self.adapter.execute_document(request)?;
+        let data = serde_json::to_value(result).map_err(|_| {
+            FacadeError::new(FacadeErrorCode::Internal, "文档结果无法序列化", false)
+        })?;
+        Ok(stable_success(data, document_success_summary(action)))
     }
 
     fn view_image(
@@ -6127,13 +5986,11 @@ pub(crate) fn public_task_kind(name: &str, arguments: &Value) -> TaskKind {
             _ => TaskKind::Other,
         },
         "git_workflow" => TaskKind::GitOperation,
-        "document_workflow" => {
-            if arguments.get("action").and_then(Value::as_str) == Some("inspect") {
-                TaskKind::ReadFile
-            } else {
-                TaskKind::ModifyFile
-            }
-        }
+        "document_workflow" => match arguments.get("action").and_then(Value::as_str) {
+            Some("inspect" | "search") => TaskKind::ReadFile,
+            Some("create" | "edit" | "convert" | "rebuild") => TaskKind::ModifyFile,
+            _ => TaskKind::Other,
+        },
         "workspace_context" | "view_image" => TaskKind::ReadFile,
         _ => TaskKind::Other,
     }
@@ -6157,58 +6014,77 @@ pub(crate) fn public_safe_summary(name: &str, arguments: &Value) -> SafeTaskSumm
         .unwrap_or(SafeTaskSummary::Omitted)
 }
 
-fn stable_document_text(value: &Value) -> Result<&str, FacadeError> {
-    let data = value
-        .get("structuredContent")
-        .and_then(|structured| structured.get("data"))
-        .ok_or_else(runtime_capability_mismatch)?;
-    if data.get("truncated").and_then(Value::as_bool) == Some(true)
-        || data.get("eof").and_then(Value::as_bool) == Some(false)
-    {
-        return Err(FacadeError::new(
-            FacadeErrorCode::OutputTruncated,
-            "Document exceeds the complete-read limit; no mutation was performed",
-            false,
-        )
-        .with_details(json!({"field":"content","truncated":true})));
-    }
-    data.get("text")
+fn required_document_content(object: &Map<String, Value>) -> Result<&str, FacadeError> {
+    object
+        .get("content")
         .and_then(Value::as_str)
-        .ok_or_else(runtime_capability_mismatch)
+        .ok_or_else(invalid_argument)
 }
 
-fn document_add_patch(path: &str, content: &str) -> String {
-    let normalized = normalize_document_text(content);
-    let mut patch = format!("*** Begin Patch\n*** Add File: {path}\n");
-    for line in normalized.split_terminator('\n') {
-        patch.push('+');
-        patch.push_str(line);
-        patch.push('\n');
+fn document_source_format(
+    object: &Map<String, Value>,
+    target_path: &str,
+) -> Result<DocumentFormat, FacadeError> {
+    match object.get("source_format") {
+        Some(Value::String(value)) if value == "text" => Ok(DocumentFormat::Text),
+        Some(Value::String(value)) if value == "markdown" => Ok(DocumentFormat::Markdown),
+        Some(_) => Err(invalid_argument()),
+        None => match DocumentFormat::from_path(target_path).map_err(normalize_document_error)? {
+            DocumentFormat::Markdown | DocumentFormat::Docx => Ok(DocumentFormat::Markdown),
+            DocumentFormat::Text | DocumentFormat::Pdf => Ok(DocumentFormat::Text),
+        },
     }
-    patch.push_str("*** End Patch");
-    patch
 }
 
-fn document_rebuild_patch(path: &str, existing: &str, content: &str) -> String {
-    let existing = normalize_document_text(existing);
-    let content = normalize_document_text(content);
-    let mut patch = format!("*** Begin Patch\n*** Update File: {path}\n@@\n");
-    for line in existing.split_terminator('\n') {
-        patch.push('-');
-        patch.push_str(line);
-        patch.push('\n');
-    }
-    for line in content.split_terminator('\n') {
-        patch.push('+');
-        patch.push_str(line);
-        patch.push('\n');
-    }
-    patch.push_str("*** End Patch");
-    patch
+fn document_edits(object: &Map<String, Value>) -> Result<Vec<DocumentEditOperation>, FacadeError> {
+    let values = object
+        .get("edits")
+        .and_then(Value::as_array)
+        .filter(|values| !values.is_empty())
+        .ok_or_else(invalid_argument)?;
+    values
+        .iter()
+        .map(|value| {
+            let edit = value.as_object().ok_or_else(invalid_argument)?;
+            let operation = required_string(edit, "operation")?;
+            let block_id = required_string(edit, "block_id")?.to_string();
+            match operation {
+                "replace" | "insert_before" | "insert_after" => {
+                    ensure_only_keys(edit, &["operation", "block_id", "content"])?;
+                    let content = edit
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .ok_or_else(invalid_argument)?
+                        .to_string();
+                    Ok(match operation {
+                        "replace" => DocumentEditOperation::Replace { block_id, content },
+                        "insert_before" => {
+                            DocumentEditOperation::InsertBefore { block_id, content }
+                        }
+                        "insert_after" => DocumentEditOperation::InsertAfter { block_id, content },
+                        _ => unreachable!(),
+                    })
+                }
+                "delete" => {
+                    ensure_only_keys(edit, &["operation", "block_id"])?;
+                    Ok(DocumentEditOperation::Delete { block_id })
+                }
+                _ => Err(invalid_argument()),
+            }
+        })
+        .collect()
 }
 
-fn normalize_document_text(value: &str) -> String {
-    value.replace("\r\n", "\n").replace('\r', "\n")
+fn document_success_summary(action: &str) -> &'static str {
+    match action {
+        "inspect" => "Document inspected",
+        "search" => "Document searched",
+        "create" => "Document created",
+        "edit" => "Document edited",
+        "convert" => "Document converted",
+        "rebuild" => "Document rebuilt",
+        _ => "Document operation completed",
+    }
 }
 
 fn public_workspace_paths_valid(name: &str, arguments: &Value) -> bool {
@@ -7183,7 +7059,7 @@ mod schema43_filesystem_facade_tests {
 
     #[test]
     fn schema43_filesystem_is_flat_nine_core_contract() {
-        assert_eq!(AGENT_API_REVISION, 49);
+        assert_eq!(AGENT_API_REVISION, 50);
         assert_eq!(V1_CORE_TOOL_NAMES.len(), 9);
         assert_eq!(V1_CORE_TOOL_NAMES[2], "filesystem");
         let schema = public_tool_schema("filesystem");
@@ -7502,6 +7378,51 @@ fn normalize_filesystem_error(error: FilesystemError) -> FacadeError {
         ),
         FilesystemError::Io => {
             FacadeError::new(FacadeErrorCode::Internal, "文件系统操作失败", false)
+        }
+    }
+}
+
+fn normalize_document_error(error: DocumentError) -> FacadeError {
+    match error {
+        DocumentError::InvalidArgument => invalid_argument(),
+        DocumentError::NotFound => {
+            FacadeError::new(FacadeErrorCode::NotFound, "文档不存在", false)
+        }
+        DocumentError::OutsideAuthority => FacadeError::new(
+            FacadeErrorCode::WorkspaceDenied,
+            "文档路径越出当前工作区",
+            false,
+        ),
+        DocumentError::FileChanged => FacadeError::new(
+            FacadeErrorCode::FileChanged,
+            "文档自读取后已变化或目标已存在",
+            false,
+        ),
+        DocumentError::LimitExceeded => FacadeError::new(
+            FacadeErrorCode::OutputTruncated,
+            "文档超过本地处理上限",
+            false,
+        ),
+        DocumentError::UnsupportedFormat => {
+            FacadeError::new(
+                FacadeErrorCode::InvalidArgument,
+                "文档格式或目标转换不受支持",
+                false,
+            )
+            .with_details(json!({"field":"path","supported_formats":["txt","md","docx","pdf"],"pdf_mutation":false}))
+        }
+        DocumentError::UnsupportedContent => FacadeError::new(
+            FacadeErrorCode::CapabilityUnavailable,
+            "文档包含当前版本无法无损处理的结构",
+            false,
+        ),
+        DocumentError::CorruptDocument => FacadeError::new(
+            FacadeErrorCode::InvalidArgument,
+            "文档格式损坏或无法解析",
+            false,
+        ),
+        DocumentError::Io => {
+            FacadeError::new(FacadeErrorCode::Internal, "文档操作失败", false)
         }
     }
 }
@@ -8537,6 +8458,65 @@ mod tests {
         }
     }
 
+    fn fake_document_result(request: DocumentRequest) -> DocumentResult {
+        match request {
+            DocumentRequest::Inspect {
+                path, start_block, ..
+            } => DocumentResult::Inspect {
+                path,
+                format: DocumentFormat::Text,
+                sha256: "a".repeat(64),
+                total_bytes: 4,
+                start_block,
+                end_block: Some(start_block),
+                total_blocks: 1,
+                blocks: vec![crate::document::DocumentBlock {
+                    id: "block-1".into(),
+                    kind: crate::document::DocumentBlockKind::Paragraph,
+                    text: "old".into(),
+                    level: None,
+                }],
+                text: "old".into(),
+                truncated: false,
+            },
+            DocumentRequest::Search { path, .. } => DocumentResult::Search {
+                path,
+                format: DocumentFormat::Text,
+                sha256: "a".repeat(64),
+                matches: Vec::new(),
+                total_blocks: 1,
+                truncated: false,
+            },
+            DocumentRequest::Create { path, .. } => DocumentResult::Create {
+                path,
+                format: DocumentFormat::Text,
+                sha256: "b".repeat(64),
+                bytes: 3,
+            },
+            DocumentRequest::Edit { path, edits, .. } => DocumentResult::Edit {
+                path,
+                format: DocumentFormat::Text,
+                sha256: "c".repeat(64),
+                applied_edits: edits.len(),
+            },
+            DocumentRequest::Convert { source, path } => DocumentResult::Convert {
+                source,
+                path,
+                source_format: DocumentFormat::Text,
+                format: DocumentFormat::Markdown,
+                source_sha256: "a".repeat(64),
+                sha256: "d".repeat(64),
+                bytes: 3,
+            },
+            DocumentRequest::Rebuild { path, .. } => DocumentResult::Rebuild {
+                path,
+                format: DocumentFormat::Text,
+                sha256: "e".repeat(64),
+                bytes: 7,
+            },
+        }
+    }
+
     impl WorkspaceRuntimeAdapter for FakeAdapter {
         fn negotiate(&mut self) -> Result<(), FacadeError> {
             validate_runtime_capabilities(&self.catalog)
@@ -8645,15 +8625,14 @@ mod tests {
             Ok(stable_success(json!({}), "ok"))
         }
 
-        fn inspect_document(
-            &mut self,
-            _arguments: Value,
-            _request_id: Option<&Value>,
-        ) -> Result<Value, FacadeError> {
-            Ok(stable_success(json!({"text":"old\n"}), "ok"))
+        fn execute_document(
+            &self,
+            request: DocumentRequest,
+        ) -> Result<DocumentResult, FacadeError> {
+            Ok(fake_document_result(request))
         }
 
-        fn apply_document_patch(
+        fn apply_workflow_patch(
             &mut self,
             _arguments: Value,
             _request_id: Option<&Value>,
@@ -8906,15 +8885,7 @@ mod tests {
             ))
         }
 
-        fn inspect_document(
-            &mut self,
-            _arguments: Value,
-            _request_id: Option<&Value>,
-        ) -> Result<Value, FacadeError> {
-            Ok(stable_success(json!({"text":"old\n"}), "ok"))
-        }
-
-        fn apply_document_patch(
+        fn apply_workflow_patch(
             &mut self,
             _arguments: Value,
             _request_id: Option<&Value>,
@@ -9379,26 +9350,6 @@ mod tests {
         assert_eq!(command_summary("running"), "Command running");
         assert_eq!(command_summary("completed"), "Command completed");
         assert_ne!(command_summary("running"), command_summary("completed"));
-    }
-
-    #[test]
-    fn schema42_document_eof_is_not_truncation() {
-        assert!(!document_range_was_truncated(1, Some(9999), 10_000, 100));
-        assert!(document_range_was_truncated(1, None, 100, 1000));
-        assert!(!document_range_was_truncated(20, Some(40), 100, 1000));
-    }
-
-    #[test]
-    fn schema49_document_rebuild_rejects_incomplete_source_text() {
-        for data in [
-            json!({"text":"partial","truncated":true,"eof":true}),
-            json!({"text":"partial","truncated":false,"eof":false}),
-        ] {
-            let error =
-                stable_document_text(&json!({"structuredContent":{"data":data}})).unwrap_err();
-            assert_eq!(error.code, FacadeErrorCode::OutputTruncated);
-            assert!(!error.retryable);
-        }
     }
 
     #[test]
@@ -9885,21 +9836,6 @@ mod tests {
     }
 
     #[test]
-    fn schema41_document_create_existing_target_returns_file_changed() {
-        let mut f =
-            AgentFacade::with_adapter(FakeAdapter::new(compatible_catalog()), policy()).unwrap();
-        let e = f
-            .dispatch(
-                PermissionMode::Full,
-                "document_workflow",
-                json!({"action":"create","path":"doc.txt","content":"new"}),
-                None,
-            )
-            .unwrap_err();
-        assert_eq!(e.code, FacadeErrorCode::FileChanged);
-    }
-
-    #[test]
     fn schema41_workflow_workdir_and_wait_budget_are_discoverable() {
         let workflow = public_tool_schema("agent_workflow");
         let wd=workflow["inputSchema"]["properties"]["commands"]["items"]["properties"]["workdir"]["description"].as_str().unwrap_or_default();
@@ -10345,25 +10281,24 @@ mod tests {
     }
 
     #[test]
-    fn document_rebuild_schema_discloses_existing_path_and_content_requirements() {
+    fn document_schema_discloses_fixed_actions_and_hash_guarded_mutations() {
         let tool = public_tool_schema("document_workflow");
         let schema = &tool["inputSchema"];
         assert_eq!(schema["type"], "object");
         assert!(schema.get("oneOf").is_none());
-        assert!(
-            tool["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("rebuild requires an existing path+content"))
+        assert_eq!(
+            schema["properties"]["action"]["enum"],
+            json!(["inspect", "search", "create", "edit", "convert", "rebuild"])
         );
         assert!(
-            schema["properties"]["path"]["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("rebuild") && value.contains("already exist"))
+            tool["description"].as_str().is_some_and(
+                |value| value.contains("DocumentIR") && value.contains("expected_sha256")
+            )
         );
-        assert!(
-            schema["properties"]["content"]["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("rebuild"))
+        assert_eq!(schema["properties"]["expected_sha256"]["minLength"], 64);
+        assert_eq!(
+            schema["properties"]["edits"]["items"]["properties"]["operation"]["enum"],
+            json!(["replace", "insert_before", "insert_after", "delete"])
         );
     }
 
@@ -10849,8 +10784,16 @@ mod tests {
         for (action, arguments) in [
             ("inspect", json!({"action":"inspect","path":"doc.txt"})),
             (
+                "search",
+                json!({"action":"search","path":"doc.txt","query":"old"}),
+            ),
+            (
                 "create",
                 json!({"action":"create","path":"new.txt","content":"new"}),
+            ),
+            (
+                "edit",
+                json!({"action":"edit","path":"doc.txt","expected_sha256":"a".repeat(64),"edits":[{"operation":"replace","block_id":"block-1","content":"new"}]}),
             ),
             (
                 "convert",
@@ -10858,7 +10801,7 @@ mod tests {
             ),
             (
                 "rebuild",
-                json!({"action":"rebuild","path":"doc.txt","content":"rebuilt"}),
+                json!({"action":"rebuild","path":"doc.txt","content":"rebuilt","expected_sha256":"a".repeat(64)}),
             ),
         ] {
             let result = facade
@@ -11140,7 +11083,7 @@ mod tests {
     }
 
     #[test]
-    fn public_paths_and_document_patches_are_target_bound() {
+    fn public_workspace_paths_are_target_bound() {
         for denied in [
             r"C:\absolute.txt",
             r"\\server\share\file.txt",
@@ -11155,14 +11098,6 @@ mod tests {
         for allowed in [".", "file.txt", "sub/file.txt", r"sub\file.txt"] {
             assert!(workspace_relative_path_valid(allowed), "{allowed}");
         }
-
-        let create = document_add_patch("safe/doc.txt", "hello\nworld\n");
-        assert!(create.contains("*** Add File: safe/doc.txt"));
-        assert!(!create.contains("other.txt"));
-        let rebuild = document_rebuild_patch("safe/doc.txt", "old\n", "new\n");
-        assert!(rebuild.contains("*** Update File: safe/doc.txt"));
-        assert!(rebuild.contains("-old"));
-        assert!(rebuild.contains("+new"));
 
         assert!(public_patch_targets_valid(
             "*** Begin Patch\n*** Update File: safe/doc.txt\n@@\n-old\n+new\n*** End Patch"

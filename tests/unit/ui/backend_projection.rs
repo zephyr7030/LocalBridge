@@ -98,7 +98,7 @@ fn main_projection_json_contract_matches_the_frontend_fixture() {
         reconnect: Some(ReconnectProjection { generation: 3 }),
         update: Some(UpdateProjection {
             state: "current",
-            current_version: "0.13.0".into(),
+            current_version: "0.1.4".into(),
             latest_version: None,
             release_url: Some("https://github.com/zephyr7030/LocalBridge/releases".into()),
             operation_id: Some("update-1".into()),

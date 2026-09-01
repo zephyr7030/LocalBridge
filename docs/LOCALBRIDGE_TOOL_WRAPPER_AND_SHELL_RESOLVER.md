@@ -333,14 +333,16 @@ schema27 要求五个 action 共享一个 repository resolver。对 active works
 
 ```text
 inspect
+search
 create
+edit
 convert
 rebuild
 ```
 
-覆盖 PDF/DOCX/Markdown/TXT 等产品级文档工作流，避免模型临时拼接 Python/PowerShell/LibreOffice/pandoc。文件仍受 Workspace Guard / capability policy。
+覆盖 PDF/DOCX/Markdown/TXT 等产品级文档工作流，避免模型临时拼接 Python/PowerShell/LibreOffice/pandoc。六个 public action 固定通过同一 `DocumentIR`；`edit` 只提供 `replace / insert_before / insert_after / delete` 四种 block 原子操作，多项 edit 在内存中完成后只提交一次。`edit` 与 `rebuild` 必须携带最近一次 inspect/search 返回的 `expected_sha256`，条件写失败统一返回 `FileChanged`。PDF 当前只读，可 inspect/search 并转换为 TXT/Markdown。文件仍受 Workspace Guard / capability policy。
 
-Public Registry 的 action 不能先广告再恒定返回 unavailable。当前冻结的 `inspect/create/convert/rebuild` 与 `agent_workflow` 九 action、`task_control get/cancel` 都必须在对应当前 v1 schema 对外提供时真实可执行；未来 action 必须先实现、分类、测试，再进入 public schema。
+Public Registry 的 action 不能先广告再恒定返回 unavailable。当前冻结的六个 document action 与 `agent_workflow` 九 action、`task_control list/get/cancel` 都必须在对应当前 v1 schema 对外提供时真实可执行；未来 action 必须先实现、分类、测试，再进入 public schema。
 
 ---
 

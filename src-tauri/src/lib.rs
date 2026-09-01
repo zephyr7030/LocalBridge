@@ -3,6 +3,7 @@ pub mod commands;
 pub mod control_plane;
 pub mod credentials;
 pub mod diagnostics;
+pub(crate) mod document;
 pub mod domain;
 pub mod execution;
 pub mod filesystem;

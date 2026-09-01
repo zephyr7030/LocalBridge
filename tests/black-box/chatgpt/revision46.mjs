@@ -106,6 +106,22 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     ]);
     assert.ok(toolSchema(tools, "task_control").properties.task_id);
     assert.ok(toolSchema(tools, "agent_workflow").properties.task_id);
+    const documentSchema = toolSchema(tools, "document_workflow");
+    assert.deepEqual(documentSchema.properties.action.enum, [
+      "inspect",
+      "search",
+      "create",
+      "edit",
+      "convert",
+      "rebuild",
+    ]);
+    assert.deepEqual(documentSchema.properties.edits.items.properties.operation.enum, [
+      "replace",
+      "insert_before",
+      "insert_after",
+      "delete",
+    ]);
+    assert.equal(documentSchema.properties.expected_sha256.minLength, 64);
     await reconnectClient.connect();
     report.checks.public_schema = "PASS";
 
@@ -434,15 +450,117 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     assert.equal(structured(blamePastEof).ok, false, explain(blamePastEof));
     report.checks.git_error_propagation = "PASS";
 
-    const documentPastEof = await toolCall(
+    const documentInspect = await toolCall(
       client,
       "document_workflow",
-      { action: "inspect", path: "range.txt", start_line: 999, end_line: 1_000 },
-      "document-past-eof",
+      { action: "inspect", path: "range.txt", start_block: 1, max_blocks: 2 },
+      "document-inspect",
     );
-    const documentError = assertToolError(documentPastEof, "InvalidArgument");
-    assert.equal(documentError.details.field, "start_line", explain(documentPastEof));
-    report.checks.document_range = "PASS";
+    const documentData = assertSuccess(documentInspect);
+    assert.equal(documentData.blocks.length, 2, explain(documentInspect));
+    assert.equal(documentData.blocks[1].id, "block-2", explain(documentInspect));
+    assert.equal(documentData.truncated, true, explain(documentInspect));
+    assert.match(documentData.sha256, /^[a-f0-9]{64}$/i, explain(documentInspect));
+
+    const documentSearch = await toolCall(
+      client,
+      "document_workflow",
+      { action: "search", path: "range.txt", query: "line3" },
+      "document-search",
+    );
+    const documentSearchData = assertSuccess(documentSearch);
+    assert.equal(documentSearchData.matches[0].block_id, "block-3", explain(documentSearch));
+
+    const documentEdit = await toolCall(
+      client,
+      "document_workflow",
+      {
+        action: "edit",
+        path: "range.txt",
+        expected_sha256: documentData.sha256,
+        edits: [{ operation: "replace", block_id: "block-2", content: "line2-edited" }],
+      },
+      "document-edit",
+    );
+    const editData = assertSuccess(documentEdit);
+    assert.notEqual(editData.sha256, documentData.sha256, explain(documentEdit));
+    const staleEdit = await toolCall(
+      client,
+      "document_workflow",
+      {
+        action: "edit",
+        path: "range.txt",
+        expected_sha256: documentData.sha256,
+        edits: [{ operation: "delete", block_id: "block-1" }],
+      },
+      "document-stale-edit",
+    );
+    assertToolError(staleEdit, "FileChanged");
+
+    const createDocx = await toolCall(
+      client,
+      "document_workflow",
+      {
+        action: "create",
+        path: "document-probe.docx",
+        source_format: "markdown",
+        content: "# Document Probe\nDOCX_SEARCH_NEEDLE",
+      },
+      "document-create-docx",
+    );
+    assertSuccess(createDocx);
+    const searchDocx = await toolCall(
+      client,
+      "document_workflow",
+      { action: "search", path: "document-probe.docx", query: "DOCX_SEARCH_NEEDLE" },
+      "document-search-docx",
+    );
+    assert.equal(assertSuccess(searchDocx).matches.length, 1, explain(searchDocx));
+    const convertDocx = await toolCall(
+      client,
+      "document_workflow",
+      { action: "convert", source: "document-probe.docx", path: "document-probe.md" },
+      "document-convert-docx",
+    );
+    assertSuccess(convertDocx);
+    const inspectConverted = await toolCall(
+      client,
+      "document_workflow",
+      { action: "inspect", path: "document-probe.md" },
+      "document-inspect-converted",
+    );
+    const convertedData = assertSuccess(inspectConverted);
+    assert.equal(convertedData.blocks[0].kind, "heading", explain(inspectConverted));
+    assert.equal(convertedData.blocks[0].text, "Document Probe", explain(inspectConverted));
+    const searchPdf = await toolCall(
+      client,
+      "document_workflow",
+      { action: "search", path: "document-probe.pdf", query: "PDF_SEARCH_NEEDLE" },
+      "document-search-pdf",
+    );
+    const pdfData = assertSuccess(searchPdf);
+    assert.equal(pdfData.format, "pdf", explain(searchPdf));
+    assert.equal(pdfData.matches.length, 1, explain(searchPdf));
+    const convertPdf = await toolCall(
+      client,
+      "document_workflow",
+      { action: "convert", source: "document-probe.pdf", path: "document-probe.txt" },
+      "document-convert-pdf",
+    );
+    assertSuccess(convertPdf);
+    const editPdf = await toolCall(
+      client,
+      "document_workflow",
+      {
+        action: "edit",
+        path: "document-probe.pdf",
+        expected_sha256: pdfData.sha256,
+        edits: [{ operation: "delete", block_id: "block-1" }],
+      },
+      "document-edit-pdf",
+    );
+    assertToolError(editPdf, "InvalidArgument");
+    report.checks.document_workflow = "PASS";
 
     const missingOutput = await toolCall(
       client,

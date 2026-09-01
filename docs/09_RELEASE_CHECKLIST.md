@@ -259,7 +259,7 @@
 - [ ] detached running public session can be cancelled by task_control and converges through the same terminator/finalizer as command_control kill
 - [ ] git show/diff file metadata uses NUL-delimited machine Git output and Unicode deleted paths retain correct status independently from patch text
 - [ ] command_control and elevated_exec expose directly projectable top-level properties without client-hostile top-level oneOf; strict server call validation remains
-- [ ] document_workflow rebuild schema discloses existing target path + content requirements
+- [ ] document_workflow 只暴露六个固定 action，edit 只暴露四个 block 原子操作，edit/rebuild 强制 expected_sha256
 - [ ] Windows 300ms timeout converges within 1800ms, TERM does not map to CTRL_BREAK/debug mode, and forced tree kill is bounded
 - [ ] Full cmd/PowerShell aliases and scripts execute with unchanged current-user authority; no alias rewrite or top-level command-string privilege classifier remains
 - [ ] direct system tools and descendant-invoked system tools have identical current-user authority; administrator-token work is available only through the structured Broker route

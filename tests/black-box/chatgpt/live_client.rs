@@ -51,6 +51,11 @@ impl LiveRuntime {
             b"@echo off\r\nsc query EventLog\r\n",
         )
         .expect("write descendant policy probe");
+        fs::write(
+            workspace.join("document-probe.pdf"),
+            simple_pdf("PDF_SEARCH_NEEDLE"),
+        )
+        .expect("write PDF document fixture");
         for args in [
             &["init"][..],
             &["config", "user.email", "black-box@example.invalid"][..],
@@ -109,6 +114,41 @@ impl LiveRuntime {
     fn workspace(&self) -> &Path {
         &self.workspace
     }
+}
+
+fn simple_pdf(text: &str) -> Vec<u8> {
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('(', "\\(")
+        .replace(')', "\\)");
+    let stream = format!("BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET");
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+    ];
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+    pdf.extend_from_slice(b"0000000000 65535 f \n");
+    for offset in offsets {
+        pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    pdf
 }
 
 impl Drop for LiveRuntime {
@@ -178,7 +218,7 @@ fn revision46_reported_failures_are_rechecked_through_the_external_client() {
         "prepared_workflow_cancel",
         "cross_session_workflow_resume",
         "git_error_propagation",
-        "document_range",
+        "document_workflow",
         "output_error_taxonomy",
         "final_projection",
     ] {
