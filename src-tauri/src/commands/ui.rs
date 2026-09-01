@@ -154,7 +154,7 @@ struct ReconnectProjection {
     generation: u64,
 }
 
-const ADMIN_CONSENT_DURATION: Duration = Duration::from_millis(9000);
+const ADMIN_CONSENT_DURATION: Duration = Duration::from_millis(3000);
 
 #[derive(Debug)]
 struct PendingAdminConsent {
@@ -1576,7 +1576,10 @@ mod tests {
         let start = Instant::now();
         let mut gate = AdminConsentGate::default();
         gate.begin_at("challenge-a-0001", start);
-        assert!(!gate.confirm_at("challenge-a-0001", start + Duration::from_millis(8_999)));
+        assert!(!gate.confirm_at(
+            "challenge-a-0001",
+            start + ADMIN_CONSENT_DURATION - Duration::from_millis(1)
+        ));
         assert!(gate.confirm_at("challenge-a-0001", start + ADMIN_CONSENT_DURATION));
         assert!(gate.consume_confirmed());
         assert!(!gate.consume_confirmed());
@@ -1587,9 +1590,13 @@ mod tests {
         let start = Instant::now();
         let mut gate = AdminConsentGate::default();
         gate.begin_at("challenge-a-0001", start);
-        gate.begin_at("challenge-b-0002", start + Duration::from_millis(8_500));
-        assert!(!gate.confirm_at("challenge-b-0002", start + Duration::from_millis(9_000)));
-        assert!(gate.confirm_at("challenge-b-0002", start + Duration::from_millis(17_500)));
+        let restarted_at = start + Duration::from_millis(500);
+        gate.begin_at("challenge-b-0002", restarted_at);
+        assert!(!gate.confirm_at(
+            "challenge-b-0002",
+            restarted_at + ADMIN_CONSENT_DURATION - Duration::from_millis(1)
+        ));
+        assert!(gate.confirm_at("challenge-b-0002", restarted_at + ADMIN_CONSENT_DURATION));
         assert!(gate.consume_confirmed());
     }
 

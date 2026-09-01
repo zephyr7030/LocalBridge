@@ -18,6 +18,8 @@ use super::{
     StartupProfileStore,
 };
 use crate::mcp::ProductionRuntimeConfig;
+use crate::privilege::{UacLaunchError, current_process_is_elevated};
+use crate::state::PrivilegeFault;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupSuppression {
@@ -45,6 +47,8 @@ pub enum DesktopStartupError {
     Runtime(DesktopRuntimeStartError),
     AppDataIo(std::io::Error),
     InstallRootUnavailable,
+    AuthorityProbe(UacLaunchError),
+    Authority(PrivilegeFault),
 }
 
 impl std::fmt::Display for DesktopStartupError {
@@ -60,6 +64,15 @@ impl std::fmt::Display for DesktopStartupError {
             Self::AppDataIo(error) => write!(f, "desktop startup app-data setup failed: {error}"),
             Self::InstallRootUnavailable => {
                 f.write_str("desktop startup install root is unavailable")
+            }
+            Self::AuthorityProbe(error) => {
+                write!(f, "desktop startup authority probe failed: {error}")
+            }
+            Self::Authority(error) => {
+                write!(
+                    f,
+                    "desktop startup administrator activation failed: {error:?}"
+                )
             }
         }
     }
@@ -118,7 +131,10 @@ pub fn configure_desktop_startup(
         .validated_tunnel_id()
         .map_err(DesktopStartupError::Profile)?
         .map(|tunnel_id| ConnectionProfile::new(tunnel_id, 0));
-    let permission_mode: PermissionMode = data.settings.permission_mode.into();
+    let process_elevated =
+        current_process_is_elevated().map_err(DesktopStartupError::AuthorityProbe)?;
+    let stored_permission: PermissionMode = data.settings.permission_mode.into();
+    let permission_mode = startup_permission(stored_permission, process_elevated);
     lifecycle.replace_desired_state(DesiredState {
         permission: permission_mode,
         workspace: desired_workspace,
@@ -126,6 +142,15 @@ pub fn configure_desktop_startup(
         connection: desired_connection,
     });
     let install_root = production_install_root()?;
+    if process_elevated {
+        let broker = current_broker_executable()?;
+        let activated = lifecycle
+            .reconcile_permission_from_elevated_startup(&broker)
+            .map_err(DesktopStartupError::Authority)?;
+        if !activated {
+            return Err(DesktopStartupError::Authority(PrivilegeFault::Unknown));
+        }
+    }
     lifecycle.publish_local_environment_observation(
         install_root.join("runtime/python/python.exe").is_file()
             && install_root
@@ -224,6 +249,24 @@ fn production_install_root() -> Result<PathBuf, DesktopStartupError> {
             .ok()
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .ok_or(DesktopStartupError::InstallRootUnavailable)
+    }
+}
+
+fn current_broker_executable() -> Result<PathBuf, DesktopStartupError> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| {
+            path.parent()
+                .map(|parent| parent.join("localbridge-privileged-broker.exe"))
+        })
+        .ok_or(DesktopStartupError::InstallRootUnavailable)
+}
+
+fn startup_permission(stored: PermissionMode, process_elevated: bool) -> PermissionMode {
+    if process_elevated {
+        PermissionMode::Elevated
+    } else {
+        stored
     }
 }
 

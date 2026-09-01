@@ -38,5 +38,6 @@ pub use protocol::{
 #[cfg(windows)]
 pub use windows::{
     ElevatedBrokerProcess, NamedPipeClient, NamedPipeConnection, NamedPipeServer,
-    PrivilegeIpcError, UacLaunchError, launch_broker_with_explicit_uac, random_session_nonce,
+    PrivilegeIpcError, UacLaunchError, current_process_is_elevated,
+    launch_broker_with_explicit_uac, random_session_nonce,
 };

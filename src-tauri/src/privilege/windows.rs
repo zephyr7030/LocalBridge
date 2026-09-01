@@ -36,7 +36,8 @@ use windows_sys::Win32::Security::{
     OWNER_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Security::{
-    GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
+    TokenElevation, TokenUser,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_SHARE_READ,
@@ -272,6 +273,32 @@ pub fn launch_broker_with_explicit_uac(
         pid,
         executable: trusted_broker,
     })
+}
+
+pub fn current_process_is_elevated() -> Result<bool, UacLaunchError> {
+    let mut token: HANDLE = null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return Err(UacLaunchError::LaunchFailed(last_error_code()));
+    }
+    let result = (|| {
+        let mut elevation: TOKEN_ELEVATION = unsafe { zeroed() };
+        let mut bytes_returned = 0u32;
+        if unsafe {
+            GetTokenInformation(
+                token,
+                TokenElevation,
+                (&raw mut elevation).cast(),
+                size_of::<TOKEN_ELEVATION>() as u32,
+                &mut bytes_returned,
+            )
+        } == 0
+        {
+            return Err(UacLaunchError::LaunchFailed(last_error_code()));
+        }
+        Ok(elevation.TokenIsElevated != 0)
+    })();
+    unsafe { CloseHandle(token) };
+    result
 }
 
 fn validate_broker_executable_for_current_install(
@@ -984,6 +1011,11 @@ mod tests {
         assert!(!sddl.contains(";;;WD"));
         assert!(!sddl.contains(";;;AU"));
         assert!(!sddl.contains(";;;AN"));
+    }
+
+    #[test]
+    fn current_process_elevation_is_a_typed_os_observation() {
+        assert!(current_process_is_elevated().is_ok());
     }
 
     #[test]

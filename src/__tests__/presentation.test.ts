@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionReconciliationText, privilegeText, serviceVisualState, taskText, updateStatusText, workspaceDisplayText } from "../presentation";
+import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionRestartNotice, privilegeText, serviceVisualState, taskText, updateStatusText, workspaceDisplayText } from "../presentation";
 
 describe("LB-015 presentation", () => {
   it("maps frozen Chinese wording", () => {
@@ -42,16 +42,17 @@ describe("LB-015 presentation", () => {
     expect(lastActivityOutcome(last)).toBe("成功");
     expect(lastActivityOutcome({ ...last, outcome: "blocked" })).toBe("已阻止");
   });
-  it("shows desired, effective, and reconciliation without optimistic permission state", () => {
-    const fixture = {
+  it("renders only the restart authorization notice when the backend requests it", () => {
+    const authorizationRequired = {
       authorityStatus: "ready",
       permission: "admin",
       effectivePermission: "full",
-      permissionReconciliation: "awaiting_authorization",
-    } as unknown as Parameters<typeof permissionReconciliationText>[0];
-    expect(permissionReconciliationText(fixture)).toContain("期望：管理员模式");
-    expect(permissionReconciliationText(fixture)).toContain("当前：完整模式");
-    expect(permissionReconciliationText(fixture)).toContain("等待 Windows 授权");
+      permissionReconciliation: "authorization_required",
+    } as unknown as Parameters<typeof permissionRestartNotice>[0];
+    expect(permissionRestartNotice(authorizationRequired)).toBe("重启后需重新授权");
+    expect(permissionRestartNotice({ ...authorizationRequired, permissionReconciliation: "converged" } as Parameters<typeof permissionRestartNotice>[0])).toBeNull();
+    expect(permissionRestartNotice({ ...authorizationRequired, permissionReconciliation: "awaiting_authorization" } as Parameters<typeof permissionRestartNotice>[0])).toBeNull();
+    expect(permissionRestartNotice(null)).toBeNull();
   });
   it("keeps desired, observed, and effective workspace semantics visible during startup", () => {
     const reconciling = {

@@ -19,6 +19,7 @@ const ADMIN_WARNING_CONSEQUENCES = [
   "恶意程序获得更高权限",
   "系统被破坏，严重时可能需要重装 Windows",
 ] as const;
+const ADMIN_WARNING_INITIAL_SECONDS = 3;
 
 export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   const challengeId = useRef(crypto.randomUUID());
@@ -26,7 +27,7 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
   const confirmationHandedOff = useRef(false);
   const onCancelRef = useRef(onCancel);
   const [backendChallengeReady, setBackendChallengeReady] = useState(false);
-  const [remainingSeconds, setRemainingSeconds] = useState(9);
+  const [remainingSeconds, setRemainingSeconds] = useState(ADMIN_WARNING_INITIAL_SECONDS);
 
   useEffect(() => { onCancelRef.current = onCancel; }, [onCancel]);
 

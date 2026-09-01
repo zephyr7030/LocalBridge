@@ -17,10 +17,10 @@ for (const text of [
   "系统被破坏，严重时可能需要重装 Windows",
   "仅在你明确理解操作后果时授权。",
 ]) if (!warning.includes(text)) throw new Error(`LB-015 administrator warning copy missing: ${text}`);
-for (const marker of ["ADMIN_WARNING_COUNTDOWN_MS = 9000", "performance.now()", "adminWarningCanConfirm", "adminWarningRemainingSeconds", 'event.key === "Escape"', "admin-consent-begin", "admin-consent-cancel", "backendChallengeReady", "onMouseDown={() => void cancel()}", "disabled={!backendChallengeReady || remainingSeconds > 0}", "`确认${remainingSeconds}`", ' : "确认"']) if (!warning.includes(marker)) throw new Error(`LB-015 administrator warning gate marker missing: ${marker}`);
+for (const marker of ["ADMIN_WARNING_INITIAL_SECONDS = 3", "Date.now()", "adminWarningCanConfirm", "adminWarningRemainingSeconds", 'event.key === "Escape"', "bridge.beginAdminConsent", "bridge.cancelAdminConsent", "bridge.confirmAdminConsent", "backendChallengeReady", "onMouseDown={() => void cancel()}", "disabled={!backendChallengeReady || remainingSeconds > 0}", "`确认${remainingSeconds}`", ' : "确认"']) if (!warning.includes(marker)) throw new Error(`LB-015 administrator warning gate marker missing: ${marker}`);
 if (!css.replace(/\s+/g, "").includes("--admin-accent:#ff9500") || !css.includes(".admin-warning-confirm{background:#d70015;border-color:#d70015;color:#fff}")) throw new Error("LB-015 administrator warning/accent colors drifted");
 for (const source of [app, onboarding]) {
   if (!source.includes('mode === "admin"') || !source.includes('privilege !== "active"') || !source.includes("setAdminWarningOpen(true)") || !source.includes("<AdminModeWarning")) throw new Error("LB-015 administrator mode surface bypasses the shared warning gate");
 }
 if (!app.includes('void run(() => bridge.setAccess("admin"))') || !onboarding.includes('void applyPermission("admin")')) throw new Error("LB-015 enabled confirmation is not the only explicit admin continuation path");
-console.log("LB015_ADMIN_WARNING_CONTRACT=PASS exact_copy=true monotonic_9000ms=true cancel_escape_no_side_effect=true shared_settings_onboarding=true whole_red_confirm=true");
+console.log("LB015_ADMIN_WARNING_CONTRACT=PASS exact_copy=true monotonic_3000ms=true cancel_escape_no_side_effect=true shared_settings_onboarding=true whole_red_confirm=true");

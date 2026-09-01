@@ -11,11 +11,11 @@ describe("LB-015 administrator warning monotonic gate", () => {
   });
 
   it("derives visual countdown labels from the backend deadline", () => {
-    const notBefore = 9500;
-    for (let second = 0; second < 9; second += 1) {
-      expect(adminWarningRemainingSeconds(notBefore, 500 + second * 1000)).toBe(9 - second);
+    const notBefore = 3500;
+    for (let second = 0; second < 3; second += 1) {
+      expect(adminWarningRemainingSeconds(notBefore, 500 + second * 1000)).toBe(3 - second);
     }
-    expect(adminWarningRemainingSeconds(notBefore, 9499)).toBe(1);
-    expect(adminWarningRemainingSeconds(notBefore, 9500)).toBe(0);
+    expect(adminWarningRemainingSeconds(notBefore, 3499)).toBe(1);
+    expect(adminWarningRemainingSeconds(notBefore, 3500)).toBe(0);
   });
 });
