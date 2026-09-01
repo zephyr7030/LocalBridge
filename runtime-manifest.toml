@@ -1,0 +1,146 @@
+schema_version = 3
+
+[product]
+codename = "LocalBridge"
+target = "windows-x86_64"
+release = "0.1.4"
+
+[coding_tools_mcp]
+source = "https://github.com/xyTom/coding-tools-mcp"
+version = "0.2.2"
+git_commit = "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc"
+git_tree = "5ef5e638a12aa74dc8836ca02a88490c2fe019a6"
+sha256 = "227b94128eaacda8d63d391911db1918e0bd813718d9ea5d276b5aab7eac73fd"
+sha256_basis = "git archive --format=tar pinned commit"
+vendoring = "source"
+telemetry = "disabled"
+runtime_subset_sha256 = "cc2171854ce0035942b752ce88bb3aec2e286cdf9603dd51ad41734ea70dcda6"
+payload_tree_sha256 = "5039d4c696636c42e3f965116a0cfcc9bcd27a7ea782a013a04dff4e09945821"
+runtime_root = "runtime/coding-tools-mcp"
+entry_module = "coding_tools_mcp"
+dependency_pyjwt_version = "2.10.1"
+dependency_pyjwt_wheel = "PyJWT-2.10.1-py3-none-any.whl"
+dependency_pyjwt_wheel_sha256 = "dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb"
+auth_secret_injection = "child_environment:CODING_TOOLS_MCP_AUTH_TOKEN"
+bind_host = "127.0.0.1"
+telemetry_forced_off = true
+runtime_pip_install = false
+stable_adapter = "src-tauri/src/mcp"
+
+[tunnel_client]
+source = "https://github.com/openai/tunnel-client"
+version = "0.0.11"
+git_commit = "8d55683eeef80bc5e360d95abf4692454fafc615"
+git_tree = "f55ee74dd024b5e69714ec25c94a579276798b7f"
+asset = "tunnel-client-v0.0.11-windows-amd64.zip"
+sha256 = "eb912c86c6ccde90cda805cb17009507176a656725cf86c36fabe1901a12e29b"
+vendoring = "binary"
+secret_injection = "child_environment_reference"
+runtime_root = "runtime/tunnel-client"
+executable = "runtime/tunnel-client/tunnel-client.exe"
+executable_sha256 = "7d3c7d492ce84b52835e11865a835a8a5bcd4a669dee84e169aa11b314dc952a"
+license = "runtime/tunnel-client/LICENSE"
+license_sha256 = "f4c1d7ba32ef5bcf5cf03e2eefec5825ebafedf50fa330a36700a49c605c1ef4"
+api_key_reference = "env:LOCALBRIDGE_RUNTIME_API_KEY"
+api_key_injection = "child_environment:LOCALBRIDGE_RUNTIME_API_KEY"
+tunnel_id_injection = "child_environment:CONTROL_PLANE_TUNNEL_ID"
+production_control_plane = "https://api.openai.com"
+health_bind = "127.0.0.1:0"
+ambient_parent_overrides = "removed_before_spawn"
+stable_adapter = "src-tauri/src/tunnel"
+
+[python]
+version = "3.12.10"
+source = "python.org Windows embeddable package"
+archive = "python-3.12.10-embed-amd64.zip"
+sha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
+vendoring = "embeddable"
+executable = "runtime/python/python.exe"
+executable_sha256 = "4d6f5f81a4bca11191c4c7c6b43632694d0a4ce74e068619d8fdc161d469859a"
+python312_dll_sha256 = "9a0e3435aaa680d868150f87ab3e388ad2eebc22f87e036155c7b4eda8cd2120"
+stdlib_zip_sha256 = "fb131c0ef7e35cc5250a74c8cd18744bf4115fb8163710711f3758d7df3d1f88"
+pth_sha256 = "3840e706682aa41ec7e599a50763bec6c6ddd6bde66e81c64afe2394539ea4fa"
+payload_tree_sha256 = "48546587a8bb59d03016ea4edf82c292a477dec6acec530745b78c8935558682"
+isolated = true
+user_site_enabled = false
+runtime_pip_present = false
+external_python_fallback = false
+lb000_feasibility_sample_version = "3.12.10"
+lb000_feasibility_sample_sha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
+lb000_feasibility_status = "PASS"
+
+[policy]
+file = "runtime-policy.toml"
+
+[toolbox]
+runtime_root = "runtime/toolbox"
+build_prepare_script = "scripts/prepare-toolbox.mjs"
+runtime_download = false
+runtime_update = false
+persistent_path_mutation = false
+public_tools = false
+
+[toolbox.aria2c]
+logical_name = "aria2c"
+version = "1.37.0"
+source = "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+archive_sha256 = "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288"
+executable = "runtime/toolbox/bin/aria2c.exe"
+executable_sha256 = "be2099c214f63a3cb4954b09a0becd6e2e34660b886d4c898d260febfe9d70c2"
+
+[toolbox.seven_zip]
+logical_name = "7z"
+version = "26.02"
+source = "https://www.7-zip.org/a/7z2602-extra.7z"
+archive_sha256 = "081df9e9311dfd9c9e0e98c1c80180b99bb51e4cb24156b5f3057fe3c259d70a"
+source_member = "x64/7za.exe"
+executable = "runtime/toolbox/bin/7z.exe"
+executable_sha256 = "35d4d69d7cd6cb44558f208c3b1334268013f9daf82d2dda848893a1c30c59c2"
+
+[toolbox.jq]
+logical_name = "jq"
+version = "1.8.2"
+source = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe"
+archive_sha256 = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+executable = "runtime/toolbox/bin/jq.exe"
+executable_sha256 = "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+
+[toolbox.curl]
+bundled = false
+source = "windows-system-runtime"
+executable = "%SystemRoot%/System32/curl.exe"
+startup_existence_probe = true
+startup_capability_probe = true
+missing_error = "RuntimeUnavailable"
+capability_missing_error = "CapabilityUnavailable"
+fallback_download = false
+
+[privileged_broker]
+kind = "first_party_rust_binary"
+elevation = "uac_on_explicit_user_action"
+ttl = "none"
+network_listener = false
+
+
+[distribution]
+target_os = "windows"
+minimum_os = "windows-11"
+arch = "x86_64"
+bundle_python = true
+bundle_coding_tools_mcp = true
+bundle_tunnel_client = true
+bundle_toolbox = true
+bundle_webview2 = false
+webview2_source = "windows-system-runtime"
+external_python_dependency = false
+runtime_self_update = false
+application_auto_update = false
+telemetry = false
+
+[size_budget]
+installer_target_mib_min = 45
+installer_target_mib_max = 70
+installed_target_mib_min = 90
+installed_target_mib_max = 150
+investigate_installer_over_mib = 100
+investigate_installed_over_mib = 250

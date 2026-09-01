@@ -1,0 +1,16 @@
+{
+    "schema_version":  1,
+    "runtime":  "coding-tools-mcp",
+    "version":  "0.2.2",
+    "source":  "https://github.com/xyTom/coding-tools-mcp",
+    "git_commit":  "311c1f2529d0f047ad2a8b68db6bf92dbb93d6bc",
+    "git_tree":  "5ef5e638a12aa74dc8836ca02a88490c2fe019a6",
+    "full_git_archive_sha256":  "227b94128eaacda8d63d391911db1918e0bd813718d9ea5d276b5aab7eac73fd",
+    "runtime_subset_archive_sha256":  "cc2171854ce0035942b752ce88bb3aec2e286cdf9603dd51ad41734ea70dcda6",
+    "entry_module":  "coding_tools_mcp",
+    "dependency_pyjwt_version":  "2.10.1",
+    "dependency_pyjwt_wheel":  "PyJWT-2.10.1-py3-none-any.whl",
+    "dependency_pyjwt_wheel_sha256":  "dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb",
+    "runtime_pip_present":  false,
+    "payload_tree_sha256":  "5039d4c696636c42e3f965116a0cfcc9bcd27a7ea782a013a04dff4e09945821"
+}

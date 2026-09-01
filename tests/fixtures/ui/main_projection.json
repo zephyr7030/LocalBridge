@@ -1,0 +1,80 @@
+{
+  "authorityStatus": "ready",
+  "runtimeStatus": "ready",
+  "settingsStatus": "ready",
+  "workspaceStatus": "ready",
+  "connectionStatus": "ready",
+  "activityStatus": "ready",
+  "updateStatus": "ready",
+  "permission": "admin",
+  "effectivePermission": "full",
+  "permissionReconciliation": "awaiting_authorization",
+  "pathAuthority": "workspace",
+  "privilege": "requested",
+  "localEnvironmentService": "online",
+  "tunnelService": "recovering",
+  "codingService": "online",
+  "onboardingReady": false,
+  "workspace": {
+    "desiredPath": "D:/project/LocalBridge",
+    "observedPath": "D:/project/LocalBridge",
+    "effective": "available"
+  },
+  "projects": [
+    {
+      "id": "workspace-1",
+      "path": "D:/project/LocalBridge",
+      "active": true
+    }
+  ],
+  "currentTask": {
+    "kind": "command",
+    "summary": "running a local command",
+    "state": "running",
+    "elapsedMs": 1200
+  },
+  "currentActivity": {
+    "kind": "command",
+    "state": "waiting_input",
+    "summary": "waiting for input",
+    "elapsedMs": 1200,
+    "step": null,
+    "progressCurrent": null,
+    "progressTotal": null
+  },
+  "lastActivity": {
+    "kind": "modify",
+    "summary": "policy rejected edit",
+    "outcome": "blocked",
+    "completedAtMs": 1000
+  },
+  "projectionRevision": 49,
+  "connection": {
+    "desiredTunnelId": "tunnel_01401401401401401401401401401401",
+    "observedTunnelId": "tunnel_01401401401401401401401401401401",
+    "effective": "available"
+  },
+  "runtimeKeySaved": true,
+  "autoStart": true,
+  "closeWindowContinueRunning": true,
+  "reconnect": {
+    "generation": 3
+  },
+  "update": {
+    "state": "current",
+    "currentVersion": "0.1.4",
+    "latestVersion": null,
+    "releaseUrl": "https://github.com/zephyr7030/LocalBridge/releases",
+    "operationId": "update-1",
+    "attempt": null,
+    "retryable": true
+  },
+  "activeFaults": [
+    {
+      "code": "Authority.BrokerUnavailable",
+      "category": "authorization",
+      "message": "Privilege broker is unavailable",
+      "retryable": true
+    }
+  ]
+}
