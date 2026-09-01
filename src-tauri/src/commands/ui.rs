@@ -6,15 +6,16 @@ use tauri::{AppHandle, Manager};
 
 use super::error::{UiError, UiResult};
 use crate::app::{
-    AutostartManager, DesktopLifecycle, DesktopRuntimeStartError, STARTUP_PROFILE_FILE_NAME,
-    StartupProfileStore, manual_stop_services,
+    AutostartManager, DesktopLifecycle, DesktopRuntimeReconcileError, DesktopRuntimeStartError,
+    STARTUP_PROFILE_FILE_NAME, StartupProfileStore, manual_stop_services,
 };
 use crate::control_plane::convergence::{
-    AuthorityReconciliation, ConnectionProfile, DesiredWorkspace, PermissionReconcileAction,
-    RuntimeReconcileAction, ServiceIntent,
+    AuthorityReconciliation, ConnectionProfile, DesiredWorkspace, ServiceIntent,
+    StructuredPathAuthority,
 };
 use crate::control_plane::snapshot::{
-    ControlPlaneSnapshot, ProjectionAvailability, ProjectionSection, TaskAggregate,
+    ControlPlaneSnapshot, EffectiveAvailability, ProjectionAvailability, ProjectionSection,
+    TaskAggregate,
 };
 use crate::control_plane::update::UpdateStartError;
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
@@ -39,31 +40,48 @@ pub struct MainProjection {
     authority_status: &'static str,
     runtime_status: &'static str,
     settings_status: &'static str,
+    workspace_status: &'static str,
     connection_status: &'static str,
     activity_status: &'static str,
     update_status: &'static str,
     permission: Option<&'static str>,
     effective_permission: Option<&'static str>,
     permission_reconciliation: Option<&'static str>,
-    elevated_active: Option<bool>,
+    path_authority: Option<&'static str>,
     privilege: Option<&'static str>,
     local_environment_service: Option<&'static str>,
     tunnel_service: Option<&'static str>,
     coding_service: Option<&'static str>,
     onboarding_ready: Option<bool>,
-    current_project: Option<String>,
+    workspace: Option<UiWorkspaceProjection>,
     projects: Option<Vec<ProjectProjection>>,
     current_task: Option<TaskProjection>,
     current_activity: Option<CurrentActivityProjection>,
     last_activity: Option<LastActivityProjection>,
     projection_revision: u64,
-    tunnel_id: Option<String>,
+    connection: Option<UiConnectionProjection>,
     runtime_key_saved: Option<bool>,
     auto_start: Option<bool>,
     close_window_continue_running: Option<bool>,
     reconnect: Option<ReconnectProjection>,
     update: Option<UpdateProjection>,
     active_faults: Vec<UiFaultProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiWorkspaceProjection {
+    desired_path: Option<String>,
+    observed_path: Option<String>,
+    effective: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiConnectionProjection {
+    desired_tunnel_id: Option<String>,
+    observed_tunnel_id: Option<String>,
+    effective: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -306,6 +324,7 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
     let runtime = ready_section_value(&control_plane.runtime);
     let authority = ready_section_value(&control_plane.authority);
     let settings = ready_section_value(&control_plane.settings);
+    let workspace = ready_section_value(&control_plane.workspace);
     let task_aggregate = ready_section_value(&control_plane.activity);
     let projects = settings.map(|settings| {
         settings
@@ -321,12 +340,17 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
             })
             .collect::<Vec<_>>()
     });
-    let current_project = projects
-        .as_ref()
-        .into_iter()
-        .flatten()
-        .find(|project| project.active)
-        .map(|project| project.path.clone());
+    let workspace_projection = workspace.map(|workspace| UiWorkspaceProjection {
+        desired_path: workspace.desired_path.clone(),
+        observed_path: workspace.observed_path.clone(),
+        effective: effective_availability_code(workspace.effective),
+    });
+    let connection_projection =
+        ready_section_value(&control_plane.connection).map(|connection| UiConnectionProjection {
+            desired_tunnel_id: connection.desired_tunnel_id.clone(),
+            observed_tunnel_id: connection.observed_tunnel_id.clone(),
+            effective: effective_availability_code(connection.effective),
+        });
     let runtime_state = runtime.map(|runtime| &runtime.state);
     let (tunnel_service, coding_service) = runtime_state
         .map(service_codes)
@@ -346,6 +370,7 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
         authority_status: projection_section_code(&control_plane.authority),
         runtime_status: projection_section_code(&control_plane.runtime),
         settings_status: projection_section_code(&control_plane.settings),
+        workspace_status: projection_section_code(&control_plane.workspace),
         connection_status: projection_section_code(&control_plane.connection),
         activity_status: projection_section_code(&control_plane.activity),
         update_status: projection_section_code(&control_plane.update),
@@ -353,13 +378,16 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
         effective_permission: authority.map(|authority| permission_code(authority.effective)),
         permission_reconciliation: authority
             .map(|authority| authority_reconciliation_code(authority.reconciliation)),
-        elevated_active: authority.map(|authority| authority.elevated_active),
+        path_authority: authority.map(|authority| match authority.structured_paths {
+            StructuredPathAuthority::ActiveWorkspace => "workspace",
+            StructuredPathAuthority::AdministratorBroker => "administrator",
+        }),
         privilege: authority.map(|authority| privilege_code(&authority.broker)),
         local_environment_service: runtime_state.map(local_environment_service_code),
         tunnel_service,
         coding_service,
         onboarding_ready: runtime.map(|_| control_plane.onboarding_readiness().all_ready()),
-        current_project,
+        workspace: workspace_projection,
         projects,
         current_task: task_aggregate.and_then(|aggregate| {
             task_projection_from_aggregate(
@@ -370,8 +398,7 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
         current_activity: task_aggregate.and_then(current_activity_projection),
         last_activity: task_aggregate.and_then(last_activity_projection),
         projection_revision: control_plane.revision,
-        tunnel_id: ready_section_value(&control_plane.connection)
-            .and_then(|connection| connection.desired_tunnel_id.clone()),
+        connection: connection_projection,
         runtime_key_saved: settings.map(|settings| settings.runtime_key_saved),
         auto_start: settings.map(|settings| settings.auto_start),
         close_window_continue_running: settings
@@ -381,6 +408,15 @@ fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainPr
             .map(|update| update_projection(Some(update))),
         active_faults: ui_faults(&control_plane),
     })
+}
+
+fn effective_availability_code(availability: EffectiveAvailability) -> &'static str {
+    match availability {
+        EffectiveAvailability::Available => "available",
+        EffectiveAvailability::Disabled => "disabled",
+        EffectiveAvailability::Reconciling => "reconciling",
+        EffectiveAvailability::Unavailable => "unavailable",
+    }
 }
 
 fn projection_section_code<T>(section: &ProjectionSection<T>) -> &'static str {
@@ -468,16 +504,7 @@ pub async fn set_permission_mode(mode: String, app: AppHandle) -> UiResult<()> {
             return Err(UiError::from("无法保存权限设置"));
         }
         refresh_settings_snapshot(&app, &lifecycle)?;
-        match lifecycle.reconciliation_plan().permission {
-            PermissionReconcileAction::RequestAuthorization => {
-                let _ = request_explicit_admin(&lifecycle);
-            }
-            PermissionReconcileAction::DisableBroker => {
-                let _ = lifecycle.privilege().disable();
-            }
-            PermissionReconcileAction::None => {}
-        }
-        lifecycle.publish_current_observation();
+        reconcile_explicit_permission(&lifecycle)?;
         Ok(())
     })
     .await
@@ -512,17 +539,37 @@ pub async fn confirm_admin_consent(challenge_id: String) -> UiResult<()> {
         })?
 }
 
-fn request_explicit_admin(lifecycle: &DesktopLifecycle) -> Result<(), ()> {
-    let executable = std::env::current_exe().map_err(|_| ())?;
+fn reconcile_explicit_permission(lifecycle: &DesktopLifecycle) -> UiResult<()> {
+    let executable = std::env::current_exe().map_err(|_| {
+        OperationError::new(
+            "Authority.ExecutableUnavailable",
+            ErrorCategory::Unavailable,
+            "Unable to locate the LocalBridge executable",
+            true,
+        )
+    })?;
     let broker = executable
         .parent()
         .map(|parent| parent.join("localbridge-privileged-broker.exe"))
-        .ok_or(())?;
+        .ok_or_else(|| {
+            OperationError::new(
+                "Authority.BrokerUnavailable",
+                ErrorCategory::Unavailable,
+                "Unable to locate the administrator service",
+                true,
+            )
+        })?;
     lifecycle
-        .privilege()
-        .enable_from_explicit_user_action(&broker)
-        .map(|_| ())
-        .map_err(|_| ())
+        .reconcile_permission_from_explicit_action(&broker)
+        .map_err(|fault| {
+            OperationError::new(
+                format!("Authority.{fault:?}"),
+                ErrorCategory::Authorization,
+                "Administrator authorization did not complete",
+                true,
+            )
+            .into()
+        })
 }
 
 #[tauri::command]
@@ -836,40 +883,9 @@ fn activate_project(
         .map_err(|_| "无法保存当前项目".to_string())?;
     lifecycle.set_desired_workspace(Some(DesiredWorkspace::new(id, candidate)));
     lifecycle.set_desired_services(ServiceIntent::Enabled);
-    match lifecycle.reconciliation_plan().runtime {
-        RuntimeReconcileAction::ApplyWorkspace(path) => {
-            lifecycle
-                .switch_runtime_workspace(&path)
-                .map_err(|_| "项目切换目标已保存，运行服务仍在收敛".to_string())?;
-        }
-        RuntimeReconcileAction::Start => {
-            start_runtime_for_path(app, lifecycle, candidate)
-                .map_err(|_| "项目切换目标已保存，运行服务当前不可用".to_string())?;
-        }
-        RuntimeReconcileAction::RestartConnection => {
-            let config = production_runtime_config_for_path(app, candidate)?;
-            lifecycle
-                .backend_handle()
-                .restart_production_runtime(config)
-                .map_err(|_| "项目目标已保存，连接服务仍在收敛".to_string())?;
-        }
-        RuntimeReconcileAction::None => {}
-        RuntimeReconcileAction::Stop | RuntimeReconcileAction::WaitForObservation => {
-            return Err(UiError::from("项目目标已保存，运行服务正在收敛"));
-        }
-    }
-    Ok(())
-}
-
-fn start_runtime_for_path(
-    app: &AppHandle,
-    lifecycle: &DesktopLifecycle,
-    path: &Path,
-) -> UiResult<()> {
-    let config = production_runtime_config_for_path(app, path)?;
-    Ok(lifecycle
-        .start_production_runtime(config)
-        .map_err(runtime_start_message)?)
+    lifecycle
+        .reconcile_runtime_from_desired_state(|| production_runtime_config_for_path(app, candidate))
+        .map_err(|error| runtime_reconciliation_message(error, "项目目标已保存"))
 }
 
 fn production_runtime_config_for_path(
@@ -913,19 +929,41 @@ fn reconnect_after_connection_change(
     app: &AppHandle,
     lifecycle: &DesktopLifecycle,
 ) -> UiResult<()> {
-    match lifecycle.reconciliation_plan().runtime {
-        RuntimeReconcileAction::RestartConnection | RuntimeReconcileAction::Start => {
+    lifecycle
+        .reconcile_runtime_from_desired_state(|| {
             let (_, data) = load_app_data(app)?;
-            let config = production_runtime_config_for_active_workspace(app, &data)?;
-            Ok(lifecycle
-                .backend_handle()
-                .restart_production_runtime(config)
-                .map_err(|_| "连接设置已保存，但服务重连失败".to_string())?)
-        }
-        RuntimeReconcileAction::ApplyWorkspace(_) | RuntimeReconcileAction::WaitForObservation => {
-            Err(UiError::from("连接设置已保存，运行服务正在收敛"))
-        }
-        RuntimeReconcileAction::None | RuntimeReconcileAction::Stop => Ok(()),
+            production_runtime_config_for_active_workspace(app, &data)
+        })
+        .map_err(|error| runtime_reconciliation_message(error, "连接设置已保存"))
+}
+
+fn runtime_reconciliation_message(
+    error: DesktopRuntimeReconcileError<UiError>,
+    context: &str,
+) -> UiError {
+    match error {
+        DesktopRuntimeReconcileError::Configuration(error) => error,
+        DesktopRuntimeReconcileError::Start(error) => OperationError::new(
+            "Runtime.ReconcileStartFailed",
+            ErrorCategory::Unavailable,
+            format!("{context}，{}", runtime_start_message(error)),
+            true,
+        )
+        .into(),
+        DesktopRuntimeReconcileError::Control(_) => OperationError::new(
+            "Runtime.ReconcileControlFailed",
+            ErrorCategory::Unavailable,
+            format!("{context}，运行服务仍在收敛"),
+            true,
+        )
+        .into(),
+        DesktopRuntimeReconcileError::WaitingForObservation => OperationError::new(
+            "Runtime.Reconciling",
+            ErrorCategory::Conflict,
+            format!("{context}，运行服务正在收敛"),
+            true,
+        )
+        .into(),
     }
 }
 
@@ -1143,8 +1181,10 @@ fn privilege_code(value: &PrivilegeState) -> &'static str {
 fn authority_reconciliation_code(value: AuthorityReconciliation) -> &'static str {
     match value {
         AuthorityReconciliation::Converged => "converged",
+        AuthorityReconciliation::AuthorizationRequired => "authorization_required",
         AuthorityReconciliation::AwaitingAuthorization => "awaiting_authorization",
         AuthorityReconciliation::BrokerUnavailable => "broker_unavailable",
+        AuthorityReconciliation::DisablePending => "disable_pending",
     }
 }
 fn service_codes(state: &RuntimeState) -> (&'static str, &'static str) {

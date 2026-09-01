@@ -9,7 +9,7 @@ use crate::control_plane::snapshot::SettingsProjection;
 use crate::credentials::{CredentialStore, WindowsCredentialStore};
 use crate::domain::{ErrorCategory, OperationError};
 use crate::settings::{SettingsStore, SettingsStoreError};
-use crate::state::{PermissionMode, PrivilegeFault};
+use crate::state::PermissionMode;
 use crate::workspace::{WorkspaceRegistryError, WorkspaceValidator};
 
 use super::{
@@ -43,7 +43,6 @@ pub enum DesktopStartupError {
     Autostart(AutostartError),
     Workspace(WorkspaceRegistryError),
     Runtime(DesktopRuntimeStartError),
-    Privilege(PrivilegeFault),
     AppDataIo(std::io::Error),
     InstallRootUnavailable,
 }
@@ -58,9 +57,6 @@ impl std::fmt::Display for DesktopStartupError {
                 write!(f, "desktop startup workspace validation failed: {error:?}")
             }
             Self::Runtime(error) => write!(f, "desktop startup runtime failed: {error}"),
-            Self::Privilege(error) => {
-                write!(f, "desktop startup privilege state failed: {error:?}")
-            }
             Self::AppDataIo(error) => write!(f, "desktop startup app-data setup failed: {error}"),
             Self::InstallRootUnavailable => {
                 f.write_str("desktop startup install root is unavailable")
@@ -142,8 +138,6 @@ pub fn configure_desktop_startup(
         .set_enabled(data.settings.auto_start_services)
         .map_err(DesktopStartupError::Autostart)?;
 
-    restore_privilege_preference(permission_mode, lifecycle)?;
-
     let config = match build_background_resume_config(
         app_data_dir,
         startup_mode,
@@ -165,18 +159,6 @@ pub fn configure_desktop_startup(
         .spawn_start_production_runtime(config)
         .map_err(DesktopStartupError::AppDataIo)?;
     Ok(DesktopStartupOutcome::ServicesStarted)
-}
-
-fn restore_privilege_preference(
-    permission_mode: PermissionMode,
-    lifecycle: &DesktopLifecycle,
-) -> Result<(), DesktopStartupError> {
-    if permission_mode == PermissionMode::Elevated {
-        let result = lifecycle.privilege().request_without_uac();
-        lifecycle.publish_current_observation();
-        result.map_err(DesktopStartupError::Privilege)?;
-    }
-    Ok(())
 }
 
 pub fn manual_stop_services(

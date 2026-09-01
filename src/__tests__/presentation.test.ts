@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionReconciliationText, privilegeText, serviceVisualState, taskText, updateStatusText } from "../presentation";
+import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionReconciliationText, privilegeText, serviceVisualState, taskText, updateStatusText, workspaceDisplayText } from "../presentation";
 
 describe("LB-015 presentation", () => {
   it("maps frozen Chinese wording", () => {
@@ -52,6 +52,19 @@ describe("LB-015 presentation", () => {
     expect(permissionReconciliationText(fixture)).toContain("期望：管理员模式");
     expect(permissionReconciliationText(fixture)).toContain("当前：完整模式");
     expect(permissionReconciliationText(fixture)).toContain("等待 Windows 授权");
+  });
+  it("keeps desired, observed, and effective workspace semantics visible during startup", () => {
+    const reconciling = {
+      pathAuthority: "workspace",
+      workspaceStatus: "ready",
+      workspace: { desiredPath: "D:/project/LocalBridge", observedPath: null, effective: "unavailable" },
+    };
+    expect(workspaceDisplayText(reconciling as unknown as Parameters<typeof workspaceDisplayText>[0])).toBe("D:/project/LocalBridge（正在收敛）");
+    expect(workspaceDisplayText({ ...reconciling, pathAuthority: "administrator" } as unknown as Parameters<typeof workspaceDisplayText>[0])).toBe("全目录访问");
+    expect(workspaceDisplayText({
+      ...reconciling,
+      workspace: { ...reconciling.workspace, observedPath: "D:/project/LocalBridge", effective: "available" },
+    } as unknown as Parameters<typeof workspaceDisplayText>[0])).toBe("D:/project/LocalBridge");
   });
   it("renders typed update lifecycle without guessing availability", () => {
     const base = { currentVersion: "1.0.0", latestVersion: null, releaseUrl: "https://github.com/owner/repo/releases", operationId: null, attempt: null, retryable: true };

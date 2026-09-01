@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::control_plane::convergence::{
     ConnectionProfile, ConvergenceSnapshot, DesiredState, DesiredStateOwner, DesiredWorkspace,
     EffectiveConnection, EffectiveWorkspaceAuthority, ObservedState, ReconcilePlan, Reconciler,
-    ServiceIntent,
+    RuntimeReconcileAction, ServiceIntent,
 };
 use crate::control_plane::snapshot::{
     AuthorityProjection, ConnectionProjection, ControlPlaneSnapshot, ControlPlaneSnapshotOwner,
@@ -36,6 +36,7 @@ use crate::runtime::{
     RecoveryClock, RecoveryController, RecoveryOutcome, RuntimeDriver, RuntimeOrchestrator,
     RuntimeOutage, SystemRecoveryClock, WorkspaceSwitchError,
 };
+use crate::state::PrivilegeFault;
 #[cfg(windows)]
 use crate::state::{
     CurrentTaskStatus, LastToolTiming, PermissionMode, PrivilegeState, RuntimeComponent,
@@ -123,6 +124,14 @@ impl std::fmt::Display for DesktopRuntimeStartError {
 }
 
 impl std::error::Error for DesktopRuntimeStartError {}
+
+#[derive(Debug)]
+pub enum DesktopRuntimeReconcileError<E> {
+    Configuration(E),
+    Start(DesktopRuntimeStartError),
+    Control(DesktopRuntimeControlError),
+    WaitingForObservation,
+}
 
 pub trait ExitRuntime {
     fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError>;
@@ -488,7 +497,6 @@ fn publish_control_plane_observation(
     runtime: DesktopRuntimeSnapshot,
     activity: Option<TaskAggregate>,
 ) -> ControlPlaneSnapshot {
-    let previous = owner.read();
     let broker = privilege.state();
     let convergence = ConvergenceSnapshot::derive(
         desired.snapshot(),
@@ -499,138 +507,137 @@ fn publish_control_plane_observation(
             connection: runtime.connection_profile.clone(),
         },
     );
-    let runtime_value = RuntimeProjection {
-        active: runtime.active,
-        state: runtime.state.clone(),
-        local_environment_available: previous
-            .runtime
-            .value()
-            .and_then(|runtime| runtime.local_environment_available),
-        current_task_elapsed_ms: runtime.current_task_elapsed_ms,
-        last_tool: runtime.last_tool.as_ref().map(|tool| LastToolProjection {
-            kind: tool.kind,
-            summary: tool.summary.as_deref().map(str::to_owned),
-            age_ms: tool.age_ms,
-        }),
-        outage: runtime.outage.as_ref().map(|outage| OutageProjection {
-            generation: outage.generation,
-            operation_id: outage.request_id.clone(),
-            component: outage.component,
-            fault: outage.fault.clone(),
-            user_attention_required: outage.user_attention_required,
-        }),
-    };
-    let runtime_section = if activity.is_some() {
-        ProjectionSection::ready(runtime_value)
-    } else {
-        ProjectionSection::stale(previous.runtime.into_value())
-    };
-    let authority = ProjectionSection::ready(AuthorityProjection {
-        desired: convergence.effective.authority.configured,
-        effective: convergence.effective.authority.execution,
-        broker: broker.clone(),
-        elevated_active: convergence.effective.authority.elevated_active,
-        reconciliation: convergence.effective.authority.reconciliation,
-    });
-    let workspace = ProjectionSection::ready(WorkspaceProjection {
-        desired_id: convergence
-            .desired
-            .workspace
-            .as_ref()
-            .and_then(|workspace| workspace.id.as_ref())
-            .map(|id| id.as_str().to_owned()),
-        desired_path: convergence
-            .desired
-            .workspace
-            .as_ref()
-            .map(|workspace| workspace.execution_path.to_string_lossy().into_owned()),
-        observed_path: convergence
-            .observed
-            .workspace
-            .as_ref()
-            .map(|path| path.to_string_lossy().into_owned()),
-        effective: match convergence.effective.workspace {
-            EffectiveWorkspaceAuthority::Available(_) => EffectiveAvailability::Available,
-            EffectiveWorkspaceAuthority::Unavailable(_) => EffectiveAvailability::Unavailable,
-        },
-    });
-    let connection = ProjectionSection::ready(ConnectionProjection {
-        desired_tunnel_id: convergence
-            .desired
-            .connection
-            .as_ref()
-            .map(|profile| profile.tunnel_id.expose().to_owned()),
-        desired_credential_epoch: convergence
-            .desired
-            .connection
-            .as_ref()
-            .map(|profile| profile.credential_epoch),
-        observed_tunnel_id: convergence
-            .observed
-            .connection
-            .as_ref()
-            .map(|profile| profile.tunnel_id.expose().to_owned()),
-        observed_credential_epoch: convergence
-            .observed
-            .connection
-            .as_ref()
-            .map(|profile| profile.credential_epoch),
-        effective: match convergence.effective.connection {
-            EffectiveConnection::Available(_) => EffectiveAvailability::Available,
-            EffectiveConnection::Unavailable(_) => EffectiveAvailability::Unavailable,
-        },
-    });
-    let mut active_faults = previous
-        .active_faults
-        .into_iter()
-        .filter(|fault| fault.source == FaultSource::Settings)
-        .collect::<Vec<_>>();
-    if let RuntimeState::Faulted(fault) = &runtime.state {
-        active_faults.push(persistent_fault(
-            previous_fault(&owner.read(), "runtime"),
-            "runtime",
-            FaultSource::Runtime,
-            OperationError::new(
-                format!("Runtime.{fault:?}"),
-                ErrorCategory::Unavailable,
-                "Runtime is unavailable",
-                true,
+    owner.update(|previous| {
+        let runtime_value = RuntimeProjection {
+            active: runtime.active,
+            state: runtime.state.clone(),
+            local_environment_available: previous
+                .runtime
+                .value()
+                .and_then(|runtime| runtime.local_environment_available),
+            current_task_elapsed_ms: runtime.current_task_elapsed_ms,
+            last_tool: runtime.last_tool.as_ref().map(|tool| LastToolProjection {
+                kind: tool.kind,
+                summary: tool.summary.as_deref().map(str::to_owned),
+                age_ms: tool.age_ms,
+            }),
+            outage: runtime.outage.as_ref().map(|outage| OutageProjection {
+                generation: outage.generation,
+                operation_id: outage.request_id.clone(),
+                component: outage.component,
+                fault: outage.fault.clone(),
+                user_attention_required: outage.user_attention_required,
+            }),
+        };
+        let runtime_section = ProjectionSection::ready(runtime_value);
+        let authority = ProjectionSection::ready(AuthorityProjection {
+            desired: convergence.effective.authority.configured,
+            effective: convergence.effective.authority.execution,
+            broker: broker.clone(),
+            structured_paths: convergence.effective.authority.structured_paths,
+            reconciliation: convergence.effective.authority.reconciliation,
+        });
+        let workspace = ProjectionSection::ready(WorkspaceProjection {
+            desired_id: convergence
+                .desired
+                .workspace
+                .as_ref()
+                .and_then(|workspace| workspace.id.as_ref())
+                .map(|id| id.as_str().to_owned()),
+            desired_path: convergence
+                .desired
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.execution_path.to_string_lossy().into_owned()),
+            observed_path: convergence
+                .observed
+                .workspace
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            effective: match convergence.effective.workspace {
+                EffectiveWorkspaceAuthority::Available(_) => EffectiveAvailability::Available,
+                EffectiveWorkspaceAuthority::Unavailable(_) => EffectiveAvailability::Unavailable,
+            },
+        });
+        let connection = ProjectionSection::ready(ConnectionProjection {
+            desired_tunnel_id: convergence
+                .desired
+                .connection
+                .as_ref()
+                .map(|profile| profile.tunnel_id.expose().to_owned()),
+            desired_credential_epoch: convergence
+                .desired
+                .connection
+                .as_ref()
+                .map(|profile| profile.credential_epoch),
+            observed_tunnel_id: convergence
+                .observed
+                .connection
+                .as_ref()
+                .map(|profile| profile.tunnel_id.expose().to_owned()),
+            observed_credential_epoch: convergence
+                .observed
+                .connection
+                .as_ref()
+                .map(|profile| profile.credential_epoch),
+            effective: match convergence.effective.connection {
+                EffectiveConnection::Available(_) => EffectiveAvailability::Available,
+                EffectiveConnection::Unavailable(_) => EffectiveAvailability::Unavailable,
+            },
+        });
+        let mut active_faults = previous
+            .active_faults
+            .iter()
+            .filter(|fault| fault.source == FaultSource::Settings)
+            .cloned()
+            .collect::<Vec<_>>();
+        if let RuntimeState::Faulted(fault) = &runtime.state {
+            active_faults.push(persistent_fault(
+                previous_fault(previous, "runtime"),
+                "runtime",
+                FaultSource::Runtime,
+                OperationError::new(
+                    format!("Runtime.{fault:?}"),
+                    ErrorCategory::Unavailable,
+                    "Runtime is unavailable",
+                    true,
+                ),
+            ));
+        }
+        if let PrivilegeState::Faulted(fault) = &broker {
+            active_faults.push(persistent_fault(
+                previous_fault(previous, "authority"),
+                "authority",
+                FaultSource::Authority,
+                OperationError::new(
+                    format!("Authority.{fault:?}"),
+                    ErrorCategory::Authorization,
+                    "Privilege broker is unavailable",
+                    true,
+                ),
+            ));
+        }
+        let (scheduler, activity) = match activity {
+            Some(activity) => (
+                ProjectionSection::ready(activity.scheduler.clone()),
+                ProjectionSection::ready(activity),
             ),
-        ));
-    }
-    if let PrivilegeState::Faulted(fault) = &broker {
-        active_faults.push(persistent_fault(
-            previous_fault(&owner.read(), "authority"),
-            "authority",
-            FaultSource::Authority,
-            OperationError::new(
-                format!("Authority.{fault:?}"),
-                ErrorCategory::Authorization,
-                "Privilege broker is unavailable",
-                true,
+            None => (
+                ProjectionSection::stale(previous.scheduler.value().cloned()),
+                ProjectionSection::stale(previous.activity.value().cloned()),
             ),
-        ));
-    }
-    let (scheduler, activity) = match activity {
-        Some(activity) => (
-            ProjectionSection::ready(activity.scheduler.clone()),
-            ProjectionSection::ready(activity),
-        ),
-        None => (
-            ProjectionSection::stale(previous.scheduler.into_value()),
-            ProjectionSection::stale(previous.activity.into_value()),
-        ),
-    };
-    owner.publish(SnapshotDraft {
-        runtime: runtime_section,
-        authority,
-        scheduler,
-        workspace,
-        connection,
-        settings: previous.settings,
-        activity,
-        update: previous.update,
-        active_faults,
+        };
+        SnapshotDraft {
+            runtime: runtime_section,
+            authority,
+            scheduler,
+            workspace,
+            connection,
+            settings: previous.settings.clone(),
+            activity,
+            update: previous.update.clone(),
+            active_faults,
+        }
     })
 }
 
@@ -655,6 +662,42 @@ fn persistent_fault(
         error,
         first_seen_at_ms: previous.map_or(now, |fault| fault.first_seen_at_ms),
         last_seen_at_ms: now,
+    }
+}
+
+fn settings_snapshot_draft(
+    previous: &ControlPlaneSnapshot,
+    settings: SettingsProjection,
+    error: Option<OperationError>,
+) -> SnapshotDraft {
+    let mut active_faults = previous
+        .active_faults
+        .iter()
+        .filter(|fault| fault.source != FaultSource::Settings)
+        .cloned()
+        .collect::<Vec<_>>();
+    let settings = match error {
+        Some(error) => {
+            active_faults.push(persistent_fault(
+                previous_fault(previous, "settings"),
+                "settings",
+                FaultSource::Settings,
+                error,
+            ));
+            ProjectionSection::faulted(Some(settings))
+        }
+        None => ProjectionSection::ready(settings),
+    };
+    SnapshotDraft {
+        runtime: previous.runtime.clone(),
+        authority: previous.authority.clone(),
+        scheduler: previous.scheduler.clone(),
+        workspace: previous.workspace.clone(),
+        connection: previous.connection.clone(),
+        settings,
+        activity: previous.activity.clone(),
+        update: previous.update.clone(),
+        active_faults,
     }
 }
 
@@ -716,11 +759,10 @@ impl DesktopLifecycle {
                     let mut owner = monitor_runtime
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let Some(runtime) = owner.active.as_deref_mut() else {
-                        continue;
-                    };
-                    let mut recovery_observer = |event| record_recovery_attempt_event(&event);
-                    let _ = runtime.monitor_recovery_with_observer(&mut recovery_observer);
+                    if let Some(runtime) = owner.active.as_deref_mut() {
+                        let mut recovery_observer = |event| record_recovery_attempt_event(&event);
+                        let _ = runtime.monitor_recovery_with_observer(&mut recovery_observer);
+                    }
                     let snapshot = owner.snapshot();
                     let activity = owner.task_aggregate_snapshot();
                     drop(owner);
@@ -839,70 +881,85 @@ impl DesktopLifecycle {
         Reconciler::plan(&self.convergence_snapshot())
     }
 
+    pub fn reconcile_permission_from_explicit_action(
+        &self,
+        broker_executable: &Path,
+    ) -> Result<(), PrivilegeFault> {
+        let result = match self.reconciliation_plan().permission {
+            crate::control_plane::convergence::PermissionReconcileAction::RequestAuthorization => {
+                self.privilege
+                    .enable_from_explicit_user_action(broker_executable)
+                    .map(|_| ())
+            }
+            crate::control_plane::convergence::PermissionReconcileAction::DisableBroker => {
+                self.privilege.disable()
+            }
+            crate::control_plane::convergence::PermissionReconcileAction::None => Ok(()),
+        };
+        self.publish_current_observation();
+        result
+    }
+
+    #[cfg(windows)]
+    pub fn reconcile_runtime_from_desired_state<E>(
+        &self,
+        runtime_config: impl FnOnce() -> Result<ProductionRuntimeConfig, E>,
+    ) -> Result<(), DesktopRuntimeReconcileError<E>> {
+        match self.reconciliation_plan().runtime {
+            RuntimeReconcileAction::None => Ok(()),
+            RuntimeReconcileAction::Start => self
+                .start_production_runtime(
+                    runtime_config().map_err(DesktopRuntimeReconcileError::Configuration)?,
+                )
+                .map_err(DesktopRuntimeReconcileError::Start),
+            RuntimeReconcileAction::Stop => self
+                .stop_runtime_for_control_plane()
+                .map_err(DesktopRuntimeReconcileError::Control),
+            RuntimeReconcileAction::ApplyWorkspace(path) => self
+                .switch_runtime_workspace(&path)
+                .map_err(DesktopRuntimeReconcileError::Control),
+            RuntimeReconcileAction::RestartConnection => self
+                .backend_handle()
+                .restart_production_runtime(
+                    runtime_config().map_err(DesktopRuntimeReconcileError::Configuration)?,
+                )
+                .map_err(DesktopRuntimeReconcileError::Control),
+            RuntimeReconcileAction::WaitForObservation => {
+                Err(DesktopRuntimeReconcileError::WaitingForObservation)
+            }
+        }
+    }
+
     pub fn publish_settings_snapshot(
         &self,
         settings: SettingsProjection,
         error: Option<OperationError>,
     ) -> ControlPlaneSnapshot {
-        let previous = self.snapshot_owner.read();
-        let mut active_faults = previous
-            .active_faults
-            .iter()
-            .filter(|fault| fault.source != FaultSource::Settings)
-            .cloned()
-            .collect::<Vec<_>>();
-        let settings = match error {
-            Some(error) => {
-                active_faults.push(persistent_fault(
-                    previous_fault(&previous, "settings"),
-                    "settings",
-                    FaultSource::Settings,
-                    error,
-                ));
-                ProjectionSection::faulted(Some(settings))
-            }
-            None => ProjectionSection::ready(settings),
-        };
-        self.snapshot_owner.publish(SnapshotDraft {
-            runtime: previous.runtime,
-            authority: previous.authority,
-            scheduler: previous.scheduler,
-            workspace: previous.workspace,
-            connection: previous.connection,
-            settings,
-            activity: previous.activity,
-            update: previous.update,
-            active_faults,
-        })
+        self.snapshot_owner
+            .update(|previous| settings_snapshot_draft(previous, settings, error))
     }
 
     pub fn publish_settings_fault(&self, error: OperationError) -> ControlPlaneSnapshot {
-        let settings = self
-            .snapshot_owner
-            .read()
-            .settings
-            .value()
-            .cloned()
-            .unwrap_or_default();
-        self.publish_settings_snapshot(settings, Some(error))
+        self.snapshot_owner.update(|previous| {
+            let settings = previous.settings.value().cloned().unwrap_or_default();
+            settings_snapshot_draft(previous, settings, Some(error))
+        })
     }
 
     pub fn publish_local_environment_observation(&self, available: bool) -> ControlPlaneSnapshot {
-        let previous = self.snapshot_owner.read();
-        let runtime = previous.runtime.map(|mut runtime| {
-            runtime.local_environment_available = Some(available);
-            runtime
-        });
-        self.snapshot_owner.publish(SnapshotDraft {
-            runtime,
-            authority: previous.authority,
-            scheduler: previous.scheduler,
-            workspace: previous.workspace,
-            connection: previous.connection,
-            settings: previous.settings,
-            activity: previous.activity,
-            update: previous.update,
-            active_faults: previous.active_faults,
+        self.snapshot_owner.update(|previous| SnapshotDraft {
+            runtime: previous.runtime.clone().map(|mut runtime| {
+                runtime.local_environment_available = Some(available);
+                runtime
+            }),
+            authority: previous.authority.clone(),
+            scheduler: previous.scheduler.clone(),
+            workspace: previous.workspace.clone(),
+            connection: previous.connection.clone(),
+            settings: previous.settings.clone(),
+            activity: previous.activity.clone(),
+            update: previous.update.clone(),
+            active_faults: previous.active_faults.clone(),
         })
     }
 
@@ -1303,9 +1360,9 @@ impl DesktopBackendHandle {
         )
         .with_privileged_execution(Arc::new(self.privilege.gateway()))
         .with_task_projection_wake(wake)
-        .with_control_plane_state(
-            self.desired.clone(),
+        .with_published_control_plane_state(
             self.desired.snapshot().state.connection,
+            self.snapshot_owner.reader(),
         );
         let mut runtime = RuntimeOrchestrator::new(driver);
         runtime.start().map_err(DesktopRuntimeStartError::Runtime)?;

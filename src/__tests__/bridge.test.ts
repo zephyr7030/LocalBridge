@@ -29,6 +29,8 @@ describe("backend projection contract", () => {
   it("parses the Rust-owned JSON fixture without losing lifecycle states", () => {
     const projection = parseMainProjection(mainProjectionFixture);
     expect(projection.permissionReconciliation).toBe("awaiting_authorization");
+    expect(projection.workspace?.effective).toBe("available");
+    expect(projection.connection?.observedTunnelId).toBe(projection.connection?.desiredTunnelId);
     expect(projection.currentActivity?.state).toBe("waiting_input");
     expect(projection.lastActivity?.outcome).toBe("blocked");
     expect(projection.activeFaults).toHaveLength(1);

@@ -122,12 +122,6 @@ impl PrivilegeController {
         }
     }
 
-    pub fn request_without_uac(&self) -> Result<(), PrivilegeFault> {
-        self.disable()?;
-        self.shared.replace(BrokerLifecycle::Requested);
-        Ok(())
-    }
-
     pub fn enable_from_explicit_user_action(
         &self,
         broker_executable: &Path,
@@ -433,7 +427,7 @@ mod tests {
             ),
             Err(PrivilegedExecError::GateClosed(PrivilegeState::Disabled))
         ));
-        controller.request_without_uac().unwrap();
+        controller.shared.replace(BrokerLifecycle::Requested);
         assert_eq!(
             controller
                 .gateway()
@@ -445,7 +439,6 @@ mod tests {
     #[test]
     fn fault_transition_replaces_the_previous_lifecycle_atomically() {
         let controller = PrivilegeController::new();
-        controller.request_without_uac().unwrap();
         controller.fail(PrivilegeFault::BrokerExited);
         assert_eq!(
             controller.gateway().state(),
@@ -454,9 +447,9 @@ mod tests {
     }
 
     #[test]
-    fn background_request_sets_requested_without_opening_privileged_gate() {
+    fn requested_lifecycle_never_opens_privileged_gate() {
         let controller = PrivilegeController::new();
-        controller.request_without_uac().unwrap();
+        controller.shared.replace(BrokerLifecycle::Requested);
         assert_eq!(controller.state(), PrivilegeState::Requested);
         assert!(matches!(
             controller.gateway().execute(

@@ -581,7 +581,7 @@ fn public_tool_output_schema(name: &str) -> Value {
                 "important_files":{"type":"array","items":{"type":"string"}},
                 "instructions":{"type":"array","items":{"type":"string"}},
                 "permission_mode":{"type":"string","enum":["edit","full","elevated"]},
-                "workspace_scope":{"type":"string","enum":["structured_tools_active_workspace"]},
+                "workspace_scope":{"type":"string","enum":["structured_tools_active_workspace","administrator_broker_paths"]},
                 "ordinary_route_token":{"type":"string","enum":["current_windows_user"]},
                 "elevated_route_available":{"type":"boolean"},
                 "privilege_state":{"type":"string"},
@@ -597,9 +597,10 @@ fn public_tool_output_schema(name: &str) -> Value {
                         "observed_broker":{"type":"string"},
                         "observed_uac":{"type":"string"},
                         "effective_permission":{"type":"string","enum":["edit","full","elevated"]},
-                        "reconciliation":{"type":"string","enum":["converged","awaiting_authorization","broker_unavailable","disable_pending","unavailable"]}
+                        "reconciliation":{"type":"string","enum":["converged","authorization_required","awaiting_authorization","broker_unavailable","disable_pending","unavailable"]},
+                        "revision":{"type":"integer","minimum":0}
                     },
-                    "required":["desired_permission","observed_privilege","observed_broker","observed_uac","effective_permission","reconciliation"],
+                    "required":["desired_permission","observed_privilege","observed_broker","observed_uac","effective_permission","reconciliation","revision"],
                     "additionalProperties":false
                 },
                 "shell_discovery":{"type":"object","additionalProperties":true},
@@ -4256,46 +4257,12 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             .map(|name| Value::String((*name).to_string()))
             .collect::<Vec<_>>();
         public_tools.push(Value::String("elevated_exec".into()));
-        let permission_mode = match mode {
-            PermissionMode::Edit => "edit",
-            PermissionMode::Full => "full",
-            PermissionMode::Elevated => "elevated",
-        };
         let data = result
             .pointer_mut("/structuredContent/data")
             .and_then(Value::as_object_mut)
             .ok_or_else(|| {
                 FacadeError::new(FacadeErrorCode::Internal, "工作区上下文投影无效", false)
             })?;
-        data.insert(
-            "permission_mode".into(),
-            Value::String(permission_mode.into()),
-        );
-        data.insert(
-            "workspace_scope".into(),
-            Value::String("structured_tools_active_workspace".into()),
-        );
-        data.insert(
-            "ordinary_route_token".into(),
-            Value::String("current_windows_user".into()),
-        );
-        data.insert("elevated_route_available".into(), Value::Bool(false));
-        data.insert("privilege_state".into(), Value::String("unknown".into()));
-        data.insert("broker_state".into(), Value::String("unknown".into()));
-        data.insert("uac_state".into(), Value::String("unknown".into()));
-        data.insert("administrator_token_available".into(), Value::Bool(false));
-        data.insert("selected_route".into(), Value::String("ordinary".into()));
-        data.insert(
-            "authority".into(),
-            json!({
-                "desired_permission":permission_mode,
-                "observed_privilege":"unknown",
-                "observed_broker":"unknown",
-                "observed_uac":"unknown",
-                "effective_permission":if mode == PermissionMode::Elevated { "full" } else { permission_mode },
-                "reconciliation":"unavailable"
-            }),
-        );
         data.insert(
             "shell_discovery".into(),
             discovery
@@ -10749,7 +10716,7 @@ mod tests {
     }
 
     #[test]
-    fn schema36_workspace_context_reports_mode_scope_and_capability_snapshot() {
+    fn internal_workspace_context_defers_authority_to_the_control_plane_mapper() {
         let mut facade =
             AgentFacade::with_adapter(FakeAdapter::new(compatible_catalog()), policy()).unwrap();
         let result = facade
@@ -10762,10 +10729,8 @@ mod tests {
             )
             .unwrap();
         let data = stable_data(&result);
-        assert_eq!(data["permission_mode"], "full");
-        assert_eq!(data["workspace_scope"], "structured_tools_active_workspace");
-        assert_eq!(data["ordinary_route_token"], "current_windows_user");
-        assert_eq!(data["elevated_route_available"], false);
+        assert!(data.get("permission_mode").is_none());
+        assert!(data.get("authority").is_none());
         assert!(
             data["capabilities"]["public_tools"]
                 .as_array()

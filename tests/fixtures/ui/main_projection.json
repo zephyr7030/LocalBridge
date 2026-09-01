@@ -2,19 +2,24 @@
   "authorityStatus": "ready",
   "runtimeStatus": "ready",
   "settingsStatus": "ready",
+  "workspaceStatus": "ready",
   "connectionStatus": "ready",
   "activityStatus": "ready",
   "updateStatus": "ready",
   "permission": "admin",
   "effectivePermission": "full",
   "permissionReconciliation": "awaiting_authorization",
-  "elevatedActive": false,
+  "pathAuthority": "workspace",
   "privilege": "requested",
   "localEnvironmentService": "online",
   "tunnelService": "recovering",
   "codingService": "online",
   "onboardingReady": false,
-  "currentProject": "D:/project/LocalBridge",
+  "workspace": {
+    "desiredPath": "D:/project/LocalBridge",
+    "observedPath": "D:/project/LocalBridge",
+    "effective": "available"
+  },
   "projects": [
     {
       "id": "workspace-1",
@@ -44,7 +49,11 @@
     "completedAtMs": 1000
   },
   "projectionRevision": 49,
-  "tunnelId": "tunnel_01401401401401401401401401401401",
+  "connection": {
+    "desiredTunnelId": "tunnel_01401401401401401401401401401401",
+    "observedTunnelId": "tunnel_01401401401401401401401401401401",
+    "effective": "available"
+  },
   "runtimeKeySaved": true,
   "autoStart": true,
   "closeWindowContinueRunning": true,

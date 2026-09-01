@@ -56,6 +56,7 @@ button{cursor:pointer}
 .ghost{background:#fff;border-color:var(--control-border);color:#1d1d1f}
 .choice{background:var(--control-neutral);border-color:var(--control-border);color:#3a3a3c}
 .choice.selected{background:var(--accent);border-color:var(--accent);color:#fff}
+.choice.pending:not(.selected){border-style:dashed;border-color:var(--admin-accent);box-shadow:inset 0 0 0 1px var(--admin-accent)}
 .choice.admin-choice.selected{background:var(--admin-accent);border-color:var(--admin-accent);color:#fff}
 .primary:not(:disabled):hover,.choice.selected:not(:disabled):hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .choice.admin-choice.selected:not(:disabled):hover{background:var(--admin-accent-hover);border-color:var(--admin-accent-hover)}

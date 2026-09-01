@@ -17,6 +17,9 @@ use localbridge_lib::mcp::{
 use localbridge_lib::state::PermissionMode;
 use serde_json::Value;
 
+#[path = "../../support/control_plane.rs"]
+mod control_plane_support;
+
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
@@ -81,8 +84,11 @@ impl LiveRuntime {
             coding,
             CapabilityPolicy::load(&repo.join("runtime-policy.toml"))
                 .expect("load public capability policy"),
-            desired,
-            None,
+            control_plane_support::ready_control_plane(
+                &desired,
+                &workspace,
+                localbridge_lib::state::PrivilegeState::Disabled,
+            ),
             None,
             None,
         )

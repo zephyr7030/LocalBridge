@@ -7,6 +7,7 @@ const readiness = readFileSync("src/components/ReadinessCheck.tsx","utf8");
 const adminWarning = readFileSync("src/components/AdminModeWarning.tsx","utf8");
 const backend = readFileSync("src-tauri/src/commands/onboarding.rs","utf8");
 const permissionBackend = readFileSync("src-tauri/src/commands/ui.rs","utf8");
+const lifecycleBackend = readFileSync("src-tauri/src/app/background.rs","utf8");
 const controlPlane = readFileSync("src-tauri/src/control_plane/snapshot.rs","utf8");
 const lib = readFileSync("src-tauri/src/lib.rs","utf8");
 const bridge = readFileSync("src/bridge.ts","utf8");
@@ -31,7 +32,7 @@ if (!apiState.includes("projectionRevision: number") || apiState.includes("permi
 for (const marker of ["projection_revision: u64", "snapshot.revision", "snapshot.onboarding_readiness()"] ) if (!backend.includes(marker)) throw new Error(`LB-016 backend onboarding projection does not derive from one snapshot: ${marker}`);
 if (rustState.includes("permission:") || backend.includes("authority.desired")) throw new Error("LB-016 backend onboarding projection retains a parallel permission value");
 if (ui.includes('useState<AccessCode>("edit")') || ui.includes("setPermission(")) throw new Error("LB-016 React still owns a parallel live permission value");
-for (const marker of ["main?.permission === mode", "nextMain.permission !== mode", "main?.onboardingReady === true"] ) if (!ui.includes(marker)) throw new Error(`LB-016 permission/readiness controls do not use the control-plane projection: ${marker}`);
+for (const marker of ["main?.effectivePermission === mode", "nextMain.effectivePermission !== mode", 'nextMain.permissionReconciliation !== "converged"', "main?.onboardingReady === true"] ) if (!ui.includes(marker)) throw new Error(`LB-016 permission/readiness controls do not use the effective control-plane projection: ${marker}`);
 if (ui.includes("state.permission")) throw new Error("LB-016 onboarding still consumes its obsolete permission projection");
 for (const marker of ["pub struct OnboardingReadiness", "ProjectionAvailability::Ready", "runtime.is_stale()", "pub fn onboarding_readiness"] ) if (!controlPlane.includes(marker)) throw new Error(`LB-016 shared control-plane readiness projection missing: ${marker}`);
 if (!ui.includes('"*".repeat(state.runtimeKeyLength)') || !ui.includes('"已安全保存至windows安全凭据"')) throw new Error("LB-016 saved Runtime API Key mask/status contract missing");
@@ -44,7 +45,7 @@ for (const required of ["pub async fn prepare_onboarding_project","tauri::async_
 const prepareStart = backend.indexOf("pub async fn prepare_onboarding_project");
 const prepareEnd = backend.indexOf("pub async fn complete_onboarding", prepareStart);
 if (backend.slice(prepareStart, prepareEnd).includes("set_permission_mode")) throw new Error("LB-016 project preparation still duplicates the permission writer");
-if (!ui.includes("await bridge.setAccess(mode)") || !permissionBackend.includes("enable_from_explicit_user_action") || !permissionBackend.includes("let privilege_active =") || !permissionBackend.includes("matches!(lifecycle.privilege().state(), PrivilegeState::Active { .. })") || !permissionBackend.includes("&& !privilege_active")) throw new Error("LB-016 administrator selection/reselection is not the consent-gated explicit UAC action");
+if (!ui.includes("await bridge.setAccess(mode)") || !lifecycleBackend.includes("enable_from_explicit_user_action") || !permissionBackend.includes("let privilege_active =") || !permissionBackend.includes("matches!(lifecycle.privilege().state(), PrivilegeState::Active { .. })") || !permissionBackend.includes("&& !privilege_active") || !permissionBackend.includes("reconcile_explicit_permission(&lifecycle)?")) throw new Error("LB-016 administrator selection/reselection is not the consent-gated lifecycle reconciliation action");
 for (const forbidden of ["enable_admin","disable_admin","enableAdmin","disableAdmin","启用管理员权限"]) if (`${ui}\n${bridge}\n${app}\n${lib}`.includes(forbidden)) throw new Error(`LB-016 separate administrator enable surface remains: ${forbidden}`);
 if (!css.includes(".onboarding-permissions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;align-items:stretch}") || !css.includes(".choice.onboarding-permission{width:100%;height:100%;min-width:0;padding:15px 16px")) throw new Error("LB-016 Screen3 PermissionMode group is not the symmetric equal-three-column contract");
 for (const marker of ['"permission-geometry"', "getBoundingClientRect()", "document.createRange()", "getClientRects()", "Math.max(...widths) - Math.min(...widths) <= 0.5", "Math.max(...heights) - Math.min(...heights) <= 0.5", "Math.abs(gaps[0] - gaps[1]) <= 0.5", "lineBoxesInside(button, button.querySelector(\"strong\"))", "lineBoxesInside(button, button.querySelector(\"small\"))", "permissionGeometryFailed"]) if (!ui.includes(marker)) throw new Error(`LB-016 real Screen3 equal-thirds rendered-geometry self-gate missing: ${marker}`);

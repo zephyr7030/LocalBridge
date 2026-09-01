@@ -46,9 +46,21 @@ export function permissionReconciliationText(projection: MainProjection | null):
   }
   if (projection.permissionReconciliation === "converged") return `当前已生效：${accessText[projection.effectivePermission]}`;
   const state = `期望：${accessText[projection.permission]} · 当前：${accessText[projection.effectivePermission]}`;
+  if (projection.permissionReconciliation === "authorization_required") return `${state} · 需要重新授权管理员模式`;
   if (projection.permissionReconciliation === "awaiting_authorization") return `${state} · 等待 Windows 授权`;
   if (projection.permissionReconciliation === "broker_unavailable") return `${state} · 管理员服务不可用`;
+  if (projection.permissionReconciliation === "disable_pending") return `${state} · 正在关闭管理员服务`;
   return "权限状态暂不可用";
+}
+export function workspaceDisplayText(projection: MainProjection | null): string {
+  if (!projection) return "正在读取";
+  if (projection.pathAuthority === "administrator") return "全目录访问";
+  if (projection.workspaceStatus !== "ready") return projectionStatusText(projection.workspaceStatus);
+  if (projection.workspace?.effective === "available") {
+    return projection.workspace.observedPath ?? projection.workspace.desiredPath ?? "未选择项目";
+  }
+  if (projection.workspace?.desiredPath) return `${projection.workspace.desiredPath}（正在收敛）`;
+  return "未选择项目";
 }
 export function updateStatusText(update: UpdateProjection | null, status: ProjectionStatusCode = "ready"): string {
   if (!update) return status === "stale" ? "版本状态已过期" : status === "fault" || status === "unavailable" ? "版本状态暂不可用" : "正在读取版本";

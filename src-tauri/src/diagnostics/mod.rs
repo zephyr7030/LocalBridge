@@ -5,8 +5,8 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::domain::ErrorCategory;
 use crate::runtime::{
@@ -213,22 +213,26 @@ struct DiagnosticsLogSnapshot {
 }
 
 #[derive(Debug, Default)]
-struct DiagnosticsStore(Mutex<DiagnosticsState>);
+struct DiagnosticsStore {
+    state: Mutex<DiagnosticsState>,
+    changed: Condvar,
+}
 
 impl DiagnosticsStore {
     fn mutate(&self, update: impl FnOnce(&mut DiagnosticsState) -> bool) {
         let mut state = self
-            .0
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if update(&mut state) {
             state.revision = state.revision.saturating_add(1);
+            self.changed.notify_all();
         }
     }
 
     fn read(&self) -> DiagnosticsLogSnapshot {
         let state = self
-            .0
+            .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         DiagnosticsLogSnapshot {
@@ -237,11 +241,34 @@ impl DiagnosticsStore {
             request_diagnostics: state.requests.events.iter().cloned().collect(),
         }
     }
+
+    fn wait_after(&self, since: u64, timeout: Duration) -> u64 {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.revision > since {
+            return state.revision;
+        }
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, timeout, |state| state.revision <= since)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.revision
+    }
 }
 
 fn diagnostics_store() -> &'static DiagnosticsStore {
     static STORE: OnceLock<DiagnosticsStore> = OnceLock::new();
     STORE.get_or_init(DiagnosticsStore::default)
+}
+
+pub fn wait_diagnostics_log_change_after(since: u64, timeout: Duration) -> u64 {
+    diagnostics_store().wait_after(since, timeout)
+}
+
+pub fn diagnostics_log_revision() -> u64 {
+    diagnostics_store().read().revision
 }
 
 pub fn build_snapshot(

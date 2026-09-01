@@ -465,6 +465,20 @@ fn mcp_request_diagnostics_are_append_only_and_bounded() {
 }
 
 #[test]
+fn diagnostics_log_revision_wakes_waiters_without_a_control_plane_change() {
+    let store = std::sync::Arc::new(DiagnosticsStore::default());
+    let since = store.read().revision;
+    let waiter_store = std::sync::Arc::clone(&store);
+    let waiter = std::thread::spawn(move || {
+        waiter_store.wait_after(since, std::time::Duration::from_secs(1))
+    });
+
+    store.mutate(|_| true);
+
+    assert_eq!(waiter.join().unwrap(), since + 1);
+}
+
+#[test]
 fn materialized_log_directory_contains_a_redacted_diagnostics_artifact() {
     let root = TempDir::new("materialized-log");
     complete_runtime(root.path());

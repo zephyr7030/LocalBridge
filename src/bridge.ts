@@ -2,12 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type AccessCode = "edit" | "full" | "admin";
 export type ProjectionStatusCode = "ready" | "stale" | "unavailable" | "fault";
-export type PermissionReconciliationCode = "converged" | "awaiting_authorization" | "broker_unavailable" | "unavailable";
+export type PermissionReconciliationCode = "converged" | "authorization_required" | "awaiting_authorization" | "broker_unavailable" | "disable_pending" | "unavailable";
+export type PathAuthorityCode = "workspace" | "administrator";
+export type EffectiveAvailabilityCode = "available" | "disabled" | "reconciling" | "unavailable";
 export type PrivilegeCode = "off" | "requested" | "awaiting" | "active" | "fault";
 export type ServiceCode = "off" | "starting" | "online" | "recovering" | "fault";
 export type TaskKindCode = "read" | "search" | "modify" | "command" | "git" | "build" | "test" | "admin" | "other";
 export type TaskStateCode = "idle" | "running" | "waiting" | "blocked" | "failed" | "cancelled";
 export interface ProjectProjection { id: string; path: string; active: boolean }
+export interface WorkspaceProjection { desiredPath: string | null; observedPath: string | null; effective: EffectiveAvailabilityCode }
+export interface ConnectionProjection { desiredTunnelId: string | null; observedTunnelId: string | null; effective: EffectiveAvailabilityCode }
 export interface TaskProjection { kind: TaskKindCode; summary: string | null; state: TaskStateCode; elapsedMs: number | null }
 export type WorkflowStateCode = "running" | "waiting";
 export type CommandActivityStateCode = "running" | "waiting_input" | "cancelling";
@@ -26,10 +30,12 @@ export type UpdateStateCode = "source_unavailable" | "idle" | "checking" | "curr
 export interface UpdateProjection { state: UpdateStateCode; currentVersion: string; latestVersion: string | null; releaseUrl: string | null; operationId: string | null; attempt: number | null; retryable: boolean }
 export interface OpenReleaseProjection { releaseUrl: string }
 export interface AdminConsentChallenge { challengeId: string; notBeforeUnixMs: number }
-export interface MainProjection { authorityStatus: ProjectionStatusCode; runtimeStatus: ProjectionStatusCode; settingsStatus: ProjectionStatusCode; connectionStatus: ProjectionStatusCode; activityStatus: ProjectionStatusCode; updateStatus: ProjectionStatusCode; permission: AccessCode | null; effectivePermission: AccessCode | null; permissionReconciliation: PermissionReconciliationCode | null; elevatedActive: boolean | null; privilege: PrivilegeCode | null; localEnvironmentService: ServiceCode | null; tunnelService: ServiceCode | null; codingService: ServiceCode | null; onboardingReady: boolean | null; currentProject: string | null; projects: ProjectProjection[] | null; currentTask: TaskProjection | null; currentActivity: CurrentActivityProjection | null; lastActivity: LastActivityProjection | null; projectionRevision: number; tunnelId: string | null; runtimeKeySaved: boolean | null; autoStart: boolean | null; closeWindowContinueRunning: boolean | null; reconnect: ReconnectProjection | null; update: UpdateProjection | null; activeFaults: UiFaultProjection[]; }
+export interface MainProjection { authorityStatus: ProjectionStatusCode; runtimeStatus: ProjectionStatusCode; settingsStatus: ProjectionStatusCode; workspaceStatus: ProjectionStatusCode; connectionStatus: ProjectionStatusCode; activityStatus: ProjectionStatusCode; updateStatus: ProjectionStatusCode; permission: AccessCode | null; effectivePermission: AccessCode | null; permissionReconciliation: PermissionReconciliationCode | null; pathAuthority: PathAuthorityCode | null; privilege: PrivilegeCode | null; localEnvironmentService: ServiceCode | null; tunnelService: ServiceCode | null; codingService: ServiceCode | null; onboardingReady: boolean | null; workspace: WorkspaceProjection | null; projects: ProjectProjection[] | null; currentTask: TaskProjection | null; currentActivity: CurrentActivityProjection | null; lastActivity: LastActivityProjection | null; projectionRevision: number; connection: ConnectionProjection | null; runtimeKeySaved: boolean | null; autoStart: boolean | null; closeWindowContinueRunning: boolean | null; reconnect: ReconnectProjection | null; update: UpdateProjection | null; activeFaults: UiFaultProjection[]; }
 const projectionStatuses: ProjectionStatusCode[] = ["ready", "stale", "unavailable", "fault"];
 const accessCodes: AccessCode[] = ["edit", "full", "admin"];
-const reconciliationCodes: PermissionReconciliationCode[] = ["converged", "awaiting_authorization", "broker_unavailable", "unavailable"];
+const reconciliationCodes: PermissionReconciliationCode[] = ["converged", "authorization_required", "awaiting_authorization", "broker_unavailable", "disable_pending", "unavailable"];
+const pathAuthorities: PathAuthorityCode[] = ["workspace", "administrator"];
+const effectiveAvailabilities: EffectiveAvailabilityCode[] = ["available", "disabled", "reconciling", "unavailable"];
 const privilegeCodes: PrivilegeCode[] = ["off", "requested", "awaiting", "active", "fault"];
 const serviceCodes: ServiceCode[] = ["off", "starting", "online", "recovering", "fault"];
 const taskKinds: TaskKindCode[] = ["read", "search", "modify", "command", "git", "build", "test", "admin", "other"];
@@ -46,6 +52,8 @@ export const isEnum = <T extends string>(value: unknown, values: readonly T[]): 
 export const isEnumOrNull = <T extends string>(value: unknown, values: readonly T[]): value is T | null => value === null || isEnum(value, values);
 export const isUiErrorCategory = (value: unknown): value is UiErrorCategory => isEnum(value, errorCategories);
 const isProject = (value: unknown): value is ProjectProjection => isRecord(value) && typeof value.id === "string" && typeof value.path === "string" && typeof value.active === "boolean";
+const isWorkspace = (value: unknown): value is WorkspaceProjection => isRecord(value) && isStringOrNull(value.desiredPath) && isStringOrNull(value.observedPath) && isEnum(value.effective, effectiveAvailabilities);
+const isConnection = (value: unknown): value is ConnectionProjection => isRecord(value) && isStringOrNull(value.desiredTunnelId) && isStringOrNull(value.observedTunnelId) && isEnum(value.effective, effectiveAvailabilities);
 const isTask = (value: unknown): value is TaskProjection => isRecord(value) && isEnum(value.kind, taskKinds) && isStringOrNull(value.summary) && isEnum(value.state, taskStates) && isNumberOrNull(value.elapsedMs);
 const isCurrentActivity = (value: unknown): value is CurrentActivityProjection => isRecord(value) && isEnum(value.kind, taskKinds) && isEnum(value.state, activityStates) && isStringOrNull(value.summary) && isNumberOrNull(value.elapsedMs) && isStringOrNull(value.step) && isNumberOrNull(value.progressCurrent) && isNumberOrNull(value.progressTotal);
 const isLastActivity = (value: unknown): value is LastActivityProjection => isRecord(value) && isEnum(value.kind, taskKinds) && isStringOrNull(value.summary) && isEnum(value.outcome, activityOutcomes) && typeof value.completedAtMs === "number";
@@ -56,25 +64,26 @@ export function parseMainProjection(value: unknown): MainProjection {
     || !isEnum(value.authorityStatus, projectionStatuses)
     || !isEnum(value.runtimeStatus, projectionStatuses)
     || !isEnum(value.settingsStatus, projectionStatuses)
+    || !isEnum(value.workspaceStatus, projectionStatuses)
     || !isEnum(value.connectionStatus, projectionStatuses)
     || !isEnum(value.activityStatus, projectionStatuses)
     || !isEnum(value.updateStatus, projectionStatuses)
     || !isEnumOrNull(value.permission, accessCodes)
     || !isEnumOrNull(value.effectivePermission, accessCodes)
     || !isEnumOrNull(value.permissionReconciliation, reconciliationCodes)
-    || !isBooleanOrNull(value.elevatedActive)
+    || !isEnumOrNull(value.pathAuthority, pathAuthorities)
     || !isEnumOrNull(value.privilege, privilegeCodes)
     || !isEnumOrNull(value.localEnvironmentService, serviceCodes)
     || !isEnumOrNull(value.tunnelService, serviceCodes)
     || !isEnumOrNull(value.codingService, serviceCodes)
     || !isBooleanOrNull(value.onboardingReady)
-    || !isStringOrNull(value.currentProject)
+    || !(value.workspace === null || isWorkspace(value.workspace))
     || !(value.projects === null || (Array.isArray(value.projects) && value.projects.every(isProject)))
     || !(value.currentTask === null || isTask(value.currentTask))
     || !(value.currentActivity === null || isCurrentActivity(value.currentActivity))
     || !(value.lastActivity === null || isLastActivity(value.lastActivity))
     || typeof value.projectionRevision !== "number"
-    || !isStringOrNull(value.tunnelId)
+    || !(value.connection === null || isConnection(value.connection))
     || !isBooleanOrNull(value.runtimeKeySaved)
     || !isBooleanOrNull(value.autoStart)
     || !isBooleanOrNull(value.closeWindowContinueRunning)

@@ -268,8 +268,7 @@ pub(crate) fn get_sse(port: u16, session: &str) -> RawHttpResponse {
 }
 
 fn parse_raw_http_response(mut stream: TcpStream) -> RawHttpResponse {
-    let mut bytes = Vec::new();
-    stream.read_to_end(&mut bytes).unwrap();
+    let bytes = read_complete_http_response(&mut stream);
     let split = bytes
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
@@ -304,8 +303,7 @@ fn parse_raw_http_response(mut stream: TcpStream) -> RawHttpResponse {
 }
 
 pub(crate) fn parse_client_response(mut stream: TcpStream) -> ClientResponse {
-    let mut bytes = Vec::new();
-    stream.read_to_end(&mut bytes).unwrap();
+    let bytes = read_complete_http_response(&mut stream);
     let split = bytes
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
@@ -337,6 +335,49 @@ pub(crate) fn parse_client_response(mut stream: TcpStream) -> ClientResponse {
         session,
         body,
     }
+}
+
+fn read_complete_http_response(stream: &mut TcpStream) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    match stream.read_to_end(&mut bytes) {
+        Ok(_) => bytes,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::ConnectionReset
+                && response_content_length_is_complete(&bytes) =>
+        {
+            bytes
+        }
+        Err(error) => panic!("read complete test HTTP response: {error}"),
+    }
+}
+
+fn response_content_length_is_complete(bytes: &[u8]) -> bool {
+    let Some(header_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return false;
+    };
+    let Ok(headers) = std::str::from_utf8(&bytes[..header_end]) else {
+        return false;
+    };
+    let content_length = headers.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("Content-Length")
+            .then(|| value.trim().parse::<usize>().ok())
+            .flatten()
+    });
+    content_length.is_some_and(|length| bytes.len() >= header_end + 4 + length)
+}
+
+#[test]
+fn reset_tolerance_requires_a_complete_content_length_body() {
+    assert!(response_content_length_is_complete(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"
+    ));
+    assert!(!response_content_length_is_complete(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n{}"
+    ));
+    assert!(!response_content_length_is_complete(
+        b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{}"
+    ));
 }
 
 pub(crate) fn initialize(port: u16, id: u64) -> ClientResponse {

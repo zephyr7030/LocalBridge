@@ -391,6 +391,65 @@ impl ExitRuntime for GenerationTestRuntime {
 }
 
 #[cfg(windows)]
+#[test]
+fn runtime_reconciler_applies_workspace_without_command_layer_plan_interpretation() {
+    struct WorkspaceRuntime {
+        workspace: PathBuf,
+    }
+
+    impl ExitRuntime for WorkspaceRuntime {
+        fn stop_tunnel_for_exit(&mut self) -> Result<(), DesktopExitError> {
+            Ok(())
+        }
+
+        fn finish_exit_after_tunnel(&mut self) -> Result<(), DesktopExitError> {
+            Ok(())
+        }
+
+        fn runtime_snapshot(&self) -> DesktopRuntimeSnapshot {
+            DesktopRuntimeSnapshot {
+                active: true,
+                state: RuntimeState::Ready,
+                current_task: CurrentTaskStatus::Idle,
+                current_task_elapsed_ms: None,
+                last_tool: None,
+                configured_workspace: Some(self.workspace.clone()),
+                connection_profile: None,
+                outage: None,
+            }
+        }
+
+        fn switch_workspace(&mut self, candidate: &Path) -> Result<(), DesktopRuntimeControlError> {
+            self.workspace = candidate.to_path_buf();
+            Ok(())
+        }
+    }
+
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    lifecycle
+        .install_runtime_for_test(WorkspaceRuntime {
+            workspace: PathBuf::from(r"C:\before"),
+        })
+        .unwrap();
+    lifecycle.set_desired_workspace(Some(DesiredWorkspace::new(
+        crate::workspace::WorkspaceId::from_validated("workspace-after").unwrap(),
+        PathBuf::from(r"C:\after"),
+    )));
+    lifecycle.set_desired_services(ServiceIntent::Enabled);
+
+    lifecycle
+        .reconcile_runtime_from_desired_state(|| -> Result<ProductionRuntimeConfig, ()> {
+            panic!("workspace reconciliation must not request a restart configuration")
+        })
+        .unwrap();
+
+    assert_eq!(
+        lifecycle.runtime_snapshot().configured_workspace.as_deref(),
+        Some(Path::new(r"C:\after"))
+    );
+}
+
+#[cfg(windows)]
 fn ui_ready_test_config(workspace: &str) -> ProductionRuntimeConfig {
     ProductionRuntimeConfig::new(
         PathBuf::from(r"C:\LocalBridge"),

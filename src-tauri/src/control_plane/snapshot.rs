@@ -10,7 +10,7 @@ use crate::state::{
 };
 use crate::workspace::WorkspaceValidator;
 
-use super::convergence::AuthorityReconciliation;
+use super::convergence::{AuthorityReconciliation, StructuredPathAuthority};
 use super::scheduler::SchedulerSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,7 +158,7 @@ pub struct AuthorityProjection {
     pub desired: PermissionMode,
     pub effective: PermissionMode,
     pub broker: PrivilegeState,
-    pub elevated_active: bool,
+    pub structured_paths: StructuredPathAuthority,
     pub reconciliation: AuthorityReconciliation,
 }
 
@@ -297,6 +297,28 @@ impl ControlPlaneSnapshot {
     pub fn onboarding_readiness(&self) -> OnboardingReadiness {
         OnboardingReadiness::from_runtime(&self.runtime)
     }
+
+    pub fn work_is_authorized(&self) -> bool {
+        let runtime_ready = self.runtime.availability() == ProjectionAvailability::Ready
+            && !self.runtime.is_stale()
+            && self
+                .runtime
+                .value()
+                .is_some_and(|runtime| runtime.state == RuntimeState::Ready);
+        let workspace_ready = self.workspace.availability() == ProjectionAvailability::Ready
+            && !self.workspace.is_stale()
+            && self
+                .workspace
+                .value()
+                .is_some_and(|workspace| workspace.effective == EffectiveAvailability::Available);
+        let connection_ready = self.connection.availability() == ProjectionAvailability::Ready
+            && !self.connection.is_stale()
+            && self.connection.value().is_some_and(|connection| {
+                connection.desired_tunnel_id.is_none()
+                    || connection.effective == EffectiveAvailability::Available
+            });
+        runtime_ready && workspace_ready && connection_ready
+    }
 }
 
 impl Default for ControlPlaneSnapshot {
@@ -338,6 +360,9 @@ struct SnapshotState {
 #[derive(Debug, Clone)]
 pub struct ControlPlaneSnapshotOwner(Arc<(Mutex<SnapshotState>, Condvar)>);
 
+#[derive(Debug, Clone)]
+pub struct ControlPlaneSnapshotReader(Arc<(Mutex<SnapshotState>, Condvar)>);
+
 impl Default for ControlPlaneSnapshotOwner {
     fn default() -> Self {
         Self(Arc::new((
@@ -350,6 +375,10 @@ impl Default for ControlPlaneSnapshotOwner {
 }
 
 impl ControlPlaneSnapshotOwner {
+    pub fn reader(&self) -> ControlPlaneSnapshotReader {
+        ControlPlaneSnapshotReader(Arc::clone(&self.0))
+    }
+
     pub fn read(&self) -> ControlPlaneSnapshot {
         self.0
             .0
@@ -359,11 +388,43 @@ impl ControlPlaneSnapshotOwner {
             .clone()
     }
 
-    pub fn publish(&self, draft: SnapshotDraft) -> ControlPlaneSnapshot {
+    pub fn initialize(&self, draft: SnapshotDraft) -> Option<ControlPlaneSnapshot> {
         let (state, changed) = &*self.0;
         let mut state = state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.current.revision != 0 {
+            return None;
+        }
+        Some(Self::publish_locked(&mut state, changed, draft))
+    }
+
+    #[cfg(test)]
+    fn publish(&self, draft: SnapshotDraft) -> ControlPlaneSnapshot {
+        let (state, changed) = &*self.0;
+        let mut state = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Self::publish_locked(&mut state, changed, draft)
+    }
+
+    pub(crate) fn update(
+        &self,
+        update: impl FnOnce(&ControlPlaneSnapshot) -> SnapshotDraft,
+    ) -> ControlPlaneSnapshot {
+        let (state, changed) = &*self.0;
+        let mut state = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let draft = update(&state.current);
+        Self::publish_locked(&mut state, changed, draft)
+    }
+
+    fn publish_locked(
+        state: &mut SnapshotState,
+        changed: &Condvar,
+        draft: SnapshotDraft,
+    ) -> ControlPlaneSnapshot {
         if state.current.runtime == draft.runtime
             && state.current.authority == draft.authority
             && state.current.scheduler == draft.scheduler
@@ -395,32 +456,30 @@ impl ControlPlaneSnapshotOwner {
     }
 
     pub fn mark_activity_stale(&self) -> ControlPlaneSnapshot {
-        let previous = self.read();
-        self.publish(SnapshotDraft {
-            runtime: previous.runtime,
-            authority: previous.authority,
-            scheduler: ProjectionSection::stale(previous.scheduler.value),
-            workspace: previous.workspace,
-            connection: previous.connection,
-            settings: previous.settings,
-            activity: ProjectionSection::stale(previous.activity.value),
-            update: previous.update,
-            active_faults: previous.active_faults,
+        self.update(|previous| SnapshotDraft {
+            runtime: previous.runtime.clone(),
+            authority: previous.authority.clone(),
+            scheduler: ProjectionSection::stale(previous.scheduler.value.clone()),
+            workspace: previous.workspace.clone(),
+            connection: previous.connection.clone(),
+            settings: previous.settings.clone(),
+            activity: ProjectionSection::stale(previous.activity.value.clone()),
+            update: previous.update.clone(),
+            active_faults: previous.active_faults.clone(),
         })
     }
 
     pub fn mark_observation_stale(&self) -> ControlPlaneSnapshot {
-        let previous = self.read();
-        self.publish(SnapshotDraft {
-            runtime: ProjectionSection::stale(previous.runtime.into_value()),
-            authority: ProjectionSection::stale(previous.authority.into_value()),
-            scheduler: ProjectionSection::stale(previous.scheduler.into_value()),
-            workspace: ProjectionSection::stale(previous.workspace.into_value()),
-            connection: ProjectionSection::stale(previous.connection.into_value()),
-            settings: previous.settings,
-            activity: ProjectionSection::stale(previous.activity.into_value()),
-            update: previous.update,
-            active_faults: previous.active_faults,
+        self.update(|previous| SnapshotDraft {
+            runtime: ProjectionSection::stale(previous.runtime.value.clone()),
+            authority: ProjectionSection::stale(previous.authority.value.clone()),
+            scheduler: ProjectionSection::stale(previous.scheduler.value.clone()),
+            workspace: ProjectionSection::stale(previous.workspace.value.clone()),
+            connection: ProjectionSection::stale(previous.connection.value.clone()),
+            settings: previous.settings.clone(),
+            activity: ProjectionSection::stale(previous.activity.value.clone()),
+            update: previous.update.clone(),
+            active_faults: previous.active_faults.clone(),
         })
     }
 
@@ -428,17 +487,16 @@ impl ControlPlaneSnapshotOwner {
         &self,
         update: ProjectionSection<UpdateLifecycle>,
     ) -> ControlPlaneSnapshot {
-        let previous = self.read();
-        self.publish(SnapshotDraft {
-            runtime: previous.runtime,
-            authority: previous.authority,
-            scheduler: previous.scheduler,
-            workspace: previous.workspace,
-            connection: previous.connection,
-            settings: previous.settings,
-            activity: previous.activity,
+        self.update(|previous| SnapshotDraft {
+            runtime: previous.runtime.clone(),
+            authority: previous.authority.clone(),
+            scheduler: previous.scheduler.clone(),
+            workspace: previous.workspace.clone(),
+            connection: previous.connection.clone(),
+            settings: previous.settings.clone(),
+            activity: previous.activity.clone(),
             update,
-            active_faults: previous.active_faults,
+            active_faults: previous.active_faults.clone(),
         })
     }
 
@@ -454,6 +512,17 @@ impl ControlPlaneSnapshotOwner {
             .wait_timeout_while(state, timeout, |state| state.current.revision == revision)
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.current.revision
+    }
+}
+
+impl ControlPlaneSnapshotReader {
+    pub fn read(&self) -> ControlPlaneSnapshot {
+        self.0
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .current
+            .clone()
     }
 }
 
@@ -549,6 +618,48 @@ mod tests {
     }
 
     #[test]
+    fn section_updates_are_serialized_by_the_snapshot_owner_without_lost_state() {
+        let owner = ControlPlaneSnapshotOwner::default();
+        let first = owner.publish(draft(ProjectionSection::ready(
+            SettingsProjection::default(),
+        )));
+        let settings_owner = owner.clone();
+        let settings = std::thread::spawn(move || {
+            settings_owner.update(|previous| SnapshotDraft {
+                runtime: previous.runtime.clone(),
+                authority: previous.authority.clone(),
+                scheduler: previous.scheduler.clone(),
+                workspace: previous.workspace.clone(),
+                connection: previous.connection.clone(),
+                settings: ProjectionSection::ready(SettingsProjection {
+                    auto_start: true,
+                    ..SettingsProjection::default()
+                }),
+                activity: previous.activity.clone(),
+                update: previous.update.clone(),
+                active_faults: previous.active_faults.clone(),
+            })
+        });
+        let update_owner = owner.clone();
+        let update = std::thread::spawn(move || {
+            update_owner.publish_update(ProjectionSection::ready(UpdateLifecycle::Idle {
+                current_version: crate::domain::ProductVersion::parse("1.2.3").unwrap(),
+                releases_url: "https://github.com/owner/repo/releases".into(),
+            }))
+        });
+        settings.join().unwrap();
+        update.join().unwrap();
+
+        let final_snapshot = owner.read();
+        assert_eq!(final_snapshot.revision, first.revision + 2);
+        assert!(final_snapshot.settings.value().unwrap().auto_start);
+        assert!(matches!(
+            final_snapshot.update.value(),
+            Some(UpdateLifecycle::Idle { .. })
+        ));
+    }
+
+    #[test]
     fn contention_marks_previous_activity_stale_without_fabricating_running() {
         let owner = ControlPlaneSnapshotOwner::default();
         owner.publish(draft(ProjectionSection::ready(
@@ -578,5 +689,56 @@ mod tests {
             ProjectionAvailability::Ready
         );
         assert!(snapshot.scheduler.value.is_some());
+    }
+
+    #[test]
+    fn read_only_consumer_observes_one_effective_revision_and_fails_closed_when_stale() {
+        let owner = ControlPlaneSnapshotOwner::default();
+        let reader = owner.reader();
+        let mut ready = draft(ProjectionSection::ready(SettingsProjection::default()));
+        ready.runtime = ProjectionSection::ready(RuntimeProjection {
+            active: true,
+            state: RuntimeState::Ready,
+            local_environment_available: Some(true),
+            current_task_elapsed_ms: None,
+            last_tool: None,
+            outage: None,
+        });
+        ready.authority = ProjectionSection::ready(AuthorityProjection {
+            desired: PermissionMode::Full,
+            effective: PermissionMode::Full,
+            broker: PrivilegeState::Disabled,
+            structured_paths: StructuredPathAuthority::ActiveWorkspace,
+            reconciliation: AuthorityReconciliation::Converged,
+        });
+        ready.workspace = ProjectionSection::ready(WorkspaceProjection {
+            desired_id: None,
+            desired_path: Some("D:/workspace".into()),
+            observed_path: Some("D:/workspace".into()),
+            effective: EffectiveAvailability::Available,
+        });
+        ready.connection = ProjectionSection::ready(ConnectionProjection {
+            desired_tunnel_id: None,
+            desired_credential_epoch: None,
+            observed_tunnel_id: None,
+            observed_credential_epoch: None,
+            effective: EffectiveAvailability::Unavailable,
+        });
+
+        let published = owner.publish(ready);
+        let consumed = reader.read();
+        assert_eq!(consumed.revision, published.revision);
+        assert!(consumed.work_is_authorized());
+
+        let mut stale = draft(consumed.settings.clone());
+        stale.runtime = consumed.runtime;
+        stale.authority = consumed.authority;
+        stale.workspace = ProjectionSection::stale(consumed.workspace.into_value());
+        stale.connection = consumed.connection;
+        stale.scheduler = consumed.scheduler;
+        stale.activity = consumed.activity;
+        stale.update = consumed.update;
+        stale.active_faults = consumed.active_faults;
+        assert!(!owner.publish(stale).work_is_authorized());
     }
 }

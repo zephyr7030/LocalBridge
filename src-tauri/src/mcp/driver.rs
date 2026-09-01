@@ -3,8 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::control_plane::convergence::{ConnectionProfile, DesiredStateOwner};
-use crate::control_plane::snapshot::TaskAggregate;
+use crate::control_plane::convergence::ConnectionProfile;
+#[cfg(test)]
+use crate::control_plane::convergence::DesiredStateOwner;
+use crate::control_plane::snapshot::{ControlPlaneSnapshotReader, TaskAggregate};
 use crate::credentials::CredentialStore;
 use crate::execution::CapabilityPolicy;
 use crate::privilege::PrivilegedExecution;
@@ -84,8 +86,10 @@ where
     bearer_factory: B,
     privileged_execution: Option<Arc<dyn PrivilegedExecution>>,
     task_projection_wake: Option<CurrentTaskWake>,
-    desired_state: Option<DesiredStateOwner>,
+    #[cfg(test)]
+    simulated_desired_state: Option<DesiredStateOwner>,
     observed_connection: Option<ConnectionProfile>,
+    control_plane_snapshot: Option<ControlPlaneSnapshotReader>,
 }
 
 impl<'a, C, B> ProductionRuntimeDriver<'a, C, B>
@@ -104,8 +108,10 @@ where
             bearer_factory,
             privileged_execution: None,
             task_projection_wake: None,
-            desired_state: None,
+            #[cfg(test)]
+            simulated_desired_state: None,
             observed_connection: None,
+            control_plane_snapshot: None,
         }
     }
 
@@ -123,8 +129,10 @@ where
             bearer_factory,
             privileged_execution: None,
             task_projection_wake: None,
-            desired_state: None,
+            #[cfg(test)]
+            simulated_desired_state: None,
             observed_connection: None,
+            control_plane_snapshot: None,
         }
     }
 
@@ -141,12 +149,23 @@ where
         self
     }
 
+    pub fn with_published_control_plane_state(
+        mut self,
+        observed_connection: Option<ConnectionProfile>,
+        snapshot: ControlPlaneSnapshotReader,
+    ) -> Self {
+        self.observed_connection = observed_connection;
+        self.control_plane_snapshot = Some(snapshot);
+        self
+    }
+
+    #[cfg(test)]
     pub fn with_control_plane_state(
         mut self,
         desired_state: DesiredStateOwner,
         observed_connection: Option<ConnectionProfile>,
     ) -> Self {
-        self.desired_state = Some(desired_state);
+        self.simulated_desired_state = Some(desired_state);
         self.observed_connection = observed_connection;
         self
     }
@@ -230,19 +249,35 @@ where
     fn start_pep(&mut self, mcp: Self::Mcp) -> Result<Self::Pep, RuntimeFault> {
         let policy = CapabilityPolicy::load(&self.config.install_root.join("runtime-policy.toml"))
             .map_err(|_| RuntimeFault::PolicyInvalid)?;
-        let desired_state = self
-            .desired_state
-            .as_ref()
-            .ok_or(RuntimeFault::PolicyInvalid)?;
-        PolicyEnforcementRuntime::start_with_control_plane(
-            mcp,
-            policy,
-            desired_state.clone(),
-            self.observed_connection.clone(),
-            self.privileged_execution.clone(),
-            self.task_projection_wake.clone(),
-        )
-        .map_err(policy_runtime_fault)
+        if let Some(snapshot) = self.control_plane_snapshot.as_ref() {
+            return PolicyEnforcementRuntime::start_with_control_plane(
+                mcp,
+                policy,
+                snapshot.clone(),
+                self.privileged_execution.clone(),
+                self.task_projection_wake.clone(),
+            )
+            .map_err(policy_runtime_fault);
+        }
+        #[cfg(test)]
+        let result = {
+            let desired_state = self
+                .simulated_desired_state
+                .as_ref()
+                .ok_or(RuntimeFault::PolicyInvalid)?;
+            PolicyEnforcementRuntime::start_with_simulated_control_plane(
+                mcp,
+                policy,
+                desired_state.clone(),
+                self.observed_connection.clone(),
+                self.privileged_execution.clone(),
+                self.task_projection_wake.clone(),
+            )
+            .map_err(policy_runtime_fault)
+        };
+        #[cfg(not(test))]
+        let result = Err(RuntimeFault::PolicyInvalid);
+        result
     }
 
     fn confirm_pep_ready(&mut self, pep: &Self::Pep) -> Result<(), RuntimeFault> {

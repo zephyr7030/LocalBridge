@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 
 use super::error::{UiError, UiResult};
@@ -7,7 +8,8 @@ use crate::control_plane::snapshot::ProjectionAvailability;
 use crate::diagnostics::{
     BrokerDiagnosticState, DiagnosticCheck, DiagnosticEvent, DiagnosticFault,
     DiagnosticsOutageInput, DiagnosticsRuntimeInput, DiagnosticsSnapshot, build_snapshot,
-    export_snapshot, materialize_log_directory,
+    diagnostics_log_revision, export_snapshot, materialize_log_directory,
+    wait_diagnostics_log_change_after,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -20,6 +22,13 @@ pub struct DiagnosticsViewProjection {
     active_workspace_path: Option<String>,
     recent_events: Vec<DiagnosticEvent>,
     active_faults: Vec<DiagnosticFault>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticsRevisionProjection {
+    projection_revision: u64,
+    log_revision: u64,
 }
 
 #[tauri::command]
@@ -115,10 +124,30 @@ fn project_diagnostics_view(
 }
 
 #[tauri::command]
-pub async fn wait_diagnostics_change(since_revision: u64, app: AppHandle) -> UiResult<u64> {
-    tauri::async_runtime::spawn_blocking(move || -> UiResult<u64> {
+pub async fn wait_diagnostics_change(
+    since_projection_revision: u64,
+    since_log_revision: u64,
+    app: AppHandle,
+) -> UiResult<DiagnosticsRevisionProjection> {
+    tauri::async_runtime::spawn_blocking(move || -> UiResult<DiagnosticsRevisionProjection> {
         let lifecycle = app.state::<DesktopLifecycle>();
-        Ok(lifecycle.wait_projection_change_after(since_revision))
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let projection_revision = lifecycle.control_plane_snapshot().revision;
+            let log_revision = diagnostics_log_revision();
+            if projection_revision > since_projection_revision
+                || log_revision > since_log_revision
+                || Instant::now() >= deadline
+            {
+                return Ok(DiagnosticsRevisionProjection {
+                    projection_revision,
+                    log_revision,
+                });
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let wait = remaining.min(Duration::from_millis(250));
+            let _ = wait_diagnostics_log_change_after(since_log_revision, wait);
+        }
     })
     .await
     .map_err(|_| UiError::internal("Ui.DiagnosticsWaitJoinFailed", "诊断状态唤醒后台任务异常"))?

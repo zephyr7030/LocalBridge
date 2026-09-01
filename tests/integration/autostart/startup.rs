@@ -1,4 +1,5 @@
 use super::*;
+use crate::control_plane::convergence::AuthorityReconciliation;
 use crate::privilege::PrivilegeController;
 use crate::settings::{AppData, StoredPermissionMode};
 use crate::state::{PrivilegeState, RuntimeState};
@@ -154,14 +155,16 @@ fn no_active_workspace_never_falls_back_to_remembered_project() {
 }
 
 #[test]
-fn elevated_preference_restores_requested_without_uac_for_background_and_foreground() {
-    let background = DesktopLifecycle::new(PrivilegeController::new());
-    restore_privilege_preference(PermissionMode::Elevated, &background).unwrap();
-    assert_eq!(background.privilege().state(), PrivilegeState::Requested);
-
-    let foreground = DesktopLifecycle::new(PrivilegeController::new());
-    restore_privilege_preference(PermissionMode::Elevated, &foreground).unwrap();
-    assert_eq!(foreground.privilege().state(), PrivilegeState::Requested);
+fn elevated_preference_requires_explicit_authorization_after_restart() {
+    let lifecycle = DesktopLifecycle::new(PrivilegeController::new());
+    lifecycle.set_desired_permission(PermissionMode::Elevated);
+    let snapshot = lifecycle.convergence_snapshot();
+    assert_eq!(snapshot.observed.broker, PrivilegeState::Disabled);
+    assert_eq!(snapshot.effective.authority.execution, PermissionMode::Full);
+    assert_eq!(
+        snapshot.effective.authority.reconciliation,
+        AuthorityReconciliation::AuthorizationRequired
+    );
 }
 
 #[test]

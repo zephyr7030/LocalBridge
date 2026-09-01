@@ -30,6 +30,9 @@ use localbridge_lib::state::{PermissionMode, PrivilegeState};
 use localbridge_lib::workspace::WorkspaceValidator;
 use serde_json::{Value, json};
 
+#[path = "../../support/control_plane.rs"]
+mod control_plane_support;
+
 const BROKER_EXE: &str = env!("CARGO_BIN_EXE_localbridge-privileged-broker");
 
 #[test]
@@ -792,9 +795,8 @@ fn live_uac_mcp_elevated_exec_uses_administrator_token_and_revokes_catalog() {
     let pep = PolicyEnforcementRuntime::start_with_control_plane(
         coding,
         CapabilityPolicy::load(&repo.join("runtime-policy.toml")).unwrap(),
-        desired,
-        None,
-        Some(privileged),
+        control_plane_support::ready_control_plane(&desired, &workspace, PrivilegeState::Disabled),
+        Some(Arc::clone(&privileged)),
         None,
     )
     .expect("PEP with real privilege gateway");
@@ -839,14 +841,16 @@ fn live_uac_mcp_elevated_exec_uses_administrator_token_and_revokes_catalog() {
         .enable_from_explicit_user_action(&sibling_broker)
         .expect("explicit UAC broker activation");
     assert!(matches!(controller.state(), PrivilegeState::Active { .. }));
-    pep.set_permission_mode(PermissionMode::Elevated);
-
-    let stale_after_enable = live_post(
-        pep.port(),
-        Some(&session),
-        &json!({"jsonrpc":"2.0","id":9003,"method":"ping","params":{}}),
-    );
-    assert_eq!(stale_after_enable.status, 404);
+    let coding = pep.stop().expect("restart PEP after authority changed");
+    desired.set_permission(PermissionMode::Elevated);
+    let pep = PolicyEnforcementRuntime::start_with_control_plane(
+        coding,
+        CapabilityPolicy::load(&repo.join("runtime-policy.toml")).unwrap(),
+        control_plane_support::ready_control_plane(&desired, &workspace, controller.state()),
+        Some(Arc::clone(&privileged)),
+        None,
+    )
+    .expect("PEP observes active administrator authority");
     session = live_initialize(pep.port(), 9004).session.unwrap();
     let elevated_tools = live_post(
         pep.port(),
@@ -908,12 +912,15 @@ fn live_uac_mcp_elevated_exec_uses_administrator_token_and_revokes_catalog() {
     controller
         .disable()
         .expect("disable real Broker after identity probe");
-    let stale_after_disable = live_post(
-        pep.port(),
-        Some(&session),
-        &json!({"jsonrpc":"2.0","id":9008,"method":"tools/list","params":{}}),
-    );
-    assert_eq!(stale_after_disable.status, 404);
+    let coding = pep.stop().expect("restart PEP after authority revocation");
+    let pep = PolicyEnforcementRuntime::start_with_control_plane(
+        coding,
+        CapabilityPolicy::load(&repo.join("runtime-policy.toml")).unwrap(),
+        control_plane_support::ready_control_plane(&desired, &workspace, controller.state()),
+        Some(privileged),
+        None,
+    )
+    .expect("PEP observes revoked administrator authority");
     session = live_initialize(pep.port(), 9009).session.unwrap();
     let revoked_tools = live_post(
         pep.port(),
@@ -950,6 +957,6 @@ fn live_uac_mcp_elevated_exec_uses_administrator_token_and_revokes_catalog() {
     let _ = fs::remove_file(&sibling_broker);
     let _ = fs::remove_dir_all(&workspace);
     println!(
-        "LB012_LIVE_UAC=PASS ordinary_before=S-1-16-8192 ordinary_after=S-1-16-8192 elevated=S-1-16-12288 stale_enable=404 stale_disable=404"
+        "LB012_LIVE_UAC=PASS ordinary_before=S-1-16-8192 ordinary_after=S-1-16-8192 elevated=S-1-16-12288 authority_restarts=2"
     );
 }

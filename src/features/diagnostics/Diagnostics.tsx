@@ -22,19 +22,21 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      let revision = 0;
+      let projectionRevision = 0;
+      let logRevision = 0;
       while (!cancelled) {
         try {
           const next = await diagnosticsApi.read();
           if (cancelled) return;
           setSnapshot(next);
           setError(null);
-          revision = next.projectionRevision;
-          await diagnosticsApi.waitForChange(revision);
+          projectionRevision = next.projectionRevision;
+          logRevision = next.logRevision;
+          await diagnosticsApi.waitForChange(projectionRevision, logRevision);
         } catch (value) {
           if (cancelled) return;
           setError(uiErrorMessage(value, "无法读取诊断状态"));
-          try { await diagnosticsApi.waitForChange(revision); } catch { /* next backend wake/read retries */ }
+          try { await diagnosticsApi.waitForChange(projectionRevision, logRevision); } catch { /* next backend wake/read retries */ }
         }
       }
     })();

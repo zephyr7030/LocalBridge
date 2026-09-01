@@ -1,4 +1,3 @@
-use super::convergence::DesiredStateOwner;
 use std::path::Path;
 
 use super::execution_registry::{ExecutionRegistry, ExecutionRegistryError};
@@ -9,7 +8,6 @@ use super::task_registry::TaskRegistry;
 
 #[derive(Clone)]
 pub(crate) struct ControlPlane {
-    desired: DesiredStateOwner,
     requests: RequestRegistry,
     tasks: TaskRegistry,
     executions: ExecutionRegistry,
@@ -18,29 +16,18 @@ pub(crate) struct ControlPlane {
 }
 
 impl ControlPlane {
-    pub(crate) fn for_workspace(
-        desired: DesiredStateOwner,
-        workspace: &Path,
-    ) -> Result<Self, ExecutionRegistryError> {
-        Ok(Self::new(
-            desired,
-            ExecutionRegistry::for_workspace(workspace)?,
-        ))
+    pub(crate) fn for_workspace(workspace: &Path) -> Result<Self, ExecutionRegistryError> {
+        Ok(Self::new(ExecutionRegistry::for_workspace(workspace)?))
     }
 
-    pub(crate) fn new(desired: DesiredStateOwner, executions: ExecutionRegistry) -> Self {
+    pub(crate) fn new(executions: ExecutionRegistry) -> Self {
         Self {
-            desired,
             requests: RequestRegistry::default(),
             tasks: TaskRegistry::default(),
             executions,
             scheduler: Scheduler::default(),
             sessions: SessionRegistry::default(),
         }
-    }
-
-    pub(crate) fn desired(&self) -> DesiredStateOwner {
-        self.desired.clone()
     }
 
     pub(crate) fn requests(&self) -> RequestRegistry {
@@ -85,10 +72,8 @@ mod tests {
             "localbridge-control-plane-owner-{}-{nonce}.json",
             std::process::id()
         ));
-        let control_plane = ControlPlane::new(
-            DesiredStateOwner::default(),
-            ExecutionRegistry::open_at(state_path.clone()).unwrap(),
-        );
+        let control_plane =
+            ControlPlane::new(ExecutionRegistry::open_at(state_path.clone()).unwrap());
         let requests_from_transport = control_plane.requests();
         let requests_from_controller = control_plane.requests();
         let session_a = McpSessionId::new("session-a");

@@ -165,11 +165,14 @@ pub struct ObservedState {
 #[serde(rename_all = "snake_case")]
 pub enum AuthorityReconciliation {
     Converged,
+    AuthorizationRequired,
     AwaitingAuthorization,
     BrokerUnavailable,
+    DisablePending,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StructuredPathAuthority {
     ActiveWorkspace,
     AdministratorBroker,
@@ -180,7 +183,6 @@ pub struct EffectiveAuthority {
     pub configured: PermissionMode,
     pub execution: PermissionMode,
     pub structured_paths: StructuredPathAuthority,
-    pub elevated_active: bool,
     pub reconciliation: AuthorityReconciliation,
 }
 
@@ -376,8 +378,11 @@ pub fn derive_authority(configured: PermissionMode, broker: &PrivilegeState) -> 
             configured,
             execution: configured,
             structured_paths: StructuredPathAuthority::ActiveWorkspace,
-            elevated_active: false,
-            reconciliation: AuthorityReconciliation::Converged,
+            reconciliation: if matches!(broker, PrivilegeState::Disabled) {
+                AuthorityReconciliation::Converged
+            } else {
+                AuthorityReconciliation::DisablePending
+            },
         };
     }
     match broker {
@@ -385,21 +390,24 @@ pub fn derive_authority(configured: PermissionMode, broker: &PrivilegeState) -> 
             configured,
             execution: PermissionMode::Elevated,
             structured_paths: StructuredPathAuthority::AdministratorBroker,
-            elevated_active: true,
             reconciliation: AuthorityReconciliation::Converged,
+        },
+        PrivilegeState::Disabled => EffectiveAuthority {
+            configured,
+            execution: PermissionMode::Full,
+            structured_paths: StructuredPathAuthority::ActiveWorkspace,
+            reconciliation: AuthorityReconciliation::AuthorizationRequired,
         },
         PrivilegeState::Requested | PrivilegeState::AwaitingUac => EffectiveAuthority {
             configured,
             execution: PermissionMode::Full,
             structured_paths: StructuredPathAuthority::ActiveWorkspace,
-            elevated_active: false,
             reconciliation: AuthorityReconciliation::AwaitingAuthorization,
         },
-        PrivilegeState::Disabled | PrivilegeState::Faulted(_) => EffectiveAuthority {
+        PrivilegeState::Faulted(_) => EffectiveAuthority {
             configured,
             execution: PermissionMode::Full,
             structured_paths: StructuredPathAuthority::ActiveWorkspace,
-            elevated_active: false,
             reconciliation: AuthorityReconciliation::BrokerUnavailable,
         },
     }
@@ -530,7 +538,6 @@ mod tests {
             snapshot.effective.authority.structured_paths,
             StructuredPathAuthority::ActiveWorkspace
         );
-        assert!(!snapshot.effective.authority.elevated_active);
         assert_eq!(
             snapshot.effective.authority.reconciliation,
             AuthorityReconciliation::BrokerUnavailable
@@ -611,7 +618,6 @@ mod tests {
             ),
         );
         assert!(snapshot.effective.work_is_authorized());
-        assert!(snapshot.effective.authority.elevated_active);
         assert_eq!(
             snapshot.effective.authority.structured_paths,
             StructuredPathAuthority::AdministratorBroker

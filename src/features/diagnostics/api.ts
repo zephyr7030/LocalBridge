@@ -22,6 +22,11 @@ export interface DiagnosticsViewProjection {
   activeFaults: Array<{ code: string; category: UiErrorCategory; message: string; retryable: boolean }>;
 }
 
+export interface DiagnosticsRevisionProjection {
+  projectionRevision: number;
+  logRevision: number;
+}
+
 const diagnosticLevels: DiagnosticLevel[] = ["ok", "warning", "error", "unknown"];
 const brokerStates: BrokerDiagnosticState[] = ["off", "requested", "awaiting", "active", "fault", "unavailable"];
 const isCheck = (value: unknown): value is DiagnosticCheck => isRecord(value)
@@ -46,9 +51,16 @@ export function parseDiagnosticsProjection(value: unknown): DiagnosticsViewProje
   return value as unknown as DiagnosticsViewProjection;
 }
 
+function parseDiagnosticsRevision(value: unknown): DiagnosticsRevisionProjection {
+  if (!isRecord(value) || typeof value.projectionRevision !== "number" || typeof value.logRevision !== "number") {
+    throw new Error("后端诊断 revision 合同不兼容");
+  }
+  return value as unknown as DiagnosticsRevisionProjection;
+}
+
 export const diagnosticsApi = {
   read: async () => parseDiagnosticsProjection(await invoke<unknown>("get_diagnostics")),
-  waitForChange: (sinceRevision: number) => invoke<number>("wait_diagnostics_change", { sinceRevision }),
+  waitForChange: async (sinceProjectionRevision: number, sinceLogRevision: number) => parseDiagnosticsRevision(await invoke<unknown>("wait_diagnostics_change", { sinceProjectionRevision, sinceLogRevision })),
   openLogs: () => invoke<void>("open_logs"),
   exportReport: () => invoke<string>("export_diagnostics"),
 };
