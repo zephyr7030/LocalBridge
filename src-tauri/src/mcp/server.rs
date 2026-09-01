@@ -8313,7 +8313,6 @@ mod tests {
 
         let port = pep.port();
         let call_session = session.clone();
-        let call_started = std::time::Instant::now();
         let call = thread::spawn(move || {
             post(
                 port,
@@ -8369,9 +8368,11 @@ mod tests {
         );
 
         let call_result = call.join().expect("tools/call client thread");
+        let cancellation_settle_elapsed = cancel_started.elapsed();
         assert!(
-            call_started.elapsed() < Duration::from_secs(5),
-            "cancelled command ran near natural 10 second duration"
+            cancellation_settle_elapsed < Duration::from_secs(5),
+            "upstream cancellation did not settle within 5 seconds; elapsed_ms={}",
+            cancellation_settle_elapsed.as_millis()
         );
         assert!(
             call_result.body.get("result").is_some() || call_result.body.get("error").is_some(),
