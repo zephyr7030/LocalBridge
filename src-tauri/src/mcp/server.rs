@@ -28,7 +28,7 @@ use crate::control_plane::convergence::{
 use crate::control_plane::execution_registry::{ExecutionRegistry, ExecutionRegistryError};
 use crate::control_plane::owner::ControlPlane;
 use crate::control_plane::request_registry::{
-    ActiveRequest, RequestCancellationTarget, RequestRegistry,
+    ActiveRequest, ActiveRequestState, RequestCancellationTarget, RequestRegistry,
 };
 use crate::control_plane::scheduler::{Scheduler, SchedulerAdmissionError, SchedulerLane};
 use crate::control_plane::session_registry::{
@@ -1287,16 +1287,24 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                             Some(session),
                         );
                     }
-                    for _ in 0..2 {
-                        thread::sleep(Duration::from_millis(25));
-                        let Some(active) = registered_request_for_transport_cancel(
-                            requests,
-                            &session_id,
-                            &request_id,
-                        ) else {
-                            break;
-                        };
-                        let _ = cancel_registered_request(&active, cancellation, privileged);
+                    if let RequestCancellationTarget::Runtime(runtime_request_id) =
+                        &active.cancellation
+                    {
+                        if spawn_runtime_cancellation_relay(
+                            active.key.clone(),
+                            runtime_request_id.clone(),
+                            requests.clone(),
+                            cancellation.clone(),
+                        )
+                        .is_err()
+                        {
+                            return write_mcp_http_error(
+                                &mut stream,
+                                503,
+                                mcp_unavailable("cancellation_unavailable"),
+                                Some(session),
+                            );
+                        }
                     }
                 }
                 return write_empty(&mut stream, 202, Some(session));
@@ -4232,6 +4240,36 @@ fn registered_request_for_transport_cancel(
     request_id: &RpcRequestId,
 ) -> Option<ActiveRequest> {
     requests.request_cancellation(&RequestKey::new(session_id.clone(), request_id.clone()))
+}
+
+fn spawn_runtime_cancellation_relay(
+    key: RequestKey,
+    runtime_request_id: RpcRequestId,
+    requests: RequestRegistry,
+    cancellation: McpCancellationClient,
+) -> Result<(), ()> {
+    thread::Builder::new()
+        .name("localbridge-runtime-cancellation-relay".into())
+        .spawn(move || {
+            for delay_ms in [25, 50, 100, 200, 400, 800, 800, 800] {
+                thread::sleep(Duration::from_millis(delay_ms));
+                let Some(active) = requests.active(&key) else {
+                    break;
+                };
+                if active.state != ActiveRequestState::CancellationRequested
+                    || !matches!(
+                        &active.cancellation,
+                        RequestCancellationTarget::Runtime(active_runtime_request_id)
+                            if active_runtime_request_id == &runtime_request_id
+                    )
+                {
+                    break;
+                }
+                let _ = cancel_registered_request(&active, &cancellation, None);
+            }
+        })
+        .map(|_| ())
+        .map_err(|_| ())
 }
 
 fn next_private_request_id() -> RpcRequestId {
@@ -8314,8 +8352,6 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(10));
         }
-        thread::sleep(Duration::from_millis(100));
-
         let cancel_started = std::time::Instant::now();
         let cancelled = post(
             pep.port(),

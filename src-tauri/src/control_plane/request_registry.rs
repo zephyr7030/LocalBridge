@@ -84,6 +84,15 @@ impl RequestRegistry {
             .is_some_and(|request| request.state == ActiveRequestState::CancellationRequested)
     }
 
+    pub(crate) fn active(&self, key: &RequestKey) -> Option<ActiveRequest> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
+            .get(key)
+            .cloned()
+    }
+
     pub(crate) fn remove(&self, key: &RequestKey) -> Option<ActiveRequest> {
         self.0
             .lock()
@@ -214,6 +223,27 @@ mod tests {
             ActiveRequestState::CancellationRequested
         );
         assert!(registry.cancellation_was_requested(&request));
+    }
+
+    #[test]
+    fn reused_request_key_does_not_inherit_terminal_request_cancellation() {
+        let registry = RequestRegistry::default();
+        let request = key("a", 3);
+        registry
+            .register(request.clone(), runtime_target(103))
+            .unwrap();
+        registry.request_cancellation(&request).unwrap();
+        registry.remove(&request).unwrap();
+        registry
+            .register(request.clone(), runtime_target(104))
+            .unwrap();
+
+        let active = registry.active(&request).unwrap();
+        assert_eq!(active.state, ActiveRequestState::Active);
+        assert!(matches!(
+            active.cancellation,
+            RequestCancellationTarget::Runtime(RpcRequestId::Number(104))
+        ));
     }
 
     #[test]
