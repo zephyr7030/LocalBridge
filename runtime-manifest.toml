@@ -3,7 +3,7 @@ schema_version = 3
 [product]
 codename = "LocalBridge"
 target = "windows-x86_64"
-release = "0.13.0"
+release = "0.1.3"
 
 [coding_tools_mcp]
 source = "https://github.com/xyTom/coding-tools-mcp"

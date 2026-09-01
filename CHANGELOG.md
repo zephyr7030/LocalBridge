@@ -6,7 +6,7 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 No user-visible changes yet.
 
-## [0.13.0] - 2026-08-23
+## [0.1.3] - 2026-08-23
 
 - 完成本轮 schema44 控制面缺陷修复，并将公开工具 API 提升至 revision 47；统一架构验收仍以项目状态记录为准。
 - 修复 durable workflow 与 detached command 跨 MCP Session 的恢复、观察和定向取消。

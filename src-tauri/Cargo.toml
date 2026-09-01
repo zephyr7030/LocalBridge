@@ -1,6 +1,6 @@
 [package]
 name = "localbridge"
-version = "0.13.0"
+version = "0.1.3"
 description = "LocalBridge desktop shell"
 authors = ["LocalBridge"]
 edition = "2024"

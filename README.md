@@ -34,7 +34,7 @@ Python、Coding Runtime、Tunnel 和常用辅助工具随 LocalBridge 一起管�
 
 普通使用不需要准备开发环境。
 
-1. 打开右侧 **[Releases](../../releases)**，下载最新的 `LocalBridge_0.13.0_x64-setup.exe`。
+1. 打开右侧 **[Releases](../../releases)**，下载最新的 `LocalBridge_0.1.3_x64-setup.exe`。
 2. 安装后按向导填写 Tunnel ID、Runtime API Key，并选择要授权的本地项目目录。
 3. 按应用提示在 ChatGPT 中创建 **Local Bridge** 自定义连接器。
 4. 之后即可直接让 ChatGPT 读取、修改和运行该项目。
