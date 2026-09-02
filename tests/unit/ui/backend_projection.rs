@@ -320,6 +320,7 @@ fn schema44_typed_task_aggregate_separates_current_and_history() {
             task_id: TaskId::new("task-old"),
             public_session_id: PublicSessionId::new("public-old"),
             owner_session: Some(McpSessionId::new("session-a")),
+            adoption_token_hash: None,
             runtime_handle: None,
             state: ExecutionState::Terminal(ExecutionTerminal {
                 outcome: TerminalOutcome::Cancelled,
@@ -356,6 +357,7 @@ fn schema44_typed_task_aggregate_separates_current_and_history() {
             task_id,
             public_session_id: PublicSessionId::new("public-running"),
             owner_session: Some(McpSessionId::new("session-a")),
+            adoption_token_hash: None,
             runtime_handle: None,
             state: ExecutionState::Running,
             started_at_ms: 1,

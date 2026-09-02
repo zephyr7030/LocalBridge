@@ -2,6 +2,44 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct AdoptionToken(String);
+
+impl AdoptionToken {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for AdoptionToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("AdoptionToken(<redacted>)")
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptionTokenHash(String);
+
+impl AdoptionTokenHash {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for AdoptionTokenHash {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("AdoptionTokenHash(<redacted>)")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct McpSessionId(String);
 
@@ -146,5 +184,13 @@ mod tests {
         let public = PublicSessionId::new("same-text");
         assert_eq!(task.as_str(), execution.as_str());
         assert_eq!(execution.as_str(), public.as_str());
+    }
+
+    #[test]
+    fn adoption_secrets_are_never_exposed_by_debug_output() {
+        let token = AdoptionToken::new("secret-token");
+        let hash = AdoptionTokenHash::new("secret-hash");
+        assert!(!format!("{token:?}").contains("secret-token"));
+        assert!(!format!("{hash:?}").contains("secret-hash"));
     }
 }

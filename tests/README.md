@@ -37,6 +37,7 @@ npm run test:ci -- --from schema44 --through rust-test
 npm run test:ci -- --from rust-clippy
 npm run test:ci
 npm run test:mcp-client -- --url https://example.test/mcp
+node tests/e2e/onboarding/fixed_window_runtime_e2e.mjs dashboard --production-assets
 ```
 
 If the desktop app is already running from Cargo's default debug directory, set

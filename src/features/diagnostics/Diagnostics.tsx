@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { uiErrorMessage } from "../../bridge";
+import { parseUiError, type UiError } from "../../bridge";
 import { diagnosticsApi, type DiagnosticsViewProjection } from "./api";
+import { UiErrorNotice } from "../../components/UiErrorNotice";
 import "./diagnostics.css";
 
 const eventTime = (timestampMs: number) => new Date(timestampMs).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -14,9 +15,10 @@ const brokerText = {
   unavailable: "状态暂不可用",
 } as const;
 
-export function Diagnostics({ onClose }: { onClose: () => void }) {
+export function Diagnostics({ onClose, commandError }: { onClose: () => void; commandError: UiError | null }) {
   const [snapshot, setSnapshot] = useState<DiagnosticsViewProjection | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<UiError | null>(null);
+  const [transportError, setTransportError] = useState<UiError | null>(null);
   const [exportedPath, setExportedPath] = useState<string | null>(null);
 
   useEffect(() => {
@@ -24,19 +26,23 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
     void (async () => {
       let projectionRevision = 0;
       let logRevision = 0;
+      let retryDelayMs = 250;
       while (!cancelled) {
         try {
           const next = await diagnosticsApi.read();
           if (cancelled) return;
           setSnapshot(next);
-          setError(null);
+          setTransportError(null);
           projectionRevision = next.projectionRevision;
           logRevision = next.logRevision;
+          retryDelayMs = 250;
           await diagnosticsApi.waitForChange(projectionRevision, logRevision);
         } catch (value) {
           if (cancelled) return;
-          setError(uiErrorMessage(value, "无法读取诊断状态"));
-          try { await diagnosticsApi.waitForChange(projectionRevision, logRevision); } catch { /* next backend wake/read retries */ }
+          setSnapshot(null);
+          setTransportError(parseUiError(value, "无法读取诊断状态"));
+          await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs));
+          retryDelayMs = Math.min(retryDelayMs * 2, 5000);
         }
       }
     })();
@@ -48,7 +54,7 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
     try {
       setExportedPath(await diagnosticsApi.exportReport());
     } catch (value) {
-      setError(uiErrorMessage(value, "无法导出诊断信息"));
+      setError(parseUiError(value, "无法导出诊断信息"));
     }
   };
 
@@ -79,10 +85,12 @@ export function Diagnostics({ onClose }: { onClose: () => void }) {
             </div>
           </>
         )}
-        {error ? <p className="diagnostics-error" role="alert">{error}</p> : null}
+        {commandError && <UiErrorNotice error={commandError} />}
+        {transportError && <UiErrorNotice error={transportError} />}
+        {error && <UiErrorNotice error={error} />}
         {exportedPath ? <p className="diagnostics-exported">已导出到：{exportedPath}</p> : null}
         <div className="dialog-actions diagnostics-actions">
-          <button className="secondary" onClick={() => void diagnosticsApi.openLogs().catch((value) => setError(uiErrorMessage(value, "无法打开日志")))}>生成并打开日志</button>
+          <button className="secondary" onClick={() => void diagnosticsApi.openLogs().catch((value) => setError(parseUiError(value, "无法打开日志")))}>生成并打开日志</button>
           <button className="secondary" onClick={() => void exportReport()}>导出诊断</button>
           <button className="primary" onClick={onClose}>完成</button>
         </div>

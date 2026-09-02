@@ -97,6 +97,8 @@ pub(crate) struct WorkflowCheckpoint<Payload> {
     #[serde(default)]
     pub owner_session_id: Option<String>,
     #[serde(default)]
+    pub adoption_token_hash: Option<crate::domain::AdoptionTokenHash>,
+    #[serde(default)]
     pub created_at_ms: u64,
     #[serde(default)]
     pub updated_at_ms: u64,
@@ -154,6 +156,7 @@ impl<Payload> WorkflowCheckpoint<Payload> {
             version: CHECKPOINT_VERSION,
             workflow_id,
             owner_session_id: None,
+            adoption_token_hash: None,
             created_at_ms: now,
             updated_at_ms: now,
             stale_after_ms: WORKFLOW_STALE_AFTER_MS,
@@ -394,18 +397,6 @@ impl WorkflowCheckpointStore {
             .and_then(|checkpoint| (!checkpoint.completed).then_some(checkpoint.workflow_id)))
     }
 
-    pub(crate) fn active_unowned_workflow<Payload>(
-        &self,
-    ) -> Result<Option<String>, WorkflowCheckpointError>
-    where
-        Payload: Clone + Serialize + DeserializeOwned,
-    {
-        Ok(self.load::<Payload>()?.and_then(|checkpoint| {
-            (!checkpoint.completed && checkpoint.owner_session_id.is_none())
-                .then_some(checkpoint.workflow_id)
-        }))
-    }
-
     pub(crate) fn cancel_owned<Payload>(
         &self,
         workflow_id: &str,
@@ -420,59 +411,6 @@ impl WorkflowCheckpointStore {
         if checkpoint.completed
             || checkpoint.workflow_id != workflow_id
             || checkpoint.owner_session_id.as_deref() != Some(owner_session_id)
-        {
-            return Ok(false);
-        }
-        checkpoint.completed = true;
-        checkpoint.current_step = Some("cancelled".into());
-        checkpoint.next_step = None;
-        checkpoint.directory_inflight = false;
-        checkpoint.patch_inflight = false;
-        checkpoint.command_inflight = false;
-        checkpoint.current_session_id = None;
-        checkpoint.failure = Some(WorkflowFailure::new("cancelled", Some("cancelled")));
-        self.save(&checkpoint)?;
-        Ok(true)
-    }
-
-    pub(crate) fn cancel_by_id<Payload>(
-        &self,
-        workflow_id: &str,
-    ) -> Result<bool, WorkflowCheckpointError>
-    where
-        Payload: Clone + Serialize + DeserializeOwned,
-    {
-        let Some(mut checkpoint) = self.load::<Payload>()? else {
-            return Ok(false);
-        };
-        if checkpoint.completed || checkpoint.workflow_id != workflow_id {
-            return Ok(false);
-        }
-        checkpoint.completed = true;
-        checkpoint.current_step = Some("cancelled".into());
-        checkpoint.next_step = None;
-        checkpoint.directory_inflight = false;
-        checkpoint.patch_inflight = false;
-        checkpoint.command_inflight = false;
-        checkpoint.current_session_id = None;
-        checkpoint.failure = Some(WorkflowFailure::new("cancelled", Some("cancelled")));
-        self.save(&checkpoint)?;
-        Ok(true)
-    }
-
-    pub(crate) fn cancel_unowned<Payload>(
-        &self,
-        workflow_id: &str,
-    ) -> Result<bool, WorkflowCheckpointError>
-    where
-        Payload: Clone + Serialize + DeserializeOwned,
-    {
-        let Some(mut checkpoint) = self.load::<Payload>()? else {
-            return Ok(false);
-        };
-        if checkpoint.completed
-            || checkpoint.workflow_id != workflow_id
-            || checkpoint.owner_session_id.is_some()
         {
             return Ok(false);
         }

@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,8 +8,6 @@ use crate::domain::{
 };
 
 const MAX_RETAINED_TASKS: usize = 256;
-
-static TASK_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TaskTransitionError {
@@ -234,15 +231,7 @@ fn trim_terminal_history(state: &mut TaskRegistryState) {
 }
 
 fn next_task_id() -> TaskId {
-    let generation = TASK_GENERATION.fetch_add(1, Ordering::Relaxed);
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    TaskId::new(format!(
-        "lb-task-{:x}-{now:x}-{generation:x}",
-        std::process::id()
-    ))
+    TaskId::new(crate::security::random_prefixed_id("lb-task-"))
 }
 
 fn now_unix_ms() -> u64 {

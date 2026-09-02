@@ -129,6 +129,7 @@ struct FixedWindowE2eRect {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FixedWindowE2eMetrics {
+    inline_script_blocked: bool,
     inner_width: f64,
     inner_height: f64,
     dpr: f64,
@@ -166,6 +167,13 @@ struct FixedWindowE2eMetrics {
 #[cfg(debug_assertions)]
 const FIXED_WINDOW_E2E_METRICS_SCRIPT: &str = r#"
 (() => {
+  if (window.__LOCALBRIDGE_CSP_PROBED__ === undefined) {
+    window.__LOCALBRIDGE_CSP_PROBED__ = true;
+    const script = document.createElement('script');
+    script.textContent = 'window.__LOCALBRIDGE_UNTRUSTED_SCRIPT_RAN__ = true';
+    document.head.appendChild(script);
+    script.remove();
+  }
   const rect = (element) => element ? (() => {
     const value = element.getBoundingClientRect();
     return { left: value.left, top: value.top, width: value.width, height: value.height };
@@ -206,6 +214,7 @@ const FIXED_WINDOW_E2E_METRICS_SCRIPT: &str = r#"
   const settingsReplaceLefts = Array.from(document.querySelectorAll('.settings-replace'))
     .map((element) => element.getBoundingClientRect().left);
   const metrics = {
+    inlineScriptBlocked: window.__LOCALBRIDGE_UNTRUSTED_SCRIPT_RAN__ !== true,
     innerWidth: window.innerWidth,
     innerHeight: window.innerHeight,
     dpr: window.devicePixelRatio,
@@ -269,6 +278,12 @@ fn run_fixed_window_e2e(view: FixedWindowE2eView) {
             store.save(&data).map_err(|error| {
                 std::io::Error::other(format!("fixed-window E2E settings save: {error:?}"))
             })?;
+            lifecycle.publish_settings_snapshot(
+                localbridge_lib::control_plane::snapshot::SettingsProjection::from_app_data(
+                    &data, false, None,
+                ),
+                None,
+            );
             app.manage(lifecycle);
             let (metrics_tx, metrics_rx) = mpsc::channel::<String>();
             app.manage(FixedWindowE2eMetricsSink::new(metrics_tx));
@@ -372,6 +387,9 @@ fn execute_fixed_window_e2e(
 
     let metrics = collect_fixed_window_e2e_metrics(window, view, metrics_rx)?;
     assert_fixed_window_e2e_metrics(&metrics, view)?;
+    if std::env::var_os("LOCALBRIDGE_CSP_E2E").is_some() && !metrics.inline_script_blocked {
+        return Err("production CSP allowed an untrusted inline script".to_string());
+    }
 
     window
         .eval("document.querySelector('[aria-label=\"最小化\"]')?.click();")

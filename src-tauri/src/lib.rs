@@ -10,6 +10,7 @@ pub mod filesystem;
 pub mod mcp;
 pub mod privilege;
 pub mod runtime;
+pub(crate) mod security;
 pub mod settings;
 pub mod state;
 pub mod tray;

@@ -24,8 +24,10 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
-    GetExitCodeProcess, GetProcessTimes, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
-    STARTUPINFOW, TerminateProcess, WaitForSingleObject,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
+    GetProcessTimes, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES,
+    STARTUPINFOEXW, STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 const FORCED_EXIT_CODE: u32 = 0x4C42_0004;
@@ -507,12 +509,22 @@ pub fn run_bounded_command(
     let mut command_line = build_command_line(executable, args);
     let application = wide_null(executable.as_os_str());
     let current_directory = wide_null(current_dir.as_os_str());
-    let mut startup: STARTUPINFOW = unsafe { zeroed() };
-    startup.cb = size_of::<STARTUPINFOW>() as u32;
-    startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdOutput = write_handle;
-    startup.hStdError = write_handle;
-    startup.hStdInput = null_mut();
+    let mut inherited_handles = match InheritedHandleList::new(&[write_handle]) {
+        Ok(handles) => handles,
+        Err(error) => {
+            close_handle(read_handle);
+            close_handle(write_handle);
+            close_handle(job);
+            return Err(error);
+        }
+    };
+    let mut startup: STARTUPINFOEXW = unsafe { zeroed() };
+    startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdOutput = write_handle;
+    startup.StartupInfo.hStdError = write_handle;
+    startup.StartupInfo.hStdInput = null_mut();
+    startup.lpAttributeList = inherited_handles.as_mut_ptr();
     let mut process_info: PROCESS_INFORMATION = unsafe { zeroed() };
     let created = unsafe {
         CreateProcessW(
@@ -521,10 +533,10 @@ pub fn run_bounded_command(
             null(),
             null(),
             1,
-            CREATE_SUSPENDED | CREATE_NO_WINDOW,
+            CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
             null(),
             current_directory.as_ptr(),
-            &startup,
+            &startup.StartupInfo,
             &mut process_info,
         )
     };
@@ -643,6 +655,69 @@ pub fn run_bounded_command(
         truncated,
         timed_out,
     })
+}
+
+struct InheritedHandleList {
+    storage: Vec<usize>,
+    _handles: Vec<HANDLE>,
+    attribute_list: LPPROC_THREAD_ATTRIBUTE_LIST,
+}
+
+impl InheritedHandleList {
+    fn new(handles: &[HANDLE]) -> Result<Self, SupervisorError> {
+        if handles.is_empty() || handles.iter().any(|handle| handle.is_null()) {
+            return Err(SupervisorError::InvalidSpec(
+                "invalid inherited handle list",
+            ));
+        }
+        let mut byte_count = 0usize;
+        unsafe {
+            InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut byte_count);
+        }
+        if byte_count == 0 {
+            return Err(last_error("InitializeProcThreadAttributeList(size)"));
+        }
+        let word_count = byte_count.div_ceil(size_of::<usize>());
+        let mut storage = vec![0usize; word_count];
+        let owned_handles = handles.to_vec();
+        let attribute_list = storage.as_mut_ptr().cast();
+        if unsafe { InitializeProcThreadAttributeList(attribute_list, 1, 0, &mut byte_count) } == 0
+        {
+            return Err(last_error("InitializeProcThreadAttributeList"));
+        }
+        if unsafe {
+            UpdateProcThreadAttribute(
+                attribute_list,
+                0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+                owned_handles.as_ptr().cast(),
+                std::mem::size_of_val(handles),
+                null_mut(),
+                null(),
+            )
+        } == 0
+        {
+            let error = last_error("UpdateProcThreadAttribute(HANDLE_LIST)");
+            unsafe { DeleteProcThreadAttributeList(attribute_list) };
+            return Err(error);
+        }
+        Ok(Self {
+            storage,
+            _handles: owned_handles,
+            attribute_list,
+        })
+    }
+
+    fn as_mut_ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
+        debug_assert_eq!(self.attribute_list, self.storage.as_mut_ptr().cast());
+        self.attribute_list
+    }
+}
+
+impl Drop for InheritedHandleList {
+    fn drop(&mut self) {
+        unsafe { DeleteProcThreadAttributeList(self.attribute_list) };
+    }
 }
 
 impl Drop for WindowsProcessSupervisor {
@@ -902,6 +977,9 @@ fn quote_windows_arg(arg: &OsStr) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::sync::mpsc;
+
     use super::*;
 
     #[test]
@@ -1005,5 +1083,53 @@ mod tests {
                 .iter()
                 .any(|entry| entry == "localbridge_test_env=synthetic-value")
         );
+    }
+
+    #[test]
+    fn bounded_process_inherits_only_its_declared_output_handle() {
+        let temp = std::env::temp_dir().join(format!(
+            "localbridge-handle-list-{}",
+            NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&temp).unwrap();
+        let marker = temp.join("started.txt");
+        let (unrelated_read, unrelated_write) = create_bounded_output_pipe().unwrap();
+        let command_dir = temp.clone();
+        let command = thread::spawn(move || {
+            run_bounded_command(
+                Path::new(r"C:\Windows\System32\cmd.exe"),
+                &[
+                    OsString::from("/d"),
+                    OsString::from("/s"),
+                    OsString::from("/c"),
+                    OsString::from("echo ready>started.txt & ping 127.0.0.1 -n 4 >nul & echo done"),
+                ],
+                &command_dir,
+                Duration::from_secs(6),
+                4096,
+            )
+        });
+
+        let started = Instant::now();
+        while !marker.is_file() && started.elapsed() < Duration::from_secs(2) {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(marker.is_file(), "child did not reach its marker");
+        close_handle(unrelated_write);
+
+        let (eof_tx, eof_rx) = mpsc::channel();
+        let unrelated_reader = unrelated_read as usize;
+        let reader = thread::spawn(move || {
+            let (bytes, _) = drain_bounded_output(unrelated_reader as HANDLE, 16);
+            let _ = eof_tx.send(bytes);
+        });
+        let eof = eof_rx.recv_timeout(Duration::from_millis(750));
+        let output = command.join().unwrap().unwrap();
+        reader.join().unwrap();
+        fs::remove_dir_all(&temp).unwrap();
+
+        assert_eq!(eof.unwrap(), Vec::<u8>::new());
+        assert_eq!(output.exit_code, 0);
+        assert!(String::from_utf8_lossy(&output.output).contains("done"));
     }
 }

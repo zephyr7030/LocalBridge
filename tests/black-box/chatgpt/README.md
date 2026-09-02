@@ -36,11 +36,27 @@ One process owns exactly one MCP session. Keep the process alive across
 ownership. A tool call has the same side effects it would have from ChatGPT;
 the test client itself adds no capabilities or privileged route.
 
+The loopback PEP now requires a per-process bearer before MCP initialization and
+on every request. The Rust fixture passes its test instance's bearer through
+`LOCALBRIDGE_TEST_MCP_HEADERS`; production does not expose a token-discovery
+endpoint. Do not put this bearer in a URL, command-line argument, or test report.
+The supervised Tunnel supplies the internal bearer itself on the production path.
+
+After `tools/list`, the client validates each actual `structuredContent` against
+that tool's advertised `outputSchema` using `schema_contract.mjs`. It does not
+rewrite responses, pre-validate intentional invalid inputs, or treat an absent
+cached schema as an absent capability. Scenarios must discover the catalog for
+each new client when checking the output contract.
+
 `client.test.mjs` fixes the transport contract without starting LocalBridge.
 `command_lifecycle.mjs` is the single black-box driver for following an accepted
 public command through retryable poll-budget expiry to one durable terminal
 outcome; scenarios must reuse it instead of copying polling loops.
 `live_client.rs` starts the real bundled runtime and policy facade, then invokes
-the external client to prove one public command reaches a terminal outcome.
+the external scenarios. Coverage includes queued cancellation, service shutdown
+with queued side effects, session isolation and orphan adoption, phased workflow
+execution ownership, DOCX package fidelity, and fail-closed multi-file Patch.
+`shutdown_queue.mjs` signals the Rust fixture only after the public scheduler
+reports a queued request; the fixture then invokes the real service stop path.
 Neither test proves the OpenAI Tunnel path; Tunnel incidents must be reproduced
 by pointing the same client at the real HTTPS connector endpoint.

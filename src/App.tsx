@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { APP_NAME } from "./appModel";
-import { bridge, type AccessCode, type MainProjection, type ProjectProjection, uiErrorMessage } from "./bridge";
+import { bridge, parseUiError, type AccessCode, type ProjectProjection, type UiError } from "./bridge";
+import { initialProjectionTransportState, projectionReadFailed, projectionReadSucceeded } from "./projectionTransport";
 import { accessText, currentActivityDetail, currentActivityElapsed, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionRestartNotice, projectionStatusText, serviceText, uiText, updateStatusText, workspaceDisplayText } from "./presentation";
 import { Onboarding } from "./features/onboarding/Onboarding";
 import { onboardingApi, type OnboardingState } from "./features/onboarding/api";
@@ -8,10 +9,10 @@ import { Diagnostics } from "./features/diagnostics/Diagnostics";
 import { WindowChrome } from "./components/WindowChrome";
 import { ServiceStatusDot } from "./components/ServiceStatusDot";
 import { AdminModeWarning } from "./components/AdminModeWarning";
+import { UiErrorNotice } from "./components/UiErrorNotice";
 import "./styles.css";
 
 type View = "main" | "settings" | "diagnostics";
-function errorText(value: unknown): string { return uiErrorMessage(value, "操作未完成"); }
 
 export function App() {
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
@@ -42,10 +43,10 @@ export function App() {
 }
 
 function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
-  const [projection, setProjection] = useState<MainProjection | null>(null);
+  const [projectionTransport, setProjectionTransport] = useState(initialProjectionTransportState);
+  const projection = projectionTransport.projection;
   const [view, setView] = useState<View>("main");
-  const [error, setError] = useState<string | null>(null);
-  const errorTimer = useRef<number | null>(null);
+  const [error, setError] = useState<UiError | null>(null);
   const [keyValue, setKeyValue] = useState("");
   const [tunnelValue, setTunnelValue] = useState("");
   const [editingTunnel, setEditingTunnel] = useState(false);
@@ -56,46 +57,45 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const [adminWarningOpen, setAdminWarningOpen] = useState(false);
   const [fullAccessInfoOpen, setFullAccessInfoOpen] = useState(false);
   const [handledGeneration, setHandledGeneration] = useState<number | null>(null);
-  const clearTransientError = useCallback(() => {
-    if (errorTimer.current !== null) {
-      window.clearTimeout(errorTimer.current);
-      errorTimer.current = null;
-    }
+  const clearCommandError = useCallback(() => {
     setError(null);
   }, []);
-  const showTransientError = useCallback((value: unknown) => {
-    if (errorTimer.current !== null) {
-      window.clearTimeout(errorTimer.current);
-    }
-    setError(errorText(value));
-    errorTimer.current = window.setTimeout(() => {
-      setError(null);
-      errorTimer.current = null;
-    }, 3000);
+  const showCommandError = useCallback((value: unknown) => {
+    setError(parseUiError(value, "操作未完成"));
   }, []);
-  const refresh = useCallback(async () => { try { setProjection(await bridge.read()); } catch (value) { showTransientError(value); } }, [showTransientError]);
+  const refresh = useCallback(async () => {
+    try {
+      setProjectionTransport(projectionReadSucceeded(await bridge.read()));
+    } catch (value) {
+      const error = parseUiError(value, "无法读取后端状态");
+      setProjectionTransport(projectionReadFailed(error));
+      throw error;
+    }
+  }, []);
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       let revision = 0;
+      let retryDelayMs = 250;
       while (!cancelled) {
         try {
           const next = await bridge.read();
           if (cancelled) return;
-          setProjection(next);
+          setProjectionTransport(projectionReadSucceeded(next));
           revision = next.projectionRevision;
+          retryDelayMs = 250;
           await bridge.waitForProjectionChange(revision);
         } catch (value) {
           if (cancelled) return;
-          showTransientError(value);
-          try { await bridge.waitForProjectionChange(revision); } catch { /* next read retries */ }
+          setProjectionTransport(projectionReadFailed(parseUiError(value, "无法读取后端状态")));
+          await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs));
+          retryDelayMs = Math.min(retryDelayMs * 2, 5000);
         }
       }
     })();
     return () => { cancelled = true; };
-  }, [showTransientError]);
-  useEffect(() => () => { if (errorTimer.current !== null) window.clearTimeout(errorTimer.current); }, []);
-  const run = useCallback(async (action: () => Promise<void>) => { clearTransientError(); try { await action(); await refresh(); } catch (value) { showTransientError(value); } }, [clearTransientError, refresh, showTransientError]);
+  }, []);
+  const run = useCallback(async (action: () => Promise<void>) => { clearCommandError(); try { await action(); await refresh(); } catch (value) { showCommandError(value); } }, [clearCommandError, refresh, showCommandError]);
   useEffect(() => {
     if (view !== "settings" || (projection && !projection.runtimeKeySaved)) setConfirmingKeyDelete(false);
   }, [view, projection?.runtimeKeySaved]);
@@ -138,7 +138,8 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
     <div className="service-actions" aria-label="服务控制"><button className="secondary service-restart" onClick={() => void run(() => bridge.restartServices())}>重启服务</button><button className="secondary service-stop" onClick={() => void run(() => bridge.stopServices())}>关闭服务</button></div>
     <div className="task-row" aria-live="polite"><span className={`activity-dot task-${taskState}`} aria-hidden="true"/><span className="activity-row-main"><span className="activity-action">{currentActivityText(currentActivity, projection?.activityStatus ?? "unavailable")}</span>{currentDetail && <span className="activity-summary">{currentDetail}</span>}</span>{currentElapsed && <span className="activity-elapsed">{currentElapsed}</span>}</div>
     {lastActivity ? <div className="last-tool-row"><span className="activity-dot-spacer" aria-hidden="true"/><span className={`last-activity-left outcome-${lastActivity.outcome}`}><span className="activity-action">上次执行：{lastActivityAction(lastActivity)}</span>{lastActivity.summary && <span className="activity-summary">{lastActivity.summary}</span>}<span className="activity-outcome">{lastActivityOutcome(lastActivity)}</span></span><span className="last-tool-age">{formatLastToolAge(Math.max(0, Date.now() - lastActivity.completedAtMs))}</span></div> : null}
-    {error && <div className="error" role="alert">{error}</div>}
+    {projectionTransport.error && <UiErrorNotice error={projectionTransport.error} />}
+    {error && <UiErrorNotice error={error} />}
     {view === "settings" && <div className="sheet-backdrop" onMouseDown={() => setView("main")}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>{uiText.settings}</h2>
       <section className="settings-section"><h3>常规</h3><div className="row"><span>开机启动</span><input type="checkbox" disabled={projection?.autoStart == null} checked={projection?.autoStart ?? false} onChange={(event) => void run(() => bridge.setAutoStart(event.target.checked))}/></div><div className="row"><span>关闭窗口后继续运行</span><input type="checkbox" disabled={projection?.closeWindowContinueRunning == null} checked={projection?.closeWindowContinueRunning ?? false} onChange={(event) => void run(() => bridge.setCloseWindowContinueRunning(event.target.checked))}/></div></section>
       <section className="settings-section"><h3>连接</h3>
@@ -149,7 +150,7 @@ function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       <section className="settings-section"><h3>关于</h3><div className="settings-summary"><span>{updateStatusText(projection?.update ?? null, projection?.updateStatus ?? "unavailable")}</span><div className="inline-actions"><button className="secondary" disabled={!projection?.update?.retryable || projection.update.state === "checking"} onClick={() => void run(async () => { await bridge.retryUpdateCheck(); })}>检查更新</button><button className="secondary" disabled={!projection?.update?.releaseUrl} onClick={() => void run(async () => { await bridge.openGitHubReleases(); })}>GitHub Releases</button></div></div></section>
       <div className="dialog-actions"><button className="secondary" onClick={onOpenWelcome}>打开欢迎页</button><button className="primary" onClick={() => setView("main")}>完成</button></div>
     </section></div>}
-    {view === "diagnostics" && <Diagnostics onClose={() => setView("main")} />}
+    {view === "diagnostics" && <Diagnostics commandError={error} onClose={() => setView("main")} />}
     {adminWarningOpen && <AdminModeWarning onCancel={() => setAdminWarningOpen(false)} onConfirm={() => { setAdminWarningOpen(false); void run(() => bridge.setAccess("admin")); }} />}
     {fullAccessInfoOpen && <div className="dialog-backdrop" onMouseDown={() => setFullAccessInfoOpen(false)}><section className="dialog" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><h2>全目录访问</h2><p>管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式</p><div className="dialog-actions"><button className="primary" onClick={() => setFullAccessInfoOpen(false)}>完成</button></div></section></div>}
     {projectPickerOpen && <div className="sheet-backdrop" onMouseDown={() => setProjectPickerOpen(false)}><section className="sheet" onMouseDown={(event) => event.stopPropagation()}><h2>切换项目</h2><div className="project-list">{projection?.projects?.map((item) => <div className="project-item" key={item.id}><button className="ghost project-select" disabled={item.active} onClick={() => void run(async () => { await bridge.selectProject(item.id); setProjectPickerOpen(false); })}><span className="project-path">{item.path}</span>{item.active ? <span className="project-current">当前</span> : null}</button><button className="secondary" onClick={() => { if (item.active) { setProjectPickerOpen(false); setRemoveTarget(item); } else { void run(() => bridge.removeProject(item.id)); } }}>移除</button></div>)}</div><div className="dialog-actions"><button className="secondary" onClick={chooseOtherFolder}>选择其他文件夹</button><button className="primary" onClick={() => setProjectPickerOpen(false)}>完成</button></div></section></div>}

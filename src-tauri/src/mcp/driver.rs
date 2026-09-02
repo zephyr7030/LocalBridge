@@ -296,7 +296,11 @@ where
             pep.port(),
         )
         .map_err(|error| error.runtime_fault())?;
+        let bearer = pep
+            .local_connector_bearer()
+            .ok_or(RuntimeFault::PolicyInvalid)?;
         PreparedTunnelStart::prepare(config, self.credential_store.as_ref())
+            .map(|prepared| prepared.with_mcp_guard_bearer(bearer))
             .and_then(PreparedTunnelStart::spawn)
             .map_err(|error| error.runtime_fault())
     }
@@ -322,7 +326,11 @@ where
             pep.port(),
         )
         .map_err(|error| error.runtime_fault())?;
+        let bearer = pep
+            .local_connector_bearer()
+            .ok_or(RuntimeFault::PolicyInvalid)?;
         let tunnel = PreparedTunnelStart::prepare(config, self.credential_store.as_ref())
+            .map(|prepared| prepared.with_mcp_guard_bearer(bearer))
             .and_then(PreparedTunnelStart::spawn)
             .map_err(|error| error.runtime_fault())?;
         if permit.is_cancelled() {
@@ -446,7 +454,8 @@ fn available_loopback_port() -> Result<u16, RuntimeFault> {
 fn policy_runtime_fault(error: PolicyEnforcementError) -> RuntimeFault {
     match error {
         PolicyEnforcementError::BindFailed => RuntimeFault::PolicyBindFailed,
-        PolicyEnforcementError::UpstreamCancellationUnavailable
+        PolicyEnforcementError::AuthenticationUnavailable
+        | PolicyEnforcementError::UpstreamCancellationUnavailable
         | PolicyEnforcementError::UpstreamHealthUnavailable
         | PolicyEnforcementError::UpstreamFacadeNegotiationFailed
         | PolicyEnforcementError::ThreadSpawnFailed

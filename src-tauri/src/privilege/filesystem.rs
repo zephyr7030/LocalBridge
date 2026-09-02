@@ -517,6 +517,9 @@ fn administrator_coding_edit_error(error: CodingEditError) -> AdministratorFiles
         CodingEditError::FileChanged => AdministratorFilesystemErrorCode::FileChanged,
         CodingEditError::PatchConflict => AdministratorFilesystemErrorCode::PatchConflict,
         CodingEditError::AmbiguousMatch => AdministratorFilesystemErrorCode::AmbiguousMatch,
+        CodingEditError::MultiFilePatchUnsupported => {
+            AdministratorFilesystemErrorCode::InvalidArgument
+        }
         CodingEditError::Io => AdministratorFilesystemErrorCode::Io,
     }
 }

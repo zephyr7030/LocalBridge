@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 #[cfg(test)]
 use std::path::Path;
 
@@ -13,6 +13,7 @@ pub(crate) enum CodingEditError {
     FileChanged,
     PatchConflict,
     AmbiguousMatch,
+    MultiFilePatchUnsupported,
     Io,
 }
 
@@ -34,28 +35,6 @@ enum PatchOperation {
     },
     Delete {
         path: String,
-    },
-}
-
-#[derive(Debug)]
-enum AppliedChange {
-    Replace {
-        path: String,
-        before: Vec<u8>,
-        after: Vec<u8>,
-    },
-    Move {
-        source: String,
-        destination: String,
-        content: Vec<u8>,
-    },
-    Add {
-        path: String,
-        content: Vec<u8>,
-    },
-    Delete {
-        path: String,
-        content: Vec<u8>,
     },
 }
 
@@ -194,162 +173,61 @@ impl CodingEditService {
         if let Some(expected) = expected {
             self.verify_expected_files(expected)?;
         }
-        let operations = parse_patch(patch)?;
+        let mut operations = parse_patch(patch)?;
         if operations.is_empty() {
             return Err(CodingEditError::PatchConflict);
         }
-
-        let mut updates = Vec::<(String, Option<String>, Vec<u8>, Vec<u8>, String)>::new();
-        let mut adds = Vec::<(String, Vec<u8>)>::new();
-        let mut deletes = Vec::<(String, Vec<u8>, String)>::new();
-        let mut modified = Vec::<String>::new();
-        let mut mutation_paths = HashSet::<String>::new();
-
-        for operation in operations {
-            match operation {
-                PatchOperation::Update {
-                    path,
-                    destination,
-                    hunks,
-                } => {
-                    let bytes = self.read_file(&path)?;
-                    let identity = match expected {
-                        Some(expected) => expected
-                            .get(&path)
-                            .ok_or(CodingEditError::FileChanged)?
-                            .clone(),
-                        None => sha256_hex(&bytes),
-                    };
-                    self.require_identity(&bytes, &identity)?;
-                    let updated = apply_text_hunks_preserving_format(&bytes, &hunks)?;
-                    register_mutation_path(&mut mutation_paths, &path)?;
-                    let target = match destination.as_deref() {
-                        Some(destination) if destination != path => {
-                            register_mutation_path(&mut mutation_paths, destination)?;
-                            self.filesystem
-                                .validate_new_file_path(destination)
-                                .map_err(map_filesystem_error)?;
-                            Some(destination.to_string())
-                        }
-                        None => None,
-                        Some(_) => None,
-                    };
-                    modified.push(target.clone().unwrap_or_else(|| path.clone()));
-                    updates.push((path, target, bytes, updated, identity));
-                }
-                PatchOperation::Add { path, content } => {
-                    register_mutation_path(&mut mutation_paths, &path)?;
-                    self.filesystem
-                        .validate_new_file_path(&path)
-                        .map_err(map_filesystem_error)?;
-                    modified.push(path.clone());
-                    adds.push((path, content));
-                }
-                PatchOperation::Delete { path } => {
-                    let bytes = self.read_file(&path)?;
-                    let identity = match expected {
-                        Some(expected) => expected
-                            .get(&path)
-                            .ok_or(CodingEditError::FileChanged)?
-                            .clone(),
-                        None => sha256_hex(&bytes),
-                    };
-                    self.require_identity(&bytes, &identity)?;
-                    register_mutation_path(&mut mutation_paths, &path)?;
-                    modified.push(path.clone());
-                    deletes.push((path, bytes, identity));
-                }
-            }
+        if operations.len() != 1 {
+            return Err(CodingEditError::MultiFilePatchUnsupported);
         }
-
-        let mut applied = Vec::<AppliedChange>::new();
-        let commit = (|| -> Result<(), CodingEditError> {
-            for (source, destination, before, updated, identity) in updates {
-                self.filesystem
-                    .replace_file_if_sha256(&source, &identity, &updated)
-                    .map_err(map_filesystem_error)?;
-                applied.push(AppliedChange::Replace {
-                    path: source.clone(),
-                    before,
-                    after: updated.clone(),
-                });
-                if let Some(destination) = destination {
-                    self.filesystem
-                        .move_file_if_sha256(&source, &destination, &sha256_hex(&updated))
-                        .map_err(map_filesystem_error)?;
-                    applied.push(AppliedChange::Move {
-                        source,
-                        destination,
-                        content: updated,
-                    });
+        match operations.pop().expect("one parsed patch operation") {
+            PatchOperation::Update {
+                path,
+                destination,
+                hunks,
+            } => {
+                if destination.is_some() {
+                    return Err(CodingEditError::MultiFilePatchUnsupported);
                 }
-            }
-            for (target, content) in adds {
+                let bytes = self.read_file(&path)?;
+                let identity = match expected {
+                    Some(expected) => expected
+                        .get(&path)
+                        .ok_or(CodingEditError::FileChanged)?
+                        .clone(),
+                    None => sha256_hex(&bytes),
+                };
+                self.require_identity(&bytes, &identity)?;
+                let updated = apply_text_hunks_preserving_format(&bytes, &hunks)?;
                 self.filesystem
-                    .create_file_for_edit(&target, &content)
+                    .replace_file_if_sha256(&path, &identity, &updated)
                     .map_err(map_filesystem_error)?;
-                applied.push(AppliedChange::Add {
-                    path: target,
-                    content,
-                });
+                Ok(vec![path])
             }
-            for (target, content, identity) in deletes {
+            PatchOperation::Add { path, content } => {
                 self.filesystem
-                    .delete_file_if_sha256(&target, &identity)
+                    .validate_new_file_path(&path)
                     .map_err(map_filesystem_error)?;
-                applied.push(AppliedChange::Delete {
-                    path: target,
-                    content,
-                });
+                self.filesystem
+                    .create_file_for_edit(&path, &content)
+                    .map_err(map_filesystem_error)?;
+                Ok(vec![path])
             }
-            Ok(())
-        })();
-        if let Err(error) = commit {
-            if self.rollback_changes(applied).is_err() {
-                return Err(CodingEditError::Io);
+            PatchOperation::Delete { path } => {
+                let bytes = self.read_file(&path)?;
+                let identity = match expected {
+                    Some(expected) => expected
+                        .get(&path)
+                        .ok_or(CodingEditError::FileChanged)?
+                        .clone(),
+                    None => sha256_hex(&bytes),
+                };
+                self.require_identity(&bytes, &identity)?;
+                self.filesystem
+                    .delete_file_if_sha256(&path, &identity)
+                    .map_err(map_filesystem_error)?;
+                Ok(vec![path])
             }
-            return Err(error);
-        }
-        modified.sort();
-        modified.dedup();
-        Ok(modified)
-    }
-
-    fn rollback_changes(&self, changes: Vec<AppliedChange>) -> Result<(), CodingEditError> {
-        let mut failed = false;
-        for change in changes.into_iter().rev() {
-            let result = match change {
-                AppliedChange::Replace {
-                    path,
-                    before,
-                    after,
-                } => self
-                    .filesystem
-                    .replace_file_if_sha256(&path, &sha256_hex(&after), &before),
-                AppliedChange::Move {
-                    source,
-                    destination,
-                    content,
-                } => self.filesystem.move_file_if_sha256(
-                    &destination,
-                    &source,
-                    &sha256_hex(&content),
-                ),
-                AppliedChange::Add { path, content } => self
-                    .filesystem
-                    .delete_file_if_sha256(&path, &sha256_hex(&content)),
-                AppliedChange::Delete { path, content } => {
-                    self.filesystem.create_file_for_edit(&path, &content)
-                }
-            };
-            if result.is_err() {
-                failed = true;
-            }
-        }
-        if failed {
-            Err(CodingEditError::Io)
-        } else {
-            Ok(())
         }
     }
 
@@ -369,15 +247,6 @@ impl CodingEditService {
             return Err(CodingEditError::FileChanged);
         }
         Ok(())
-    }
-}
-
-fn register_mutation_path(paths: &mut HashSet<String>, path: &str) -> Result<(), CodingEditError> {
-    let identity = path.replace('\\', "/").to_lowercase();
-    if paths.insert(identity) {
-        Ok(())
-    } else {
-        Err(CodingEditError::PatchConflict)
     }
 }
 
@@ -688,13 +557,8 @@ mod tests {
     }
 
     #[test]
-    fn multi_file_patch_rolls_back_prior_files_when_a_later_commit_fails() {
-        use std::os::windows::fs::OpenOptionsExt;
-        use windows_sys::Win32::Storage::FileSystem::{
-            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-        };
-
-        let root = workspace("patch-rollback");
+    fn multi_file_patch_is_rejected_before_any_file_changes() {
+        let root = workspace("patch-single-file-boundary");
         let first = b"first-before\n";
         let second = b"second-before\n";
         fs::write(root.join("a.txt"), first).unwrap();
@@ -703,22 +567,14 @@ mod tests {
         let mut expected = BTreeMap::new();
         expected.insert("a.txt".into(), sha256_hex(first));
         expected.insert("b.txt".into(), sha256_hex(second));
-        let writer = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-            .open(root.join("b.txt"))
-            .unwrap();
-
         let result = service.apply_patch(
             "*** Begin Patch\n*** Update File: a.txt\n@@\n-first-before\n+first-after\n*** Update File: b.txt\n@@\n-second-before\n+second-after\n*** End Patch",
             &expected,
         );
 
-        assert_eq!(result, Err(CodingEditError::FileChanged));
+        assert_eq!(result, Err(CodingEditError::MultiFilePatchUnsupported));
         assert_eq!(fs::read(root.join("a.txt")).unwrap(), first);
         assert_eq!(fs::read(root.join("b.txt")).unwrap(), second);
-        drop(writer);
         let _ = fs::remove_dir_all(root);
     }
 

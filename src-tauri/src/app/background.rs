@@ -900,6 +900,16 @@ impl DesktopLifecycle {
         result
     }
 
+    pub fn reconcile_permission_downgrade(&self) -> Result<(), PrivilegeFault> {
+        debug_assert_ne!(
+            self.desired.snapshot().state.permission,
+            PermissionMode::Elevated
+        );
+        let result = self.privilege.disable();
+        self.publish_current_observation();
+        result
+    }
+
     pub fn reconcile_permission_from_elevated_startup(
         &self,
         broker_executable: &Path,

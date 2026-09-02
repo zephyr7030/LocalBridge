@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 const ROOT = process.cwd();
 const TARGET_DIR = join(ROOT, "src-tauri", "target-fixed-window-e2e");
+const PRODUCTION_ASSETS = process.argv.includes("--production-assets");
 if (process.platform !== "win32") throw new Error("LB-016 fixed-window E2E requires Windows/Tauri/WebView2");
 
 async function freePort() {
@@ -30,19 +31,33 @@ async function runView(view) {
   mkdirSync(join(ROOT, "tests", "artifacts"), { recursive: true });
   writeFileSync(join(ROOT, configPath), JSON.stringify({
     identifier: `com.localbridge.desktop.fixedwindowe2e.${view}`,
-    build: {
+    build: PRODUCTION_ASSETS ? { beforeBuildCommand: "npm run build" } : {
       devUrl: `http://127.0.0.1:${devPort}${view === "onboarding" ? "?lb016-e2e=permission-geometry" : ""}`,
       beforeDevCommand: `npm run dev -- --port ${devPort}`,
     },
     bundle: { active: false },
   }, null, 2));
+  if (PRODUCTION_ASSETS) {
+    execFileSync(process.execPath, [
+      "node_modules/@tauri-apps/cli/tauri.js", "build", "--debug", "--no-bundle", "--config", configPath,
+    ], {
+      cwd: ROOT,
+      env: { ...process.env, CARGO_TARGET_DIR: TARGET_DIR },
+      windowsHide: true,
+      stdio: "inherit",
+      timeout: 600_000,
+    });
+  }
   return await new Promise((resolve, reject) => {
     let output = "";
-    const child = spawn("cmd.exe", ["/d", "/s", "/c", `node_modules\\.bin\\tauri.cmd dev --no-watch --config ${configPath}`], {
+    const program = PRODUCTION_ASSETS ? join(TARGET_DIR, "debug", "localbridge.exe") : "cmd.exe";
+    const args = PRODUCTION_ASSETS ? [] : ["/d", "/s", "/c", `node_modules\\.bin\\tauri.cmd dev --no-watch --config ${configPath}`];
+    const child = spawn(program, args, {
       cwd: ROOT,
       env: {
         ...process.env,
         LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW: view,
+        ...(PRODUCTION_ASSETS ? { LOCALBRIDGE_CSP_E2E: "1" } : {}),
         CARGO_TARGET_DIR: TARGET_DIR,
       },
       windowsHide: true,
@@ -72,7 +87,7 @@ async function runView(view) {
   });
 }
 
-const requestedView = process.argv[2];
+const requestedView = process.argv.slice(2).find((argument) => !argument.startsWith("--"));
 if (requestedView) {
   if (!['onboarding', 'dashboard'].includes(requestedView)) throw new Error(`Unknown fixed-window E2E view: ${requestedView}`);
   const marker = await runView(requestedView);

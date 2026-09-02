@@ -2,16 +2,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
-use crate::control_plane::command_control::{
-    COMMAND_CONTROL_TRANSPORT_HEADROOM_MS, COMMAND_CONTROL_UPSTREAM_HEADROOM_MS,
-};
+use crate::control_plane::command_control::COMMAND_CONTROL_UPSTREAM_HEADROOM_MS;
 use crate::control_plane::execution_registry::{ExecutionRegistry, ExecutionRegistryError};
 use crate::diagnostics::error::{
     DiagnosticErrorCode, DiagnosticPhase, ErrorDiagnostic, from_canonical_code,
@@ -22,17 +20,21 @@ use crate::document::{
     DocumentService,
 };
 use crate::domain::{
-    ExecutionId, ExecutionState, ExecutionTerminal, McpSessionId, PublicSessionId,
-    RuntimeCommandHandle, TaskId, TerminalOutcome,
+    AdoptionToken, AdoptionTokenHash, ExecutionId, ExecutionState, ExecutionTerminal, McpSessionId,
+    PublicSessionId, RuntimeCommandHandle, TaskId, TerminalOutcome,
 };
 #[cfg(test)]
 use crate::execution::output_handles::MAX_LOCAL_RETAINED_OUTPUT_HANDLES;
-use crate::execution::output_handles::OutputHandleRegistry;
+use crate::execution::output_handles::{OutputHandleRegistry, OutputOwner};
 use crate::state::{
     Capability, CurrentTaskStatus, PermissionMode, RuntimeFault, SafeTaskSummary,
     TaskExecutionState, TaskKind,
 };
 
+use super::observation::WorkspaceObservationSeed;
+#[cfg(test)]
+use super::public_contract::EXEC_COMMAND_FIELDS;
+use super::public_contract::ExecCommandArguments;
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use crate::control_plane::workflow_checkpoint::{
     WorkflowCheckpoint as StoredWorkflowCheckpoint, WorkflowCheckpointStore, WorkflowFailure,
@@ -57,21 +59,12 @@ use crate::workspace::path_authority::{
 
 type WorkflowCheckpoint = StoredWorkflowCheckpoint<Value>;
 
-pub const AGENT_API_VERSION: u32 = 1;
-pub const AGENT_API_REVISION: u32 = 50;
-pub const V1_CORE_TOOL_NAMES: [&str; 9] = [
-    "workspace_context",
-    "agent_workflow",
-    "filesystem",
-    "exec_command",
-    "command_control",
-    "task_control",
-    "git_workflow",
-    "document_workflow",
-    "view_image",
-];
-pub(crate) const COMMAND_CONTROL_ACTIONS: [&str; 5] = ["adopt", "poll", "read", "write", "kill"];
-pub(crate) const TASK_CONTROL_ACTIONS: [&str; 3] = ["list", "get", "cancel"];
+#[cfg(test)]
+use super::public_contract::public_tool_schema;
+pub use super::public_contract::{
+    AGENT_API_REVISION, AGENT_API_VERSION, ToolRegistry, V1_CORE_TOOL_NAMES,
+};
+pub(crate) use super::public_contract::{public_error_output_schema, stable_public_tool_catalog};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FacadeErrorCode {
@@ -327,538 +320,6 @@ impl FacadeDenied {
 #[derive(Debug)]
 pub enum FacadeCallError {
     Denied(FacadeDenied),
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ToolRegistry;
-
-impl ToolRegistry {
-    pub const fn version(&self) -> u32 {
-        AGENT_API_VERSION
-    }
-
-    pub fn contains(&self, name: &str) -> bool {
-        V1_CORE_TOOL_NAMES.contains(&name)
-    }
-
-    pub fn core_tools(&self) -> Vec<Value> {
-        V1_CORE_TOOL_NAMES
-            .iter()
-            .map(|name| public_tool_schema(name))
-            .collect()
-    }
-}
-
-fn public_tool_schema(name: &str) -> Value {
-    let (description, input_schema) = match name {
-        "workspace_context" => (
-            "Return stable LocalBridge workspace/runtime context.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "detail":{"type":"string","enum":["compact","full"],"default":"compact"}
-                },
-                "additionalProperties":false
-            }),
-        ),
-        "agent_workflow" => (
-            "Run a LocalBridge engineering workflow using stable actions. resume may use the returned task_id to continue a durable workflow after MCP reconnect; other actions may use objective/path/directory_changes/patch/commands as permitted by policy.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"],"description":"resume never starts a new workflow; all other actions start or inspect a workflow."},
-                    "phase":{"type":"string","enum":["prepare","edit","verify","persist"],"description":"Optional coding-agent-v1 phase. Omit for legacy one-shot behavior."},
-                    "task_id":{"type":"string","minLength":1,"description":"Required for edit/verify/persist phased calls and for resume after MCP reconnect; returned by prepare."},
-                    "objective":{"type":"string","description":"Optional for non-resume actions; forbidden for resume."},
-                    "path":{"type":"string","default":".","description":"Optional project path for non-resume actions; forbidden for resume."},
-                    "patch":{"type":"string","minLength":1,"description":"Optional workspace patch for write-capable non-resume actions; forbidden for resume."},
-                    "expected_files":{"type":"object","additionalProperties":{"type":"string","minLength":64,"maxLength":64},"description":"Content SHA-256 identities required before phased edits."},
-                    "directory_changes":{
-                        "type":"array","maxItems":32,
-                        "items":{
-                            "type":"object",
-                            "properties":{
-                                "action":{"type":"string","enum":["create_directory","remove_empty_directory"]},
-                                "path":{"type":"string","minLength":1}
-                            },
-                            "required":["action","path"],
-                            "additionalProperties":false
-                        }
-                    },
-                    "commands":{"description":"Optional process steps for process-capable non-resume actions; forbidden for resume.",
-                        "type":"array","maxItems":8,
-                        "items":{
-                            "type":"object",
-                            "properties":{
-                                "command":{"type":"string","minLength":1},
-                                "shell":{"type":"string","enum":["auto","powershell","pwsh","windows_powershell","cmd"],"default":"auto"},
-                                "workdir":{"type":"string","default":".","description":"Relative to agent_workflow.path selected project; dot means the selected project. Do not repeat the project path here."},
-                                "timeout_ms":{"type":"integer","minimum":1,"maximum":600000,"default":30000},
-                                "yield_time_ms":{"type":"integer","minimum":0,"maximum":30000,"default":10000},
-                                "max_output_bytes":{"type":"integer","minimum":1,"maximum":1048576,"default":65536},
-                                "stdin":{"type":"string"}
-                            },
-                            "required":["command"],
-                            "additionalProperties":false
-                        }
-                    }
-                },
-                "required":["action"],
-                "additionalProperties":false
-            }),
-        ),
-        "filesystem" => (
-            "Perform bounded LocalBridge-owned filesystem operations. Action-specific required fields are enforced by the server; search matches names and metadata, while search_content searches UTF-8 file contents; replace and patch are identity-bound edits.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "action":{"type":"string","enum":["list","stat","read","write","replace","patch","search","search_content","copy","move","delete","hash"]},
-                    "path":{"type":"string","minLength":1,"description":"Required for list/stat/read/write/replace/search/search_content/delete/hash."},
-                    "source":{"type":"string","minLength":1,"description":"Required for copy/move."},
-                    "destination":{"type":"string","minLength":1,"description":"Required for copy/move."},
-                    "recursive":{"type":"boolean","default":false,"description":"List and search are non-recursive by default; set true only when recursive traversal is required."},
-                    "max_depth":{"type":"integer","minimum":1,"maximum":64},
-                    "max_entries":{"type":"integer","minimum":1,"maximum":100000},
-                    "max_results":{"type":"integer","minimum":1,"maximum":10000},
-                    "offset":{"type":"integer","minimum":0},
-                    "max_bytes":{"type":"integer","minimum":1,"maximum":1048576},
-                    "content":{"type":"string","description":"Required for write; interpreted according to encoding."},
-                    "encoding":{"type":"string","enum":["utf8","base64"]},
-                    "expected_sha256":{"type":"string","minLength":64,"maxLength":64,"description":"Required for replace; identifies the exact source bytes."},
-                    "old":{"type":"string","minLength":1,"description":"Required for replace; must occur exactly once."},
-                    "new":{"type":"string","description":"Required for replace."},
-                    "patch":{"type":"string","minLength":1,"description":"Required for patch; uses the LocalBridge patch envelope."},
-                    "expected_files":{"type":"object","additionalProperties":{"type":"string","minLength":64,"maxLength":64},"description":"Optional path-to-SHA-256 preconditions for patch."},
-                    "pattern":{"type":"string","minLength":1,"description":"Required for search and search_content; search matches names, search_content matches literal UTF-8 text."},
-                    "case_sensitive":{"type":"boolean","default":true,"description":"Used by search_content only."},
-                    "max_file_bytes":{"type":"integer","minimum":1,"maximum":16777216,"description":"Per-file read bound for search_content."},
-                    "type":{"type":"string","enum":["file","directory"]},
-                    "min_size":{"type":"integer","minimum":0},
-                    "max_size":{"type":"integer","minimum":0},
-                    "modified_after":{"type":"integer","minimum":0,"description":"Unix epoch milliseconds."},
-                    "modified_before":{"type":"integer","minimum":0,"description":"Unix epoch milliseconds."},
-                    "sort_by":{"type":"string","enum":["path","size","modified"]},
-                    "sort_order":{"type":"string","enum":["asc","desc"]},
-                    "overwrite":{"type":"boolean"},
-                    "calculate_size":{"type":"boolean"}
-                },
-                "required":["action"],
-                "additionalProperties":false
-            }),
-        ),
-        "exec_command" => (
-            "Execute a command through a trusted logical shell under the current Windows user token. Full shell execution includes the same current-user authority for the shell and every descendant; administrator-token work is available only through the structured Broker route.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "command":{"type":"string","minLength":1,"description":"Shell text executed with current Windows user authority; descendants inherit that authority."},
-                    "shell":{"type":"string","enum":["auto","powershell","pwsh","windows_powershell","cmd"],"default":"auto"},
-                    "workdir":{"type":"string"},
-                    "timeout_ms":{"type":"integer","minimum":1,"maximum":600000,"default":30000},
-                    "yield_time_ms":{"type":"integer","minimum":0,"maximum":30000,"default":10000},
-                    "max_output_bytes":{"type":"integer","minimum":1,"maximum":1048576,"default":65536},
-                    "stdin":{"type":"string","default":""}
-                },
-                "required":["command"],
-                "additionalProperties":false
-            }),
-        ),
-        "command_control" => (
-            "Adopt, read, write, poll, or terminate an existing LocalBridge command session.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "action":{"type":"string","enum":COMMAND_CONTROL_ACTIONS,"description":"adopt/poll/write/kill use session_id; read uses output_ref."},
-                    "session_id":{"type":"string","minLength":1,"description":"Required for adopt, poll, write, and kill."},
-                    "output_ref":{"type":"string","minLength":1,"description":"Required for read."},
-                    "chars":{"type":"string","minLength":1,"description":"Required for write."},
-                    "signal":{"type":"string","enum":["TERM","KILL","INT"],"description":"Optional kill signal; defaults to TERM."},
-                    "wait_ms":{"type":"integer","minimum":0,"maximum":30000,"description":format!("Server-side wait target for poll/write/kill. Under a responsive local runtime LocalBridge returns within wait_ms plus at most {COMMAND_CONTROL_TRANSPORT_HEADROOM_MS}ms transport headroom; the budget is end-to-end and is not reset per socket stage.")},
-                    "stream":{"type":"string","enum":["stdout","stderr"],"description":"Optional read stream."},
-                    "offset":{"type":"integer","minimum":0,"description":"Optional read byte offset."},
-                    "limit":{"type":"integer","minimum":1,"maximum":1048576,"description":"Optional read byte limit."}
-                },
-                "required":["action"],
-                "additionalProperties":false
-            }),
-        ),
-        "task_control" => (
-            "List, read, or cancel LocalBridge tasks and detached executions.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "action":{"type":"string","enum":TASK_CONTROL_ACTIONS},
-                    "task_id":{"type":"string","minLength":1,"description":"Optional for get and cancel. Required when cancel has more than one candidate."}
-                },
-                "required":["action"],
-                "additionalProperties":false
-            }),
-        ),
-        "git_workflow" => (
-            "Run a stable LocalBridge Git workflow action. blame requires path; status/diff/log/show default path to the active project. Action-specific optional fields are documented on each property.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "action":{"type":"string","enum":["status","diff","log","show","blame"],"description":"Selects the strict server-side argument contract."},
-                    "path":{"type":"string","description":"Required for blame; optional repository/project context for status/diff/log/show."},
-                    "paths":{"type":"array","items":{"type":"string"},"description":"Optional path filters for diff/show only."},
-                    "ref":{"type":"string","description":"Optional log starting ref only."},
-                    "rev":{"type":"string","description":"Optional revision for show/blame only."},
-                    "staged":{"type":"boolean","description":"Optional diff only."},
-                    "unstaged":{"type":"boolean","description":"Optional diff only."},
-                    "include_untracked":{"type":"boolean","description":"Optional status only."},
-                    "include_patch":{"type":"boolean","description":"Optional show only; defaults true."},
-                    "max_entries":{"type":"integer","minimum":1,"description":"Optional status limit only."},
-                    "max_count":{"type":"integer","minimum":1,"description":"Optional log count only."},
-                    "skip":{"type":"integer","minimum":0,"description":"Optional log offset only."},
-                    "start_line":{"type":"integer","minimum":1,"description":"Optional blame start line only."},
-                    "end_line":{"type":"integer","minimum":1,"description":"Optional blame end line only."},
-                    "max_lines":{"type":"integer","minimum":1,"description":"Optional blame line limit only."},
-                    "context_lines":{"type":"integer","minimum":0,"description":"Optional diff/show context only."},
-                    "max_bytes":{"type":"integer","minimum":1,"description":"Optional diff/show capture limit only."}
-                },
-                "required":["action"],
-                "additionalProperties":false
-            }),
-        ),
-        "document_workflow" => (
-            "Inspect, search, create, edit, convert, or rebuild TXT, Markdown, DOCX, and PDF workspace documents through one DocumentIR pipeline. edit and rebuild require expected_sha256; PDF is read-only and can be converted to TXT or Markdown.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "action":{"type":"string","enum":["inspect","search","create","edit","convert","rebuild"],"description":"Selects the strict action-specific argument contract."},
-                    "path":{"type":"string","description":"Target document path. Required for every action; for convert this is the new output path."},
-                    "source":{"type":"string","description":"Required only for convert."},
-                    "content":{"type":"string","description":"Required for create and rebuild. Interpreted using source_format."},
-                    "source_format":{"type":"string","enum":["text","markdown"],"description":"Optional for create/rebuild; defaults to markdown for .md/.docx targets and text for .txt targets."},
-                    "expected_sha256":{"type":"string","minLength":64,"maxLength":64,"description":"Required for edit and rebuild. Use the sha256 returned by inspect/search."},
-                    "edits":{"type":"array","minItems":1,"description":"Required only for edit. Operations are applied to one DocumentIR and committed once.","items":{"type":"object","properties":{"operation":{"type":"string","enum":["replace","insert_before","insert_after","delete"]},"block_id":{"type":"string","pattern":"^block-[1-9][0-9]*$"},"content":{"type":"string","description":"Required except for delete; one DocumentIR block, so newline characters are rejected."}},"required":["operation","block_id"],"additionalProperties":false}},
-                    "query":{"type":"string","minLength":1,"description":"Required only for search."},
-                    "case_sensitive":{"type":"boolean","description":"Optional search matching mode; defaults false."},
-                    "max_results":{"type":"integer","minimum":1,"maximum":1000,"description":"Optional search result limit; defaults 100."},
-                    "start_block":{"type":"integer","minimum":1,"description":"Optional inspect starting DocumentIR block; defaults 1."},
-                    "max_blocks":{"type":"integer","minimum":1,"maximum":10000,"description":"Optional inspect block limit; defaults 200."},
-                    "max_bytes":{"type":"integer","minimum":1,"maximum":1048576,"description":"Optional inspect text budget; defaults 1 MiB."}
-                },
-                "required":["action"],
-                "additionalProperties":false
-            }),
-        ),
-        "view_image" => (
-            "Inspect a workspace image through the stable LocalBridge image contract.",
-            json!({
-                "type":"object",
-                "properties":{
-                    "path":{"type":"string","minLength":1},
-                    "max_bytes":{"type":"integer","minimum":1024,"maximum":10485760},
-                    "max_width":{"type":"integer","minimum":1,"maximum":10000},
-                    "max_height":{"type":"integer","minimum":1,"maximum":10000},
-                    "auto_resize":{"type":"boolean"}
-                },
-                "required":["path"],
-                "additionalProperties":false
-            }),
-        ),
-        _ => unreachable!("registry only requests frozen public tools"),
-    };
-    json!({
-        "name": name,
-        "description": description,
-        "inputSchema": input_schema,
-        "outputSchema": public_tool_output_schema(name)
-    })
-}
-
-pub(crate) fn stable_public_tool_catalog() -> Value {
-    json!({"tools":ToolRegistry.core_tools()})
-}
-
-fn public_tool_output_schema(name: &str) -> Value {
-    let data_schema = match name {
-        "workspace_context" => json!({
-            "type":"object",
-            "properties":{
-                "api_version":{"type":"integer"},
-                "facade_revision":{"type":"integer"},
-                "workspace":{"type":"string"},
-                "default_cwd":{"type":"string"},
-                "runtime":{"type":"string","enum":["ready","recovering","fault"]},
-                "runtime_health":{"type":"object","additionalProperties":true},
-                "detail":{"type":"string","enum":["compact","full"]},
-                "coding_profile":{"type":"string","enum":["coding-agent-v1"]},
-                "git_root":{"type":["string","null"]},
-                "important_files":{"type":"array","items":{"type":"string"}},
-                "instructions":{"type":"array","items":{"type":"string"}},
-                "permission_mode":{"type":"string","enum":["edit","full","elevated"]},
-                "workspace_scope":{"type":"string","enum":["structured_tools_active_workspace","administrator_broker_paths"]},
-                "ordinary_route_token":{"type":"string","enum":["current_windows_user"]},
-                "elevated_route_available":{"type":"boolean"},
-                "privilege_state":{"type":"string"},
-                "broker_state":{"type":"string"},
-                "uac_state":{"type":"string"},
-                "administrator_token_available":{"type":"boolean"},
-                "selected_route":{"type":"string"},
-                "authority":{
-                    "type":"object",
-                    "properties":{
-                        "desired_permission":{"type":"string","enum":["edit","full","elevated"]},
-                        "observed_privilege":{"type":"string"},
-                        "observed_broker":{"type":"string"},
-                        "observed_uac":{"type":"string"},
-                        "effective_permission":{"type":"string","enum":["edit","full","elevated"]},
-                        "reconciliation":{"type":"string","enum":["converged","authorization_required","awaiting_authorization","broker_unavailable","disable_pending","unavailable"]},
-                        "revision":{"type":"integer","minimum":0}
-                    },
-                    "required":["desired_permission","observed_privilege","observed_broker","observed_uac","effective_permission","reconciliation","revision"],
-                    "additionalProperties":false
-                },
-                "shell_discovery":{"type":"object","additionalProperties":true},
-                "capabilities":{"type":"object","additionalProperties":true},
-                "project_name":{"type":["string","null"]},
-                "project_type":{"type":["string","null"]},
-                "project_version":{"type":["string","null"]},
-                "git_branch":{"type":["string","null"]},
-                "git_dirty":{"type":["boolean","null"]},
-                "git_changed_count":{"type":["integer","null"],"minimum":0},
-                "package_manager":{"type":["string","null"]},
-                "build_system":{"type":["string","null"]},
-                "test_system":{"type":["string","null"]},
-                "runtime_availability":{"type":"object","additionalProperties":true},
-                "trusted_shells":{"type":"array","items":{"type":"string"}},
-                "current_task":{"type":["object","null"],"additionalProperties":true}
-            },
-            "required":["api_version","facade_revision","workspace","default_cwd","runtime","permission_mode","workspace_scope","ordinary_route_token","elevated_route_available","privilege_state","authority","shell_discovery","capabilities","project_name","project_type","project_version","git_branch","git_dirty","git_changed_count","package_manager","build_system","test_system","runtime_availability","trusted_shells","current_task"],
-            "additionalProperties":false
-        }),
-        "agent_workflow" => json!({
-            "type":"object",
-            "properties":{
-                "action":{"type":"string","enum":["diagnose","bugfix","feature","refactor","test_failure","build_release","document","resume","custom"]},
-                "phase":{"type":["string","null"]},
-                "workflow_id":{"type":["string","null"]},
-                "task_id":{"type":["string","null"]},
-                "objective":{"type":["string","null"]},
-                "state":{"type":"string","enum":["context_ready","prepared","editing","verifying","persisted","running","completed","cancelled","failed"]},
-                "summary":{"type":["string","null"]},
-                "warnings":{"type":"array","items":{"type":"string"}},
-                "next_step":{"type":["string","null"]},
-                "output_refs":{"type":"array","items":{"type":"string"}},
-                "workspace":{"type":"object","additionalProperties":true},
-                "project":{"type":"object","additionalProperties":true},
-                "context":{"type":"object","additionalProperties":true},
-                "verification_plan":{"type":"array","items":{"type":"object","additionalProperties":true}},
-                "git_before":{"type":"object","additionalProperties":true},
-                "git_after":{"type":"object","additionalProperties":true},
-                "patch_applied":{"type":"boolean"},
-                "directory_changes":{"type":"array","items":{"type":"object","additionalProperties":true}},
-                "commands":{"type":"array","items":{"type":"object","additionalProperties":true}},
-                "current_execution":{"type":"object","additionalProperties":true}
-            },
-            "required":["action","state","workspace","project","git_before","patch_applied","directory_changes","commands"],
-            "additionalProperties":false
-        }),
-        "filesystem" => json!({
-            "type":"object",
-            "properties":{
-                "entries":{"type":"array","items":{"type":"object","additionalProperties":true}},
-                "matches":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"path":{"type":"string"},"line":{"type":"integer","minimum":1},"column":{"type":"integer","minimum":1},"text":{"type":"string"}},"required":["path","line","column","text"]}},
-                "affected_files":{"type":"array","items":{"type":"string"}},
-                "scanned_entries":{"type":"integer","minimum":0},
-                "scanned_files":{"type":"integer","minimum":0},
-                "skipped_binary_files":{"type":"integer","minimum":0},
-                "skipped_oversized_files":{"type":"integer","minimum":0},
-                "truncated":{"type":"boolean"},
-                "path":{"type":"string"},
-                "kind":{"type":"string"},
-                "size":{"type":"integer","minimum":0},
-                "modified_ms":{"type":["integer","null"],"minimum":0},
-                "calculated_size":{"type":"boolean"},
-                "offset":{"type":"integer","minimum":0},
-                "total_bytes":{"type":"integer","minimum":0},
-                "returned_bytes":{"type":"integer","minimum":0},
-                "eof":{"type":"boolean"},
-                "encoding":{"type":"string","enum":["utf8","base64"]},
-                "content":{"type":"string"},
-                "destination":{"type":["string","null"]},
-                "bytes":{"type":"integer","minimum":0},
-                "changed":{"type":"boolean"},
-                "algorithm":{"type":"string","enum":["sha256"]},
-                "sha256":{"type":"string","minLength":64,"maxLength":64}
-            },
-            "additionalProperties":false
-        }),
-        "exec_command" => command_output_data_schema(),
-        "command_control" => json!({
-            "type":"object",
-            "properties":{
-                "status":{"type":"string","enum":["running","completed","failed","timed_out","cancelled","lost"]},
-                "task_id":{"type":"string"},
-                "elapsed_ms":{"type":"integer","minimum":0},
-                "exit_code":{"type":"integer"},
-                "signal":{"type":"string"},
-                "session_id":{"type":"string"},
-                "output":{"type":"string"},
-                "output_ref":{"type":"string"},
-                "output_refs":{"type":"object","additionalProperties":{"type":"string"}},
-                "truncated":{"type":"boolean"},
-                "stream":{"type":"string","enum":["stdout","stderr"]},
-                "offset":{"type":"integer"},
-                "requested_offset":{"type":"integer"},
-                "limit":{"type":"integer"},
-                "next_offset":{"type":["integer","null"]},
-                "total_bytes":{"type":"integer","minimum":0},
-                "returned_bytes":{"type":"integer","minimum":0},
-                "content":{"type":"string"}
-            },
-            "additionalProperties":false
-        }),
-        "task_control" => json!({
-            "type":"object",
-            "properties":{
-                "state":{"type":"string","enum":["idle","active","waiting","cancel_requested"]},
-                "availability":{"type":"string","enum":["ready","stale","unknown","unavailable"]},
-                "execution_state":{"type":"string"},
-                "kind":{"type":["string","null"]},
-                "summary":{"type":["string","null"]},
-                "task_id":{"type":["string","null"]},
-                "session_id":{"type":["string","null"]},
-                "current_activity":{"type":["object","null"],"additionalProperties":true},
-                "last_activity":{"type":["object","null"],"additionalProperties":true},
-                "scheduler":{"type":"object","additionalProperties":true},
-                "cancelled_requests":{"type":"integer","minimum":0},
-                "cancellation_requested":{"type":"boolean"},
-                "cancelled_queued_tasks":{"type":"integer","minimum":0},
-                "durable_task_cancelled":{"type":"boolean"},
-                "workflow_cancelled":{"type":"boolean"},
-                "task":{"type":["object","null"],"additionalProperties":true},
-                "tasks":{"type":"array","items":{"type":"object","additionalProperties":true}},
-                "executions":{"type":"array","items":{"type":"object","additionalProperties":true}}
-            },
-            "required":["state","availability"],
-            "additionalProperties":false
-        }),
-        "git_workflow" => json!({
-            "type":"object",
-            "properties":{
-                "is_repo":{"type":"boolean"},
-                "repository_root":{"type":["string","null"]},
-                "head":{"type":["string","null"]},
-                "diff":{"type":"string"},
-                "content":{"type":"string"},
-                "entries":{"type":"array"},
-                "files":{"type":"array"},
-                "commits":{"type":"array"},
-                "lines":{"type":"array"},
-                "warnings":{"type":"array"}
-            },
-            "additionalProperties":true
-        }),
-        "document_workflow" => json!({
-            "type":"object",
-            "properties":{
-                "action":{"type":"string","enum":["inspect","search","create","edit","convert","rebuild"]},
-                "path":{"type":"string"},
-                "source":{"type":"string"},
-                "format":{"type":"string","enum":["text","markdown","docx","pdf"]},
-                "source_format":{"type":"string","enum":["text","markdown","docx","pdf"]},
-                "sha256":{"type":"string","minLength":64,"maxLength":64},
-                "source_sha256":{"type":"string","minLength":64,"maxLength":64},
-                "text":{"type":"string"},
-                "blocks":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string","enum":["paragraph","heading","list_item","blank"]},"text":{"type":"string"},"level":{"type":"integer","minimum":1,"maximum":6}},"required":["id","kind","text"],"additionalProperties":false}},
-                "matches":{"type":"array","items":{"type":"object","properties":{"block_id":{"type":"string"},"block_index":{"type":"integer","minimum":1},"excerpt":{"type":"string"}},"required":["block_id","block_index","excerpt"],"additionalProperties":false}},
-                "start_block":{"type":"integer","minimum":1},
-                "end_block":{"type":["integer","null"],"minimum":1},
-                "total_blocks":{"type":"integer","minimum":0},
-                "total_bytes":{"type":"integer"},
-                "bytes":{"type":"integer","minimum":0},
-                "truncated":{"type":"boolean"},
-                "applied_edits":{"type":"integer","minimum":1}
-            },
-            "additionalProperties":false
-        }),
-        "view_image" => json!({
-            "type":"object",
-            "properties":{
-                "kind":{"const":"image"},
-                "path":{"type":"string"},
-                "mime_type":{"type":"string"},
-                "original_width":{"type":"integer","minimum":1},
-                "original_height":{"type":"integer","minimum":1},
-                "width":{"type":"integer","minimum":1},
-                "height":{"type":"integer","minimum":1},
-                "resized":{"type":"boolean"}
-            },
-            "required":["kind","path","mime_type","original_width","original_height","width","height","resized"],
-            "additionalProperties":false
-        }),
-        _ => unreachable!("registry only requests frozen public tools"),
-    };
-    json!({
-        "type":"object",
-        "properties":{
-            "ok":{"type":"boolean"},
-            "state":{"type":["string","null"]},
-            "summary":{"type":["string","null"]},
-            "task_id":{"type":["string","null"]},
-            "warnings":{"type":"array","items":{"type":"string"}},
-            "next_step":{"type":["string","null"]},
-            "output_refs":{"type":"array","items":{"type":"string"}},
-            "data":{"anyOf":[data_schema,{"type":"null"}]},
-            "error":{"anyOf":[public_error_output_schema(),{"type":"null"}]}
-        },
-        "required":["ok","state","summary","task_id","warnings","next_step","output_refs","data","error"],
-        "additionalProperties":false
-    })
-}
-
-fn command_output_data_schema() -> Value {
-    json!({
-        "type":"object",
-        "properties":{
-            "status":{"type":"string","enum":["running","completed","failed","cancelled","timed_out","lost"]},
-            "task_id":{"type":"string"},
-            "elapsed_ms":{"type":"integer","minimum":0},
-            "exit_code":{"type":"integer"},
-            "signal":{"type":"string"},
-            "session_id":{"type":"string"},
-            "output":{"type":"string"},
-            "output_ref":{"type":"string"},
-            "output_refs":{"type":"object","additionalProperties":{"type":"string"}},
-            "truncated":{"type":"boolean"},
-            "allowed":{"type":"boolean"},
-            "route":{"type":"string","enum":["ordinary","workspace_restricted","elevated_required","permanently_denied"]},
-            "rule_category":{"type":"string"},
-            "remediation":{"type":"string"},
-            "would_execute":{"type":"boolean"}
-        },
-        "required":["status"],
-        "additionalProperties":false
-    })
-}
-
-pub(crate) fn public_error_output_schema() -> Value {
-    json!({
-        "type":"object",
-        "properties":{
-            "code":{"type":"string","enum":[
-                "InvalidArgument","NotFound","WorkspaceDenied","CapabilityDenied","PolicyDenied",
-                "InvalidShellSyntax","ElevatedOperationNotReviewed","PrivilegedRouteUnavailable","ElevationRequired","ProcessFailed","ProcessTimedOut",
-                "ProcessCancelled","OperationTimedOut","QueueCapacityExceeded","TaskIdRequired","TaskNotOwned","SessionUnavailable","OutputNotFound","OutputTruncated","RuntimeUnavailable","CapabilityUnavailable",
-                "RuntimeProtocolMismatch","RuntimeCapabilityMismatch","FileChanged","PatchConflict","AmbiguousMatch","Internal"
-            ]},
-            "error_code":{"type":"string","enum":["InvalidRequest","Unavailable","Denied","Timeout","Cancelled","ExecutionFailed","Unknown"]},
-            "phase":{"type":"string","enum":["transport","mcp","runtime","policy","tool","process","unknown"]},
-            "cause":{"type":"string"},
-            "http_status":{"type":["integer","null"],"minimum":100,"maximum":599},
-            "message":{"type":"string"},
-            "retryable":{"type":"boolean"},
-            "rule_category":{"type":"string"},
-            "remediation":{"type":"string"},
-            "details":{"anyOf":[{"type":"object","additionalProperties":true},{"type":"null"}]}
-        },
-        "required":["code","error_code","phase","cause","message","retryable"],
-        "additionalProperties":false
-    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1290,6 +751,7 @@ pub struct ShellCommandRequest {
     pub yield_time_ms: u64,
     pub stdin: Option<String>,
     pub owner_task_id: Option<String>,
+    pub owner_session: Option<McpSessionId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1410,6 +872,25 @@ pub trait WorkspaceRuntimeAdapter {
         arguments: Value,
         request_id: Option<&Value>,
     ) -> Result<Value, FacadeError>;
+    fn authorize_command_resource(
+        &self,
+        _action: CommandControlAction,
+        _arguments: &Map<String, Value>,
+        _owner: &McpSessionId,
+    ) -> Result<(), FacadeError> {
+        Err(FacadeError::new(
+            FacadeErrorCode::TaskNotOwned,
+            "command resource is not owned by the current MCP session",
+            false,
+        ))
+    }
+    fn transfer_workflow_executions(
+        &self,
+        _task_id: &TaskId,
+        _owner: &McpSessionId,
+    ) -> Result<(), FacadeError> {
+        Ok(())
+    }
     fn git_workflow(
         &mut self,
         action: GitWorkflowAction,
@@ -1463,17 +944,11 @@ pub trait WorkspaceRuntimeAdapter {
     }
 }
 
-static PUBLIC_COMMAND_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
 const MAX_PENDING_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_STDERR_PROTOCOL_BYTES: usize = 256 * 1024;
 
 fn next_public_handle(prefix: &str) -> String {
-    let generation = PUBLIC_COMMAND_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{prefix}-{:x}-{nonce:x}-{generation:x}", std::process::id())
+    crate::security::random_prefixed_id(&format!("{prefix}-"))
 }
 
 #[derive(Debug, Clone)]
@@ -1491,28 +966,38 @@ struct PublicCommandSessions {
     outputs: OutputHandleRegistry,
 }
 
+#[derive(Debug)]
+struct StartedPublicCommand {
+    public_session_id: String,
+    adoption_token: AdoptionToken,
+}
+
 impl PublicCommandSessions {
     fn start_session(
         &mut self,
         executions: &ExecutionRegistry,
         owner_task_id: Option<String>,
-    ) -> Result<String, FacadeError> {
+        owner_session: Option<McpSessionId>,
+    ) -> Result<StartedPublicCommand, FacadeError> {
         let public = next_public_handle("lb-session");
         let task_id = TaskId::new(owner_task_id.unwrap_or_else(|| next_public_handle("lb-task")));
-        let execution_id = executions
-            .start(task_id, PublicSessionId::new(public.clone()))
+        let started = executions
+            .start_owned(task_id, PublicSessionId::new(public.clone()), owner_session)
             .map_err(normalize_execution_registry_error)?;
         self.sessions.insert(
             public.clone(),
             PublicCommandSession {
-                execution_id,
+                execution_id: started.execution_id,
                 started_at: Instant::now(),
                 pending_output: String::new(),
                 pending_output_truncated: false,
                 stderr_protocol_buffer: String::new(),
             },
         );
-        Ok(public)
+        Ok(StartedPublicCommand {
+            public_session_id: public,
+            adoption_token: started.adoption_token,
+        })
     }
 
     fn bind_private_session(
@@ -1544,8 +1029,13 @@ impl PublicCommandSessions {
             .public_for_private(private_output_ref, owner_public_session_id, stream)
     }
 
-    fn retain_local_output(&mut self, stream: &str, content: String) -> String {
-        self.outputs.retain_local(stream, content)
+    fn retain_local_output(
+        &mut self,
+        owner_session: McpSessionId,
+        stream: &str,
+        content: String,
+    ) -> String {
+        self.outputs.retain_local(owner_session, stream, content)
     }
 
     fn reap_expired_mappings(&mut self, executions: &ExecutionRegistry) {
@@ -1606,6 +1096,21 @@ impl PublicCommandSessions {
 
     fn output_stream(&self, public_output_ref: &str) -> Option<String> {
         self.outputs.stream(public_output_ref)
+    }
+
+    fn output_owned_by(
+        &self,
+        public_output_ref: &str,
+        owner: &McpSessionId,
+        executions: &ExecutionRegistry,
+    ) -> bool {
+        match self.outputs.owner(public_output_ref) {
+            Some(OutputOwner::McpSession(output_owner)) => &output_owner == owner,
+            Some(OutputOwner::PublicSession(public_session)) => executions
+                .execution_for_public_session(&PublicSessionId::new(public_session))
+                .is_some_and(|execution| execution.owner_session.as_ref() == Some(owner)),
+            None => false,
+        }
     }
 
     fn output_refs_by_stream(&self, output_refs: &[String]) -> Map<String, Value> {
@@ -2282,9 +1787,13 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
         }
         request.execution.cwd = PathBuf::from(normalized_cwd);
         let selector = request.execution.shell;
-        let public_session_id = self
-            .public_commands
-            .start_session(&self.executions, request.owner_task_id.clone())?;
+        let started_public = self.public_commands.start_session(
+            &self.executions,
+            request.owner_task_id.clone(),
+            request.owner_session.clone(),
+        )?;
+        let public_session_id = started_public.public_session_id;
+        let adoption_token = started_public.adoption_token;
         let outcome = (|| {
             let invocation = self
                 .shell_executor
@@ -2325,7 +1834,17 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                     private_session_id,
                 )?;
             }
-            self.normalize_command_result(&raw, &public_session_id, None)
+            let mut result = self.normalize_command_result(&raw, &public_session_id, None)?;
+            if let Some(data) = result
+                .pointer_mut("/structuredContent/data")
+                .and_then(Value::as_object_mut)
+            {
+                data.insert(
+                    "adoption_token".into(),
+                    Value::String(adoption_token.expose().to_string()),
+                );
+            }
+            Ok(result)
         })();
         match outcome {
             Ok(result) => Ok(result),
@@ -2338,6 +1857,52 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                 Err(error)
             }
         }
+    }
+
+    fn authorize_command_resource(
+        &self,
+        action: CommandControlAction,
+        arguments: &Map<String, Value>,
+        owner: &McpSessionId,
+    ) -> Result<(), FacadeError> {
+        if action == CommandControlAction::Read {
+            let output_ref = required_string(arguments, "output_ref")?;
+            return self
+                .public_commands
+                .output_owned_by(output_ref, owner, &self.executions)
+                .then_some(())
+                .ok_or_else(|| {
+                    FacadeError::new(
+                        FacadeErrorCode::OutputNotFound,
+                        "output handle is unavailable to the current MCP session",
+                        false,
+                    )
+                });
+        }
+        let public_session = required_string(arguments, "session_id")?;
+        let execution = self
+            .executions
+            .execution_for_public_session(&PublicSessionId::new(public_session))
+            .ok_or_else(session_unavailable)?;
+        if execution.owner_session.as_ref() == Some(owner) {
+            Ok(())
+        } else {
+            Err(FacadeError::new(
+                FacadeErrorCode::TaskNotOwned,
+                "command session is not owned by the current MCP session",
+                false,
+            ))
+        }
+    }
+
+    fn transfer_workflow_executions(
+        &self,
+        task_id: &TaskId,
+        owner: &McpSessionId,
+    ) -> Result<(), FacadeError> {
+        self.executions
+            .transfer_orphaned_workflow_executions(task_id, owner)
+            .map_err(normalize_execution_registry_error)
     }
 
     fn control_command(
@@ -3102,12 +2667,13 @@ impl CodingToolsRuntimeAdapter {
             return;
         };
         if let Some(private) = structured.get("output_ref").and_then(Value::as_str) {
+            let stream = primary_output_stream(structured, private);
             data.insert(
                 "output_ref".into(),
                 Value::String(self.public_commands.public_output_for_private(
                     private,
                     public_session_id,
-                    "stdout",
+                    stream,
                 )),
             );
         }
@@ -3130,6 +2696,21 @@ impl CodingToolsRuntimeAdapter {
             }
         }
     }
+}
+
+fn primary_output_stream<'a>(structured: &'a Map<String, Value>, output_ref: &str) -> &'a str {
+    // The private primary handle may select stderr. Its stream ownership must
+    // not depend on whether this response or the terminal observer arrives first.
+    structured
+        .get("output_refs")
+        .and_then(Value::as_object)
+        .and_then(|refs| {
+            ["stdout", "stderr"]
+                .into_iter()
+                .find(|stream| refs.get(*stream).and_then(Value::as_str) == Some(output_ref))
+        })
+        .or_else(|| structured.get("output_stream").and_then(Value::as_str))
+        .unwrap_or("stdout")
 }
 
 fn public_local_output_page(
@@ -3329,6 +2910,13 @@ fn normalize_execution_registry_error(error: ExecutionRegistryError) -> FacadeEr
             FacadeErrorCode::QueueCapacityExceeded,
             "执行容量已满，请等待已有命令结束后重试",
             true,
+        ),
+        ExecutionRegistryError::OwnerConflict { .. }
+        | ExecutionRegistryError::NotOrphaned(_)
+        | ExecutionRegistryError::AdoptionDenied => FacadeError::new(
+            FacadeErrorCode::TaskNotOwned,
+            "execution ownership transfer requires an orphaned resource and a valid credential",
+            false,
         ),
         _ => command_state_internal_error(),
     }
@@ -3720,26 +3308,34 @@ impl AgentFacade<CodingToolsRuntimeAdapter> {
         self.adapter.validate_workspace_identity()
     }
 
-    pub(crate) fn bind_public_command_owner(
+    pub(crate) fn workspace_observation_seed(
         &self,
-        public_session_id: &str,
-        owner_session: McpSessionId,
-    ) -> Result<(), FacadeError> {
-        let execution = self
-            .adapter
-            .executions
-            .execution_for_public_session(&PublicSessionId::new(public_session_id))
-            .ok_or_else(session_unavailable)?;
-        self.adapter
-            .executions
-            .bind_owner(&execution.id, owner_session)
-            .map_err(normalize_execution_registry_error)
+    ) -> Result<WorkspaceObservationSeed, FacadeError> {
+        Ok(WorkspaceObservationSeed {
+            workspace: self.adapter.workspace.to_string_lossy().into_owned(),
+            default_cwd: self
+                .adapter
+                .cached_default_cwd
+                .clone()
+                .ok_or_else(runtime_capability_mismatch)?,
+            project_discovery: self
+                .adapter
+                .cached_project_discovery
+                .clone()
+                .ok_or_else(runtime_capability_mismatch)?,
+            runtime_discovery: self.adapter.runtime_discovery(),
+        })
     }
 
-    pub(crate) fn retain_local_output(&mut self, stream: &str, content: String) -> String {
+    pub(crate) fn retain_local_output(
+        &mut self,
+        owner_session: McpSessionId,
+        stream: &str,
+        content: String,
+    ) -> String {
         self.adapter
             .public_commands
-            .retain_local_output(stream, content)
+            .retain_local_output(owner_session, stream, content)
     }
 
     pub fn into_runtime(self) -> CodingToolsRuntime {
@@ -4103,8 +3699,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 self.agent_workflow(mode, arguments, request_id, task_id, owner_session)
             }
             "filesystem" => self.adapter.filesystem(arguments),
-            "exec_command" => self.exec_command(mode, arguments, request_id, task_id),
-            "command_control" => self.command_control(arguments, request_id),
+            "exec_command" => {
+                self.exec_command(mode, arguments, request_id, task_id, owner_session)
+            }
+            "command_control" => self.command_control(arguments, request_id, owner_session),
             "git_workflow" => self.git_workflow(arguments, request_id),
             "document_workflow" => self.document_workflow(arguments, request_id),
             "view_image" => self.view_image(arguments, request_id),
@@ -4284,7 +3882,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             return Err(invalid_argument());
         }
         if action == "resume" {
-            ensure_only_keys(object, &["action", "task_id"])?;
+            ensure_only_keys(object, &["action", "task_id", "adoption_token"])?;
             let durable_task_id = object
                 .get("task_id")
                 .map(|value| {
@@ -4300,6 +3898,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 task_id,
                 owner_session,
                 durable_task_id,
+                object.get("adoption_token").and_then(Value::as_str),
             );
         }
         if let Some(phase) = object.get("phase").and_then(Value::as_str) {
@@ -4673,6 +4272,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         owner_task_id: checkpoint
                             .as_ref()
                             .map(|checkpoint| checkpoint.workflow_id.clone()),
+                        owner_session: owner_session.cloned(),
                     },
                     request_id,
                 )
@@ -4802,6 +4402,9 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     Value::Object(object.clone()),
                     objective.to_string(),
                 );
+                let adoption_token = new_workflow_adoption_token();
+                checkpoint.adoption_token_hash =
+                    Some(hash_workflow_adoption_token(&adoption_token));
                 checkpoint.owner_session_id = owner_session.map(ToString::to_string);
                 checkpoint.files_read = context
                     .get("files_read")
@@ -4821,6 +4424,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         "phase":"prepare",
                         "workflow_id":checkpoint.workflow_id,
                         "task_id":checkpoint.workflow_id,
+                        "adoption_token":adoption_token.expose(),
                         "objective":objective,
                         "state":"prepared",
                         "summary":"Coding task prepared",
@@ -4838,7 +4442,14 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             "edit" => {
                 ensure_only_keys(
                     object,
-                    &["action", "phase", "task_id", "patch", "expected_files"],
+                    &[
+                        "action",
+                        "phase",
+                        "task_id",
+                        "adoption_token",
+                        "patch",
+                        "expected_files",
+                    ],
                 )?;
                 let task_id = required_string(object, "task_id")?;
                 let patch = required_string(object, "patch")?;
@@ -4854,8 +4465,13 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     .get("expected_files")
                     .and_then(Value::as_object)
                     .unwrap_or(&empty_expected);
-                let mut checkpoint =
-                    self.load_coding_checkpoint(task_id, action, request_id, owner_session)?;
+                let mut checkpoint = self.load_coding_checkpoint(
+                    task_id,
+                    action,
+                    request_id,
+                    owner_session,
+                    object.get("adoption_token").and_then(Value::as_str),
+                )?;
                 if checkpoint.completed
                     || checkpoint.current_step.as_deref() != Some("prepare")
                     || checkpoint.next_step.as_deref() != Some("edit")
@@ -4911,10 +4527,15 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ))
             }
             "verify" => {
-                ensure_only_keys(object, &["action", "phase", "task_id"])?;
+                ensure_only_keys(object, &["action", "phase", "task_id", "adoption_token"])?;
                 let task_id = required_string(object, "task_id")?;
-                let mut checkpoint =
-                    self.load_coding_checkpoint(task_id, action, request_id, owner_session)?;
+                let mut checkpoint = self.load_coding_checkpoint(
+                    task_id,
+                    action,
+                    request_id,
+                    owner_session,
+                    object.get("adoption_token").and_then(Value::as_str),
+                )?;
                 if checkpoint.completed {
                     return Ok(coding_checkpoint_result(
                         &checkpoint,
@@ -4992,6 +4613,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                             yield_time_ms: 30_000,
                             stdin: None,
                             owner_task_id: Some(checkpoint.workflow_id.clone()),
+                            owner_session: owner_session.cloned(),
                         },
                         request_id,
                     ) {
@@ -5076,10 +4698,15 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                 ))
             }
             "persist" => {
-                ensure_only_keys(object, &["action", "phase", "task_id"])?;
+                ensure_only_keys(object, &["action", "phase", "task_id", "adoption_token"])?;
                 let task_id = required_string(object, "task_id")?;
-                let mut checkpoint =
-                    self.load_coding_checkpoint(task_id, action, request_id, owner_session)?;
+                let mut checkpoint = self.load_coding_checkpoint(
+                    task_id,
+                    action,
+                    request_id,
+                    owner_session,
+                    object.get("adoption_token").and_then(Value::as_str),
+                )?;
                 if checkpoint.current_session_id.is_some()
                     || checkpoint.command_inflight
                     || checkpoint.current_step.as_deref() != Some("verify")
@@ -5133,6 +4760,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         action: &str,
         request_id: Option<&Value>,
         owner_session: Option<&McpSessionId>,
+        adoption_token: Option<&str>,
     ) -> Result<WorkflowCheckpoint, FacadeError> {
         let stored = self.adapter.load_workflow_checkpoint()?.ok_or_else(|| {
             FacadeError::new(FacadeErrorCode::NotFound, "coding task 不存在", false)
@@ -5154,9 +4782,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     false,
                 ));
             };
-            // An explicit, unguessable TaskId is the durable resource capability.
-            // MCP transport sessions are shorter lived, so a phased call atomically
-            // transfers the checkpoint owner instead of creating parallel ownership.
+            if !workflow_adoption_token_matches(&checkpoint, adoption_token) {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::TaskNotOwned,
+                    "coding task transfer requires its adoption_token",
+                    false,
+                ));
+            }
+            self.adapter.transfer_workflow_executions(
+                &TaskId::new(checkpoint.workflow_id.clone()),
+                owner_session,
+            )?;
             checkpoint.owner_session_id = Some(owner_session.to_string());
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
         }
@@ -5296,6 +4932,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         request_task_id: &TaskId,
         owner_session: Option<&McpSessionId>,
         durable_task_id: Option<&str>,
+        adoption_token: Option<&str>,
     ) -> Result<Value, FacadeError> {
         let stored = self.adapter.load_workflow_checkpoint()?.ok_or_else(|| {
             FacadeError::new(FacadeErrorCode::NotFound, "没有可恢复的工作流", false)
@@ -5319,9 +4956,17 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                     false,
                 ));
             };
-            // The checkpoint remains the one mutable lifecycle owner. A caller that
-            // presents its stable TaskId capability after transport reconnect atomically
-            // transfers only the MCP-session owner field; no parallel workflow is created.
+            if !workflow_adoption_token_matches(&checkpoint, adoption_token) {
+                return Err(FacadeError::new(
+                    FacadeErrorCode::TaskNotOwned,
+                    "workflow transfer requires its adoption_token",
+                    false,
+                ));
+            }
+            self.adapter.transfer_workflow_executions(
+                &TaskId::new(checkpoint.workflow_id.clone()),
+                owner_session,
+            )?;
             checkpoint.owner_session_id = Some(owner_session.to_string());
             persist_agent_checkpoint(&self.adapter, &checkpoint)?;
         }
@@ -5641,6 +5286,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
                         .and_then(Value::as_str)
                         .map(str::to_string),
                     owner_task_id: Some(checkpoint.workflow_id.clone()),
+                    owner_session: owner_session.cloned(),
                 },
                 request_id,
             )?;
@@ -5711,22 +5357,11 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         arguments: Value,
         request_id: Option<&Value>,
         task_id: &TaskId,
+        owner_session: Option<&McpSessionId>,
     ) -> Result<Value, FacadeError> {
-        let object = object_args(&arguments)?;
-        let command = required_string(object, "command")?;
-        let shell: ShellSelector = serde_json::from_value(
-            object
-                .get("shell")
-                .cloned()
-                .unwrap_or_else(|| Value::String("auto".into())),
-        )
-        .map_err(|_| invalid_argument())?;
-        let workdir = object.get("workdir").and_then(Value::as_str).unwrap_or(".");
-        if object
-            .get("dry_run")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
+        let parsed =
+            ExecCommandArguments::parse(arguments.clone()).map_err(|()| invalid_argument())?;
+        if parsed.dry_run {
             let mut actual = arguments.clone();
             if let Some(actual) = actual.as_object_mut() {
                 actual.remove("dry_run");
@@ -5741,30 +5376,19 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             ));
         }
         let spec = ShellExecutionSpec {
-            shell,
-            command: command.to_string(),
-            cwd: Path::new(workdir).to_path_buf(),
-            timeout_ms: object
-                .get("timeout_ms")
-                .and_then(Value::as_u64)
-                .unwrap_or(30_000),
-            max_output_bytes: object
-                .get("max_output_bytes")
-                .and_then(Value::as_u64)
-                .unwrap_or(65_536) as usize,
+            shell: parsed.shell,
+            command: parsed.command,
+            cwd: parsed.workdir,
+            timeout_ms: parsed.timeout_ms,
+            max_output_bytes: parsed.max_output_bytes,
         };
         self.adapter.execute_shell(
             ShellCommandRequest {
                 execution: spec,
-                yield_time_ms: object
-                    .get("yield_time_ms")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(10_000),
-                stdin: object
-                    .get("stdin")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
+                yield_time_ms: parsed.yield_time_ms,
+                stdin: parsed.stdin,
                 owner_task_id: Some(task_id.to_string()),
+                owner_session: owner_session.cloned(),
             },
             request_id,
         )
@@ -5774,6 +5398,7 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
         &mut self,
         arguments: Value,
         request_id: Option<&Value>,
+        owner_session: Option<&McpSessionId>,
     ) -> Result<Value, FacadeError> {
         let object = object_args(&arguments)?;
         let action = required_string(object, "action")?;
@@ -5793,6 +5418,10 @@ impl<A: WorkspaceRuntimeAdapter> AgentFacade<A> {
             CommandControlAction::Kill => &["action", "session_id", "signal", "wait_ms"][..],
         };
         ensure_only_keys(object, allowed)?;
+        if let Some(owner_session) = owner_session {
+            self.adapter
+                .authorize_command_resource(action, object, owner_session)?;
+        }
         match action {
             CommandControlAction::Read => {
                 required_string(object, "output_ref")?;
@@ -7233,7 +6862,7 @@ mod schema43_filesystem_facade_tests {
             b"after\r\ncontext\r\n"
         );
         let replaced_hash = replaced["structuredContent"]["data"]["sha256"].clone();
-        let patched = run_workspace_filesystem(
+        let rejected = run_workspace_filesystem(
             &root,
             json!({
                 "action":"patch",
@@ -7241,11 +6870,34 @@ mod schema43_filesystem_facade_tests {
                 "expected_files":{"edit.txt":replaced_hash}
             }),
         )
+        .unwrap_err();
+        assert_eq!(rejected.code, FacadeErrorCode::InvalidArgument);
+        assert_eq!(
+            std::fs::read(root.join("edit.txt")).unwrap(),
+            b"after\r\ncontext\r\n"
+        );
+        assert!(!root.join("added.txt").exists());
+        let patched = run_workspace_filesystem(
+            &root,
+            json!({
+                "action":"patch",
+                "patch":"*** Begin Patch\n*** Update File: edit.txt\n@@\n-after\n+final\n context\n*** End Patch",
+                "expected_files":{"edit.txt":replaced_hash}
+            }),
+        )
         .unwrap();
         assert_eq!(
             patched["structuredContent"]["data"]["affected_files"],
-            json!(["added.txt", "edit.txt"])
+            json!(["edit.txt"])
         );
+        run_workspace_filesystem(
+            &root,
+            json!({
+                "action":"patch",
+                "patch":"*** Begin Patch\n*** Add File: added.txt\n+final added\n*** End Patch"
+            }),
+        )
+        .unwrap();
         assert_eq!(
             std::fs::read(root.join("edit.txt")).unwrap(),
             b"final\r\ncontext\r\n"
@@ -7548,6 +7200,11 @@ fn normalize_coding_edit_error(error: CodingEditError) -> FacadeError {
         CodingEditError::AmbiguousMatch => {
             FacadeError::new(FacadeErrorCode::AmbiguousMatch, "编辑匹配不唯一", false)
         }
+        CodingEditError::MultiFilePatchUnsupported => FacadeError::new(
+            FacadeErrorCode::InvalidArgument,
+            "patch 每次只能修改一个文件；请将多文件修改拆成独立请求",
+            false,
+        ),
         CodingEditError::NotFound => {
             FacadeError::new(FacadeErrorCode::NotFound, "目标文件不存在", false)
         }
@@ -7676,6 +7333,28 @@ fn coding_checkpoint_result(checkpoint: &WorkflowCheckpoint, state: &str, text: 
     )
 }
 
+fn new_workflow_adoption_token() -> AdoptionToken {
+    AdoptionToken::new(crate::security::random_prefixed_id("lb-workflow-adopt-"))
+}
+
+fn hash_workflow_adoption_token(token: &AdoptionToken) -> AdoptionTokenHash {
+    let digest = Sha256::digest(token.expose().as_bytes());
+    AdoptionTokenHash::new(format!("{digest:x}"))
+}
+
+fn workflow_adoption_token_matches(
+    checkpoint: &WorkflowCheckpoint,
+    candidate: Option<&str>,
+) -> bool {
+    let Some(candidate) = candidate.filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    checkpoint.adoption_token_hash.as_ref()
+        == Some(&hash_workflow_adoption_token(&AdoptionToken::new(
+            candidate,
+        )))
+}
+
 pub(crate) fn stable_success(data: Value, text: &str) -> Value {
     let state = data.get("state").cloned().unwrap_or(Value::Null);
     let summary = data
@@ -7689,10 +7368,13 @@ pub(crate) fn stable_success(data: Value, text: &str) -> Value {
         .unwrap_or(Value::Null);
     let warnings = data.get("warnings").cloned().unwrap_or_else(|| json!([]));
     let next_step = data.get("next_step").cloned().unwrap_or(Value::Null);
-    let output_refs = data
-        .get("output_refs")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
+    // The common envelope is always a list; command data additionally names
+    // each stream. Do not copy that stream map into the list contract.
+    let output_refs = match data.get("output_refs") {
+        Some(Value::Array(refs)) => refs.clone(),
+        Some(Value::Object(streams)) => streams.values().cloned().collect(),
+        _ => Vec::new(),
+    };
     json!({
         "content":[{"type":"text","text":text}],
         "structuredContent":{
@@ -8247,6 +7929,8 @@ fn sanitize_object_array(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     #[test]
@@ -8437,7 +8121,10 @@ mod tests {
         task_state: &ExecutionRegistry,
         private: &str,
     ) -> String {
-        let public = sessions.start_session(task_state, None).unwrap();
+        let public = sessions
+            .start_session(task_state, None, None)
+            .unwrap()
+            .public_session_id;
         sessions
             .bind_private_session(task_state, &public, private)
             .unwrap();
@@ -9903,6 +9590,19 @@ mod tests {
         assert_eq!(structured["ok"], true);
         assert!(structured["error"].is_null());
 
+        let command = stable_success(
+            json!({"status":"running","output_refs":{"stdout":"lb-output-a"}}),
+            "running",
+        );
+        assert_eq!(
+            command["structuredContent"]["output_refs"],
+            json!(["lb-output-a"])
+        );
+        assert_eq!(
+            command["structuredContent"]["data"]["output_refs"]["stdout"],
+            "lb-output-a"
+        );
+
         let error =
             FacadeError::new(FacadeErrorCode::FileChanged, "changed", false).to_mcp_result();
         let structured = &error["structuredContent"];
@@ -10336,10 +10036,15 @@ mod tests {
         let mut sessions = PublicCommandSessions::default();
         let private =
             sessions.public_output_for_private("PRIVATE_OUTPUT_SECRET", "session-a", "stdout");
-        let first = sessions.retain_local_output("stdout", "first".into());
+        let first =
+            sessions.retain_local_output(McpSessionId::new("owner"), "stdout", "first".into());
         let mut latest = String::new();
         for index in 1..=MAX_LOCAL_RETAINED_OUTPUT_HANDLES {
-            latest = sessions.retain_local_output("stderr", format!("retained-{index}"));
+            latest = sessions.retain_local_output(
+                McpSessionId::new("owner"),
+                "stderr",
+                format!("retained-{index}"),
+            );
         }
 
         assert!(sessions.local_output(&first).is_none());
@@ -10694,6 +10399,32 @@ mod tests {
         assert_eq!(data["would_execute"], false);
         assert_eq!(data["route"], "ordinary");
         assert!(data.get("session_id").is_none());
+
+        let schema = public_tool_schema("exec_command");
+        let schema_fields = schema["inputSchema"]["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            schema_fields,
+            EXEC_COMMAND_FIELDS.into_iter().collect::<BTreeSet<_>>()
+        );
+
+        for invalid in [
+            json!({"command":"where cmd","unknown_field":true}),
+            json!({"command":"where cmd","dry_run":"true"}),
+            json!({"command":"where cmd","timeout_ms":0}),
+        ] {
+            let rejected = facade
+                .call_tool(PermissionMode::Full, "exec_command", invalid, None, |_| {})
+                .unwrap();
+            assert_eq!(
+                rejected["structuredContent"]["error"]["code"],
+                "InvalidArgument"
+            );
+        }
     }
 
     #[test]
@@ -10916,12 +10647,21 @@ mod tests {
         let task_state = test_task_state("terminal-output-streams");
         let mut sessions = PublicCommandSessions::default();
         let public = bind_test_session(&mut sessions, &task_state, "PRIVATE_OUTPUT_STREAMS");
+        let raw = json!({
+            "output_ref":"private-stderr",
+            "output_stream":"stderr",
+            "output_refs":{"stdout":"private-stdout","stderr":"private-stderr"}
+        });
+        let primary_stream = primary_output_stream(raw.as_object().unwrap(), "private-stderr");
+        assert_eq!(primary_stream, "stderr");
+        let primary = sessions.public_output_for_private("private-stderr", &public, primary_stream);
         let stdout = sessions.public_output_for_private("private-stdout", &public, "stdout");
         let stderr = sessions.public_output_for_private("private-stderr", &public, "stderr");
         let refs = sessions.output_refs_by_stream(&[stdout.clone(), stderr.clone()]);
 
         assert_eq!(refs["stdout"], stdout);
         assert_eq!(refs["stderr"], stderr);
+        assert_eq!(primary, stderr);
     }
 
     #[test]

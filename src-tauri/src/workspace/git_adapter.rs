@@ -323,6 +323,7 @@ fn git_status(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) 
         os("status"),
         os("--porcelain=v1"),
         os("-b"),
+        os("-z"),
     ];
     if !include_untracked {
         args.push(os("--untracked-files=no"));
@@ -332,28 +333,11 @@ fn git_status(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) 
         Ok(output) => return Some(git_failure(&output)),
         Err(message) => return Some(tool_error("GIT_ERROR", &message)),
     };
-    let text = String::from_utf8_lossy(&status.output);
-    let mut lines = text.lines();
-    let branch_line = lines.next().unwrap_or_default();
-    let (branch, upstream, ahead, behind) = parse_branch_line(branch_line);
-    let mut entries = Vec::new();
-    for line in lines {
-        if line.len() < 3 {
-            continue;
-        }
-        let bytes = line.as_bytes();
-        let raw_path = line.get(3..).unwrap_or_default();
-        let (original_path, path) = raw_path
-            .split_once(" -> ")
-            .map(|(from, to)| (Some(from.to_string()), to.to_string()))
-            .unwrap_or((None, raw_path.to_string()));
-        entries.push(json!({
-            "path": path,
-            "original_path": original_path,
-            "index_status": (bytes[0] as char).to_string(),
-            "worktree_status": (bytes[1] as char).to_string()
-        }));
-    }
+    let ((branch, upstream, ahead, behind), mut entries) =
+        match parse_status_porcelain_v1_z(&status.output, status.truncated) {
+            Ok(parsed) => parsed,
+            Err(message) => return Some(tool_error("GIT_ERROR", message)),
+        };
     let truncated = status.truncated || entries.len() > max_entries;
     entries.truncate(max_entries);
     let head = run_git(
@@ -384,6 +368,66 @@ fn git_status(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) 
         "truncated": truncated
     });
     Some(tool_success("git_status", payload))
+}
+
+type BranchStatus = (Option<String>, Option<String>, u64, u64);
+
+fn parse_status_porcelain_v1_z(
+    bytes: &[u8],
+    truncated: bool,
+) -> Result<(BranchStatus, Vec<Value>), &'static str> {
+    if bytes.is_empty() {
+        return Ok(((None, None, 0, 0), Vec::new()));
+    }
+    if !truncated && bytes.last() != Some(&0) {
+        return Err("Git status returned an incomplete machine record");
+    }
+    let mut records = bytes.split(|byte| *byte == 0).peekable();
+    let branch_record = records
+        .next()
+        .ok_or("Git status omitted its branch record")?;
+    let branch_line =
+        std::str::from_utf8(branch_record).map_err(|_| "Git status branch is not valid UTF-8")?;
+    let branch = parse_branch_line(branch_line);
+    let mut entries = Vec::new();
+    while let Some(record) = records.next() {
+        if record.is_empty() {
+            continue;
+        }
+        if record.len() < 3 || record[2] != b' ' {
+            if truncated && records.peek().is_none() {
+                break;
+            }
+            return Err("Git status returned an invalid machine record");
+        }
+        let index_status = record[0] as char;
+        let worktree_status = record[1] as char;
+        let path = std::str::from_utf8(&record[3..])
+            .map_err(|_| "Git status path is not valid UTF-8")?
+            .to_string();
+        let rename_or_copy =
+            matches!(index_status, 'R' | 'C') || matches!(worktree_status, 'R' | 'C');
+        let original_path = if rename_or_copy {
+            let original = records
+                .next()
+                .filter(|record| !record.is_empty())
+                .ok_or("Git status omitted the original rename path")?;
+            Some(
+                std::str::from_utf8(original)
+                    .map_err(|_| "Git status original path is not valid UTF-8")?
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        entries.push(json!({
+            "path": path,
+            "original_path": original_path,
+            "index_status": index_status.to_string(),
+            "worktree_status": worktree_status.to_string(),
+        }));
+    }
+    Ok((branch, entries))
 }
 
 fn git_diff(resolver: &GitRepositoryResolver, arguments: &Map<String, Value>) -> Option<Value> {
@@ -1425,6 +1469,54 @@ mod tests {
                 .is_some_and(|content| content.contains("deleted file mode"))
         );
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn git_status_preserves_unicode_arrow_and_rename_paths() {
+        let root = temp_repo();
+        git(&root, &["init"]);
+        git(&root, &["config", "user.email", "status@example.invalid"]);
+        git(&root, &["config", "user.name", "LocalBridge Status"]);
+        git(&root, &["config", "core.autocrlf", "false"]);
+        let original = "测试 old.txt";
+        let renamed = "重命名 new.txt";
+        let untracked = "未跟踪 文件.txt";
+        fs::write(root.join(original), b"tracked\n").unwrap();
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-m", "status fixture"]);
+        git(&root, &["mv", original, renamed]);
+        fs::write(root.join(untracked), b"untracked\n").unwrap();
+
+        let status = handle_git_tool(
+            &root,
+            "git_status",
+            &json!({"path":".","include_untracked":true}),
+        )
+        .unwrap();
+        assert_eq!(status["isError"], false, "{status:#?}");
+        let entries = status["structuredContent"]["entries"].as_array().unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|entry| { entry["path"] == renamed && entry["original_path"] == original }),
+            "{entries:#?}"
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry["path"] == untracked && entry["original_path"].is_null()),
+            "{entries:#?}"
+        );
+        assert!(entries.iter().all(|entry| {
+            !entry["path"]
+                .as_str()
+                .is_some_and(|path| path.contains("\\346") || path.starts_with('"'))
+        }));
+        let machine = b"## main\0R  to -> literal.txt\0from -> literal.txt\0";
+        let (_, special) = parse_status_porcelain_v1_z(machine, false).unwrap();
+        assert_eq!(special[0]["path"], "to -> literal.txt");
+        assert_eq!(special[0]["original_path"], "from -> literal.txt");
         fs::remove_dir_all(root).unwrap();
     }
 }

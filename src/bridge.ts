@@ -59,6 +59,15 @@ const isCurrentActivity = (value: unknown): value is CurrentActivityProjection =
 const isLastActivity = (value: unknown): value is LastActivityProjection => isRecord(value) && isEnum(value.kind, taskKinds) && isStringOrNull(value.summary) && isEnum(value.outcome, activityOutcomes) && typeof value.completedAtMs === "number";
 const isUpdate = (value: unknown): value is UpdateProjection => isRecord(value) && isEnum(value.state, updateStates) && typeof value.currentVersion === "string" && isStringOrNull(value.latestVersion) && isStringOrNull(value.releaseUrl) && isStringOrNull(value.operationId) && isNumberOrNull(value.attempt) && typeof value.retryable === "boolean";
 const isFault = (value: unknown): value is UiFaultProjection => isRecord(value) && typeof value.code === "string" && isUiErrorCategory(value.category) && typeof value.message === "string" && typeof value.retryable === "boolean";
+const isUiError = (value: unknown): value is UiError => isRecord(value)
+  && typeof value.code === "string"
+  && isUiErrorCategory(value.category)
+  && typeof value.message === "string"
+  && typeof value.retryable === "boolean"
+  && isStringOrNull(value.operationId)
+  && isStringOrNull(value.sessionId)
+  && (value.requestId === null || typeof value.requestId === "string" || typeof value.requestId === "number")
+  && isStringOrNull(value.taskId);
 export function parseMainProjection(value: unknown): MainProjection {
   if (!isRecord(value)
     || !isEnum(value.authorityStatus, projectionStatuses)
@@ -107,9 +116,20 @@ export function parseAdminConsentChallenge(value: unknown): AdminConsentChalleng
   return value as unknown as AdminConsentChallenge;
 }
 export function uiErrorMessage(value: unknown, fallback: string): string {
-  if (typeof value === "object" && value !== null && "message" in value && typeof value.message === "string" && value.message.trim()) return value.message;
-  if (value instanceof Error && value.message.trim()) return value.message;
-  return fallback;
+  return parseUiError(value, fallback).message;
+}
+export function parseUiError(value: unknown, fallback: string): UiError {
+  if (isUiError(value)) return value;
+  return {
+    code: value instanceof Error ? "Ui.FrontendFailure" : "Ui.Unavailable",
+    category: "unavailable",
+    message: value instanceof Error && value.message.trim() ? value.message : fallback,
+    retryable: true,
+    operationId: null,
+    sessionId: null,
+    requestId: null,
+    taskId: null,
+  };
 }
 export const bridge = {
   read: async () => parseMainProjection(await invoke<unknown>("get_main_projection")),

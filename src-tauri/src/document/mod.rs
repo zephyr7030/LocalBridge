@@ -1,4 +1,5 @@
 use std::io::{Cursor, Read, Write};
+use std::ops::Range;
 use std::path::Path;
 
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -376,9 +377,22 @@ impl DocumentService {
         if edits.is_empty() || !valid_sha256(expected_sha256) {
             return Err(DocumentError::InvalidArgument);
         }
-        let (_bytes, sha256, mut ir) = self.load(path)?;
+        let (bytes, sha256, mut ir) = self.load(path)?;
         if !sha256.eq_ignore_ascii_case(expected_sha256) {
             return Err(DocumentError::FileChanged);
+        }
+        if ir.format == DocumentFormat::Docx {
+            let edit_count = edits.len();
+            let updated = edit_docx_package(&bytes, &ir, edits)?;
+            self.filesystem
+                .replace_file_if_sha256(path, expected_sha256, &updated)
+                .map_err(map_filesystem_error)?;
+            return Ok(DocumentResult::Edit {
+                path: self.display_path(path)?,
+                format: DocumentFormat::Docx,
+                sha256: sha256_hex(&updated),
+                applied_edits: edit_count,
+            });
         }
         if !ir.editable {
             return Err(if ir.format == DocumentFormat::Pdf {
@@ -855,6 +869,271 @@ fn render_docx(ir: &DocumentIr) -> Result<Vec<u8>, DocumentError> {
         .map_err(|_| DocumentError::Io)
 }
 
+#[derive(Debug)]
+struct DocxParagraphSpan {
+    range: Range<usize>,
+    text_ranges: Vec<Range<usize>>,
+    direct_body_child: bool,
+    ambiguous_replacement: bool,
+}
+
+#[derive(Debug, Default)]
+struct PlannedDocxEdit {
+    before: Vec<String>,
+    after: Vec<String>,
+    replacement: Option<String>,
+    delete: bool,
+}
+
+fn edit_docx_package(
+    bytes: &[u8],
+    ir: &DocumentIr,
+    edits: Vec<DocumentEditOperation>,
+) -> Result<Vec<u8>, DocumentError> {
+    let document_xml = read_docx_part(bytes, "word/document.xml")?;
+    let xml = std::str::from_utf8(&document_xml).map_err(|_| DocumentError::CorruptDocument)?;
+    let spans = docx_paragraph_spans(xml)?;
+    if spans.len() != ir.blocks.len() {
+        return Err(DocumentError::UnsupportedContent);
+    }
+    let mut planned = (0..spans.len())
+        .map(|_| PlannedDocxEdit::default())
+        .collect::<Vec<_>>();
+    for edit in edits {
+        let (block_id, operation, content) = match edit {
+            DocumentEditOperation::Replace { block_id, content } => (block_id, 0, Some(content)),
+            DocumentEditOperation::InsertBefore { block_id, content } => {
+                (block_id, 1, Some(content))
+            }
+            DocumentEditOperation::InsertAfter { block_id, content } => {
+                (block_id, 2, Some(content))
+            }
+            DocumentEditOperation::Delete { block_id } => (block_id, 3, None),
+        };
+        if content
+            .as_deref()
+            .is_some_and(|value| value.contains(['\r', '\n']))
+        {
+            return Err(DocumentError::InvalidArgument);
+        }
+        let index = ir
+            .blocks
+            .iter()
+            .position(|block| block.id == block_id)
+            .ok_or(DocumentError::InvalidArgument)?;
+        if !spans[index].direct_body_child {
+            return Err(DocumentError::UnsupportedContent);
+        }
+        let target = &mut planned[index];
+        match (operation, content) {
+            (0, Some(content)) if target.replacement.is_none() && !target.delete => {
+                target.replacement = Some(content)
+            }
+            (1, Some(content)) if !target.delete => target.before.push(content),
+            (2, Some(content)) if !target.delete => target.after.push(content),
+            (3, None)
+                if target.replacement.is_none()
+                    && target.before.is_empty()
+                    && target.after.is_empty()
+                    && !target.delete =>
+            {
+                target.delete = true
+            }
+            _ => return Err(DocumentError::InvalidArgument),
+        }
+    }
+
+    let mut updated_xml = String::with_capacity(xml.len());
+    let mut cursor = 0;
+    for (index, span) in spans.iter().enumerate() {
+        let edit = &planned[index];
+        updated_xml.push_str(&xml[cursor..span.range.start]);
+        for content in &edit.before {
+            updated_xml.push_str(&simple_docx_paragraph(content));
+        }
+        if !edit.delete {
+            if let Some(content) = &edit.replacement {
+                if span.ambiguous_replacement || span.text_ranges.len() != 1 {
+                    return Err(DocumentError::UnsupportedContent);
+                }
+                let text = &span.text_ranges[0];
+                updated_xml.push_str(&xml[span.range.start..text.start]);
+                updated_xml.push_str(&xml_escape(content));
+                updated_xml.push_str(&xml[text.end..span.range.end]);
+            } else {
+                updated_xml.push_str(&xml[span.range.clone()]);
+            }
+        }
+        for content in &edit.after {
+            updated_xml.push_str(&simple_docx_paragraph(content));
+        }
+        cursor = span.range.end;
+    }
+    updated_xml.push_str(&xml[cursor..]);
+    rewrite_docx_part(bytes, "word/document.xml", updated_xml.as_bytes())
+}
+
+fn read_docx_part(bytes: &[u8], name: &str) -> Result<Vec<u8>, DocumentError> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).map_err(|_| DocumentError::CorruptDocument)?;
+    let mut part = archive
+        .by_name(name)
+        .map_err(|_| DocumentError::CorruptDocument)?;
+    if part.size() > MAX_DOCUMENT_BYTES as u64 {
+        return Err(DocumentError::LimitExceeded);
+    }
+    let mut content = Vec::with_capacity(part.size() as usize);
+    part.read_to_end(&mut content)
+        .map_err(|_| DocumentError::CorruptDocument)?;
+    Ok(content)
+}
+
+fn rewrite_docx_part(bytes: &[u8], name: &str, content: &[u8]) -> Result<Vec<u8>, DocumentError> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).map_err(|_| DocumentError::CorruptDocument)?;
+    let archive_comment = archive.comment().to_vec().into_boxed_slice();
+    let output = Cursor::new(Vec::new());
+    let mut writer = ZipWriter::new(output);
+    writer.set_raw_comment(archive_comment);
+    let mut replaced = false;
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|_| DocumentError::CorruptDocument)?;
+        if entry.name() == name {
+            if replaced {
+                return Err(DocumentError::CorruptDocument);
+            }
+            replaced = true;
+            let mut options = SimpleFileOptions::default().compression_method(entry.compression());
+            if let Some(modified) = entry.last_modified() {
+                options = options.last_modified_time(modified);
+            }
+            if let Some(mode) = entry.unix_mode() {
+                options = options.unix_permissions(mode);
+            }
+            writer
+                .start_file(name, options)
+                .map_err(|_| DocumentError::Io)?;
+            writer.write_all(content).map_err(|_| DocumentError::Io)?;
+        } else {
+            writer.raw_copy_file(entry).map_err(|_| DocumentError::Io)?;
+        }
+    }
+    if !replaced {
+        return Err(DocumentError::CorruptDocument);
+    }
+    writer
+        .finish()
+        .map(|cursor| cursor.into_inner())
+        .map_err(|_| DocumentError::Io)
+}
+
+fn docx_paragraph_spans(xml: &str) -> Result<Vec<DocxParagraphSpan>, DocumentError> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut stack = Vec::<Vec<u8>>::new();
+    let mut active = None::<DocxParagraphSpan>;
+    let mut paragraphs = Vec::new();
+    loop {
+        let start = reader.buffer_position() as usize;
+        let event = reader
+            .read_event()
+            .map_err(|_| DocumentError::CorruptDocument)?;
+        let end = reader.buffer_position() as usize;
+        match event {
+            XmlEvent::Start(event) => {
+                let local = event.local_name().as_ref().to_vec();
+                if local == b"p" {
+                    if active.is_some() {
+                        return Err(DocumentError::UnsupportedContent);
+                    }
+                    active = Some(DocxParagraphSpan {
+                        range: start..0,
+                        text_ranges: Vec::new(),
+                        direct_body_child: stack.last().is_some_and(|parent| parent == b"body"),
+                        ambiguous_replacement: false,
+                    });
+                } else if docx_replacement_is_ambiguous(&local) {
+                    if let Some(paragraph) = active.as_mut() {
+                        paragraph.ambiguous_replacement = true;
+                    }
+                }
+                stack.push(local);
+            }
+            XmlEvent::Empty(event) => {
+                let local = event.local_name().as_ref().to_vec();
+                if local == b"p" {
+                    return Err(DocumentError::UnsupportedContent);
+                }
+                if docx_replacement_is_ambiguous(&local) {
+                    if let Some(paragraph) = active.as_mut() {
+                        paragraph.ambiguous_replacement = true;
+                    }
+                }
+            }
+            XmlEvent::Text(_) => {
+                if stack.last().is_some_and(|element| element == b"t") {
+                    if let Some(paragraph) = active.as_mut() {
+                        paragraph.text_ranges.push(start..end);
+                    }
+                }
+            }
+            XmlEvent::CData(_) => {
+                if let Some(paragraph) = active.as_mut() {
+                    paragraph.ambiguous_replacement = true;
+                }
+            }
+            XmlEvent::End(event) => {
+                let local = event.local_name().as_ref().to_vec();
+                let opened = stack.pop().ok_or(DocumentError::CorruptDocument)?;
+                if opened != local {
+                    return Err(DocumentError::CorruptDocument);
+                }
+                if local == b"p" {
+                    let mut paragraph = active.take().ok_or(DocumentError::CorruptDocument)?;
+                    paragraph.range.end = end;
+                    paragraphs.push(paragraph);
+                }
+            }
+            XmlEvent::Eof => break,
+            _ => {}
+        }
+    }
+    if active.is_some() || !stack.is_empty() {
+        return Err(DocumentError::CorruptDocument);
+    }
+    Ok(paragraphs)
+}
+
+fn docx_replacement_is_ambiguous(local_name: &[u8]) -> bool {
+    matches!(
+        local_name,
+        b"hyperlink"
+            | b"fldSimple"
+            | b"fldChar"
+            | b"instrText"
+            | b"drawing"
+            | b"object"
+            | b"pict"
+            | b"bookmarkStart"
+            | b"bookmarkEnd"
+            | b"commentRangeStart"
+            | b"commentRangeEnd"
+            | b"sdt"
+            | b"altChunk"
+            | b"tab"
+            | b"br"
+    )
+}
+
+fn simple_docx_paragraph(content: &str) -> String {
+    format!(
+        "<w:p><w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
+        xml_escape(content)
+    )
+}
+
 fn apply_edit(ir: &mut DocumentIr, edit: DocumentEditOperation) -> Result<(), DocumentError> {
     let (block_id, action) = match edit {
         DocumentEditOperation::Replace { block_id, content } => (block_id, (0u8, Some(content))),
@@ -998,6 +1277,14 @@ mod tests {
         pdf
     }
 
+    mod document_fixtures {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tests/support/document_fixtures.rs"
+        ));
+    }
+    use document_fixtures::{rich_docx, zip_entry};
+
     #[test]
     fn text_edit_is_hash_guarded_and_atomic() {
         let (root, service) = fixture();
@@ -1110,6 +1397,60 @@ mod tests {
         let markdown = fs::read_to_string(root.join("note.md")).unwrap();
         assert!(markdown.contains("# Title"));
         assert!(markdown.contains("edited"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn docx_edit_preserves_unmodified_ooxml_and_rejects_ambiguous_target() {
+        let (root, service) = fixture();
+        let original = rich_docx();
+        fs::write(root.join("rich.docx"), &original).unwrap();
+        let original_sha = sha256_hex(&original);
+        service
+            .execute(DocumentRequest::Edit {
+                path: "rich.docx".into(),
+                expected_sha256: original_sha,
+                edits: vec![DocumentEditOperation::Replace {
+                    block_id: "block-1".into(),
+                    content: "new".into(),
+                }],
+            })
+            .unwrap();
+        let edited = fs::read(root.join("rich.docx")).unwrap();
+        for part in [
+            "[Content_Types].xml",
+            "_rels/.rels",
+            "word/_rels/document.xml.rels",
+            "docProps/custom.xml",
+        ] {
+            assert_eq!(
+                zip_entry(&edited, part),
+                zip_entry(&original, part),
+                "{part}"
+            );
+        }
+        let document = String::from_utf8(zip_entry(&edited, "word/document.xml")).unwrap();
+        assert!(document.contains("<w:t>new</w:t>"));
+        assert!(document.contains("<w:rPr><w:b/></w:rPr>"));
+        assert!(document.contains("<w:hyperlink r:id=\"rId7\">"));
+        let archive = ZipArchive::new(Cursor::new(&edited)).unwrap();
+        assert_eq!(archive.comment(), b"KEEP_ARCHIVE_COMMENT");
+
+        let edited_sha = sha256_hex(&edited);
+        assert_eq!(
+            service
+                .execute(DocumentRequest::Edit {
+                    path: "rich.docx".into(),
+                    expected_sha256: edited_sha,
+                    edits: vec![DocumentEditOperation::Replace {
+                        block_id: "block-3".into(),
+                        content: "ambiguous".into(),
+                    }],
+                })
+                .unwrap_err(),
+            DocumentError::UnsupportedContent
+        );
+        assert_eq!(fs::read(root.join("rich.docx")).unwrap(), edited);
         fs::remove_dir_all(root).unwrap();
     }
 

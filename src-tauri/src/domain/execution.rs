@@ -2,7 +2,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::{ExecutionId, McpSessionId, PublicSessionId, TaskId, TerminalOutcome};
+use super::{
+    AdoptionTokenHash, ExecutionId, McpSessionId, PublicSessionId, TaskId, TerminalOutcome,
+};
 
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RuntimeCommandHandle(String);
@@ -53,6 +55,8 @@ pub struct ExecutionRecord {
     pub task_id: TaskId,
     pub public_session_id: PublicSessionId,
     pub owner_session: Option<McpSessionId>,
+    #[serde(default, skip_serializing)]
+    pub adoption_token_hash: Option<AdoptionTokenHash>,
     #[serde(skip)]
     pub runtime_handle: Option<RuntimeCommandHandle>,
     pub state: ExecutionState,

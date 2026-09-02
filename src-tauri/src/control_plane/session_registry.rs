@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::{McpSessionId, McpSessionState, RequestKey, TaskId};
+use crate::domain::{McpSessionId, McpSessionState, RequestKey};
 
 pub(crate) const MCP_SESSION_TTL_MS: u64 = 5 * 60 * 1_000;
 
@@ -17,7 +17,6 @@ pub(crate) struct SessionRecord {
     pub created_at_ms: u64,
     pub last_seen_ms: u64,
     pub owned_requests: HashSet<RequestKey>,
-    pub owned_tasks: HashSet<TaskId>,
 }
 
 impl SessionRecord {
@@ -32,7 +31,6 @@ impl SessionRecord {
             created_at_ms: now,
             last_seen_ms: now,
             owned_requests: HashSet::new(),
-            owned_tasks: HashSet::new(),
         }
     }
 
@@ -139,11 +137,6 @@ impl SessionRegistry {
 
     pub(crate) fn remove_request(&self, owner: &McpSessionId, request: &RequestKey) -> bool {
         self.update(owner, |session| session.owned_requests.remove(request))
-            .unwrap_or(false)
-    }
-
-    pub(crate) fn add_task(&self, owner: &McpSessionId, task_id: TaskId) -> bool {
-        self.update(owner, |session| session.owned_tasks.insert(task_id))
             .unwrap_or(false)
     }
 
@@ -312,19 +305,16 @@ mod tests {
     }
 
     #[test]
-    fn session_owns_typed_request_and_task_identities() {
+    fn session_owns_only_active_request_leases() {
         let registry = SessionRegistry::default();
         let id = McpSessionId::new("session-a");
         registry
             .insert_bounded(record("session-a", "v1", "catalog"), 64)
             .unwrap();
         let request = RequestKey::new(id.clone(), crate::domain::RpcRequestId::Number(7));
-        let task = TaskId::new("task-a");
         assert!(registry.add_request(&id, request.clone()));
-        assert!(registry.add_task(&id, task.clone()));
         let session = registry.get(&id).unwrap();
         assert!(session.owned_requests.contains(&request));
-        assert!(session.owned_tasks.contains(&task));
         assert!(registry.remove_request(&id, &request));
         assert!(!registry.get(&id).unwrap().owned_requests.contains(&request));
     }

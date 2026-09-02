@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseMainProjection, uiErrorMessage, type UiError } from "../bridge";
+import { parseMainProjection, parseUiError, uiErrorMessage, type UiError } from "../bridge";
+import { projectionReadFailed, projectionReadSucceeded } from "../projectionTransport";
 import { parseDiagnosticsProjection } from "../features/diagnostics/api";
 import { parseOnboardingState } from "../features/onboarding/api";
 import mainProjectionFixture from "../../tests/fixtures/ui/main_projection.json";
@@ -18,10 +19,38 @@ describe("typed UI error boundary", () => {
     };
 
     expect(uiErrorMessage(error, "fallback")).toBe("queue is full");
+    expect(parseUiError(error, "fallback")).toEqual(error);
   });
 
   it("does not treat an untyped string as the UI error contract", () => {
     expect(uiErrorMessage("legacy string error", "fallback")).toBe("fallback");
+  });
+});
+
+describe("frontend projection freshness", () => {
+  it("discards the previous successful projection after any transport or parse failure", () => {
+    const projection = parseMainProjection(mainProjectionFixture);
+    const fresh = projectionReadSucceeded(projection);
+    expect(fresh.projection?.projectionRevision).toBe(projection.projectionRevision);
+    const unavailable = projectionReadFailed(parseUiError({
+      code: "Ui.BackendUnavailable",
+      category: "unavailable",
+      message: "backend unavailable",
+      retryable: true,
+      operationId: "operation-9",
+      sessionId: "session-9",
+      requestId: 9,
+      taskId: "task-9",
+    }, "fallback"));
+    expect(unavailable.freshness).toBe("unavailable");
+    expect(unavailable.projection).toBeNull();
+    expect(unavailable.error).toMatchObject({
+      code: "Ui.BackendUnavailable",
+      operationId: "operation-9",
+      sessionId: "session-9",
+      requestId: 9,
+      taskId: "task-9",
+    });
   });
 });
 

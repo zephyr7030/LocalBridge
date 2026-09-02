@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import {
   ChatGptMcpClient,
   emptyLoopbackPreconnect,
+  parseExtraHeaders,
   singleChunkedRequestFetch,
 } from "./client.mjs";
 import {
@@ -12,7 +13,9 @@ import {
 } from "./command_lifecycle.mjs";
 
 function argumentsFrom(argv) {
-  const options = {};
+  const options = {
+    extraHeaders: parseExtraHeaders(process.env.LOCALBRIDGE_TEST_MCP_HEADERS),
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--url") options.endpoint = argv[++index];
@@ -55,6 +58,8 @@ function toolSchema(tools, name) {
   return tool.inputSchema;
 }
 
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 async function toolCall(client, name, args, requestId) {
   try {
     return await client.execute({
@@ -69,9 +74,69 @@ async function toolCall(client, name, args, requestId) {
   }
 }
 
-export async function runRevision46Scenario({ endpoint, workspace }) {
-  const client = new ChatGptMcpClient({ endpoint, timeoutMs: 35_000 });
-  const reconnectClient = new ChatGptMcpClient({ endpoint, timeoutMs: 35_000 });
+async function verifyWorkflowExecutionOwnership(endpoint, extraHeaders) {
+  const owner = new ChatGptMcpClient({ endpoint, extraHeaders, timeoutMs: 60_000 });
+  const next = new ChatGptMcpClient({ endpoint, extraHeaders, timeoutMs: 60_000 });
+  await owner.connect();
+  await next.connect();
+  await owner.execute({ op: "tools/list", request_id: "workflow-owner-schema" });
+  await next.execute({ op: "tools/list", request_id: "workflow-next-schema" });
+  try {
+    assertSuccess(await toolCall(owner, "filesystem", {
+      action: "write",
+      path: "package.json",
+      content: JSON.stringify({ scripts: { test: "node -e \"setTimeout(()=>{},45000)\"" } }),
+    }, "workflow-execution-manifest"));
+    const prepared = assertSuccess(await toolCall(owner, "agent_workflow", {
+      action: "bugfix", phase: "prepare", objective: "exercise owned detached verification",
+    }, "workflow-execution-prepare"));
+    assertSuccess(await toolCall(owner, "agent_workflow", {
+      action: "bugfix", phase: "edit", task_id: prepared.task_id,
+      patch: "*** Begin Patch\n*** Add File: workflow-owned.txt\n+owned\n*** End Patch",
+    }, "workflow-execution-edit"));
+    const verifying = assertSuccess(await toolCall(owner, "agent_workflow", {
+      action: "bugfix", phase: "verify", task_id: prepared.task_id,
+    }, "workflow-execution-verify"));
+    assert.equal(verifying.state, "verifying");
+    const detail = assertSuccess(await toolCall(owner, "task_control", {
+      action: "get", task_id: prepared.task_id,
+    }, "workflow-execution-owned-detail"));
+    const execution = detail.executions.find((item) => item.state?.state === "running");
+    assert.ok(execution, JSON.stringify(detail));
+    assert.equal(execution.owner_session, owner.sessionId);
+    assertToolError(await toolCall(next, "agent_workflow", {
+      action: "resume", task_id: prepared.task_id, adoption_token: prepared.adoption_token,
+    }, "workflow-execution-active-owner-denied"), "TaskNotOwned");
+    await owner.close();
+    assertSuccess(await toolCall(next, "agent_workflow", {
+      action: "resume", task_id: prepared.task_id, adoption_token: prepared.adoption_token,
+    }, "workflow-execution-orphan-resume"));
+    const adopted = assertSuccess(await toolCall(next, "task_control", {
+      action: "get", task_id: prepared.task_id,
+    }, "workflow-execution-adopted-detail"));
+    assert.equal(adopted.task.owner_session, next.sessionId);
+    assert.equal(adopted.executions[0].owner_session, next.sessionId);
+    const cancelled = assertSuccess(await toolCall(next, "task_control", {
+      action: "cancel", task_id: prepared.task_id,
+    }, "workflow-execution-cancel"));
+    assert.equal(cancelled.workflow_cancelled, true);
+    assert.ok(cancelled.cancelled_requests >= 1);
+    const terminal = await drivePublicCommandToTerminal({
+      publicSessionId: execution.public_session_id,
+      callTool: (name, args, requestId) => toolCall(next, name, args, requestId),
+      requestPrefix: "workflow-execution-terminal",
+    });
+    assert.equal(assertSuccess(terminal).status, "cancelled");
+    return "PASS";
+  } finally {
+    await owner.close();
+    await next.close();
+  }
+}
+
+export async function runRevision46Scenario({ endpoint, workspace, extraHeaders = {} }) {
+  const client = new ChatGptMcpClient({ endpoint, extraHeaders, timeoutMs: 35_000 });
+  const reconnectClient = new ChatGptMcpClient({ endpoint, extraHeaders, timeoutMs: 35_000 });
   const report = {
     mcp_session_id: null,
     checks: {},
@@ -106,6 +171,8 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     ]);
     assert.ok(toolSchema(tools, "task_control").properties.task_id);
     assert.ok(toolSchema(tools, "agent_workflow").properties.task_id);
+    assert.ok(toolSchema(tools, "agent_workflow").properties.adoption_token);
+    assert.ok(toolSchema(tools, "command_control").properties.adoption_token);
     const documentSchema = toolSchema(tools, "document_workflow");
     assert.deepEqual(documentSchema.properties.action.enum, [
       "inspect",
@@ -123,7 +190,128 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     ]);
     assert.equal(documentSchema.properties.expected_sha256.minLength, 64);
     await reconnectClient.connect();
+    await reconnectClient.execute({ op: "tools/list", request_id: "reconnect-catalog" });
+    const fullContext = assertSuccess(await toolCall(
+      client, "workspace_context", { detail: "full" }, "full-context-contract",
+    ));
+    assert.ok(fullContext.coding_capabilities.includes("command_execution"));
     report.checks.public_schema = "PASS";
+
+    const execSchema = toolSchema(tools, "exec_command");
+    assert.equal(execSchema.additionalProperties, false);
+    assert.equal(execSchema.properties.dry_run.type, "boolean");
+    const dryRun = assertSuccess(await toolCall(
+      client,
+      "exec_command",
+      { command: "echo BAD>dry-run-side-effect.txt", shell: "cmd", dry_run: true },
+      "exec-contract-dry-run",
+    ));
+    assert.equal(dryRun.status, "completed");
+    assert.equal(dryRun.session_id, undefined);
+    assertToolError(await toolCall(
+      client,
+      "filesystem",
+      { action: "stat", path: "dry-run-side-effect.txt" },
+      "exec-contract-no-side-effect",
+    ), "NotFound");
+    assertToolError(await toolCall(
+      client,
+      "exec_command",
+      { command: "echo BAD", shell: "cmd", unknown_field: true },
+      "exec-contract-unknown-field",
+    ), "InvalidArgument");
+    report.checks.exec_contract = "PASS";
+
+    for (const path of ["patch-a.txt", "patch-b.txt"]) {
+      assertSuccess(await toolCall(
+        client, "filesystem", { action: "write", path, content: "old\n" }, `patch-create-${path}`,
+      ));
+    }
+    assertToolError(await toolCall(
+      client,
+      "filesystem",
+      {
+        action: "patch",
+        patch: "*** Begin Patch\n*** Update File: patch-a.txt\n@@\n-old\n+new\n*** Update File: patch-b.txt\n@@\n-old\n+new\n*** End Patch",
+      },
+      "patch-reject-non-durable-multi-file",
+    ), "InvalidArgument");
+    for (const path of ["patch-a.txt", "patch-b.txt"]) {
+      const read = assertSuccess(await toolCall(
+        client, "filesystem", { action: "read", path }, `patch-unchanged-${path}`,
+      ));
+      assert.equal(read.content, "old\n");
+    }
+    report.checks.patch_crash_boundary = "PASS";
+
+    const blocker = toolCall(
+      client,
+      "exec_command",
+      {
+        command: "Start-Sleep -Seconds 4; Write-Output LB_QUEUE_BLOCKER_DONE",
+        shell: "windows_powershell",
+        yield_time_ms: 10_000,
+        timeout_ms: 20_000,
+      },
+      "queue-blocker",
+    );
+    await delay(150);
+    const concurrentObservation = await toolCall(
+      client,
+      "workspace_context",
+      { detail: "compact" },
+      "observation-during-work",
+    );
+    const concurrentObservationData = assertSuccess(concurrentObservation);
+    assert.ok(concurrentObservation.elapsed_ms < 1_000, explain(concurrentObservation));
+    assert.equal(concurrentObservationData.runtime, "ready", explain(concurrentObservation));
+    assert.equal(
+      concurrentObservationData.current_task.scheduler.foreground_work_running,
+      1,
+      explain(concurrentObservation),
+    );
+    report.checks.observation_during_work = "PASS";
+    const queuedRequestId = "queue-cancel-before-admission";
+    const queued = toolCall(
+      client,
+      "exec_command",
+      {
+        command: "Set-Content -LiteralPath queued-cancel-should-not-exist.txt -Value BAD",
+        shell: "windows_powershell",
+        workdir: ".",
+        yield_time_ms: 10_000,
+      },
+      queuedRequestId,
+    );
+    const queueDeadline = performance.now() + 2_000;
+    while (true) {
+      const observed = await toolCall(
+        client,
+        "task_control",
+        { action: "get" },
+        `queue-observe-${Math.round(performance.now())}`,
+      );
+      if (assertSuccess(observed).scheduler.queue_depth >= 1) break;
+      assert.ok(performance.now() < queueDeadline, "queued request never entered Scheduler");
+      await delay(25);
+    }
+    const cancelledQueued = await client.cancelRequest(
+      queuedRequestId,
+      "black-box queued cancellation",
+    );
+    assert.ok(cancelledQueued.elapsed_ms < 1_000, explain(cancelledQueued));
+    assertToolError(await queued, "ProcessCancelled");
+    assert.equal(assertSuccess(await blocker).status, "completed");
+    assertToolError(
+      await toolCall(
+        client,
+        "filesystem",
+        { action: "stat", path: "queued-cancel-should-not-exist.txt" },
+        "queue-cancel-side-effect-check",
+      ),
+      "NotFound",
+    );
+    report.checks.queued_request_cancel = "PASS";
 
     const listedFiles = await toolCall(
       client,
@@ -279,6 +467,29 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     const interactiveData = assertSuccess(interactive);
     assert.equal(interactiveData.status, "running", explain(interactive));
     const interactiveSession = interactiveData.session_id;
+    assert.equal(typeof interactiveData.adoption_token, "string", explain(interactive));
+    assertToolError(
+      await toolCall(
+        reconnectClient,
+        "command_control",
+        { action: "poll", session_id: interactiveSession, wait_ms: 0 },
+        "interactive-cross-session-poll",
+      ),
+      "TaskNotOwned",
+    );
+    assertToolError(
+      await toolCall(
+        reconnectClient,
+        "command_control",
+        {
+          action: "adopt",
+          session_id: interactiveSession,
+          adoption_token: interactiveData.adoption_token,
+        },
+        "interactive-active-owner-adopt",
+      ),
+      "TaskNotOwned",
+    );
     const written = await toolCall(
       client,
       "command_control",
@@ -307,6 +518,54 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     });
     const killedData = assertSuccess(killedTerminal);
     assert.equal(killedData.status, "cancelled", explain(killedTerminal));
+    const orphanOwner = new ChatGptMcpClient({ endpoint, extraHeaders, timeoutMs: 35_000 });
+    await orphanOwner.connect();
+    const orphaned = await toolCall(
+      orphanOwner,
+      "exec_command",
+      {
+        command: "Start-Sleep -Seconds 30; Write-Output SHOULD_NOT_COMPLETE",
+        shell: "windows_powershell",
+        yield_time_ms: 0,
+        timeout_ms: 60_000,
+      },
+      "orphan-adopt-start",
+    );
+    const orphanedData = assertSuccess(orphaned);
+    await orphanOwner.close();
+    assertToolError(
+      await toolCall(
+        reconnectClient,
+        "command_control",
+        {
+          action: "adopt",
+          session_id: orphanedData.session_id,
+          adoption_token: "wrong-token",
+        },
+        "orphan-adopt-wrong-token",
+      ),
+      "SessionUnavailable",
+    );
+    const adopted = assertSuccess(
+      await toolCall(
+        reconnectClient,
+        "command_control",
+        {
+          action: "adopt",
+          session_id: orphanedData.session_id,
+          adoption_token: orphanedData.adoption_token,
+        },
+        "orphan-adopt",
+      ),
+    );
+    assert.equal(adopted.adopted, true);
+    assert.notEqual(adopted.adoption_token, orphanedData.adoption_token);
+    await toolCall(
+      reconnectClient,
+      "command_control",
+      { action: "kill", session_id: orphanedData.session_id, wait_ms: 0 },
+      "orphan-adopt-kill",
+    );
     report.checks.command_session_ownership = "PASS";
     report.checks.command_wait_budget = {
       status: "PASS",
@@ -345,8 +604,17 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
       { action: "cancel" },
       "task-cancel-reconnect-without-id",
     );
-    const isolatedError = assertToolError(isolatedCancel, "TaskIdRequired");
-    assert.equal(isolatedError.details.task_id, cancellableData.task_id, explain(isolatedCancel));
+    const isolatedError = assertToolError(isolatedCancel, "TaskNotOwned");
+    assert.equal(isolatedError.details, null, explain(isolatedCancel));
+    assertToolError(
+      await toolCall(
+        reconnectClient,
+        "task_control",
+        { action: "get", task_id: cancellableData.task_id },
+        "task-get-cross-session",
+      ),
+      "TaskNotOwned",
+    );
     const taskCancel = await toolCall(
       client,
       "task_control",
@@ -380,11 +648,22 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
       reconnectClient,
       "agent_workflow",
       { action: "resume", task_id: preparedData.task_id },
+      "workflow-resume-without-token",
+    );
+    assertToolError(resumed, "TaskNotOwned");
+    const adoptedWorkflow = await toolCall(
+      reconnectClient,
+      "agent_workflow",
+      {
+        action: "resume",
+        task_id: preparedData.task_id,
+        adoption_token: preparedData.adoption_token,
+      },
       "workflow-resume-after-reconnect",
     );
-    const resumedData = assertSuccess(resumed);
-    assert.equal(resumedData.task_id, preparedData.task_id, explain(resumed));
-    assert.equal(resumedData.state, "prepared", explain(resumed));
+    const resumedData = assertSuccess(adoptedWorkflow);
+    assert.equal(resumedData.task_id, preparedData.task_id, explain(adoptedWorkflow));
+    assert.equal(resumedData.state, "prepared", explain(adoptedWorkflow));
     const workflowCancel = await toolCall(
       reconnectClient,
       "task_control",
@@ -562,6 +841,37 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     assertToolError(editPdf, "InvalidArgument");
     report.checks.document_workflow = "PASS";
 
+    const richBefore = assertSuccess(await toolCall(
+      client, "document_workflow", { action: "inspect", path: "rich.docx" }, "rich-docx-inspect",
+    ));
+    const richEdited = assertSuccess(await toolCall(
+      client,
+      "document_workflow",
+      {
+        action: "edit",
+        path: "rich.docx",
+        expected_sha256: richBefore.sha256,
+        edits: [{ operation: "replace", block_id: "block-1", content: "new" }],
+      },
+      "rich-docx-edit",
+    ));
+    assertToolError(await toolCall(
+      client,
+      "document_workflow",
+      {
+        action: "edit",
+        path: "rich.docx",
+        expected_sha256: richEdited.sha256,
+        edits: [{ operation: "replace", block_id: "block-3", content: "ambiguous" }],
+      },
+      "rich-docx-reject-lossy-target",
+    ), "CapabilityUnavailable");
+    const richAfter = assertSuccess(await toolCall(
+      client, "document_workflow", { action: "inspect", path: "rich.docx" }, "rich-docx-after",
+    ));
+    assert.equal(richAfter.sha256, richEdited.sha256);
+    report.checks.docx_fidelity = "PASS";
+
     const missingOutput = await toolCall(
       client,
       "command_control",
@@ -587,6 +897,15 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     const streamData = assertSuccess(streamTerminal);
     assert.equal(streamData.status, "completed", explain(streamTerminal));
     const stdoutRef = streamData.output_refs.stdout;
+    assertToolError(
+      await toolCall(
+        reconnectClient,
+        "command_control",
+        { action: "read", output_ref: stdoutRef, stream: "stdout" },
+        "output-cross-session",
+      ),
+      "OutputNotFound",
+    );
     const mismatchedStream = await toolCall(
       client,
       "command_control",
@@ -597,7 +916,28 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
     assert.equal(mismatchError.details.field, "stream", explain(mismatchedStream));
     assert.equal(mismatchError.details.expected, "stdout", explain(mismatchedStream));
     assert.equal(mismatchError.details.actual, "stderr", explain(mismatchedStream));
+    const stderrInitial = await toolCall(client, "exec_command", {
+      command: "Write-Error LB_RETAINED_STDERR", shell: "windows_powershell", yield_time_ms: 10_000,
+    }, "stderr-primary-handle");
+    const stderrTerminal = await settleAcceptedPublicCommand({
+      initialResponse: stderrInitial,
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      requestPrefix: "stderr-terminal",
+    });
+    assertToolError(stderrTerminal, "ProcessFailed");
+    const stderrReplay = await toolCall(client, "command_control", {
+      action: "poll", session_id: structured(stderrTerminal).data.session_id, wait_ms: 0,
+    }, "stderr-cached-terminal");
+    assertToolError(stderrReplay, "ProcessFailed");
+    const stderrRef = structured(stderrReplay).data.output_refs.stderr;
+    assert.equal(typeof stderrRef, "string");
+    const retainedStderr = assertSuccess(await toolCall(client, "command_control", {
+      action: "read", output_ref: stderrRef, stream: "stderr",
+    }, "stderr-retained-read"));
+    assert.ok(retainedStderr.content.includes("LB_RETAINED_STDERR"));
     report.checks.output_error_taxonomy = "PASS";
+
+    report.checks.workflow_execution_ownership = await verifyWorkflowExecutionOwnership(endpoint, extraHeaders);
 
     const finalTask = await toolCall(
       client,
@@ -626,9 +966,10 @@ export async function runRevision46Scenario({ endpoint, workspace }) {
   }
 }
 
-export async function runChunkedTransportScenario(endpoint) {
+export async function runChunkedTransportScenario(endpoint, extraHeaders = {}) {
   const client = new ChatGptMcpClient({
     endpoint,
+    extraHeaders,
     timeoutMs: 10_000,
     fetchImpl: singleChunkedRequestFetch,
   });
@@ -666,7 +1007,10 @@ export async function runChunkedTransportScenario(endpoint) {
 async function main() {
   const options = argumentsFrom(process.argv.slice(2));
   const report = await runRevision46Scenario(options);
-  report.chunked_local_transport = await runChunkedTransportScenario(options.endpoint);
+  report.chunked_local_transport = await runChunkedTransportScenario(
+    options.endpoint,
+    options.extraHeaders,
+  );
   process.stdout.write(`${JSON.stringify(report)}\n`);
 }
 

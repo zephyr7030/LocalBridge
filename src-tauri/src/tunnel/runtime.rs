@@ -15,6 +15,7 @@ use super::fault::{Retryability, TunnelError};
 use super::health::{ConnectorEndpoint, HealthEndpoint};
 
 const API_KEY_ENV: &str = "LOCALBRIDGE_RUNTIME_API_KEY";
+const MCP_GUARD_BEARER_ENV: &str = "LOCALBRIDGE_MCP_GUARD_BEARER";
 const TUNNEL_ID_ENV: &str = "CONTROL_PLANE_TUNNEL_ID";
 const API_KEY_REFERENCE: &str = "env:LOCALBRIDGE_RUNTIME_API_KEY";
 static HEALTH_GENERATION: AtomicU64 = AtomicU64::new(1);
@@ -76,6 +77,7 @@ pub struct PreparedTunnelStart {
     config: TunnelRuntimeConfig,
     bundle: VerifiedTunnelBundle,
     secret: SecretString,
+    mcp_guard_bearer: Option<SecretString>,
     health_url_file: PathBuf,
 }
 
@@ -85,6 +87,7 @@ impl fmt::Debug for PreparedTunnelStart {
             .field("config", &self.config)
             .field("bundle", &self.bundle)
             .field("secret", &"[REDACTED]")
+            .field("mcp_guard_authenticated", &self.mcp_guard_bearer.is_some())
             .field("health_url_file", &self.health_url_file)
             .field("arguments", &self.command_line_arguments())
             .finish()
@@ -114,12 +117,13 @@ impl PreparedTunnelStart {
             config,
             bundle,
             secret,
+            mcp_guard_bearer: None,
             health_url_file,
         })
     }
 
     pub fn command_line_arguments(&self) -> Vec<String> {
-        let arguments = vec![
+        let mut arguments = vec![
             "run".into(),
             "--control-plane.api-key".into(),
             API_KEY_REFERENCE.into(),
@@ -136,6 +140,12 @@ impl PreparedTunnelStart {
             "--log.level".into(),
             "warn".into(),
         ];
+        if self.mcp_guard_bearer.is_some() {
+            for flag in ["--mcp.extra-headers", "--mcp.discovery-extra-headers"] {
+                arguments.push(flag.into());
+                arguments.push(format!("Authorization: env:{MCP_GUARD_BEARER_ENV}"));
+            }
+        }
         #[cfg(test)]
         let arguments = if self.config.embedded_mcp_stub() {
             let mut test_arguments = arguments;
@@ -150,6 +160,11 @@ impl PreparedTunnelStart {
             arguments
         };
         arguments
+    }
+
+    pub(crate) fn with_mcp_guard_bearer(mut self, bearer: SecretString) -> Self {
+        self.mcp_guard_bearer = Some(bearer);
+        self
     }
 
     pub fn health_url_file(&self) -> &Path {
@@ -173,6 +188,14 @@ impl PreparedTunnelStart {
         spec = spec
             .env(API_KEY_ENV, self.secret.expose_secret())
             .map_err(classify_supervisor)?;
+        if let Some(bearer) = self.mcp_guard_bearer.as_ref() {
+            spec = spec
+                .env(
+                    MCP_GUARD_BEARER_ENV,
+                    &format!("Bearer {}", bearer.expose_secret()),
+                )
+                .map_err(classify_supervisor)?;
+        }
         spec = spec
             .env(TUNNEL_ID_ENV, self.config.tunnel_id.expose())
             .map_err(classify_supervisor)?;
@@ -666,6 +689,67 @@ mod tests {
         if base.health_state_dir.exists() {
             fs::remove_dir_all(base.health_state_dir).unwrap();
         }
+    }
+
+    #[test]
+    fn actual_tunnel_discovery_sends_the_authenticated_pep_header() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (request_tx, request_rx) = mpsc::channel();
+        let probe = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < deadline {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut bytes = Vec::new();
+                    let mut byte = [0_u8; 1];
+                    while bytes.len() < 32_768 && !bytes.ends_with(b"\r\n\r\n") {
+                        if stream.read(&mut byte).unwrap_or(0) == 0 {
+                            break;
+                        }
+                        bytes.push(byte[0]);
+                    }
+                    let _ = request_tx.send(String::from_utf8_lossy(&bytes).into_owned());
+                    let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    return;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let config = TunnelRuntimeConfig::new(
+            repo_root(),
+            temp_health_dir("authenticated-probe"),
+            TunnelId::new(TUNNEL_ID).unwrap(),
+            port,
+        )
+        .unwrap()
+        .with_test_control_plane_base_url("http://127.0.0.1:9")
+        .unwrap();
+        let health_dir = config.health_state_dir.clone();
+        let prepared = PreparedTunnelStart::prepare(config, &FakeStore::new([Some(SECRET_ONE)]))
+            .unwrap()
+            .with_mcp_guard_bearer(SecretString::new(SECRET_TWO).unwrap());
+        assert!(
+            !prepared
+                .command_line_arguments()
+                .join(" ")
+                .contains(SECRET_TWO)
+        );
+        assert!(!format!("{prepared:?}").contains(SECRET_TWO));
+        let mut runtime = prepared.spawn().unwrap();
+        let received = request_rx.recv_timeout(Duration::from_secs(10));
+        runtime.stop().unwrap();
+        probe.join().unwrap();
+        fs::remove_dir_all(health_dir).unwrap();
+        let request = received.expect("real tunnel binary must probe its local MCP target");
+        assert!(
+            request
+                .lines()
+                .any(|line| line == format!("Authorization: Bearer {SECRET_TWO}"))
+        );
     }
 
     #[test]

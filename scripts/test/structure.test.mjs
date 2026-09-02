@@ -71,5 +71,7 @@ test("black-box scenarios reuse the shared command terminal driver", () => {
   const source = readFileSync(revisionScenarioPath, "utf8");
   assert.match(source, /from "\.\/command_lifecycle\.mjs"/);
   assert.equal(source.includes("function pollToTerminal"), false);
-  assert.equal(source.match(/initialResponse:/g)?.length, 5);
+  // Adding a regression scenario must not require changing a magic call count.
+  // Terminal/deadline behavior is asserted by command_lifecycle.test.mjs.
+  assert.match(source, /await settleAcceptedPublicCommand\(\{/);
 });
