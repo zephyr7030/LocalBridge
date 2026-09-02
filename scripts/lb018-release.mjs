@@ -3,10 +3,12 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isPublicPath } from "./public-release/policy.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const artifacts = resolve(root, "release-artifacts/LB-019PRE");
-const PRODUCT_VERSION = "0.1.4";
+const PRODUCT_VERSION = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version;
+if (!/^\d+\.\d+\.\d+$/.test(PRODUCT_VERSION)) throw new Error("invalid release version");
+const artifacts = resolve(root, `release-artifacts/v${PRODUCT_VERSION}`);
 const NO_CONSOLE_SCENARIOS = [
   "configured_foreground_runtime_start",
   "background_launch",
@@ -45,7 +47,7 @@ function assertTrackedSourceClean() {
     .filter(Boolean)
     .filter((line) => {
       const path = line.slice(3).replaceAll("\\", "/");
-      return !path.startsWith("release-artifacts/");
+      return !path.startsWith("release-artifacts/") && (!line.startsWith("?? ") || isPublicPath(path));
     });
   if (dirty.length) throw new Error(`release source has uncommitted source changes: ${dirty[0]}`);
 }
@@ -104,16 +106,14 @@ function verifyReleaseVersionSurfaces() {
 
 function verifyNoVisibleConsoleBehavior(releaseExe) {
   if (!existsSync(releaseExe)) throw new Error(`release executable missing for no-console gate: ${releaseExe}`);
-  const testTargetDir = resolve(root, "src-tauri/target/lb019pre-no-console-test");
   const output = run("cargo", [
-    "test",
+    "+1.85.0", "test", "--locked",
     "--manifest-path", "src-tauri/Cargo.toml",
     "--test", "lb019pre_release_no_console",
     "--", "--nocapture", "--test-threads=1",
   ], {
     env: {
       ...process.env,
-      CARGO_TARGET_DIR: testTargetDir,
       LOCALBRIDGE_RELEASE_EXE: releaseExe,
     },
   });
@@ -143,9 +143,9 @@ function generateSbom() {
 function findInstaller() {
   const dir = resolve(root, "src-tauri/target/release/bundle/nsis");
   if (!existsSync(dir)) throw new Error("NSIS output directory missing");
-  const candidates = readdirSync(dir).filter((name) => name.toLowerCase().endsWith(".exe")).map((name) => resolve(dir, name));
-  if (candidates.length !== 1) throw new Error(`expected one NSIS installer, found ${candidates.length}`);
-  return candidates[0];
+  const installer = resolve(dir, `LocalBridge_${PRODUCT_VERSION}_x64-setup.exe`);
+  if (!existsSync(installer)) throw new Error(`current version NSIS installer missing: ${installer}`);
+  return installer;
 }
 
 function emitEvidence(noConsoleScenarios, sourceCommit, buildStartedMs) {
@@ -197,7 +197,7 @@ function buildReleaseTransaction(label) {
   assertTrackedSourceClean();
   const sourceCommit = sourceHead();
   const buildStartedMs = Date.now();
-  rmSync(resolve(root, "src-tauri/target/release/bundle/nsis"), { recursive: true, force: true });
+  rmSync(resolve(root, `src-tauri/target/release/bundle/nsis/LocalBridge_${PRODUCT_VERSION}_x64-setup.exe`), { force: true });
   rmSync(resolve(root, "src-tauri/target/release/localbridge.exe"), { force: true });
   run(process.execPath, [cli, "build", "--bundles", "nsis"], { stdio: "inherit" });
   if (sourceHead() !== sourceCommit) throw new Error("source HEAD changed while building release candidate");

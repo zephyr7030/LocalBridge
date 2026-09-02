@@ -12,6 +12,14 @@ development
 
 v0.1 UI 不需要暴露“更新频道”。
 
+## Version and Publication
+
+- 除非用户特别说明，每次发布递增末位小版本：`0.1.4 → 0.1.5 → 0.1.6`。
+- 当前默认发布 GitHub **Pre-release**；不得覆盖旧版本标签或替换旧版本安装包。
+- 先在本地完成与 CI 共用的门禁及当前版本打包，再推送公开源码并发布。
+- 公开源码沿用 allowlist 导出，禁止直接推送包含私有治理资料的本地历史；后续公开提交接续现有公开分支，不强制重写历史。
+- 发布资产按版本存放在 `release-artifacts/v<version>/`，上传后核对 SHA-256；清理构建缓存不得删除当前发布证据和用户既有文件。
+
 ## Stable Release Gate
 
 Stable 必须满足：
