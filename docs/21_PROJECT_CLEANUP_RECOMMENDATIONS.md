@@ -18,7 +18,8 @@
 | `src-tauri/target/toolbox-downloads/`、`toolbox-extract/` | 11.79 MiB | 固定版本工具下载及解压缓存 | 本轮保留，避免重复联网下载 | 运行资源准备脚本，校验固定哈希 |
 | `tests/artifacts/` | 0.26 MiB | 前端构建、窗口测试截图与临时配置 | 本轮保留最后一次验证产物；下次测试可覆盖 | 重跑对应测试或前端构建 |
 | `src-tauri/gen/` | 0.28 MiB | Tauri 自动生成 schema | 本轮保留，收益很小 | Tauri 构建自动生成 |
-| `release-artifacts/preflight/public-source/` | 包含在 66.25 MiB preflight 目录中 | 公开源码导出工作目录 | 本轮保留，作为已推送源码复核入口 | 重新按 allowlist 导出；不得将本地私有历史直接推送 |
+| `release-artifacts/preflight/public-source/` | 包含在 66.25 MiB preflight 目录中 | 公开源码导出工作目录 | 本轮保留，作为待发布源码复核入口 | 重新按 allowlist 导出；不得将本地私有历史直接推送 |
+| `release-artifacts/preflight/public-source/src-tauri/target/`、`release-artifacts/preflight/public-source/node_modules/` | 本轮公开源码验证新生成，未计入初始盘点 | 从导出源码独立运行完整 CI 门禁的构建缓存 | 发布完成并保存验证结果后可清理；待执行 | 在公开源码目录重新安装依赖、运行同一门禁 |
 | `node_modules/` | 85.79 MiB | 本地开发依赖 | 本轮保留；无开发需求时可选删除 | `npm ci` |
 | `src/node_modules/` | 524 B | 构建工具生成的临时配置缓存 | 发布验证后清理；待执行 | 构建自动生成 |
 | `.git/` | 834.34 MiB | 私有开发历史和对象 | 必须保留；不重写、不删分支、不自动强制 GC | 不适用 |
@@ -30,7 +31,28 @@
 
 ## 执行与验收记录
 
-- 当前状态：已完成清理前盘点，尚未删除上述目录。
+- 当前状态：已完成清理前盘点，尚未删除上述目录；GitHub 推送、Release 和清理暂缓，原因见下方门禁记录。
 - 删除前须逐项验证：绝对路径位于本仓库内、非链接/重解析点、无跟踪文件、无正在使用该路径的本项目进程。
 - 发布资产必须来自 0.1.5 重新构建，不能把 0.1.4 安装包改名后上传。
 - 最终记录实际删除字节、发布链接和保留项；缓存删除不能恢复原文件，但可以通过上述方式重建。
+
+## v0.1.5 发布门禁记录
+
+- 本地候选源码提交：`ef2255705851dc80d71c3eb83e502550de9906f2`。
+- 待推送公开提交：`f1cb8757f2f79c8ed73b64aa781cc2987fe0a6e2`，接续现有公开提交 `6614ffeee26e552d61bcd187002623240bc6841d`；仅复制公开 allowlist，77 个运行时文件字节一致。
+- 本地源树和公开导出树均完成 Rust、前端、Node、Clippy 与正式 NSIS 构建。公开树使用 Node 24 / Rust 1.85.0，在本地独立执行 CI 的全部 11 个阶段，通过后仍未推送。
+- 两份源树的 Cargo 汇总均为 465 passed、4 ignored，前端 18 项、Node 14 项通过。其中使用端黑盒 2 项实际通过。注意：未提供发布 EXE 时，历史发布 GUI 测试会直接返回，Cargo 的 passed 统计**不代表**完成真实发布 GUI 验证。
+- 额外对真实发布 EXE 执行六场景无控制台测试时，首个前台启动检查失败：已有安装版持有 `Local\LocalBridge.SingleInstance.v1`，测试实例在初始化窗口前退出。因此不能宣告发布门禁通过。
+- 进一步检查确认：Tauri 的 `app_data_dir()` 经 `dirs::data_dir()` 调用 Windows Known Folder API，不受测试子进程设置的 `APPDATA` 环境变量隔离；生产启动还会同步用户自启动注册项。**不能仅关闭当前应用，就把该测试当成安全的空白配置测试运行。**
+- 本轮没有关闭用户正在运行的安装版，没有更改 Windows 测试环境，没有绕过单实例保护；需要隔离 Windows 测试账号/环境，或用户明确授权的配置备份与恢复方案，才能继续真实启动验收。
+- 暂未生成“已通过真实启动门禁”的发布来源证明，未推送 GitHub、未创建 Release、未进行目录删除。释放空间：0 bytes。
+- `REVIEW_GUIDE.md` 和 `release-artifacts/LB-019PRE/` 共 8 个既有文件的 SHA-256 复核未变。
+
+已构建但尚未发布的安装包（两份构建环境不同，不能混用各自哈希）：
+
+| 来源 | 大小 | SHA-256 |
+|---|---:|---|
+| 本地源树 `src-tauri/target/release/bundle/nsis/LocalBridge_0.1.5_x64-setup.exe` | 22,306,901 bytes | `b906f31cbf2b2d1571ba9600994c330351e82fde95bf63c0a669f9398423c78f` |
+| 公开导出树 `release-artifacts/preflight/public-source/src-tauri/target/release/bundle/nsis/LocalBridge_0.1.5_x64-setup.exe` | 22,496,304 bytes | `0f3403e748a1b1f527b03019b81bfbe9868a40325c2dc138432d0e052cdd39fc` |
+
+完整日志保存在 `release-artifacts/v0.1.5/local-validation.log` 与 `public-validation.log`。这些日志不作为公开 Release 附件上传。
