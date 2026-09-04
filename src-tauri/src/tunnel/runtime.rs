@@ -577,6 +577,27 @@ mod tests {
         (format!("http://127.0.0.1:{port}"), release_tx, handle)
     }
 
+    fn request_has_authorization(request: &str, expected_value: &str) -> bool {
+        request
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .any(|(name, value)| {
+                name.eq_ignore_ascii_case("authorization") && value.trim() == expected_value
+            })
+    }
+
+    #[test]
+    fn authorization_header_matching_follows_http_field_name_rules() {
+        assert!(request_has_authorization(
+            "GET / HTTP/1.1\r\nauthorization: Bearer expected\r\n\r\n",
+            "Bearer expected"
+        ));
+        assert!(!request_has_authorization(
+            "GET / HTTP/1.1\r\nAuthorization: Bearer wrong\r\n\r\n",
+            "Bearer expected"
+        ));
+    }
+
     #[test]
     fn prepare_is_secret_redacted_and_unsupported_injection_fails_closed() {
         let store = FakeStore::new([Some(SECRET_ONE)]);
@@ -745,10 +766,10 @@ mod tests {
         probe.join().unwrap();
         fs::remove_dir_all(health_dir).unwrap();
         let request = received.expect("real tunnel binary must probe its local MCP target");
+        let expected_value = format!("Bearer {SECRET_TWO}");
         assert!(
-            request
-                .lines()
-                .any(|line| line == format!("Authorization: Bearer {SECRET_TWO}"))
+            request_has_authorization(&request, &expected_value),
+            "real tunnel binary omitted the authenticated MCP header"
         );
     }
 
