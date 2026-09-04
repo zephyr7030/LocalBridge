@@ -1,6 +1,7 @@
 #![cfg(windows)]
 
 use std::fs;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,6 +20,8 @@ use serde_json::Value;
 
 #[path = "../../support/control_plane.rs"]
 mod control_plane_support;
+#[path = "../../support/document_fixtures.rs"]
+mod document_fixtures;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -56,6 +59,8 @@ impl LiveRuntime {
             simple_pdf("PDF_SEARCH_NEEDLE"),
         )
         .expect("write PDF document fixture");
+        fs::write(workspace.join("rich.docx"), document_fixtures::rich_docx())
+            .expect("write rich DOCX fidelity fixture");
         for args in [
             &["init"][..],
             &["config", "user.email", "black-box@example.invalid"][..],
@@ -113,6 +118,18 @@ impl LiveRuntime {
 
     fn workspace(&self) -> &Path {
         &self.workspace
+    }
+
+    fn client_headers(&self) -> String {
+        serde_json::json!({
+            "Authorization": self
+                .pep
+                .as_ref()
+                .expect("runtime active")
+                .test_client_authorization_header()
+                .expect("authenticated public endpoint")
+        })
+        .to_string()
     }
 }
 
@@ -184,6 +201,31 @@ fn run_git(workspace: &Path, args: &[&str]) {
     );
 }
 
+fn unauthenticated_initialize_status(port: u16) -> u16 {
+    let body = br#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"unauthenticated-probe","version":"1"}}}"#;
+    let mut stream = std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+        .expect("connect unauthenticated probe");
+    write!(
+        stream,
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .expect("write unauthenticated probe head");
+    stream
+        .write_all(body)
+        .expect("write unauthenticated probe body");
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("read unauthenticated probe response");
+    response
+        .lines()
+        .next()
+        .and_then(|line| line.split_ascii_whitespace().nth(1))
+        .and_then(|status| status.parse().ok())
+        .expect("HTTP response status")
+}
+
 #[test]
 fn revision46_reported_failures_are_rechecked_through_the_external_client() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -191,11 +233,17 @@ fn revision46_reported_failures_are_rechecked_through_the_external_client() {
         .expect("repository root")
         .to_path_buf();
     let runtime = LiveRuntime::start(&repo);
+    assert_eq!(
+        unauthenticated_initialize_status(runtime.pep.as_ref().unwrap().port()),
+        401,
+        "the public loopback MCP endpoint must authenticate before creating a session"
+    );
     let scenario = repo.join("tests/black-box/chatgpt/revision46.mjs");
     let output = Command::new("node")
         .arg(scenario)
         .args(["--url", &runtime.endpoint(), "--workspace"])
         .arg(runtime.workspace())
+        .env("LOCALBRIDGE_TEST_MCP_HEADERS", runtime.client_headers())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -210,6 +258,10 @@ fn revision46_reported_failures_are_rechecked_through_the_external_client() {
     let report: Value = serde_json::from_slice(&output.stdout).expect("scenario emits JSON report");
     for check in [
         "public_schema",
+        "exec_contract",
+        "patch_crash_boundary",
+        "queued_request_cancel",
+        "observation_during_work",
         "filesystem_enumeration",
         "workspace_path_equivalence",
         "command_session_ownership",
@@ -217,13 +269,34 @@ fn revision46_reported_failures_are_rechecked_through_the_external_client() {
         "task_cancel_detached",
         "prepared_workflow_cancel",
         "cross_session_workflow_resume",
+        "workflow_execution_ownership",
         "git_error_propagation",
         "document_workflow",
+        "docx_fidelity",
         "output_error_taxonomy",
         "final_projection",
     ] {
         assert_eq!(report["checks"][check], "PASS", "{check}: {report:#?}");
     }
+    let original = document_fixtures::rich_docx();
+    let edited = fs::read(runtime.workspace().join("rich.docx")).expect("read edited DOCX");
+    for part in [
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "word/_rels/document.xml.rels",
+        "docProps/custom.xml",
+    ] {
+        assert_eq!(
+            document_fixtures::zip_entry(&edited, part),
+            document_fixtures::zip_entry(&original, part),
+            "external client edit changed unrelated package part {part}"
+        );
+    }
+    let document = String::from_utf8(document_fixtures::zip_entry(&edited, "word/document.xml"))
+        .expect("UTF-8 document XML");
+    assert!(document.contains("<w:t>new</w:t>"));
+    assert!(document.contains("<w:rPr><w:b/></w:rPr>"));
+    assert!(document.contains("<w:hyperlink r:id=\"rId7\">"));
     assert_eq!(
         report["checks"]["command_wait_budget"]["status"], "PASS",
         "{report:#?}"
@@ -238,4 +311,57 @@ fn revision46_reported_failures_are_rechecked_through_the_external_client() {
         "{report:#?}"
     );
     eprintln!("REVISION46_BLACK_BOX_REPORT={report}");
+}
+
+#[test]
+fn stopping_public_runtime_cancels_queued_work_before_side_effects() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let mut runtime = LiveRuntime::start(&repo);
+    let mut client = Command::new("node")
+        .arg(repo.join("tests/black-box/chatgpt/shutdown_queue.mjs"))
+        .arg(runtime.endpoint())
+        .env("LOCALBRIDGE_TEST_MCP_HEADERS", runtime.client_headers())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .expect("start shutdown probe");
+    let mut stdout = BufReader::new(client.stdout.take().unwrap());
+    let mut marker = String::new();
+    stdout
+        .read_line(&mut marker)
+        .expect("wait for real queued work");
+    if marker.trim() != "SHUTDOWN_QUEUE_READY" {
+        let output = client.wait_with_output().unwrap();
+        panic!(
+            "queue setup failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let coding = runtime
+        .pep
+        .take()
+        .unwrap()
+        .stop()
+        .expect("stop public runtime");
+    let mut remainder = String::new();
+    stdout.read_to_string(&mut remainder).unwrap();
+    let output = client.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(remainder.contains("SHUTDOWN_QUEUE_PASS"));
+    assert!(
+        !runtime
+            .workspace()
+            .join("shutdown-should-not-exist.txt")
+            .exists()
+    );
+    drop(coding);
 }

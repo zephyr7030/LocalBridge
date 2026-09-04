@@ -39,18 +39,12 @@ export function currentActivityDetail(activity: CurrentActivityProjection | null
 export function currentActivityElapsed(activity: CurrentActivityProjection | null): string | null { return activity?.state === "running" && activity.elapsedMs != null ? formatElapsed(activity.elapsedMs) : null; }
 export function lastActivityAction(activity: LastActivityProjection): string { return activityKindText[activity.kind]; }
 export function lastActivityOutcome(activity: LastActivityProjection): string { return lastCommandStatusText[activity.outcome]; }
-export function permissionReconciliationText(projection: MainProjection | null): string {
-  if (!projection) return "正在读取权限状态";
-  if (projection.authorityStatus !== "ready" || !projection.permission || !projection.effectivePermission || !projection.permissionReconciliation) {
-    return projection.authorityStatus === "stale" ? "权限状态已过期" : "权限状态暂不可用";
-  }
-  if (projection.permissionReconciliation === "converged") return `当前已生效：${accessText[projection.effectivePermission]}`;
-  const state = `期望：${accessText[projection.permission]} · 当前：${accessText[projection.effectivePermission]}`;
-  if (projection.permissionReconciliation === "authorization_required") return `${state} · 需要重新授权管理员模式`;
-  if (projection.permissionReconciliation === "awaiting_authorization") return `${state} · 等待 Windows 授权`;
-  if (projection.permissionReconciliation === "broker_unavailable") return `${state} · 管理员服务不可用`;
-  if (projection.permissionReconciliation === "disable_pending") return `${state} · 正在关闭管理员服务`;
-  return "权限状态暂不可用";
+export function permissionRestartNotice(projection: MainProjection | null): string | null {
+  return projection?.authorityStatus === "ready"
+    && projection.permission === "admin"
+    && projection.permissionReconciliation === "authorization_required"
+    ? "重启后需重新授权"
+    : null;
 }
 export function workspaceDisplayText(projection: MainProjection | null): string {
   if (!projection) return "正在读取";

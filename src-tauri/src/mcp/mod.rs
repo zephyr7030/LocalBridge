@@ -1,8 +1,12 @@
 mod bundle;
+mod client_auth;
 mod driver;
 mod facade;
 mod guard;
 mod http;
+mod observation;
+mod public_contract;
+mod resource_access;
 mod runtime;
 mod server;
 #[cfg(all(test, windows))]

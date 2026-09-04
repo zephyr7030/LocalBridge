@@ -1820,9 +1820,10 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "localbridge"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.22.1",
+ "getrandom 0.3.4",
  "image",
  "pdf-extract",
  "pulldown-cmark",

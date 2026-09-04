@@ -168,6 +168,30 @@ fn elevated_preference_requires_explicit_authorization_after_restart() {
 }
 
 #[test]
+fn elevated_process_token_is_the_startup_permission_fact() {
+    assert_eq!(
+        startup_permission(PermissionMode::Edit, true),
+        PermissionMode::Elevated
+    );
+    assert_eq!(
+        startup_permission(PermissionMode::Full, true),
+        PermissionMode::Elevated
+    );
+    assert_eq!(
+        startup_permission(PermissionMode::Edit, false),
+        PermissionMode::Edit
+    );
+    assert_eq!(
+        startup_permission(PermissionMode::Full, false),
+        PermissionMode::Full
+    );
+    assert_eq!(
+        startup_permission(PermissionMode::Elevated, false),
+        PermissionMode::Elevated
+    );
+}
+
+#[test]
 fn manual_stop_services_persists_latch_before_shutdown() {
     let app_data = TempDir::new("manual-stop");
     let store = StartupProfileStore::new(app_data.0.join(STARTUP_PROFILE_FILE_NAME));

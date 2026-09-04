@@ -8,6 +8,7 @@ src-tauri/target/
 
 # Local release evidence and generated public snapshots
 release-artifacts/preflight/
+release-artifacts/v*/
 
 # Secrets and local configuration
 .env

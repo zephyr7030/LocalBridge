@@ -28,7 +28,8 @@ use crate::settings::{AppData, SettingsStore};
 #[cfg(test)]
 use crate::state::{CurrentTaskStatus, TaskExecutionState};
 use crate::state::{
-    PermissionMode, PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState, TaskKind,
+    PermissionMode, PrivilegeFault, PrivilegeState, RuntimeComponent, RuntimeFault, RuntimeState,
+    TaskKind,
 };
 use crate::tunnel::TunnelId;
 use crate::workspace::{WorkspaceId, WorkspaceValidator};
@@ -154,7 +155,7 @@ struct ReconnectProjection {
     generation: u64,
 }
 
-const ADMIN_CONSENT_DURATION: Duration = Duration::from_millis(9000);
+const ADMIN_CONSENT_DURATION: Duration = Duration::from_millis(3000);
 
 #[derive(Debug)]
 struct PendingAdminConsent {
@@ -433,9 +434,7 @@ fn projection_section_code<T>(section: &ProjectionSection<T>) -> &'static str {
 }
 
 fn ready_section_value<T>(section: &ProjectionSection<T>) -> Option<&T> {
-    (projection_section_code(section) == "ready")
-        .then(|| section.value())
-        .flatten()
+    section.ready_value()
 }
 
 #[tauri::command]
@@ -489,20 +488,34 @@ pub async fn set_permission_mode(mode: String, app: AppHandle) -> UiResult<()> {
             return Err(UiError::from("管理员确认尚未完成"));
         }
         let (store, mut data) = load_app_data(&app)?;
-        // DesiredStateOwner is the single live permission owner. The settings
-        // file is only its restart seed; persistence failure never rolls the
-        // live desired state back or creates a second effective authority.
-        lifecycle.set_desired_permission(requested);
         data.settings.permission_mode = requested.into();
-        if store.save(&data).is_err() {
+        // DesiredStateOwner is the single live permission owner. The settings
+        // file is only its restart seed. A downgrade closes the privileged
+        // execution surface before persistence, and neither result can skip
+        // observing the other.
+        let (downgrade, persistence) = apply_permission_transition(
+            requested,
+            || lifecycle.set_desired_permission(requested),
+            || lifecycle.reconcile_permission_downgrade(),
+            || store.save(&data),
+        );
+        if persistence.is_err() {
             lifecycle.publish_settings_fault(OperationError::new(
                 "Settings.PermissionPersistenceFailed",
                 ErrorCategory::Unavailable,
                 "权限期望已生效，但无法持久化为下次启动设置",
                 true,
             ));
-            return Err(UiError::from("无法保存权限设置"));
         }
+        downgrade.map_err(|fault| {
+            UiError::from(OperationError::new(
+                format!("Authority.{fault:?}"),
+                ErrorCategory::Authorization,
+                "管理员执行面未能完全关闭",
+                true,
+            ))
+        })?;
+        persistence.map_err(|_| UiError::from("无法保存权限设置"))?;
         refresh_settings_snapshot(&app, &lifecycle)?;
         reconcile_explicit_permission(&lifecycle)?;
         Ok(())
@@ -510,6 +523,22 @@ pub async fn set_permission_mode(mode: String, app: AppHandle) -> UiResult<()> {
     .await
     .map_err(|_| UiError::internal("Ui.PermissionJoinFailed", "权限设置后台任务异常"))?
     .map_err(UiError::from_string)
+}
+
+fn apply_permission_transition<E>(
+    requested: PermissionMode,
+    set_desired: impl FnOnce(),
+    secure_downgrade: impl FnOnce() -> Result<(), PrivilegeFault>,
+    persist: impl FnOnce() -> Result<(), E>,
+) -> (Result<(), PrivilegeFault>, Result<(), E>) {
+    set_desired();
+    let downgrade = if requested == PermissionMode::Elevated {
+        Ok(())
+    } else {
+        secure_downgrade()
+    };
+    let persistence = persist();
+    (downgrade, persistence)
 }
 
 #[tauri::command]
@@ -1566,6 +1595,8 @@ fn task_state_code(state: TaskExecutionState) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../tests/unit/ui/backend_projection.rs"
@@ -1576,7 +1607,10 @@ mod tests {
         let start = Instant::now();
         let mut gate = AdminConsentGate::default();
         gate.begin_at("challenge-a-0001", start);
-        assert!(!gate.confirm_at("challenge-a-0001", start + Duration::from_millis(8_999)));
+        assert!(!gate.confirm_at(
+            "challenge-a-0001",
+            start + ADMIN_CONSENT_DURATION - Duration::from_millis(1)
+        ));
         assert!(gate.confirm_at("challenge-a-0001", start + ADMIN_CONSENT_DURATION));
         assert!(gate.consume_confirmed());
         assert!(!gate.consume_confirmed());
@@ -1587,9 +1621,13 @@ mod tests {
         let start = Instant::now();
         let mut gate = AdminConsentGate::default();
         gate.begin_at("challenge-a-0001", start);
-        gate.begin_at("challenge-b-0002", start + Duration::from_millis(8_500));
-        assert!(!gate.confirm_at("challenge-b-0002", start + Duration::from_millis(9_000)));
-        assert!(gate.confirm_at("challenge-b-0002", start + Duration::from_millis(17_500)));
+        let restarted_at = start + Duration::from_millis(500);
+        gate.begin_at("challenge-b-0002", restarted_at);
+        assert!(!gate.confirm_at(
+            "challenge-b-0002",
+            restarted_at + ADMIN_CONSENT_DURATION - Duration::from_millis(1)
+        ));
+        assert!(gate.confirm_at("challenge-b-0002", restarted_at + ADMIN_CONSENT_DURATION));
         assert!(gate.consume_confirmed());
     }
 
@@ -1616,6 +1654,29 @@ mod tests {
         assert!(gate.cancel("challenge-a-0001"));
         assert!(!gate.confirm_at("challenge-a-0001", start + ADMIN_CONSENT_DURATION));
         assert!(!gate.consume_confirmed());
+    }
+
+    #[test]
+    fn permission_downgrade_closes_privileged_surface_before_failed_persistence() {
+        let events = RefCell::new(Vec::new());
+        let (downgrade, persistence) = apply_permission_transition(
+            PermissionMode::Full,
+            || events.borrow_mut().push("desired"),
+            || {
+                events.borrow_mut().push("broker_disabled");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("persistence_attempted");
+                Err("disk_full")
+            },
+        );
+        assert_eq!(downgrade, Ok(()));
+        assert_eq!(persistence, Err("disk_full"));
+        assert_eq!(
+            events.into_inner(),
+            ["desired", "broker_disabled", "persistence_attempted"]
+        );
     }
     #[test]
     fn runtime_start_fault_messages_are_redacted_and_actionable() {

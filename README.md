@@ -37,7 +37,7 @@ LocalBridge 将运行所需的工具统一放入安装包，不依赖系统 PATH
 
 当前支持 **Windows 11 x64**。
 
-1. 前往 **[Releases](../../releases)**，下载 `LocalBridge_0.1.4_x64-setup.exe`。
+1. 前往 **[Releases](../../releases)**，下载 `LocalBridge_0.1.5_x64-setup.exe`。
 2. 安装后选择本地项目并完成连接设置。
 3. 根据应用引导创建 **Local Bridge** ChatGPT 插件连接。
 4. 回到 ChatGPT，开始处理本地开发或系统维护任务。

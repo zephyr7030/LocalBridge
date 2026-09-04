@@ -81,6 +81,12 @@ impl<T> ProjectionSection<T> {
         self.value.as_ref()
     }
 
+    pub fn ready_value(&self) -> Option<&T> {
+        (self.availability == ProjectionAvailability::Ready && !self.stale)
+            .then_some(self.value.as_ref())
+            .flatten()
+    }
+
     pub fn into_value(self) -> Option<T> {
         self.value
     }

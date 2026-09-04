@@ -900,6 +900,34 @@ impl DesktopLifecycle {
         result
     }
 
+    pub fn reconcile_permission_downgrade(&self) -> Result<(), PrivilegeFault> {
+        debug_assert_ne!(
+            self.desired.snapshot().state.permission,
+            PermissionMode::Elevated
+        );
+        let result = self.privilege.disable();
+        self.publish_current_observation();
+        result
+    }
+
+    pub fn reconcile_permission_from_elevated_startup(
+        &self,
+        broker_executable: &Path,
+    ) -> Result<bool, PrivilegeFault> {
+        let activated = if matches!(
+            self.reconciliation_plan().permission,
+            crate::control_plane::convergence::PermissionReconcileAction::RequestAuthorization
+        ) {
+            self.privilege
+                .enable_from_elevated_startup(broker_executable)?
+                .is_some()
+        } else {
+            false
+        };
+        self.publish_current_observation();
+        Ok(activated)
+    }
+
     #[cfg(windows)]
     pub fn reconcile_runtime_from_desired_state<E>(
         &self,

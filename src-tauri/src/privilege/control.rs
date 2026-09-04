@@ -11,7 +11,8 @@ use super::{
     AdministratorFilesystemErrorCode, AdministratorFilesystemResult, AdministratorFilesystemSpec,
     BrokerClientSession, BrokerRunError, ElevatedBrokerProcess, ElevatedExecResult,
     ElevatedExecSpec, NamedPipeServer, PrivilegeIpcError, PrivilegedFilesystemResult,
-    PrivilegedFilesystemSpec, UacLaunchError, launch_broker_with_explicit_uac,
+    PrivilegedFilesystemSpec, UacLaunchError, current_process_is_elevated,
+    launch_broker_with_explicit_uac,
 };
 
 const BROKER_EXIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -126,6 +127,26 @@ impl PrivilegeController {
         &self,
         broker_executable: &Path,
     ) -> Result<GenerationId, PrivilegeFault> {
+        self.enable_broker(broker_executable)
+    }
+
+    pub fn enable_from_elevated_startup(
+        &self,
+        broker_executable: &Path,
+    ) -> Result<Option<GenerationId>, PrivilegeFault> {
+        let elevated = current_process_is_elevated()
+            .map_err(map_uac_fault)
+            .map_err(|fault| self.fail(fault))?;
+        if !elevated {
+            return Ok(None);
+        }
+        // The process token has already passed Windows authorization. Reusing the
+        // normal broker launch keeps execution behind the same gateway without a
+        // second application-level consent owner.
+        self.enable_broker(broker_executable).map(Some)
+    }
+
+    fn enable_broker(&self, broker_executable: &Path) -> Result<GenerationId, PrivilegeFault> {
         self.disable()?;
         let generation_value = self
             .shared

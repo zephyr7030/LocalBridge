@@ -17,7 +17,7 @@ use super::error::{UiError, UiResult};
 use crate::app::{DesktopLifecycle, STARTUP_PROFILE_FILE_NAME, StartupProfileStore};
 use crate::commands::ui;
 use crate::control_plane::convergence::ConnectionProfile;
-use crate::control_plane::snapshot::OnboardingReadiness;
+use crate::control_plane::snapshot::{ControlPlaneSnapshot, OnboardingReadiness};
 use crate::credentials::{CredentialStore, SecretString, WindowsCredentialStore};
 use crate::settings::SettingsStore;
 use crate::state::RuntimeState;
@@ -248,10 +248,15 @@ pub async fn complete_onboarding(app: AppHandle) -> UiResult<()> {
 }
 
 fn project_state(lifecycle: &DesktopLifecycle) -> UiResult<OnboardingState> {
-    let snapshot = lifecycle.control_plane_snapshot();
-    let settings = snapshot.settings.value();
-    let connection = snapshot.connection.value();
-    Ok(OnboardingState {
+    Ok(onboarding_state_from_snapshot(
+        &lifecycle.control_plane_snapshot(),
+    ))
+}
+
+fn onboarding_state_from_snapshot(snapshot: &ControlPlaneSnapshot) -> OnboardingState {
+    let settings = snapshot.settings.ready_value();
+    let connection = snapshot.connection.ready_value();
+    OnboardingState {
         complete: settings.is_some_and(|settings| settings.onboarding_complete),
         projection_revision: snapshot.revision,
         connection_configured: connection
@@ -260,7 +265,7 @@ fn project_state(lifecycle: &DesktopLifecycle) -> UiResult<OnboardingState> {
         runtime_key_length: settings.and_then(|settings| settings.runtime_key_length),
         tunnel_id: connection.and_then(|connection| connection.desired_tunnel_id.clone()),
         readiness: snapshot.onboarding_readiness(),
-    })
+    }
 }
 
 fn app_data_dir(app: &AppHandle) -> UiResult<PathBuf> {
@@ -340,6 +345,43 @@ fn pick_windows_workspace_folder() -> UiResult<Option<String>> {
     };
     unsafe { CoUninitialize() };
     Ok(result?)
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use crate::control_plane::snapshot::{
+        ConnectionProjection, EffectiveAvailability, ProjectionSection, SettingsProjection,
+    };
+
+    #[test]
+    fn faulted_sections_never_publish_their_previous_onboarding_values_as_current() {
+        let snapshot = ControlPlaneSnapshot {
+            revision: 8,
+            settings: ProjectionSection::faulted(Some(SettingsProjection {
+                onboarding_complete: true,
+                runtime_key_saved: true,
+                runtime_key_length: Some(51),
+                ..SettingsProjection::default()
+            })),
+            connection: ProjectionSection::faulted(Some(ConnectionProjection {
+                desired_tunnel_id: Some("tunnel_previous".into()),
+                desired_credential_epoch: Some(1),
+                observed_tunnel_id: Some("tunnel_previous".into()),
+                observed_credential_epoch: Some(1),
+                effective: EffectiveAvailability::Available,
+            })),
+            ..ControlPlaneSnapshot::default()
+        };
+
+        let state = onboarding_state_from_snapshot(&snapshot);
+        assert_eq!(state.projection_revision, 8);
+        assert!(!state.complete);
+        assert!(!state.connection_configured);
+        assert!(!state.runtime_key_saved);
+        assert_eq!(state.runtime_key_length, None);
+        assert_eq!(state.tunnel_id, None);
+    }
 }
 
 fn wide(value: &str) -> Vec<u16> {

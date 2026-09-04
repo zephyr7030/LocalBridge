@@ -60,9 +60,10 @@ use crate::privilege::{
 };
 use crate::state::{
     Capability, CurrentTask, CurrentTaskStatus, CurrentTaskTiming, LastToolTiming, PermissionMode,
-    PrivilegeState, SafeTaskSummary, TaskExecutionState, TaskKind,
+    PrivilegeState, RuntimeState, SafeTaskSummary, TaskExecutionState, TaskKind,
 };
 
+use super::client_auth::ClientAuthenticator;
 use super::facade::{
     AGENT_API_REVISION, AgentFacade, CodingRuntimeHealth, CodingToolsRuntimeAdapter,
     FacadeCallError, FacadeDenied, FacadeError, FacadeErrorCode, FilesystemAction,
@@ -72,6 +73,7 @@ use super::facade::{
     stable_success, validate_workspace_context_probe,
 };
 use super::http::{McpCancellationClient, McpHealthClient};
+use super::observation::{WorkspaceObservationSeed, render_workspace_context};
 use super::runtime::{CodingToolsRuntime, CodingToolsRuntimeError};
 use crate::execution::policy::CapabilityPolicy;
 use crate::execution::shell::{ShellExecutionSpec, ShellExecutor, ShellSelector};
@@ -88,15 +90,16 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(3);
 const ACCEPT_IDLE: Duration = Duration::from_millis(10);
 const MAX_DOWNSTREAM_MCP_SESSIONS: usize = 64;
 const MAX_CONNECTION_WORKERS: usize = 64;
-static SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 static PRIVILEGED_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 static PRIVATE_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct ConnectionContext<'a> {
+    authenticator: &'a ClientAuthenticator,
     guard: &'a Mutex<AgentFacade<CodingToolsRuntimeAdapter>>,
     public_policy: &'a RwLock<CapabilityPolicy>,
     cancellation: &'a McpCancellationClient,
     policy_state: &'a PolicyStateSource,
+    workspace_observation: &'a WorkspaceObservationSeed,
     observed_workspace: &'a Path,
     current_task: &'a CurrentTaskProjection,
     executions: &'a ExecutionRegistry,
@@ -146,11 +149,13 @@ struct TaskControlContext<'a> {
 }
 
 struct ServeContext {
+    authenticator: ClientAuthenticator,
     guard: Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>,
     public_policy: Arc<RwLock<CapabilityPolicy>>,
     cancellation: McpCancellationClient,
     control_plane: ControlPlane,
     policy_state: PolicyStateSource,
+    workspace_observation: Arc<WorkspaceObservationSeed>,
     observed_workspace: PathBuf,
     current_task: CurrentTaskProjection,
     privileged: Option<Arc<dyn PrivilegedExecution>>,
@@ -174,6 +179,7 @@ struct PolicyControlState {
     revision: u64,
     authority: AuthorityProjection,
     work_authorized: bool,
+    runtime: Option<RuntimeState>,
 }
 
 impl PolicyStateSource {
@@ -190,6 +196,15 @@ impl PolicyStateSource {
                     revision: snapshot.revision,
                     authority: authority.value()?.clone(),
                     work_authorized: snapshot.work_is_authorized(),
+                    runtime: (snapshot.runtime.availability() == ProjectionAvailability::Ready
+                        && !snapshot.runtime.is_stale())
+                    .then(|| {
+                        snapshot
+                            .runtime
+                            .value()
+                            .map(|runtime| runtime.state.clone())
+                    })
+                    .flatten(),
                 })
             }
             #[cfg(test)]
@@ -222,6 +237,7 @@ impl PolicyStateSource {
                         reconciliation: convergence.effective.authority.reconciliation,
                     },
                     work_authorized: convergence.effective.work_is_authorized(),
+                    runtime: Some(RuntimeState::Ready),
                 })
             }
         }
@@ -388,6 +404,7 @@ impl CurrentTaskProjection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PolicyEnforcementError {
+    AuthenticationUnavailable,
     BindFailed,
     UpstreamCancellationUnavailable,
     UpstreamHealthUnavailable,
@@ -399,6 +416,9 @@ pub enum PolicyEnforcementError {
 impl fmt::Display for PolicyEnforcementError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AuthenticationUnavailable => {
+                f.write_str("policy enforcement client authentication is unavailable")
+            }
             Self::BindFailed => f.write_str("policy enforcement loopback bind failed"),
             Self::UpstreamCancellationUnavailable => {
                 f.write_str("policy enforcement upstream MCP cancellation client is unavailable")
@@ -421,6 +441,7 @@ impl std::error::Error for PolicyEnforcementError {}
 
 pub struct PolicyEnforcementRuntime {
     port: u16,
+    authenticator: ClientAuthenticator,
     control_plane: ControlPlane,
     current_task: CurrentTaskProjection,
     guard: Option<Arc<Mutex<AgentFacade<CodingToolsRuntimeAdapter>>>>,
@@ -509,6 +530,8 @@ impl PolicyEnforcementRuntime {
             PolicyStateSource::Published(snapshot_reader),
             privileged,
             wake,
+            ClientAuthenticator::generated()
+                .map_err(|_| PolicyEnforcementError::AuthenticationUnavailable)?,
         )
     }
 
@@ -534,7 +557,14 @@ impl PolicyEnforcementRuntime {
             connection: None,
             privileged: privileged.as_ref().map(Arc::clone),
         };
-        Self::start_inner(coding_runtime, policy, policy_state, privileged, wake)
+        Self::start_inner(
+            coding_runtime,
+            policy,
+            policy_state,
+            privileged,
+            wake,
+            ClientAuthenticator::disabled_for_isolated_unit_test(),
+        )
     }
 
     #[cfg(test)]
@@ -552,7 +582,14 @@ impl PolicyEnforcementRuntime {
             connection: observed_connection,
             privileged: privileged.as_ref().map(Arc::clone),
         };
-        Self::start_inner(coding_runtime, policy, policy_state, privileged, wake)
+        Self::start_inner(
+            coding_runtime,
+            policy,
+            policy_state,
+            privileged,
+            wake,
+            ClientAuthenticator::disabled_for_isolated_unit_test(),
+        )
     }
 
     fn start_inner(
@@ -561,6 +598,7 @@ impl PolicyEnforcementRuntime {
         policy_state: PolicyStateSource,
         privileged: Option<Arc<dyn PrivilegedExecution>>,
         wake: Option<CurrentTaskWake>,
+        authenticator: ClientAuthenticator,
     ) -> Result<Self, PolicyEnforcementError> {
         let public_policy = Arc::new(RwLock::new(policy.clone()));
         let health_workspace = coding_runtime.workspace().to_path_buf();
@@ -583,6 +621,11 @@ impl PolicyEnforcementRuntime {
             control_plane.executions(),
         )
         .map_err(|_| PolicyEnforcementError::UpstreamFacadeNegotiationFailed)?;
+        let workspace_observation = Arc::new(
+            guard
+                .workspace_observation_seed()
+                .map_err(|_| PolicyEnforcementError::UpstreamFacadeNegotiationFailed)?,
+        );
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| PolicyEnforcementError::BindFailed)?;
         listener
@@ -601,17 +644,20 @@ impl PolicyEnforcementRuntime {
         let guard = Arc::new(Mutex::new(guard));
         let thread_guard = Arc::clone(&guard);
         let thread_policy = Arc::clone(&public_policy);
+        let thread_authenticator = authenticator.clone();
         let thread = thread::Builder::new()
             .name("localbridge-mcp-policy".into())
             .spawn(move || {
                 serve(
                     listener,
                     ServeContext {
+                        authenticator: thread_authenticator,
                         guard: thread_guard,
                         public_policy: thread_policy,
                         cancellation,
                         control_plane: thread_control_plane,
                         policy_state: thread_policy_state,
+                        workspace_observation,
                         observed_workspace: thread_workspace,
                         current_task: thread_task,
                         privileged,
@@ -622,6 +668,7 @@ impl PolicyEnforcementRuntime {
             .map_err(|_| PolicyEnforcementError::ThreadSpawnFailed)?;
         Ok(Self {
             port,
+            authenticator,
             control_plane,
             current_task,
             guard: Some(guard),
@@ -641,6 +688,16 @@ impl PolicyEnforcementRuntime {
 
     pub fn endpoint(&self) -> String {
         format!("http://127.0.0.1:{}/mcp", self.port)
+    }
+
+    pub(crate) fn local_connector_bearer(&self) -> Option<crate::credentials::SecretString> {
+        self.authenticator.bearer_copy()
+    }
+
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub fn test_client_authorization_header(&self) -> Option<String> {
+        self.authenticator.test_authorization_header()
     }
 
     #[cfg(test)]
@@ -816,11 +873,13 @@ impl Drop for PolicyEnforcementRuntime {
 
 fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingToolsRuntimeAdapter> {
     let ServeContext {
+        authenticator,
         guard,
         public_policy,
         cancellation,
         control_plane,
         policy_state,
+        workspace_observation,
         observed_workspace,
         current_task,
         privileged,
@@ -907,8 +966,10 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                     continue;
                 }
                 let worker_guard = Arc::clone(&guard);
+                let worker_authenticator = authenticator.clone();
                 let worker_policy = Arc::clone(&public_policy);
                 let worker_policy_state = policy_state.clone();
+                let worker_observation = Arc::clone(&workspace_observation);
                 let worker_workspace = observed_workspace.clone();
                 let worker_task = current_task.clone();
                 let worker_executions = executions.clone();
@@ -924,10 +985,12 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                     .name("localbridge-mcp-policy-request".into())
                     .spawn(move || {
                         let context = ConnectionContext {
+                            authenticator: &worker_authenticator,
                             guard: &worker_guard,
                             public_policy: &worker_policy,
                             cancellation: &worker_cancellation,
                             policy_state: &worker_policy_state,
+                            workspace_observation: &worker_observation,
                             observed_workspace: &worker_workspace,
                             current_task: &worker_task,
                             executions: &worker_executions,
@@ -963,6 +1026,9 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
             Err(_) => break,
         }
     }
+    for task_id in scheduler.close() {
+        let _ = tasks.finish(&task_id, TerminalOutcome::Cancelled);
+    }
     for _ in 0..3 {
         let active = requests.all();
         if active.is_empty() {
@@ -970,7 +1036,13 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
         }
         for request in &active {
             if let Some(request) = requests.request_cancellation(&request.key) {
-                let _ = cancel_registered_request(&request, &cancellation, privileged.as_ref());
+                let _ = cancel_registered_request(
+                    &request,
+                    &cancellation,
+                    privileged.as_ref(),
+                    &scheduler,
+                    &tasks,
+                );
             }
         }
         thread::sleep(Duration::from_millis(25));
@@ -996,7 +1068,7 @@ fn settle_closed_session(
 ) {
     for request in requests.owned_by(&session.id) {
         if let Some(request) = requests.request_cancellation(&request.key) {
-            let _ = cancel_registered_request(&request, cancellation, privileged);
+            let _ = cancel_registered_request(&request, cancellation, privileged, scheduler, tasks);
         }
     }
     for task_id in scheduler.cancel_queued_by_session(&session.id) {
@@ -1020,10 +1092,12 @@ fn configure_accepted_stream(stream: &TcpStream) -> Result<(), ()> {
 
 fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> Result<(), ()> {
     let ConnectionContext {
+        authenticator,
         guard,
         public_policy,
         cancellation,
         policy_state,
+        workspace_observation,
         observed_workspace,
         current_task,
         executions,
@@ -1040,6 +1114,15 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
         Err(error) if !error.respond => return Ok(()),
         Err(error) => return write_http_diagnostic_error(&mut stream, error),
     };
+
+    if !authenticator.authenticate(request.header("authorization")) {
+        return write_mcp_http_error(
+            &mut stream,
+            401,
+            mcp_invalid("client_authentication_required"),
+            None,
+        );
+    }
 
     if request.path != "/mcp" {
         return write_mcp_http_error(&mut stream, 404, mcp_invalid("endpoint_not_found"), None);
@@ -1279,7 +1362,15 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 if let Some(active) =
                     registered_request_for_transport_cancel(requests, &session_id, &request_id)
                 {
-                    if cancel_registered_request(&active, cancellation, privileged).is_err() {
+                    if cancel_registered_request(
+                        &active,
+                        cancellation,
+                        privileged,
+                        scheduler,
+                        tasks,
+                    )
+                    .is_err()
+                    {
                         return write_mcp_http_error(
                             &mut stream,
                             503,
@@ -1415,8 +1506,27 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         public_task_kind(name, &arguments),
                         public_safe_summary(name, &arguments),
                     );
-                    let _ = sessions.add_task(&session_id, task_id.clone());
-                    match scheduler.admit_work(session_id.clone(), task_id.clone()) {
+                    if requests
+                        .register(
+                            scoped_request.clone(),
+                            RequestCancellationTarget::QueuedWork,
+                        )
+                        .is_err()
+                    {
+                        let _ = tasks.finish(&task_id, TerminalOutcome::Blocked);
+                        return write_rpc_error(
+                            &mut stream,
+                            id,
+                            -32600,
+                            "Duplicate active request id in MCP session",
+                            Some(session),
+                        );
+                    }
+                    match scheduler.admit_work_for_request(
+                        session_id.clone(),
+                        task_id.clone(),
+                        scoped_request.clone(),
+                    ) {
                         Ok(permit) => {
                             let _ = tasks.mark_running(&task_id);
                             (Some(task_id), permit)
@@ -1433,6 +1543,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                             )
                             .for_request(scoped_request.clone());
                             requests.record_error(scoped_request.clone(), error.clone());
+                            requests.remove(&scoped_request);
                             let _ =
                                 tasks.finish_with_error(&task_id, TerminalOutcome::Blocked, error);
                             return write_rpc_result(
@@ -1448,6 +1559,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                             );
                         }
                         Err(SchedulerAdmissionError::Cancelled) => {
+                            requests.remove(&scoped_request);
                             let _ = tasks.finish(&task_id, TerminalOutcome::Cancelled);
                             return write_rpc_result(
                                 &mut stream,
@@ -1458,6 +1570,16 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                                     false,
                                 )
                                 .to_mcp_result(),
+                                Some(session),
+                            );
+                        }
+                        Err(SchedulerAdmissionError::Closed) => {
+                            requests.remove(&scoped_request);
+                            let _ = tasks.finish(&task_id, TerminalOutcome::Cancelled);
+                            return write_mcp_http_error(
+                                &mut stream,
+                                503,
+                                mcp_unavailable("server_stopping"),
                                 Some(session),
                             );
                         }
@@ -1484,6 +1606,14 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                                 true,
                             )
                             .to_mcp_result(),
+                            Some(session),
+                        );
+                    }
+                    Err(SchedulerAdmissionError::Closed) => {
+                        return write_mcp_http_error(
+                            &mut stream,
+                            503,
+                            mcp_unavailable("server_stopping"),
                             Some(session),
                         );
                     }
@@ -1517,6 +1647,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         stopping,
                     },
                 );
+                requests.remove(&scoped_request);
                 return finalize_special_handler_request(&request_key, session, result);
             }
             if name == "filesystem" {
@@ -1525,7 +1656,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     .expect("filesystem is admitted through Work lane");
                 let registered_task =
                     RegisteredTaskProjection::new(task_id, tasks.clone(), current_task.clone());
-                return match effective.authority.structured_paths {
+                let result = match effective.authority.structured_paths {
                     StructuredPathAuthority::ActiveWorkspace => handle_workspace_filesystem(
                         &mut stream,
                         id,
@@ -1557,6 +1688,8 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                         )
                     }
                 };
+                requests.remove(&scoped_request);
+                return result;
             }
             if name == "task_control" {
                 let request_key = request_diagnostic_key(&id);
@@ -1582,6 +1715,50 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 );
                 return finalize_special_handler_request(&request_key, session, result);
             }
+            if name == "workspace_context" {
+                let request_key = request_diagnostic_key(&id);
+                record_mcp_request_start(&request_key, session, name);
+                let decision = public_policy
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .decide_public(mode, name, &arguments);
+                let mut result = if decision.allowed {
+                    match render_workspace_context(
+                        workspace_observation,
+                        &public_policy
+                            .read()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner),
+                        mode,
+                        effective.runtime.as_ref(),
+                        &arguments,
+                    ) {
+                        Ok(result) => result,
+                        Err(error) => error.to_mcp_result(),
+                    }
+                } else {
+                    FacadeDenied {
+                        reason: decision
+                            .deny_reason
+                            .expect("denied workspace_context decision contains reason"),
+                        capability: decision.descriptor.capability,
+                    }
+                    .to_mcp_result()
+                };
+                if decision.allowed {
+                    enrich_workspace_context_privilege(
+                        &mut result,
+                        &effective,
+                        tasks,
+                        executions,
+                        scheduler,
+                    );
+                }
+                return finalize_special_handler_request(
+                    &request_key,
+                    session,
+                    write_rpc_result(&mut stream, id, result, Some(session)),
+                );
+            }
             let request_key = scoped_request.clone();
             let controlled_public_session = command_control_public_session(name, &arguments);
             let command_action = arguments.get("action").and_then(Value::as_str);
@@ -1593,6 +1770,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 let result = if decision.allowed {
                     adopt_public_command_session(
                         controlled_public_session.as_ref(),
+                        arguments.get("adoption_token").and_then(Value::as_str),
                         &session_id,
                         executions,
                     )
@@ -1612,19 +1790,39 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             // recreated between exec -> poll/write/kill calls. Access remains resource scoped:
             // callers must present the exact PublicSessionId and no enumeration fallback exists.
             let private_request_id = next_private_request_id();
-            if requests
-                .register(
-                    request_key.clone(),
-                    RequestCancellationTarget::Runtime(private_request_id.clone()),
-                )
-                .is_err()
+            let runtime_target = RequestCancellationTarget::Runtime(private_request_id.clone());
+            let activated_request = if scheduled_task.is_some() {
+                requests.replace_cancellation_target(&request_key, runtime_target)
+            } else if requests
+                .register(request_key.clone(), runtime_target)
+                .is_ok()
             {
+                requests.active(&request_key)
+            } else {
+                None
+            };
+            let Some(activated_request) = activated_request else {
                 return write_rpc_error(
                     &mut stream,
                     id,
                     -32600,
                     "Duplicate active request id in MCP session",
                     Some(session),
+                );
+            };
+            if activated_request.state == ActiveRequestState::CancellationRequested {
+                let _ = cancel_registered_request(
+                    &activated_request,
+                    cancellation,
+                    privileged,
+                    scheduler,
+                    tasks,
+                );
+                let _ = spawn_runtime_cancellation_relay(
+                    request_key.clone(),
+                    private_request_id.clone(),
+                    requests.clone(),
+                    cancellation.clone(),
                 );
             }
             let registered_task = scheduled_task.clone();
@@ -1651,6 +1849,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                                     direct_command_control_during_work(
                                         &arguments,
                                         public_session,
+                                        &session_id,
                                         executions,
                                         cancellation,
                                         observed_workspace,
@@ -1753,12 +1952,6 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 let _ = tasks.finish(task_id, task_terminal_outcome(&result));
                 current_task.wake();
             }
-            if let Ok(result) = &result {
-                if let Some(public_session) = public_session_from_result(name, result) {
-                    let _ = guard
-                        .bind_public_command_owner(public_session.as_str(), session_id.clone());
-                }
-            }
             match result {
                 Ok(mut result) => {
                     if name == "workspace_context" {
@@ -1783,6 +1976,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
 
 fn adopt_public_command_session(
     public_session_id: Option<&PublicSessionId>,
+    adoption_token: Option<&str>,
     owner: &McpSessionId,
     executions: &ExecutionRegistry,
 ) -> Value {
@@ -1794,13 +1988,24 @@ fn adopt_public_command_session(
         )
         .to_mcp_result();
     };
-    match executions.adopt_owner(public_session_id, owner.clone()) {
-        Ok(execution) => stable_success(
+    let Some(adoption_token) = adoption_token.filter(|value| !value.is_empty()) else {
+        return FacadeError::new(
+            FacadeErrorCode::InvalidArgument,
+            "adopt requires adoption_token",
+            false,
+        )
+        .with_details(json!({"field":"adoption_token"}))
+        .to_mcp_result();
+    };
+    let adoption_token = crate::domain::AdoptionToken::new(adoption_token);
+    match executions.adopt_owner(public_session_id, &adoption_token, owner.clone()) {
+        Ok(adopted) => stable_success(
             json!({
                 "status":"running",
-                "session_id":execution.public_session_id,
-                "task_id":execution.task_id,
-                "execution_id":execution.id,
+                "session_id":adopted.execution.public_session_id,
+                "task_id":adopted.execution.task_id,
+                "execution_id":adopted.execution.id,
+                "adoption_token":adopted.next_adoption_token.expose(),
                 "adopted":true,
             }),
             "Command session adopted",
@@ -1814,6 +2019,20 @@ fn adopt_public_command_session(
         Err(ExecutionRegistryError::UnknownPublicSession(_)) => FacadeError::new(
             FacadeErrorCode::SessionUnavailable,
             "命令会话不存在或已回收",
+            false,
+        )
+        .to_mcp_result(),
+        Err(
+            ExecutionRegistryError::OwnerConflict { .. } | ExecutionRegistryError::NotOrphaned(_),
+        ) => FacadeError::new(
+            FacadeErrorCode::TaskNotOwned,
+            "command session still has an active MCP owner",
+            false,
+        )
+        .to_mcp_result(),
+        Err(ExecutionRegistryError::AdoptionDenied) => FacadeError::new(
+            FacadeErrorCode::SessionUnavailable,
+            "command session or adoption credential is unavailable",
             false,
         )
         .to_mcp_result(),
@@ -2002,7 +2221,13 @@ fn handle_task_control(
         "list" => task_control_list(tasks, executions, &session_id),
         "get" => match guard.try_lock() {
             _ if arguments.get("task_id").is_some() => {
-                match task_control_get_by_id(&arguments, tasks, executions) {
+                match task_control_get_by_id(
+                    &arguments,
+                    tasks,
+                    executions,
+                    &session_id,
+                    observed_workspace,
+                ) {
                     Ok(data) => data,
                     Err(error) => {
                         return write_rpc_result(stream, id, error.to_mcp_result(), Some(session));
@@ -2028,18 +2253,14 @@ fn handle_task_control(
             let explicit_task_capability = requested.is_some();
             let mut candidates = requested
                 .as_ref()
-                .filter(|task_id| task_is_cancellable(tasks, executions, task_id))
+                .filter(|task_id| {
+                    task_is_cancellable_owned(tasks, executions, task_id, &session_id)
+                })
                 .cloned()
                 .into_iter()
                 .collect::<BTreeSet<_>>();
             if !explicit_task_capability {
                 candidates = cancellable_task_ids(tasks, executions, &session_id);
-                candidates.extend(
-                    executions
-                        .running_unowned()
-                        .into_iter()
-                        .map(|execution| execution.task_id),
-                );
             }
             if let Some(workflow_id) = checkpoint_store
                 .as_ref()
@@ -2050,15 +2271,13 @@ fn handle_task_control(
                     candidates.insert(workflow_task);
                 }
             }
-            if let Some(workflow_id) = checkpoint_store
-                .as_ref()
-                .and_then(|store| store.active_unowned_workflow::<Value>().ok().flatten())
-            {
-                candidates.insert(TaskId::new(workflow_id));
-            }
             if let Some(requested_task) = requested.as_ref() {
                 if checkpoint_store.as_ref().is_some_and(|store| {
-                    store.active_workflow::<Value>().ok().flatten().as_deref()
+                    store
+                        .active_owned_workflow::<Value>(session)
+                        .ok()
+                        .flatten()
+                        .as_deref()
                         == Some(requested_task.as_str())
                 }) {
                     candidates.insert(requested_task.clone());
@@ -2069,25 +2288,21 @@ fn handle_task_control(
                     .as_ref()
                     .and_then(|store| store.active_workflow::<Value>().ok().flatten())
                 {
+                    let _ = workflow_id;
                     let error = FacadeError::new(
-                        FacadeErrorCode::TaskIdRequired,
-                        "存在其他 MCP Session 创建的 durable workflow；取消时必须显式指定 task_id",
+                        FacadeErrorCode::TaskNotOwned,
+                        "an active durable workflow is owned by another MCP session",
                         false,
-                    )
-                    .with_details(json!({"task_id":workflow_id}));
+                    );
                     return write_rpc_result(stream, id, error.to_mcp_result(), Some(session));
                 }
                 if let Some(execution) = executions.latest_running() {
+                    let _ = execution;
                     let error = FacadeError::new(
-                        FacadeErrorCode::TaskIdRequired,
-                        "存在其他 MCP Session 创建的 detached execution；取消时必须显式指定 task_id",
+                        FacadeErrorCode::TaskNotOwned,
+                        "an active detached execution is owned by another MCP session",
                         false,
-                    )
-                    .with_details(json!({
-                        "task_id":execution.task_id,
-                        "execution_id":execution.id,
-                        "session_id":execution.public_session_id,
-                    }));
+                    );
                     return write_rpc_result(stream, id, error.to_mcp_result(), Some(session));
                 }
             }
@@ -2102,38 +2317,20 @@ fn handle_task_control(
             let mut workflow_cancelled = false;
             if let Some(task_id) = &selected {
                 workflow_cancelled = checkpoint_store.as_ref().is_some_and(|store| {
-                    if explicit_task_capability {
-                        store
-                            .cancel_by_id::<Value>(task_id.as_str())
-                            .unwrap_or(false)
-                    } else {
-                        store
-                            .cancel_owned::<Value>(task_id.as_str(), session)
-                            .unwrap_or(false)
-                            || store
-                                .cancel_unowned::<Value>(task_id.as_str())
-                                .unwrap_or(false)
-                    }
+                    store
+                        .cancel_owned::<Value>(task_id.as_str(), session)
+                        .unwrap_or(false)
                 });
-                queued_cancelled = if explicit_task_capability {
-                    scheduler.cancel_queued_task_by_id(task_id)
-                } else {
-                    scheduler.cancel_queued_task(&session_id, task_id)
-                };
+                queued_cancelled = scheduler.cancel_queued_task(&session_id, task_id);
                 if queued_cancelled {
                     let _ = tasks.finish(task_id, TerminalOutcome::Cancelled);
                 }
                 let active_request = tasks.get(task_id).map(|task| task.request);
-                let running_executions = if explicit_task_capability {
-                    executions.running_for_task(task_id)
-                } else {
-                    executions
-                        .running_owned_by(&session_id)
-                        .into_iter()
-                        .chain(executions.running_unowned())
-                        .filter(|execution| &execution.task_id == task_id)
-                        .collect()
-                };
+                let running_executions = executions
+                    .running_owned_by(&session_id)
+                    .into_iter()
+                    .filter(|execution| &execution.task_id == task_id)
+                    .collect::<Vec<_>>();
                 for execution in running_executions {
                     let cancellation_requested =
                         execution.runtime_handle.as_ref().is_some_and(|handle| {
@@ -2188,7 +2385,15 @@ fn handle_task_control(
                 }
                 if let Some(request_key) = active_request {
                     if let Some(active) = requests.request_cancellation(&request_key) {
-                        if cancel_registered_request(&active, cancellation, privileged).is_ok() {
+                        if cancel_registered_request(
+                            &active,
+                            cancellation,
+                            privileged,
+                            scheduler,
+                            tasks,
+                        )
+                        .is_ok()
+                        {
                             cancelled = cancelled.saturating_add(1);
                         }
                     }
@@ -2294,6 +2499,8 @@ fn task_control_get_by_id(
     arguments: &Value,
     tasks: &TaskRegistry,
     executions: &ExecutionRegistry,
+    owner: &McpSessionId,
+    workspace: &Path,
 ) -> Result<Value, FacadeError> {
     let task_id = arguments
         .get("task_id")
@@ -2301,22 +2508,7 @@ fn task_control_get_by_id(
         .filter(|value| !value.is_empty())
         .map(TaskId::new)
         .ok_or_else(|| FacadeError::new(FacadeErrorCode::InvalidArgument, "task_id 无效", false))?;
-    let task = tasks
-        .get(&task_id)
-        .ok_or_else(|| FacadeError::new(FacadeErrorCode::NotFound, "任务不存在或已回收", false))?;
-    // TaskId is an explicit unguessable resource capability. Enumeration is
-    // session-scoped, while get/cancel by the returned stable identity remains
-    // usable after the shorter-lived MCP transport session reconnects.
-    let related = executions
-        .all()
-        .into_iter()
-        .filter(|execution| execution.task_id == task_id)
-        .collect::<Vec<_>>();
-    Ok(json!({
-        "state": if task.lifecycle.is_terminal() { "idle" } else { "active" },
-        "task": task,
-        "executions": related,
-    }))
+    super::resource_access::owned_task_detail(&task_id, owner, workspace, tasks, executions)
 }
 
 fn wait_for_task_cancel_settlement(
@@ -2407,6 +2599,21 @@ fn task_is_cancellable(
             .any(|execution| &execution.task_id == task_id)
 }
 
+fn task_is_cancellable_owned(
+    tasks: &TaskRegistry,
+    executions: &ExecutionRegistry,
+    task_id: &TaskId,
+    owner: &McpSessionId,
+) -> bool {
+    tasks
+        .get(task_id)
+        .is_some_and(|task| &task.owner_session == owner && !task.lifecycle.is_terminal())
+        || executions
+            .running_owned_by(owner)
+            .iter()
+            .any(|execution| &execution.task_id == task_id)
+}
+
 fn runtime_cancellation_terminal(result: Value) -> Option<ExecutionTerminal> {
     if result.get("isError").and_then(Value::as_bool) == Some(true) {
         return None;
@@ -2432,11 +2639,23 @@ fn runtime_cancellation_terminal(result: Value) -> Option<ExecutionTerminal> {
 fn direct_command_control_during_work(
     arguments: &Value,
     public_session_id: &PublicSessionId,
+    owner_session: &McpSessionId,
     executions: &ExecutionRegistry,
     cancellation: &McpCancellationClient,
     workspace: &Path,
     private_request_id: RpcRequestId,
 ) -> Value {
+    if executions
+        .execution_for_public_session(public_session_id)
+        .is_none_or(|execution| execution.owner_session.as_ref() != Some(owner_session))
+    {
+        return FacadeError::new(
+            FacadeErrorCode::TaskNotOwned,
+            "command session is not owned by the current MCP session",
+            false,
+        )
+        .to_mcp_result();
+    }
     let action = match arguments.get("action").and_then(Value::as_str) {
         Some("poll") => CommandControlAction::Poll,
         Some("write") => CommandControlAction::Write,
@@ -2990,13 +3209,11 @@ fn handle_workspace_filesystem(
     let cancellation = FilesystemCancellation::default();
     let registry_key = request_key_from_json(McpSessionId::new(session), &id)
         .expect("validated downstream request id");
-    if requests
-        .register(
-            registry_key.clone(),
-            RequestCancellationTarget::WorkspaceFilesystem(cancellation.clone()),
-        )
-        .is_err()
-    {
+    let Ok(active_request) = activate_request_target(
+        requests,
+        &registry_key,
+        RequestCancellationTarget::WorkspaceFilesystem(cancellation.clone()),
+    ) else {
         return write_rpc_error(
             stream,
             id,
@@ -3004,6 +3221,9 @@ fn handle_workspace_filesystem(
             "Duplicate active request id in MCP session",
             Some(session),
         );
+    };
+    if active_request.state == ActiveRequestState::CancellationRequested {
+        cancellation.cancel();
     }
     project_filesystem_task(current_task, kind, TaskExecutionState::Running);
 
@@ -3330,13 +3550,11 @@ fn handle_administrator_filesystem(
     let broker_request_id = format!("mcp-filesystem-{generation:x}");
     let registry_key = request_key_from_json(McpSessionId::new(session), &id)
         .expect("validated downstream request id");
-    if requests
-        .register(
-            registry_key.clone(),
-            RequestCancellationTarget::PrivilegedFilesystem(broker_request_id.clone()),
-        )
-        .is_err()
-    {
+    let Ok(active_request) = activate_request_target(
+        requests,
+        &registry_key,
+        RequestCancellationTarget::PrivilegedFilesystem(broker_request_id.clone()),
+    ) else {
         return write_rpc_error(
             stream,
             id,
@@ -3344,7 +3562,9 @@ fn handle_administrator_filesystem(
             "Duplicate active request id in MCP session",
             Some(session),
         );
-    }
+    };
+    let cancellation_already_requested =
+        active_request.state == ActiveRequestState::CancellationRequested;
     project_filesystem_task(current_task, kind, TaskExecutionState::Running);
 
     if let Err(error) = privileged.start_structured_filesystem(broker_request_id.clone(), spec) {
@@ -3394,6 +3614,9 @@ fn handle_administrator_filesystem(
                 )
             }
         };
+    }
+    if cancellation_already_requested {
+        let _ = privileged.cancel_structured_filesystem(broker_request_id.clone());
     }
 
     let filesystem = loop {
@@ -3877,13 +4100,11 @@ fn handle_elevated_exec(
     let broker_request_id = format!("mcp-elevated-{generation:x}");
     let registry_key = request_key_from_json(McpSessionId::new(session), &id)
         .expect("validated downstream request id");
-    if requests
-        .register(
-            registry_key.clone(),
-            RequestCancellationTarget::PrivilegedExecution(broker_request_id.clone()),
-        )
-        .is_err()
-    {
+    let Ok(active_request) = activate_request_target(
+        requests,
+        &registry_key,
+        RequestCancellationTarget::PrivilegedExecution(broker_request_id.clone()),
+    ) else {
         return write_rpc_error(
             stream,
             id,
@@ -3891,7 +4112,9 @@ fn handle_elevated_exec(
             "Duplicate active request id in MCP session",
             Some(session),
         );
-    }
+    };
+    let cancellation_already_requested =
+        active_request.state == ActiveRequestState::CancellationRequested;
     project_elevated_task(current_task, TaskExecutionState::Running);
 
     if let Err(error) = privileged.start_execute(broker_request_id.clone(), spec) {
@@ -3925,6 +4148,9 @@ fn handle_elevated_exec(
                 )
             }
         };
+    }
+    if cancellation_already_requested {
+        let _ = privileged.cancel_execute(broker_request_id.clone());
     }
 
     let execution = loop {
@@ -4002,13 +4228,21 @@ fn handle_elevated_exec(
     if stdout_inline_truncated {
         output_refs.insert(
             "stdout".into(),
-            Value::String(execution_guard.retain_local_output("stdout", execution.stdout.clone())),
+            Value::String(execution_guard.retain_local_output(
+                McpSessionId::new(session),
+                "stdout",
+                execution.stdout.clone(),
+            )),
         );
     }
     if stderr_inline_truncated {
         output_refs.insert(
             "stderr".into(),
-            Value::String(execution_guard.retain_local_output("stderr", execution.stderr.clone())),
+            Value::String(execution_guard.retain_local_output(
+                McpSessionId::new(session),
+                "stderr",
+                execution.stderr.clone(),
+            )),
         );
     }
     let text = [stdout.as_str(), stderr.as_str()]
@@ -4216,20 +4450,6 @@ fn operation_error_from_facade_result(
     }
 }
 
-fn public_session_from_result(tool_name: &str, result: &Value) -> Option<PublicSessionId> {
-    let data = result.pointer("/structuredContent/data")?;
-    if tool_name == "exec_command" {
-        if let Some(public_session) = data
-            .get("session_id")
-            .and_then(Value::as_str)
-            .map(PublicSessionId::new)
-        {
-            return Some(public_session);
-        }
-    }
-    None
-}
-
 fn valid_downstream_request_id(request_id: &Value) -> bool {
     rpc_request_id_from_json(request_id).is_some()
 }
@@ -4240,6 +4460,19 @@ fn registered_request_for_transport_cancel(
     request_id: &RpcRequestId,
 ) -> Option<ActiveRequest> {
     requests.request_cancellation(&RequestKey::new(session_id.clone(), request_id.clone()))
+}
+
+fn activate_request_target(
+    requests: &RequestRegistry,
+    key: &RequestKey,
+    target: RequestCancellationTarget,
+) -> Result<ActiveRequest, ()> {
+    if requests.active(key).is_some() {
+        requests.replace_cancellation_target(key, target).ok_or(())
+    } else {
+        requests.register(key.clone(), target).map_err(|_| ())?;
+        requests.active(key).ok_or(())
+    }
 }
 
 fn spawn_runtime_cancellation_relay(
@@ -4265,7 +4498,7 @@ fn spawn_runtime_cancellation_relay(
                 {
                     break;
                 }
-                let _ = cancel_registered_request(&active, &cancellation, None);
+                let _ = cancellation.cancel_request(&rpc_request_id_to_json(&runtime_request_id));
             }
         })
         .map(|_| ())
@@ -4281,8 +4514,16 @@ fn cancel_registered_request(
     request: &ActiveRequest,
     cancellation: &McpCancellationClient,
     privileged: Option<&Arc<dyn PrivilegedExecution>>,
+    scheduler: &Scheduler,
+    tasks: &TaskRegistry,
 ) -> Result<(), ()> {
     match &request.cancellation {
+        RequestCancellationTarget::QueuedWork => {
+            if let Some(task_id) = scheduler.cancel_queued_request(&request.key) {
+                let _ = tasks.finish(&task_id, TerminalOutcome::Cancelled);
+            }
+            Ok(())
+        }
         RequestCancellationTarget::Runtime(request_id) => cancellation
             .cancel_request(&rpc_request_id_to_json(request_id))
             .map_err(|_| ()),
@@ -4548,15 +4789,7 @@ fn read_chunked_body(stream: &mut TcpStream, mut wire: Vec<u8>) -> Result<Vec<u8
 }
 
 fn new_session_id() -> McpSessionId {
-    let generation = SESSION_GENERATION.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    McpSessionId::new(format!(
-        "lb-{:x}-{nanos:x}-{generation:x}",
-        std::process::id()
-    ))
+    McpSessionId::new(crate::security::random_prefixed_id("lb-mcp-session-"))
 }
 
 fn write_rpc_result(
@@ -5582,6 +5815,7 @@ mod tests {
                     reconciliation: projected.reconciliation,
                 },
                 work_authorized: true,
+                runtime: Some(RuntimeState::Ready),
             }
         };
 
@@ -6459,10 +6693,13 @@ mod tests {
             .and_then(|tools| tools.iter().find(|tool| tool["name"] == "agent_workflow"))
             .expect("fresh serving instance exposes agent_workflow");
         assert!(served_agent["inputSchema"]["properties"]["path"].is_object());
-        assert!(
-            served_agent["description"]
-                .as_str()
-                .is_some_and(|value| value.contains("resume may use the returned task_id"))
+        assert_eq!(
+            served_agent["inputSchema"]["properties"]["adoption_token"]["type"],
+            "string"
+        );
+        assert_eq!(
+            served_agent["inputSchema"]["properties"]["adoption_token"]["minLength"],
+            1
         );
         assert_eq!(served_agent["outputSchema"]["type"], "object");
         assert_eq!(
@@ -6995,7 +7232,9 @@ mod tests {
         }
         let stderr_ref = powershell_error_data["output_refs"]["stderr"]
             .as_str()
-            .expect("PowerShell failure exposes public retained stderr handle");
+            .unwrap_or_else(|| {
+                panic!("PowerShell failure must retain stderr: {powershell_error_data:#?}")
+            });
         let retained_error = public_tool_call(
             pep.port(),
             &session,
@@ -8880,6 +9119,10 @@ mod tests {
             .as_str()
             .expect("detached task id")
             .to_string();
+        let adoption_token = running.body["result"]["structuredContent"]["data"]["adoption_token"]
+            .as_str()
+            .expect("detached adoption credential")
+            .to_string();
         let isolated_cancel = public_tool_call(
             pep.port(),
             &other_session,
@@ -8888,14 +9131,9 @@ mod tests {
             json!({"action":"cancel"}),
         );
         assert_eq!(
-            isolated_cancel.body["result"]["structuredContent"]["error"]["code"], "TaskIdRequired",
-            "an active execution owned by another live MCP session must stay isolated but actionable: {:#?}",
+            isolated_cancel.body["result"]["structuredContent"]["error"]["code"], "TaskNotOwned",
+            "another live MCP session cannot cancel an execution by discovering its ID: {:#?}",
             isolated_cancel.body
-        );
-        assert_eq!(
-            isolated_cancel.body["result"]["structuredContent"]["error"]["details"]["task_id"],
-            task_id,
-            "the error must return the stable capability already exposed by current activity"
         );
         assert_eq!(
             delete(pep.port(), &session),
@@ -8911,7 +9149,7 @@ mod tests {
             json!({"action":"poll","session_id":public_session,"wait_ms":0}),
         );
         assert_eq!(
-            cross_session_poll.body["result"]["structuredContent"]["data"]["status"], "running",
+            cross_session_poll.body["result"]["structuredContent"]["error"]["code"], "TaskNotOwned",
             "{:#?}",
             cross_session_poll.body
         );
@@ -8944,9 +9182,21 @@ mod tests {
             json!({"action":"get","task_id":task_id.clone()}),
         );
         assert_eq!(
-            cross_session_get.body["result"]["structuredContent"]["data"]["task"]["id"], task_id,
-            "an explicit TaskId capability must survive MCP transport reconnect: {:#?}",
+            cross_session_get.body["result"]["structuredContent"]["error"]["code"], "TaskNotOwned",
+            "a TaskId is an identifier, not an authorization credential: {:#?}",
             cross_session_get.body
+        );
+
+        let adopted = public_tool_call(
+            pep.port(),
+            &other_session,
+            3280,
+            "command_control",
+            json!({"action":"adopt","session_id":public_session,"adoption_token":adoption_token}),
+        );
+        assert_eq!(
+            adopted.body["result"]["structuredContent"]["data"]["adopted"],
+            true
         );
 
         let current = public_tool_call(
@@ -9171,6 +9421,11 @@ mod tests {
             .as_str()
             .expect("prepared durable workflow task id")
             .to_string();
+        let workflow_adoption_token =
+            prepared.body["result"]["structuredContent"]["data"]["adoption_token"]
+                .as_str()
+                .expect("prepared workflow adoption credential")
+                .to_string();
         let reconnected_session = initialize(pep.port(), 3340)
             .session
             .expect("reconnected MCP session");
@@ -9183,20 +9438,16 @@ mod tests {
         );
         assert_eq!(
             implicit_cross_session_cancel.body["result"]["structuredContent"]["error"]["code"],
-            "TaskIdRequired",
+            "TaskNotOwned",
             "untargeted cancel must not report success for another live Session's workflow: {:#?}",
             implicit_cross_session_cancel.body
-        );
-        assert_eq!(
-            implicit_cross_session_cancel.body["result"]["structuredContent"]["error"]["details"]["task_id"],
-            workflow_task_id
         );
         let resumed_after_reconnect = public_tool_call(
             pep.port(),
             &reconnected_session,
             33402,
             "agent_workflow",
-            json!({"action":"resume","task_id":workflow_task_id.clone()}),
+            json!({"action":"resume","task_id":workflow_task_id.clone(),"adoption_token":workflow_adoption_token}),
         );
         assert_eq!(
             resumed_after_reconnect.body["result"]["structuredContent"]["data"]["state"],

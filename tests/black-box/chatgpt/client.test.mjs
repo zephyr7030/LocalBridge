@@ -8,6 +8,19 @@ import {
   normalizeEndpoint,
   parseExtraHeaders,
 } from "./client.mjs";
+import { assertPublicSchema } from "./schema_contract.mjs";
+
+test("published schema validation rejects missing, extra and mistyped response facts", () => {
+  const schema = {
+    type: "object", required: ["state"], additionalProperties: false,
+    properties: { state: { type: "string", enum: ["running", "cancelled"] }, error: { anyOf: [{ type: "null" }, { type: "object" }] } },
+  };
+  assert.doesNotThrow(() => assertPublicSchema({ state: "cancelled", error: null }, schema));
+  assert.throws(() => assertPublicSchema({}, schema), /required field/);
+  assert.throws(() => assertPublicSchema({ state: "running", hidden: true }, schema), /published schema/);
+  assert.throws(() => assertPublicSchema({ state: "completed" }, schema), /published enum/);
+  assert.throws(() => assertPublicSchema({ state: 1 }, schema), /expected string/);
+});
 
 async function startMcpFixture() {
   const requests = [];

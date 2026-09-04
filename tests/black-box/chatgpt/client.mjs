@@ -3,6 +3,7 @@ import { request as requestHttp } from "node:http";
 import { request as requestHttps } from "node:https";
 import { connect as connectTcp } from "node:net";
 import { pathToFileURL } from "node:url";
+import { assertPublicSchema } from "./schema_contract.mjs";
 
 export const MCP_PROTOCOL_VERSION = "2025-11-25";
 
@@ -332,6 +333,7 @@ export class ChatGptMcpClient {
   #nextRequestId = 1;
   #sessionId = null;
   #timeoutMs;
+  #outputSchemas = new Map();
 
   constructor({ endpoint, extraHeaders = {}, fetchImpl = singleRequestFetch, timeoutMs } = {}) {
     if (typeof fetchImpl !== "function") {
@@ -388,8 +390,13 @@ export class ChatGptMcpClient {
       throw clientError("SessionUnavailable", "MCP client is not connected");
     }
     switch (command.op) {
-      case "tools/list":
-        return this.#rpc("tools/list", {}, command.request_id);
+      case "tools/list": {
+        const response = await this.#rpc("tools/list", {}, command.request_id);
+        for (const tool of response.body?.result?.tools ?? []) {
+          if (tool.outputSchema) this.#outputSchemas.set(tool.name, tool.outputSchema);
+        }
+        return response;
+      }
       case "tools/call": {
         if (typeof command.name !== "string" || command.name === "") {
           throw clientError("InvalidInput", "tools/call requires a non-empty name");
@@ -401,11 +408,16 @@ export class ChatGptMcpClient {
         ) {
           throw clientError("InvalidInput", "tools/call arguments must be an object");
         }
-        return this.#rpc(
+        const response = await this.#rpc(
           "tools/call",
           { name: command.name, arguments: command.arguments },
           command.request_id,
         );
+        const schema = this.#outputSchemas.get(command.name);
+        if (schema && response.body?.result?.structuredContent) {
+          assertPublicSchema(response.body.result.structuredContent, schema, command.name);
+        }
+        return response;
       }
       case "rpc":
         if (typeof command.method !== "string" || command.method === "") {
@@ -420,6 +432,24 @@ export class ChatGptMcpClient {
           "op must be tools/list, tools/call, rpc, or close",
         );
     }
+  }
+
+  async cancelRequest(requestId, reason = "client cancelled request") {
+    if (this.#sessionId == null) {
+      throw clientError("SessionUnavailable", "MCP client is not connected");
+    }
+    const response = await this.#post({
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId: validateRequestId(requestId), reason },
+    });
+    if (response.transport.status !== 202) {
+      throw clientError(
+        "CancellationFailed",
+        `MCP cancellation returned HTTP ${response.transport.status}`,
+      );
+    }
+    return response;
   }
 
   async close() {

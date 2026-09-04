@@ -14,6 +14,6 @@ export default defineConfig({
     emptyOutDir: true,
   },
   test: {
-    include: ["__tests__/**/*.test.ts"],
+    include: ["__tests__/**/*.test.{ts,tsx}"],
   },
 });

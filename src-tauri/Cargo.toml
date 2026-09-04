@@ -1,6 +1,6 @@
 [package]
 name = "localbridge"
-version = "0.1.4"
+version = "0.1.5"
 description = "LocalBridge desktop shell"
 authors = ["LocalBridge"]
 edition = "2024"
@@ -25,6 +25,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 base64 = "0.22.1"
+getrandom = "0.3"
 image = { version = "0.25.9", default-features = false, features = ["png"] }
 pdf-extract = "=0.10.0"
 pulldown-cmark = { version = "0.13.4", default-features = false }

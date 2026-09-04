@@ -1,8 +1,6 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-static OUTPUT_HANDLE_GENERATION: AtomicU64 = AtomicU64::new(1);
+use crate::domain::McpSessionId;
 pub(crate) const MAX_LOCAL_RETAINED_OUTPUT_HANDLES: usize = 8;
 pub(crate) const MAX_PRIVATE_RETAINED_OUTPUT_HANDLES: usize = 256;
 
@@ -14,9 +12,16 @@ enum OutputHandle {
         stream: String,
     },
     Local {
+        owner_session: McpSessionId,
         stream: String,
         content: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OutputOwner {
+    PublicSession(String),
+    McpSession(McpSessionId),
 }
 
 #[derive(Debug, Default)]
@@ -57,7 +62,12 @@ impl OutputHandleRegistry {
         public
     }
 
-    pub(crate) fn retain_local(&mut self, stream: &str, content: String) -> String {
+    pub(crate) fn retain_local(
+        &mut self,
+        owner_session: McpSessionId,
+        stream: &str,
+        content: String,
+    ) -> String {
         while self.local_order.len() >= MAX_LOCAL_RETAINED_OUTPUT_HANDLES {
             if let Some(expired) = self.local_order.pop_front() {
                 self.remove(&expired);
@@ -67,6 +77,7 @@ impl OutputHandleRegistry {
         self.handles.insert(
             public.clone(),
             OutputHandle::Local {
+                owner_session,
                 stream: stream.to_owned(),
                 content,
             },
@@ -87,7 +98,9 @@ impl OutputHandleRegistry {
     pub(crate) fn local(&self, public_output_ref: &str) -> Option<(String, String)> {
         match self.handles.get(public_output_ref)? {
             OutputHandle::Private { .. } => None,
-            OutputHandle::Local { stream, content } => Some((stream.clone(), content.clone())),
+            OutputHandle::Local {
+                stream, content, ..
+            } => Some((stream.clone(), content.clone())),
         }
     }
 
@@ -95,6 +108,18 @@ impl OutputHandleRegistry {
         match self.handles.get(public_output_ref)? {
             OutputHandle::Private { stream, .. } | OutputHandle::Local { stream, .. } => {
                 Some(stream.clone())
+            }
+        }
+    }
+
+    pub(crate) fn owner(&self, public_output_ref: &str) -> Option<OutputOwner> {
+        match self.handles.get(public_output_ref)? {
+            OutputHandle::Private {
+                owner_public_session_id,
+                ..
+            } => Some(OutputOwner::PublicSession(owner_public_session_id.clone())),
+            OutputHandle::Local { owner_session, .. } => {
+                Some(OutputOwner::McpSession(owner_session.clone()))
             }
         }
     }
@@ -130,15 +155,7 @@ impl OutputHandleRegistry {
 }
 
 fn next_output_handle() -> String {
-    let generation = OUTPUT_HANDLE_GENERATION.fetch_add(1, Ordering::Relaxed);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!(
-        "lb-output-{:x}-{nonce:x}-{generation:x}",
-        std::process::id()
-    )
+    crate::security::random_prefixed_id("lb-output-")
 }
 
 #[cfg(test)]
@@ -158,9 +175,14 @@ mod tests {
             MAX_PRIVATE_RETAINED_OUTPUT_HANDLES
         );
 
-        let local_first = registry.retain_local("stdout", "first".into());
+        let local_first =
+            registry.retain_local(McpSessionId::new("owner"), "stdout", "first".into());
         for index in 1..=MAX_LOCAL_RETAINED_OUTPUT_HANDLES {
-            registry.retain_local("stderr", format!("local-{index}"));
+            registry.retain_local(
+                McpSessionId::new("owner"),
+                "stderr",
+                format!("local-{index}"),
+            );
         }
         assert!(registry.local(&local_first).is_none());
         assert_eq!(

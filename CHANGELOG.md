@@ -6,6 +6,14 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 No user-visible changes yet.
 
+## [0.1.5] - 2026-09-03
+
+- 本机 MCP 入口增加每实例认证；公开资源标识改用密码学随机数，执行接管必须满足原 owner 已离线及一次性转移凭证校验。
+- 修复排队请求取消、服务停止后迟到执行，以及工作流和 detached command 的跨 Session 隔离。
+- DOCX 局部编辑保留原 ZIP 文档包及未修改内容；不能保真的编辑明确拒绝。多文件 Patch 暂时明确拒绝，避免无崩溃恢复保证的部分提交。
+- 修复权限降级时的 Broker 清理、启动权限投影、前端旧快照与结构化错误展示，以及 Git 特殊文件名解析。
+- 收紧 Windows 子进程句柄继承和 WebView 内容安全策略；增加使用端黑盒、排队取消、文档保真和前后端合同回归。
+
 ## [0.1.4] - 2026-09-01
 
 - 将 `document_workflow` 收敛为 `inspect / search / create / edit / convert / rebuild` 六个稳定 action，并统一经过 typed `DocumentIR`。

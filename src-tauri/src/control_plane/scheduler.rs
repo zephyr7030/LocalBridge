@@ -4,7 +4,9 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{McpSessionId, TaskId};
+#[cfg(test)]
+use crate::domain::RpcRequestId;
+use crate::domain::{McpSessionId, RequestKey, TaskId};
 
 pub(crate) const MAX_WORK_QUEUE: usize = 32;
 pub(crate) const MAX_OBSERVATION_ACTIVE: usize = 16;
@@ -24,6 +26,7 @@ pub(crate) enum SchedulerAdmissionError {
     QueueCapacityExceeded,
     ImmediateCapacityExceeded,
     Cancelled,
+    Closed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +64,7 @@ struct QueuedWork {
     ticket: u64,
     owner_session: McpSessionId,
     task_id: TaskId,
+    request: RequestKey,
 }
 
 #[derive(Debug, Default)]
@@ -71,6 +75,7 @@ struct SchedulerState {
     queue: VecDeque<QueuedWork>,
     cancelled: HashSet<u64>,
     rejected_total: u64,
+    closed: bool,
 }
 
 #[derive(Debug, Default)]
@@ -112,6 +117,9 @@ impl Scheduler {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.closed {
+            return Err(SchedulerAdmissionError::Closed);
+        }
         match lane {
             SchedulerLane::Observation => {
                 if state.observation_active >= MAX_OBSERVATION_ACTIVE {
@@ -136,10 +144,11 @@ impl Scheduler {
         }))
     }
 
-    pub(crate) fn admit_work(
+    pub(crate) fn admit_work_for_request(
         &self,
         owner_session: McpSessionId,
         task_id: TaskId,
+        request: RequestKey,
     ) -> Result<SchedulerPermit, SchedulerAdmissionError> {
         let ticket = TICKET_GENERATION.fetch_add(1, Ordering::Relaxed);
         let mut state = self
@@ -147,6 +156,9 @@ impl Scheduler {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.closed {
+            return Err(SchedulerAdmissionError::Closed);
+        }
         if state.work_running < FOREGROUND_WORK_SLOTS && state.queue.is_empty() {
             state.work_running += 1;
             return Ok(SchedulerPermit::Work(WorkPermit {
@@ -162,6 +174,7 @@ impl Scheduler {
             ticket,
             owner_session,
             task_id,
+            request,
         });
 
         loop {
@@ -186,6 +199,54 @@ impl Scheduler {
                 }));
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn admit_work(
+        &self,
+        owner_session: McpSessionId,
+        task_id: TaskId,
+    ) -> Result<SchedulerPermit, SchedulerAdmissionError> {
+        let request = RequestKey::new(
+            owner_session.clone(),
+            RpcRequestId::String(format!("test-{}", task_id.as_str())),
+        );
+        self.admit_work_for_request(owner_session, task_id, request)
+    }
+
+    pub(crate) fn cancel_queued_request(&self, request: &RequestKey) -> Option<TaskId> {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let index = state
+            .queue
+            .iter()
+            .position(|queued| &queued.request == request)?;
+        let queued = state
+            .queue
+            .remove(index)
+            .expect("located queued work remains present");
+        state.cancelled.insert(queued.ticket);
+        self.0.changed.notify_all();
+        Some(queued.task_id)
+    }
+
+    pub(crate) fn close(&self) -> Vec<TaskId> {
+        let mut state = self
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.closed = true;
+        let mut cancelled = Vec::with_capacity(state.queue.len());
+        while let Some(queued) = state.queue.pop_front() {
+            state.cancelled.insert(queued.ticket);
+            cancelled.push(queued.task_id);
+        }
+        self.0.changed.notify_all();
+        cancelled
     }
 
     pub(crate) fn cancel_queued_by_session(&self, owner: &McpSessionId) -> Vec<TaskId> {
@@ -219,28 +280,6 @@ impl Scheduler {
             .queue
             .iter()
             .position(|queued| &queued.owner_session == owner && &queued.task_id == task_id)
-        else {
-            return false;
-        };
-        let queued = state
-            .queue
-            .remove(index)
-            .expect("located queued work remains present");
-        state.cancelled.insert(queued.ticket);
-        self.0.changed.notify_all();
-        true
-    }
-
-    pub(crate) fn cancel_queued_task_by_id(&self, task_id: &TaskId) -> bool {
-        let mut state = self
-            .0
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(index) = state
-            .queue
-            .iter()
-            .position(|queued| &queued.task_id == task_id)
         else {
             return false;
         };
@@ -424,6 +463,67 @@ mod tests {
     }
 
     #[test]
+    fn queued_work_is_cancelled_by_session_scoped_request_identity() {
+        let scheduler = Scheduler::default();
+        let running = scheduler
+            .admit_work(McpSessionId::new("running"), TaskId::new("running"))
+            .unwrap();
+        let request = RequestKey::new(McpSessionId::new("owner"), RpcRequestId::Number(7));
+        let queued_scheduler = scheduler.clone();
+        let queued_request = request.clone();
+        let queued = thread::spawn(move || {
+            queued_scheduler.admit_work_for_request(
+                McpSessionId::new("owner"),
+                TaskId::new("queued"),
+                queued_request,
+            )
+        });
+        while scheduler.snapshot().work_queued != 1 {
+            thread::yield_now();
+        }
+
+        assert_eq!(
+            scheduler.cancel_queued_request(&request),
+            Some(TaskId::new("queued"))
+        );
+        assert!(matches!(
+            queued.join().unwrap(),
+            Err(SchedulerAdmissionError::Cancelled)
+        ));
+        drop(running);
+    }
+
+    #[test]
+    fn closing_scheduler_cancels_queued_work_and_rejects_late_admission() {
+        let scheduler = Scheduler::default();
+        let running = scheduler
+            .admit_work(McpSessionId::new("running"), TaskId::new("running"))
+            .unwrap();
+        let queued_scheduler = scheduler.clone();
+        let queued = thread::spawn(move || {
+            queued_scheduler.admit_work(McpSessionId::new("owner"), TaskId::new("queued"))
+        });
+        while scheduler.snapshot().work_queued != 1 {
+            thread::yield_now();
+        }
+
+        assert_eq!(scheduler.close(), vec![TaskId::new("queued")]);
+        assert!(matches!(
+            queued.join().unwrap(),
+            Err(SchedulerAdmissionError::Cancelled)
+        ));
+        assert!(matches!(
+            scheduler.admit_work(McpSessionId::new("late"), TaskId::new("late")),
+            Err(SchedulerAdmissionError::Closed)
+        ));
+        assert!(matches!(
+            scheduler.enter_immediate(SchedulerLane::Observation),
+            Err(SchedulerAdmissionError::Closed)
+        ));
+        drop(running);
+    }
+
+    #[test]
     fn full_work_queue_returns_queue_capacity_exceeded_and_is_observable() {
         let scheduler = Scheduler::default();
         let _running = scheduler
@@ -440,6 +540,10 @@ mod tests {
                     ticket: index as u64 + 10_000,
                     owner_session: McpSessionId::new(format!("session-{index}")),
                     task_id: TaskId::new(format!("task-{index}")),
+                    request: RequestKey::new(
+                        McpSessionId::new(format!("session-{index}")),
+                        RpcRequestId::Number(index as i64),
+                    ),
                 });
             }
         }

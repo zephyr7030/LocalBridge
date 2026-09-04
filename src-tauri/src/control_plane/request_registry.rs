@@ -8,6 +8,7 @@ const MAX_RETAINED_REQUEST_ERRORS: usize = 256;
 
 #[derive(Debug, Clone)]
 pub(crate) enum RequestCancellationTarget {
+    QueuedWork,
     Runtime(RpcRequestId),
     WorkspaceFilesystem(FilesystemCancellation),
     PrivilegedFilesystem(String),
@@ -63,6 +64,20 @@ impl RequestRegistry {
             },
         );
         Ok(())
+    }
+
+    pub(crate) fn replace_cancellation_target(
+        &self,
+        key: &RequestKey,
+        cancellation: RequestCancellationTarget,
+    ) -> Option<ActiveRequest> {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let request = state.active.get_mut(key)?;
+        request.cancellation = cancellation;
+        Some(request.clone())
     }
 
     pub(crate) fn request_cancellation(&self, key: &RequestKey) -> Option<ActiveRequest> {
@@ -223,6 +238,25 @@ mod tests {
             ActiveRequestState::CancellationRequested
         );
         assert!(registry.cancellation_was_requested(&request));
+    }
+
+    #[test]
+    fn queued_cancellation_intent_survives_runtime_target_activation() {
+        let registry = RequestRegistry::default();
+        let request = key("a", 3);
+        registry
+            .register(request.clone(), RequestCancellationTarget::QueuedWork)
+            .unwrap();
+        registry.request_cancellation(&request).unwrap();
+
+        let activated = registry
+            .replace_cancellation_target(&request, runtime_target(103))
+            .unwrap();
+        assert_eq!(activated.state, ActiveRequestState::CancellationRequested);
+        assert!(matches!(
+            activated.cancellation,
+            RequestCancellationTarget::Runtime(RpcRequestId::Number(103))
+        ));
     }
 
     #[test]

@@ -12,18 +12,18 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::domain::{
-    ExecutionId, ExecutionRecord, ExecutionState, ExecutionTerminal, McpSessionId, PublicSessionId,
-    RuntimeCommandHandle, TaskId, TerminalOutcome,
+    AdoptionToken, AdoptionTokenHash, ExecutionId, ExecutionRecord, ExecutionState,
+    ExecutionTerminal, McpSessionId, PublicSessionId, RuntimeCommandHandle, TaskId,
+    TerminalOutcome,
 };
 
-const EXECUTION_STATE_VERSION: u32 = 3;
+const EXECUTION_STATE_VERSION: u32 = 4;
 const MAX_ACTIVE_EXECUTIONS: usize = 64;
 const MAX_TERMINAL_EXECUTIONS: usize = 64;
 pub(crate) const EXECUTION_ORPHAN_TTL_MS: u64 = 30 * 60 * 1_000;
 pub(crate) const EXECUTION_MAX_DETACHED_AGE_MS: u64 = 24 * 60 * 60 * 1_000;
 const MAX_OUTPUT_REFS: usize = 4;
 const MAX_STABLE_TOKEN: usize = 128;
-static EXECUTION_GENERATION: AtomicU64 = AtomicU64::new(1);
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +104,8 @@ pub(crate) enum ExecutionRegistryError {
         existing: McpSessionId,
         attempted: McpSessionId,
     },
+    NotOrphaned(ExecutionId),
+    AdoptionDenied,
     RuntimeHandleCollision(RuntimeCommandHandle),
     AlreadyTerminal {
         execution_id: ExecutionId,
@@ -127,6 +129,8 @@ impl fmt::Display for ExecutionRegistryError {
                 f,
                 "execution {execution_id} is owned by {existing}, not {attempted}"
             ),
+            Self::NotOrphaned(id) => write!(f, "execution {id} is not orphaned"),
+            Self::AdoptionDenied => f.write_str("execution adoption credential was rejected"),
             Self::RuntimeHandleCollision(handle) => {
                 write!(f, "runtime command handle collision {}", handle.as_str())
             }
@@ -140,6 +144,18 @@ impl fmt::Display for ExecutionRegistryError {
             ),
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct StartedExecution {
+    pub execution_id: ExecutionId,
+    pub adoption_token: AdoptionToken,
+}
+
+#[derive(Debug)]
+pub(crate) struct AdoptedExecution {
+    pub execution: ExecutionRecord,
+    pub next_adoption_token: AdoptionToken,
 }
 
 impl std::error::Error for ExecutionRegistryError {}
@@ -156,7 +172,7 @@ impl ExecutionRegistry {
                 .and_then(|mut file| file.read_to_end(&mut bytes))
                 .map_err(|_| ExecutionRegistryError::Storage("read"))?;
             match serde_json::from_slice::<PersistedExecutionState>(&bytes) {
-                Ok(mut state) if matches!(state.version, 2 | EXECUTION_STATE_VERSION) => {
+                Ok(mut state) if matches!(state.version, 2 | 3 | EXECUTION_STATE_VERSION) => {
                     let migrated = state.version != EXECUTION_STATE_VERSION;
                     state.version = EXECUTION_STATE_VERSION;
                     for execution in &mut state.executions {
@@ -183,6 +199,7 @@ impl ExecutionRegistry {
         for execution in &mut state.executions {
             if !execution.state.is_terminal() {
                 execution.state = ExecutionState::Terminal(lost_terminal());
+                execution.adoption_token_hash = None;
                 recovered = true;
             }
         }
@@ -198,12 +215,34 @@ impl ExecutionRegistry {
         }))))
     }
 
+    #[cfg(test)]
     pub(crate) fn start(
         &self,
         task_id: TaskId,
         public_session_id: PublicSessionId,
     ) -> Result<ExecutionId, ExecutionRegistryError> {
+        self.start_with_adoption(task_id, public_session_id)
+            .map(|started| started.execution_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_with_adoption(
+        &self,
+        task_id: TaskId,
+        public_session_id: PublicSessionId,
+    ) -> Result<StartedExecution, ExecutionRegistryError> {
+        self.start_owned(task_id, public_session_id, None)
+    }
+
+    pub(crate) fn start_owned(
+        &self,
+        task_id: TaskId,
+        public_session_id: PublicSessionId,
+        owner_session: Option<McpSessionId>,
+    ) -> Result<StartedExecution, ExecutionRegistryError> {
         let execution_id = next_execution_id();
+        let adoption_token = next_adoption_token();
+        let adoption_token_hash = hash_adoption_token(&adoption_token);
         self.transact("start", |state| {
             if state
                 .executions
@@ -228,7 +267,8 @@ impl ExecutionRegistry {
                 id: execution_id.clone(),
                 task_id,
                 public_session_id,
-                owner_session: None,
+                owner_session,
+                adoption_token_hash: Some(adoption_token_hash.clone()),
                 runtime_handle: None,
                 state: ExecutionState::Running,
                 started_at_ms: now,
@@ -237,9 +277,13 @@ impl ExecutionRegistry {
             });
             Ok(())
         })?;
-        Ok(execution_id)
+        Ok(StartedExecution {
+            execution_id,
+            adoption_token,
+        })
     }
 
+    #[cfg(test)]
     pub(crate) fn bind_owner(
         &self,
         execution_id: &ExecutionId,
@@ -271,9 +315,12 @@ impl ExecutionRegistry {
     pub(crate) fn adopt_owner(
         &self,
         public_session_id: &PublicSessionId,
+        adoption_token: &AdoptionToken,
         owner: McpSessionId,
-    ) -> Result<ExecutionRecord, ExecutionRegistryError> {
+    ) -> Result<AdoptedExecution, ExecutionRegistryError> {
         let mut adopted = None;
+        let next_adoption_token = next_adoption_token();
+        let next_adoption_token_hash = hash_adoption_token(&next_adoption_token);
         self.transact("adopt_owner", |state| {
             let execution = state
                 .executions
@@ -288,14 +335,73 @@ impl ExecutionRegistry {
                     outcome: terminal.outcome,
                 });
             }
+            if let Some(existing) = execution.owner_session.as_ref() {
+                return Err(ExecutionRegistryError::OwnerConflict {
+                    execution_id: execution.id.clone(),
+                    existing: existing.clone(),
+                    attempted: owner.clone(),
+                });
+            }
+            if execution.orphaned_at_ms.is_none() {
+                return Err(ExecutionRegistryError::NotOrphaned(execution.id.clone()));
+            }
+            if execution.adoption_token_hash.as_ref() != Some(&hash_adoption_token(adoption_token))
+            {
+                return Err(ExecutionRegistryError::AdoptionDenied);
+            }
             execution.owner_session = Some(owner);
+            execution.adoption_token_hash = Some(next_adoption_token_hash.clone());
             execution.orphaned_at_ms = None;
             execution.last_observed_at_ms = now_unix_ms();
             adopted = Some(execution.clone());
             Ok(())
         })?;
         adopted
+            .map(|execution| AdoptedExecution {
+                execution,
+                next_adoption_token,
+            })
             .ok_or_else(|| ExecutionRegistryError::UnknownPublicSession(public_session_id.clone()))
+    }
+
+    /// The workflow owner validates its transfer credential before calling this transaction.
+    /// A live execution owned by another session cannot be taken over by a workflow transfer.
+    pub(crate) fn transfer_orphaned_workflow_executions(
+        &self,
+        task_id: &TaskId,
+        owner: &McpSessionId,
+    ) -> Result<(), ExecutionRegistryError> {
+        self.transact("transfer_workflow_executions", |state| {
+            for execution in state
+                .executions
+                .iter()
+                .filter(|item| &item.task_id == task_id)
+            {
+                if execution.state.is_terminal() || execution.owner_session.as_ref() == Some(owner)
+                {
+                    continue;
+                }
+                if let Some(existing) = &execution.owner_session {
+                    return Err(ExecutionRegistryError::OwnerConflict {
+                        execution_id: execution.id.clone(),
+                        existing: existing.clone(),
+                        attempted: owner.clone(),
+                    });
+                }
+                if execution.orphaned_at_ms.is_none() {
+                    return Err(ExecutionRegistryError::NotOrphaned(execution.id.clone()));
+                }
+            }
+            for execution in state
+                .executions
+                .iter_mut()
+                .filter(|item| &item.task_id == task_id)
+            {
+                execution.owner_session = Some(owner.clone());
+                execution.orphaned_at_ms = None;
+            }
+            Ok(())
+        })
     }
 
     pub(crate) fn bind_runtime_handle(
@@ -410,6 +516,7 @@ impl ExecutionRegistry {
                 ExecutionState::Queued | ExecutionState::Running => {
                     execution.last_observed_at_ms = terminal.completed_at_ms;
                     execution.runtime_handle = None;
+                    execution.adoption_token_hash = None;
                     execution.state = ExecutionState::Terminal(sanitize_terminal(terminal));
                     Ok(())
                 }
@@ -542,6 +649,7 @@ impl ExecutionRegistry {
                         }),
                         completed_at_ms: now_ms,
                     });
+                    execution.adoption_token_hash = None;
                     execution.last_observed_at_ms = now_ms;
                     lost.push(execution_id);
                 }
@@ -570,35 +678,6 @@ impl ExecutionRegistry {
             .filter(|execution| {
                 matches!(execution.state, ExecutionState::Running)
                     && execution.owner_session.as_ref() == Some(owner)
-            })
-            .cloned()
-            .collect()
-    }
-
-    pub(crate) fn running_unowned(&self) -> Vec<ExecutionRecord> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .state
-            .executions
-            .iter()
-            .filter(|execution| {
-                matches!(execution.state, ExecutionState::Running)
-                    && execution.owner_session.is_none()
-            })
-            .cloned()
-            .collect()
-    }
-
-    pub(crate) fn running_for_task(&self, task_id: &TaskId) -> Vec<ExecutionRecord> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .state
-            .executions
-            .iter()
-            .filter(|execution| {
-                matches!(execution.state, ExecutionState::Running) && &execution.task_id == task_id
             })
             .cloned()
             .collect()
@@ -679,6 +758,7 @@ fn migrate_legacy_state(legacy: LegacyTaskState) -> PersistedExecutionState {
             task_id: TaskId::new(terminal.owner.task_id),
             public_session_id: PublicSessionId::new(terminal.owner.session_id),
             owner_session: None,
+            adoption_token_hash: None,
             runtime_handle: None,
             state: ExecutionState::Terminal(sanitize_terminal(ExecutionTerminal {
                 outcome: match terminal.status {
@@ -709,6 +789,7 @@ fn migrate_legacy_state(legacy: LegacyTaskState) -> PersistedExecutionState {
                 task_id: TaskId::new(current.owner.task_id),
                 public_session_id: PublicSessionId::new(current.owner.session_id),
                 owner_session: None,
+                adoption_token_hash: None,
                 runtime_handle: None,
                 state: ExecutionState::Terminal(lost_terminal()),
                 started_at_ms: current.started_at_ms,
@@ -830,15 +911,16 @@ fn atomic_replace(temp: &Path, target: &Path) -> Result<(), ExecutionRegistryErr
 }
 
 fn next_execution_id() -> ExecutionId {
-    let generation = EXECUTION_GENERATION.fetch_add(1, Ordering::Relaxed);
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    ExecutionId::new(format!(
-        "lb-execution-{:x}-{now:x}-{generation:x}",
-        std::process::id()
-    ))
+    ExecutionId::new(crate::security::random_prefixed_id("lb-execution-"))
+}
+
+fn next_adoption_token() -> AdoptionToken {
+    AdoptionToken::new(crate::security::random_prefixed_id("lb-adopt-"))
+}
+
+fn hash_adoption_token(token: &AdoptionToken) -> AdoptionTokenHash {
+    let digest = Sha256::digest(token.expose().as_bytes());
+    AdoptionTokenHash::new(format!("{digest:x}"))
 }
 
 fn bounded_token(mut value: String) -> String {
@@ -877,6 +959,45 @@ mod tests {
             error_code: None,
             completed_at_ms: now_unix_ms(),
         }
+    }
+
+    #[test]
+    fn execution_is_born_owned_and_workflow_transfer_requires_orphaning() {
+        let path = temp_path("owned-workflow");
+        let registry = ExecutionRegistry::open_at(path.clone()).unwrap();
+        let task = TaskId::new("workflow");
+        let public = PublicSessionId::new("workflow-command");
+        let original = McpSessionId::new("original");
+        let next = McpSessionId::new("next");
+        let started = registry
+            .start_owned(task.clone(), public.clone(), Some(original.clone()))
+            .unwrap();
+        assert_eq!(
+            registry
+                .execution_for_public_session(&public)
+                .unwrap()
+                .owner_session,
+            Some(original.clone())
+        );
+        assert!(matches!(
+            registry.transfer_orphaned_workflow_executions(&task, &next),
+            Err(ExecutionRegistryError::OwnerConflict { .. })
+        ));
+        registry.orphan_owned_by(&original).unwrap();
+        registry
+            .transfer_orphaned_workflow_executions(&task, &next)
+            .unwrap();
+        assert_eq!(
+            registry
+                .execution_for_public_session(&public)
+                .unwrap()
+                .owner_session,
+            Some(next)
+        );
+        registry
+            .finish(&started.execution_id, terminal(TerminalOutcome::Cancelled))
+            .unwrap();
+        let _ = fs::remove_file(path);
     }
 
     #[test]
@@ -1014,7 +1135,10 @@ mod tests {
         let path = temp_path("orphan-adopt");
         let registry = ExecutionRegistry::open_at(path.clone()).unwrap();
         let public = PublicSessionId::new("public");
-        let execution = registry.start(TaskId::new("task"), public.clone()).unwrap();
+        let started = registry
+            .start_with_adoption(TaskId::new("task"), public.clone())
+            .unwrap();
+        let execution = started.execution_id;
         let original = McpSessionId::new("mcp-a");
         registry.bind_owner(&execution, original.clone()).unwrap();
         assert_eq!(registry.orphan_owned_by(&original).unwrap(), 1);
@@ -1023,10 +1147,41 @@ mod tests {
         assert!(orphan.orphaned_at_ms.is_some());
 
         let adopted = registry
-            .adopt_owner(&public, McpSessionId::new("mcp-b"))
+            .adopt_owner(&public, &started.adoption_token, McpSessionId::new("mcp-b"))
             .unwrap();
-        assert_eq!(adopted.owner_session, Some(McpSessionId::new("mcp-b")));
-        assert_eq!(adopted.orphaned_at_ms, None);
+        assert_eq!(
+            adopted.execution.owner_session,
+            Some(McpSessionId::new("mcp-b"))
+        );
+        assert_eq!(adopted.execution.orphaned_at_ms, None);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn active_owner_and_wrong_token_cannot_adopt_execution() {
+        let path = temp_path("adoption-denied");
+        let registry = ExecutionRegistry::open_at(path.clone()).unwrap();
+        let public = PublicSessionId::new("public");
+        let started = registry
+            .start_with_adoption(TaskId::new("task"), public.clone())
+            .unwrap();
+        let original = McpSessionId::new("mcp-a");
+        registry
+            .bind_owner(&started.execution_id, original.clone())
+            .unwrap();
+        assert!(matches!(
+            registry.adopt_owner(&public, &started.adoption_token, McpSessionId::new("mcp-b")),
+            Err(ExecutionRegistryError::OwnerConflict { .. })
+        ));
+        registry.orphan_owned_by(&original).unwrap();
+        assert!(matches!(
+            registry.adopt_owner(
+                &public,
+                &AdoptionToken::new("wrong"),
+                McpSessionId::new("mcp-b")
+            ),
+            Err(ExecutionRegistryError::AdoptionDenied)
+        ));
         let _ = fs::remove_file(path);
     }
 
