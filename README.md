@@ -1,5 +1,9 @@
 # LocalBridge
 
+<p align="center">
+  <img src="assets/localbridge-poster.png" alt="LocalBridge — 让 ChatGPT 直接操作你的 Windows" width="760">
+</p>
+
 ## 让 ChatGPT 直接参与本地开发与 Windows 维护
 
 LocalBridge 将 ChatGPT 插件与 Windows 本地环境连接起来。无需反复上传文件或复制命令，就能让 ChatGPT 阅读和修改项目、运行开发任务，并协助完成常见的系统检查与维护工作。
