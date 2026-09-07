@@ -6,9 +6,9 @@ export const serviceText: Record<ServiceCode, string> = { off: "未启动", star
 export type ServiceVisualState = "ready" | "starting" | "fault" | "unknown";
 export const serviceVisualState: Record<ServiceCode, ServiceVisualState> = { off: "unknown", starting: "starting", online: "ready", recovering: "starting", fault: "fault" };
 export function projectionStatusText(status: ProjectionStatusCode): string {
-  if (status === "stale") return "状态已过期";
-  if (status === "fault") return "状态读取失败";
-  if (status === "unavailable") return "状态暂不可用";
+  if (status === "stale") return "正在刷新";
+  if (status === "fault") return "读取失败";
+  if (status === "unavailable") return "尚未就绪";
   return "正在读取";
 }
 const taskKindText = { read: "读取文件", search: "搜索代码", modify: "修改文件", command: "运行命令", git: "版本操作", build: "构建项目", test: "运行测试", admin: "管理员操作", other: "处理任务" } as const;
@@ -26,7 +26,7 @@ export function currentActivityText(activity: CurrentActivityProjection | null, 
   if (activity?.state === "waiting_input") return "等待输入…";
   if (activity?.state === "waiting") return "任务等待继续";
   if (activity) return `${activityKindText[activity.kind]}…`;
-  return status === "ready" ? "空闲" : status === "stale" ? "任务状态已过期" : "任务状态暂不可用";
+  return status === "ready" ? "空闲" : status === "stale" ? "正在刷新" : "尚未就绪";
 }
 export function currentActivityDetail(activity: CurrentActivityProjection | null): string | null {
   if (!activity) return null;
@@ -53,11 +53,11 @@ export function workspaceDisplayText(projection: MainProjection | null): string 
   if (projection.workspace?.effective === "available") {
     return projection.workspace.observedPath ?? projection.workspace.desiredPath ?? "未选择项目";
   }
-  if (projection.workspace?.desiredPath) return `${projection.workspace.desiredPath}（正在收敛）`;
+  if (projection.workspace?.desiredPath) return `${projection.workspace.desiredPath}（正在切换）`;
   return "未选择项目";
 }
 export function updateStatusText(update: UpdateProjection | null, status: ProjectionStatusCode = "ready"): string {
-  if (!update) return status === "stale" ? "版本状态已过期" : status === "fault" || status === "unavailable" ? "版本状态暂不可用" : "正在读取版本";
+  if (!update) return status === "stale" ? "正在刷新版本信息" : status === "fault" || status === "unavailable" ? "暂时无法获取版本信息" : "正在读取版本";
   switch (update.state) {
     case "source_unavailable": return `当前版本 ${update.currentVersion} · 发布源不可用`;
     case "idle": return `当前版本 ${update.currentVersion} · 尚未检查`;

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from "react";
 import { WizardFrame } from "../../components/WizardFrame";
 import { ReadinessCheck } from "../../components/ReadinessCheck";
 import { AdminModeWarning } from "../../components/AdminModeWarning";
@@ -14,18 +14,20 @@ type Screen4CopyKey = "name" | "tunnel";
 const messageFrom = (value: unknown, fallback: string) => uiErrorMessage(value, fallback);
 
 export function Onboarding({ initial, onComplete, previewMode = false }: { initial: OnboardingState; onComplete: () => void; previewMode?: boolean }) {
+  // Dev-only deep link so the fixed-window E2E harness can open Screen 3
+  // directly. The harness measures and asserts the rendered geometry itself;
+  // the product component does not carry its own test.
   const viteDev = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true;
-  const permissionGeometryE2e = viteDev
+  const permissionDeepLink = viteDev
     && typeof window !== "undefined"
     && new URLSearchParams(window.location.search).get("lb016-e2e") === "permission-geometry";
-  const [step, setStep] = useState(permissionGeometryE2e ? 3 : 1);
+  const [step, setStep] = useState(permissionDeepLink ? 3 : 1);
   const [state, setState] = useState(initial);
   const [main, setMain] = useState<MainProjection | null>(null);
   const [tunnelId, setTunnelId] = useState(initial.tunnelId ?? "");
   const [runtimeKey, setRuntimeKey] = useState("");
   const [runtimeKeyEditing, setRuntimeKeyEditing] = useState(!initial.runtimeKeySaved);
   const [runtimeKeyFocused, setRuntimeKeyFocused] = useState(false);
-  const [permissionGeometryFailed, setPermissionGeometryFailed] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState("");
   const [rememberedProject, setRememberedProject] = useState("");
   const [copiedRows, setCopiedRows] = useState<Record<Screen4CopyKey, boolean>>({ name: false, tunnel: false });
@@ -54,36 +56,6 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
     const timer = window.setTimeout(() => setError(null), 3000);
     return () => window.clearTimeout(timer);
   }, [error]);
-
-  useLayoutEffect(() => {
-    if (!permissionGeometryE2e || step !== 3) return;
-    const permissionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>(".onboarding-permission"));
-    const lineBoxesInside = (button: HTMLButtonElement, element: Element | null) => {
-      if (!element) return false;
-      const buttonRect = button.getBoundingClientRect();
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const boxes = Array.from(range.getClientRects());
-      return boxes.length > 0 && boxes.every((box) => box.width > 0 && box.height > 0
-        && box.top >= buttonRect.top - 0.5 && box.bottom <= buttonRect.bottom + 0.5
-        && box.left >= buttonRect.left - 0.5 && box.right <= buttonRect.right + 0.5);
-    };
-    const rectangles = permissionButtons.map((button) => button.getBoundingClientRect());
-    const widths = rectangles.map((rect) => rect.width);
-    const heights = rectangles.map((rect) => rect.height);
-    const gaps = rectangles.slice(1).map((rect, index) => rect.left - rectangles[index].right);
-    const geometryPass = window.innerWidth === 780
-      && permissionButtons.length === 3
-      && Math.max(...widths) - Math.min(...widths) <= 0.5
-      && Math.max(...heights) - Math.min(...heights) <= 0.5
-      && gaps.length === 2
-      && Math.abs(gaps[0] - gaps[1]) <= 0.5
-      && permissionButtons.every((button) => button.getBoundingClientRect().width > 0
-        && button.getBoundingClientRect().height > 0
-        && lineBoxesInside(button, button.querySelector("strong"))
-        && lineBoxesInside(button, button.querySelector("small")));
-    if (!geometryPass) setPermissionGeometryFailed(true);
-  }, [permissionGeometryE2e, step]);
 
   useEffect(() => {
     void Promise.all([onboardingApi.read(), bridge.read()]).then(([onboarding, projection]) => {
@@ -235,8 +207,6 @@ export function Onboarding({ initial, onComplete, previewMode = false }: { initi
       setError(messageFrom(value, "设置尚未完成"));
     }
   };
-
-  if (permissionGeometryFailed) return <main className="onboarding-geometry-failed" data-lb016-permission-geometry="fail" />;
 
   if (step === 1) return (
     <WizardFrame step={1} title="简单设置 即可开始" footer={<button className="primary" onClick={() => setStep(2)}>开始</button>}>

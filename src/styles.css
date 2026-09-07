@@ -163,3 +163,66 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .status-good{color:#248a3d}
 .status-bad{color:#c9342f}
 @media (max-width:560px){.shell{width:calc(100% - 20px);margin:18px auto}.row{align-items:flex-start;flex-direction:column;padding:10px 0}.value,.project-actions{text-align:left;justify-content:flex-start;width:100%}}
+
+/* Dark appearance.
+   Windows reports the user's system theme to WebView2, so the app follows it
+   instead of staying white. Every value below is an override of an existing
+   rule; the light rules above remain the single source of layout truth. */
+:root{color-scheme:light dark}
+@media (prefers-color-scheme: dark){
+  :root{
+    color:#f2f2f7;
+    background:#1c1c1e;
+    --control-border:rgba(255,255,255,.16);
+    --control-border-hover:rgba(255,255,255,.28);
+    --control-neutral:#2c2c2e;
+    --control-neutral-hover:#3a3a3c;
+    --control-focus:rgba(10,132,255,.45);
+    --accent:#0a84ff;
+    --accent-hover:#3a9bff;
+    --admin-accent:#ff9f0a;
+    --admin-accent-hover:#ffb340;
+    --status-ready:#30d158;
+    --status-starting:#e5a000;
+    --status-fault:#ff453a;
+    --status-unknown:#636366;
+  }
+  html,body{background:#1c1c1e}
+  #root{background:#1c1c1e}
+  .window-chrome{border-color:rgba(255,255,255,.14);background:#1c1c1e}
+  .window-titlebar{border-bottom-color:rgba(255,255,255,.1);background:rgba(38,38,40,.96)}
+  .window-title{color:#aeaeb2}
+  .window-control{color:#d1d1d6}
+  .window-control:hover{background:rgba(255,255,255,.1)}
+  .window-content{background:#1c1c1e}
+  .secondary{color:#f2f2f7}
+  .ghost{background:#2c2c2e;color:#f2f2f7}
+  .ghost:not(:disabled):hover{background:#3a3a3c}
+  .choice{color:#d1d1d6}
+  .row+.row{border-top-color:rgba(255,255,255,.09)}
+  .label{color:#98989d}
+  select,input[type="text"],input[type="password"]{border-color:rgba(255,255,255,.16);background:#2c2c2e;color:#f2f2f7}
+  .full-access{color:var(--admin-accent)}
+  .fault-banner{border-color:rgba(255,69,58,.34);background:rgba(255,69,58,.12);color:#ff9d96}
+  .fault-banner p{color:#ff9d96}
+  .secondary.service-restart{background:rgba(255,159,10,.14);border-color:rgba(255,159,10,.32);color:var(--admin-accent)}
+  .secondary.service-stop{background:rgba(255,69,58,.14);border-color:rgba(255,69,58,.32);color:var(--status-fault)}
+  .activity-elapsed,.last-tool-age{color:#98989d}
+  .last-activity-left.outcome-cancelled{color:#98989d}
+  .sheet-backdrop,.dialog-backdrop{background:rgba(0,0,0,.52)}
+  .sheet,.dialog{background:#2c2c2e;box-shadow:0 24px 70px rgba(0,0,0,.62)}
+  .sheet::-webkit-scrollbar-thumb,.dialog::-webkit-scrollbar-thumb{background:rgba(235,235,245,.34);background-clip:content-box}
+  .settings-summary>.settings-confirm-delete{background:rgba(255,69,58,.14);border-color:rgba(255,69,58,.32);color:var(--status-fault)}
+  .settings-status{color:#98989d}
+  .saved{color:#30d158}
+  .error{color:#ff6961}
+  .project-item{background:#1c1c1e}
+  .project-select:disabled{background:#1c1c1e;color:#f2f2f7}
+  .project-current{color:#98989d}
+  .dialog p{color:#aeaeb2}
+  .admin-warning ul{color:#d1d1d6}
+  .admin-warning-confirm{background:#ff453a;border-color:#ff453a;color:#1c1c1e}
+  .admin-warning-confirm:not(:disabled):hover{background:#ff6961;border-color:#ff6961}
+  .status-good{color:#30d158}
+  .status-bad{color:#ff6961}
+}

@@ -109,4 +109,8 @@ path = "../tests/black-box/chatgpt/live_client.rs"
 strip = true
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+# Unwind, not abort. Connection workers, Drop-based session/request/task cleanup
+# and the PoisonError recovery this crate already performs everywhere are only
+# reachable while unwinding; under `panic = "abort"` a single failed invariant in
+# one MCP request terminated the whole desktop application with no diagnostic.
+panic = "unwind"

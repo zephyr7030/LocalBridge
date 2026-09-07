@@ -144,6 +144,8 @@ struct FixedWindowE2eMetrics {
     dashboard_card_border_width_before_settings: Option<String>,
     dashboard_card_box_shadow_before_settings: Option<String>,
     settings_replace_lefts: Vec<f64>,
+    permission_rects: Vec<FixedWindowE2eRect>,
+    permission_text_contained: bool,
     settings_sheet_overflowing: bool,
     settings_sheet_border_radius: Option<String>,
     settings_sheet_clip_path: Option<String>,
@@ -213,6 +215,21 @@ const FIXED_WINDOW_E2E_METRICS_SCRIPT: &str = r#"
   if (sheet && settingsSheetScrollRange > 0) sheet.scrollTop = Math.min(24, settingsSheetScrollRange);
   const settingsReplaceLefts = Array.from(document.querySelectorAll('.settings-replace'))
     .map((element) => element.getBoundingClientRect().left);
+  const lineBoxesInside = (host, element) => {
+    if (!element) return false;
+    const bounds = host.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const boxes = Array.from(range.getClientRects());
+    return boxes.length > 0 && boxes.every((box) => box.width > 0 && box.height > 0
+      && box.top >= bounds.top - 0.5 && box.bottom <= bounds.bottom + 0.5
+      && box.left >= bounds.left - 0.5 && box.right <= bounds.right + 0.5);
+  };
+  const permissionChoices = Array.from(document.querySelectorAll('.onboarding-permission'));
+  const permissionRects = permissionChoices.map((element) => rect(element));
+  const permissionTextContained = permissionChoices.length > 0 && permissionChoices.every(
+    (element) => lineBoxesInside(element, element.querySelector('strong'))
+      && lineBoxesInside(element, element.querySelector('small')));
   const metrics = {
     inlineScriptBlocked: window.__LOCALBRIDGE_UNTRUSTED_SCRIPT_RAN__ !== true,
     innerWidth: window.innerWidth,
@@ -229,6 +246,8 @@ const FIXED_WINDOW_E2E_METRICS_SCRIPT: &str = r#"
     dashboardCardBorderWidthBeforeSettings: initialDashboardSurface.borderWidth,
     dashboardCardBoxShadowBeforeSettings: initialDashboardSurface.boxShadow,
     settingsReplaceLefts,
+    permissionRects,
+    permissionTextContained,
     settingsSheetOverflowing: !!sheet && sheet.scrollHeight > sheet.clientHeight,
     settingsSheetBorderRadius: sheetStyle?.borderRadius || null,
     settingsSheetClipPath: sheetStyle?.clipPath || null,
@@ -440,6 +459,14 @@ fn execute_fixed_window_e2e(
     ))
 }
 
+/// The fixed-window E2E harness sets this for the run that deep-links to
+/// Screen 3. Without it the app never leaves Screen 1 and there is no
+/// permission group to measure.
+#[cfg(debug_assertions)]
+fn permission_geometry_gate_requested() -> bool {
+    std::env::var_os("LOCALBRIDGE_PERMISSION_GEOMETRY_E2E").is_some()
+}
+
 #[cfg(debug_assertions)]
 fn collect_fixed_window_e2e_metrics(
     window: &WebviewWindow<tauri::Wry>,
@@ -458,7 +485,10 @@ fn collect_fixed_window_e2e_metrics(
                 let dashboard_ready = !matches!(view, FixedWindowE2eView::Dashboard)
                     || (metrics.settings_replace_lefts.len() == 2
                         && metrics.settings_sheet_clip_path.is_some());
-                if metrics.view == view.as_str() && dashboard_ready {
+                let onboarding_ready = !matches!(view, FixedWindowE2eView::Onboarding)
+                    || !permission_geometry_gate_requested()
+                    || metrics.permission_rects.len() == 3;
+                if metrics.view == view.as_str() && dashboard_ready && onboarding_ready {
                     return Ok(metrics);
                 }
             }
@@ -526,6 +556,57 @@ fn assert_fixed_window_e2e_metrics(
                 .ok_or("onboarding shell missing")?;
             if child.width > content.width + 1.0 || child.height > content.height + 1.0 {
                 return Err("onboarding exceeds fixed chrome content area".into());
+            }
+            // Screen 3 equal-thirds permission group, asserted against the real
+            // rendered geometry. This lives in the E2E harness, not in the
+            // product component: the application must not carry its own test.
+            if !permission_geometry_gate_requested() {
+                return Ok(());
+            }
+            let choices = &metrics.permission_rects;
+            if choices.len() != 3 {
+                return Err(format!(
+                    "Screen 3 must render exactly three permission choices, got {}",
+                    choices.len()
+                ));
+            }
+            if choices
+                .iter()
+                .any(|choice| choice.width <= 0.0 || choice.height <= 0.0)
+            {
+                return Err(format!(
+                    "Screen 3 permission choices have no rendered area: {choices:?}"
+                ));
+            }
+            let spread = |values: &[f64]| {
+                let mut low = f64::INFINITY;
+                let mut high = f64::NEG_INFINITY;
+                for value in values {
+                    low = low.min(*value);
+                    high = high.max(*value);
+                }
+                high - low
+            };
+            let widths: Vec<f64> = choices.iter().map(|choice| choice.width).collect();
+            let heights: Vec<f64> = choices.iter().map(|choice| choice.height).collect();
+            if spread(&widths) > 0.5 || spread(&heights) > 0.5 {
+                return Err(format!(
+                    "Screen 3 permission choices are not equal thirds: widths={widths:?} heights={heights:?}"
+                ));
+            }
+            let gaps: Vec<f64> = choices
+                .windows(2)
+                .map(|pair| pair[1].left - (pair[0].left + pair[0].width))
+                .collect();
+            if (gaps[0] - gaps[1]).abs() > 0.5 {
+                return Err(format!(
+                    "Screen 3 permission choices are not evenly spaced: {gaps:?}"
+                ));
+            }
+            if !metrics.permission_text_contained {
+                return Err(
+                    "Screen 3 permission label or description overflows its choice".into(),
+                );
             }
         }
         FixedWindowE2eView::Dashboard => {

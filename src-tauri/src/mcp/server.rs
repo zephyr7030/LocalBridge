@@ -981,6 +981,12 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                 let worker_stopping = Arc::clone(&stopping);
                 let worker_cancellation = cancellation.clone();
                 let mut spawn_failure_stream = stream.try_clone().ok();
+                // A failed invariant inside one request must not decide the fate of the
+                // whole desktop application. The worker owns the connection, so the panic
+                // boundary is here: the caller is answered with a transport error, the
+                // Drop-based session/request/task cleanup runs during the unwind, and the
+                // remaining sessions keep their runtime.
+                let mut panic_stream = stream.try_clone().ok();
                 match thread::Builder::new()
                     .name("localbridge-mcp-policy-request".into())
                     .spawn(move || {
@@ -1001,10 +1007,29 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                             privileged: worker_privileged.as_ref(),
                             stopping: &worker_stopping,
                         };
-                        if handle_connection(stream, context).is_err() {
-                            eprintln!(
-                                "[localbridge-mcp] connection closed before response completed"
-                            );
+                        let handled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                            || handle_connection(stream, context),
+                        ));
+                        match handled {
+                            Ok(Ok(())) => {}
+                            Ok(Err(())) => {
+                                eprintln!(
+                                    "[localbridge-mcp] connection closed before response completed"
+                                );
+                            }
+                            Err(_) => {
+                                if let Some(stream) = panic_stream.as_mut() {
+                                    let _ = write_mcp_http_error(
+                                        stream,
+                                        500,
+                                        mcp_unknown("request_handler_panic"),
+                                        None,
+                                    );
+                                }
+                                eprintln!(
+                                    "[localbridge-mcp] request handler panicked; connection failed and the runtime stays up"
+                                );
+                            }
                         }
                     }) {
                     Ok(worker) => workers.push(worker),

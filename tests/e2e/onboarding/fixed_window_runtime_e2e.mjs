@@ -58,6 +58,11 @@ async function runView(view) {
         ...process.env,
         LOCALBRIDGE_FIXED_WINDOW_E2E_VIEW: view,
         ...(PRODUCTION_ASSETS ? { LOCALBRIDGE_CSP_E2E: "1" } : {}),
+        // Only the dev run can deep-link to Screen 3, so only that run asks the
+        // harness to assert the equal-thirds permission geometry.
+        ...(!PRODUCTION_ASSETS && view === "onboarding"
+          ? { LOCALBRIDGE_PERMISSION_GEOMETRY_E2E: "1" }
+          : {}),
         CARGO_TARGET_DIR: TARGET_DIR,
       },
       windowsHide: true,

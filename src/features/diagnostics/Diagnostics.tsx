@@ -12,7 +12,7 @@ const brokerText = {
   awaiting: "等待系统授权",
   active: "已启用",
   fault: "故障",
-  unavailable: "状态暂不可用",
+  unavailable: "尚未就绪",
 } as const;
 
 export function Diagnostics({ onClose, commandError }: { onClose: () => void; commandError: UiError | null }) {
