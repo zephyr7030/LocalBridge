@@ -1,0 +1,204 @@
+import { useState } from "react";
+import { APP_NAME } from "../../appModel";
+import { bridge, type AccessCode, type ProjectProjection } from "../../bridge";
+import { uiText } from "../../presentation";
+import { AdminModeWarning } from "../../components/AdminModeWarning";
+import { UiErrorNotice } from "../../components/UiErrorNotice";
+import { Diagnostics } from "../diagnostics/Diagnostics";
+import { ActivityRows } from "./ActivityRows";
+import { ProjectPicker } from "./ProjectPicker";
+import { SettingsSheet } from "./SettingsSheet";
+import { StatusCard } from "./StatusCard";
+import { useDashboardProjection } from "./useDashboardProjection";
+
+type View = "main" | "settings" | "diagnostics";
+
+export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
+  const { projection, transportError, error, run } = useDashboardProjection();
+  const [view, setView] = useState<View>("main");
+  const [removeTarget, setRemoveTarget] = useState<ProjectProjection | null>(null);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [adminWarningOpen, setAdminWarningOpen] = useState(false);
+  const [fullAccessInfoOpen, setFullAccessInfoOpen] = useState(false);
+  const [handledGeneration, setHandledGeneration] = useState<number | null>(null);
+
+  const activeProject = projection?.projects?.find((item) => item.active) ?? null;
+  const adminModeFullAccess = projection?.pathAuthority === "administrator";
+  const reconnectVisible = Boolean(
+    projection?.reconnect && projection.reconnect.generation !== handledGeneration,
+  );
+
+  // Administrator is the one mode the user cannot select silently: it needs the
+  // shared consent warning first, and the backend gate re-checks it anyway.
+  const chooseAccess = (mode: AccessCode) => {
+    if (mode === "admin" && projection?.privilege !== "active") {
+      setAdminWarningOpen(true);
+      return;
+    }
+    void run(() => bridge.setAccess(mode));
+  };
+
+  const openProjectPicker = () => {
+    if (adminModeFullAccess) {
+      setFullAccessInfoOpen(true);
+      return;
+    }
+    setProjectPickerOpen(true);
+  };
+
+  return (
+    <main className="shell">
+      <header className="topbar">
+        <div className="brand">{APP_NAME}</div>
+        <div className="top-actions">
+          <button className="ghost" onClick={() => setView("settings")}>{uiText.settings}</button>
+          <button className="ghost" onClick={() => setView("diagnostics")}>{uiText.diagnostics}</button>
+        </div>
+      </header>
+
+      <StatusCard
+        projection={projection}
+        activeProject={activeProject}
+        adminModeFullAccess={adminModeFullAccess}
+        onOpenProjectPicker={openProjectPicker}
+      />
+
+      {projection?.activeFaults.length ? (
+        <section className="fault-banner" role="alert">
+          <div>
+            <strong>LocalBridge 需要处理</strong>
+            <p>
+              {projection.activeFaults[0].message}
+              {projection.activeFaults.length > 1 ? `（另有 ${projection.activeFaults.length - 1} 项）` : ""}
+            </p>
+          </div>
+          <button className="secondary" onClick={() => setView("diagnostics")}>查看诊断</button>
+        </section>
+      ) : null}
+
+      <div className="service-actions" aria-label="服务控制">
+        <button className="secondary service-restart" onClick={() => void run(() => bridge.restartServices())}>
+          重启服务
+        </button>
+        <button className="secondary service-stop" onClick={() => void run(() => bridge.stopServices())}>
+          关闭服务
+        </button>
+      </div>
+
+      <ActivityRows
+        currentActivity={projection?.currentActivity ?? null}
+        lastActivity={projection?.lastActivity ?? null}
+        activityStatus={projection?.activityStatus ?? "unavailable"}
+      />
+
+      {transportError && <UiErrorNotice error={transportError} />}
+      {error && <UiErrorNotice error={error} />}
+
+      {view === "settings" && (
+        <SettingsSheet
+          projection={projection}
+          run={run}
+          onClose={() => setView("main")}
+          onOpenWelcome={onOpenWelcome}
+          onChooseAccess={chooseAccess}
+        />
+      )}
+
+      {view === "diagnostics" && <Diagnostics commandError={error} onClose={() => setView("main")} />}
+
+      {adminWarningOpen && (
+        <AdminModeWarning
+          onCancel={() => setAdminWarningOpen(false)}
+          onConfirm={() => {
+            setAdminWarningOpen(false);
+            void run(() => bridge.setAccess("admin"));
+          }}
+        />
+      )}
+
+      {fullAccessInfoOpen && (
+        <div className="dialog-backdrop" onMouseDown={() => setFullAccessInfoOpen(false)}>
+          <section
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <h2>全目录访问</h2>
+            <p>管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式</p>
+            <div className="dialog-actions">
+              <button className="primary" onClick={() => setFullAccessInfoOpen(false)}>完成</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {projectPickerOpen && (
+        <ProjectPicker
+          projection={projection}
+          run={run}
+          onClose={() => setProjectPickerOpen(false)}
+          onConfirmRemoveActive={setRemoveTarget}
+        />
+      )}
+
+      {removeTarget && (
+        <div className="dialog-backdrop">
+          <section className="dialog">
+            <h2>移除当前项目</h2>
+            <p>
+              从 LocalBridge 移除此项目？
+              <br />
+              不会删除项目文件。
+            </p>
+            <div className="dialog-actions">
+              <button className="secondary" onClick={() => setRemoveTarget(null)}>取消</button>
+              <button
+                className="primary"
+                onClick={() =>
+                  void run(async () => {
+                    await bridge.removeProject(removeTarget.id);
+                    setRemoveTarget(null);
+                  })
+                }
+              >
+                移除
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {reconnectVisible && projection?.reconnect && (
+        <div className="dialog-backdrop">
+          <section className="dialog" role="dialog" aria-modal="true">
+            <h2>连接失败</h2>
+            <p>已自动重试 5 次。</p>
+            <div className="dialog-actions">
+              <button
+                className="secondary"
+                onClick={() =>
+                  void run(async () => {
+                    await bridge.retry();
+                    setHandledGeneration(projection.reconnect?.generation ?? null);
+                  })
+                }
+              >
+                重试
+              </button>
+              <button
+                className="primary"
+                onClick={() => {
+                  setHandledGeneration(projection.reconnect?.generation ?? null);
+                  setView("diagnostics");
+                }}
+              >
+                查看诊断
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}

@@ -24,6 +24,7 @@
 - [ ] public source export uses explicit allow/deny policy and a one-commit fresh Git history
 - [ ] public source contains no internal contracts, review state, authorization records, internal skills/templates or private Git history
 - [ ] distributable payload checker rejects caches/tests/logs/secrets/dev Tunnel config/private governance/machine paths
+- [ ] `node tests/e2e/onboarding/fixed_window_runtime_e2e.mjs` PASS（真实窗口渲染验证；需要 GUI 会话，因此不在共享门禁内，发布前手动跑一次）
 
 ## Supply Chain
 
