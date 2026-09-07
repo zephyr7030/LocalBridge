@@ -58,18 +58,7 @@ LocalBridge/
 - `runtime/` 只放 vendored 外部产物，不放产品业务代码。
 - `tests/fixtures/` 不允许真实 secret。
 - `components/` 不创建产品级状态。
-- 新目录必须由当前 PR 合同要求；禁止为了“以后可能用到”继续扩展骨架。
-
-
-## 根目录执行合同
-
-```text
-PR_INDEX.json       # PR DAG / Gate / 当前状态
-PR_CONTRACTS.json   # 每 PR writable/forbidden/tests/artifacts/non-goals
-PROJECT_STATE.json  # 全局 PRE-CODE / release 状态
-```
-
-`PR_CONTRACTS.json` 是防止路径漂移、提前实现和跨层修改的机器可读边界。
+- 禁止为了“以后可能用到”继续扩展骨架。
 
 
 ## Privileged Broker 目录
@@ -136,7 +125,6 @@ schema/
 
 scripts/
 ├─ test/
-├─ verify-schema44/
 ├─ verify-runtime-manifest/
 ├─ diff-upstream-surface/
 ├─ verify-ui-language/

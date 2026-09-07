@@ -12,7 +12,6 @@ test("the shared local and CI gate has stable unique stages", () => {
       "format",
       "public-release",
       "licenses",
-      "schema44",
       "frontend-test",
       "frontend-build",
       "runtime-resources",
@@ -36,18 +35,18 @@ test("targeted local diagnosis reuses the declared gate instead of copying comma
     "nsis-package",
   ]);
   assert.deepEqual(
-    selectStages(CI_STAGES, { from: "schema44", through: "frontend-build" }).map(({ id }) => id),
-    ["schema44", "frontend-test", "frontend-build"],
+    selectStages(CI_STAGES, { from: "frontend-test", through: "frontend-build" }).map(({ id }) => id),
+    ["frontend-test", "frontend-build"],
   );
   assert.deepEqual(
     selectStages(CI_STAGES, { through: "rust-clippy" }).at(-1)?.id,
     "rust-clippy",
   );
-  assert.deepEqual(parseGateArguments(["--only", "schema44"]), {
-    only: "schema44",
+  assert.deepEqual(parseGateArguments(["--only", "licenses"]), {
+    only: "licenses",
   });
-  assert.deepEqual(parseGateArguments(["--from", "schema44", "--through", "rust-test"]), {
-    from: "schema44",
+  assert.deepEqual(parseGateArguments(["--from", "licenses", "--through", "rust-test"]), {
+    from: "licenses",
     through: "rust-test",
   });
   assert.throws(() => parseGateArguments(["--only", "format", "--from", "rust-test"]));

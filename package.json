@@ -13,7 +13,6 @@
     "test:mcp-client": "node tests/black-box/chatgpt/client.mjs",
     "verify:runtime-manifest": "node scripts/verify-runtime-manifest/index.mjs",
     "verify:ui-language": "node scripts/verify-ui-language/index.mjs",
-    "verify:schema44": "node scripts/verify-schema44/index.mjs",
     "sidecar:prepare": "node scripts/prepare-dummy-sidecar.mjs",
     "packaging:smoke": "node scripts/lb001-packaging-smoke.mjs"
   },

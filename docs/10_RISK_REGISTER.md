@@ -251,8 +251,7 @@ Mitigation：
 
 Mitigation：
 
-- ARCHITECTURE_RULES；
-- verify scripts；
+- verify scripts（针对行为，不针对源码文本）；
 - CI hard gate；
 - adversarial fixtures。
 

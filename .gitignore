@@ -35,3 +35,7 @@ Thumbs.db
 Desktop.ini
 tests/artifacts/
 src-tauri/gen/
+
+# Files removed from the repository but still on disk, pending manual deletion.
+# Delete the folder and this entry together.
+_to_delete/

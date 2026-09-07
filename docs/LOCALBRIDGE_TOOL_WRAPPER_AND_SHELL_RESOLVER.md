@@ -2,7 +2,7 @@
 
 > 本文是 LocalBridge 后续 **Coding/Workspace Agent、Windows 系统维护、命令环境、权限边界与第三方 runtime 包装**的长期最终设计指导。只保留目标架构、稳定接口、安全合同、迁移顺序与验收标准；讨论稿、被否决方案和旧 duplicate design 不再构成事实源。
 >
-> 本文是未来能力设计基线，但任何实现仍必须服从 `START_HERE.md`、当前 8 份 numbered human authority、机器合同、`PR_INDEX.json` / `PROJECT_STATE.json` 的严格 PR 顺序与 writable paths。
+> 本文是未来能力设计基线，但任何实现仍必须服从 `AGENTS.md` 的工作原则、`docs/` 下的产品/架构/安全/发布基线文档，以及 `node scripts/test/ci-gate.mjs` 的行为门禁。
 
 ---
 

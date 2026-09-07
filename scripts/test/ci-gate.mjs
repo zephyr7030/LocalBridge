@@ -46,11 +46,6 @@ export const CI_STAGES = validateStages([
     ...node("scripts/public-release/preflight.mjs", "verify-license"),
   },
   {
-    id: "schema44",
-    label: "schema44 architecture residue scan",
-    ...node("scripts/verify-schema44/index.mjs"),
-  },
-  {
     id: "frontend-test",
     label: "frontend unit tests",
     program: "npm",
@@ -69,7 +64,7 @@ export const CI_STAGES = validateStages([
   },
   {
     id: "rust-test",
-    label: "schema44 behavioral invariants and Rust tests",
+    label: "behavioral invariants and Rust tests",
     ...cargo(
       "test",
       "--quiet",

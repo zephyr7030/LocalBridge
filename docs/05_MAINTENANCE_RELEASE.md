@@ -9,7 +9,6 @@
 
 ```text
 test:ci（统一行为门禁）
-verify-schema44（仅扫描已禁止架构残留）
 verify-runtime-manifest
 verify-ui-language
 diff-upstream-surface
@@ -177,6 +176,6 @@ node scripts/public-release/preflight.mjs clean-build
 node scripts/public-release/preflight.mjs export-public
 ```
 
-公开源码仓库由显式 allow/deny policy 生成并重新初始化 Git 历史。`PR_CONTRACTS.json`、`PR_INDEX.json`、`PROJECT_STATE.json`、`START_HERE.md`、`FINAL_REVIEW.json`、`governance/**`、`skills/**`、`templates/**`、本机 `.coding-tools/**` 状态与私有仓库历史均不得复制到公开仓库；`.gitignore` 仅作防御，不可替代对已跟踪文件和历史的排除。
+公开源码仓库由显式 allow/deny policy 生成并重新初始化 Git 历史。`skills/**`、本机 `.coding-tools/**` 状态与私有仓库历史均不得复制到公开仓库；`.gitignore` 仅作防御，不可替代对已跟踪文件和历史的排除。deny policy 中保留的开发期治理文件名（`PR_CONTRACTS.json`、`PROJECT_STATE.json` 等）已不再存在于树中，作为历史防御条目保留。
 
 LB-018 生成最终 bundle 后，另外执行 `node scripts/public-release/preflight.mjs audit-package <bundle-root>`；该检查禁止源码缓存、测试目录、日志/dump、secret、开发 Tunnel 配置、Cloudflare runtime、内部治理材料和本机路径进入发布物。

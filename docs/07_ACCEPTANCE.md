@@ -170,7 +170,6 @@
 | A166 | G0 last PR PASS | G1 仍 BLOCKED，直到 G0 对抗审查 PASS |
 | A167 | group review PASS | 只解锁下一组首 PR |
 | A168 | group review FAIL | 下一组仍 BLOCKED，按 reopen_from_pr 回滚执行 |
-| A169 | review governance write | 只能改 PR_INDEX/PROJECT_STATE 状态字段 |
 | A170 | execution | 组内仍严格按 LB 编号顺序 |
 | A171 | 首次启动 | 总屏数严格为 5，不存在第 6 屏；顺序为欢迎 → OpenAI → 项目与权限 → 创建自定义插件 → 启动检查 |
 | A172 | 1/5 | 标题为“简单设置 即可开始” |

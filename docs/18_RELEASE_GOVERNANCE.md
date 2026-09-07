@@ -24,9 +24,7 @@ v0.1 UI 不需要暴露“更新频道”。
 
 Stable 必须满足：
 
-- PR_INDEX 全部 required PR PASS；
-- PR_CONTRACTS 全部 acceptance PASS；
-- architecture verification PASS；
+- `node scripts/test/ci-gate.mjs` 全阶段 PASS；
 - compatibility snapshot frozen；
 - runtime manifest frozen；
 - dependency lockfiles frozen；
