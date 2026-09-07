@@ -437,6 +437,18 @@ fn execute_fixed_window_e2e(
         return Err("recreated main WebView has the wrong identity".into());
     }
 
+    let onboarding_geometry = if matches!(view, FixedWindowE2eView::Onboarding) {
+        if permission_geometry_gate_requested() {
+            format!(
+                " permission_geometry=asserted choices={}",
+                metrics.permission_rects.len()
+            )
+        } else {
+            " permission_geometry=skipped".to_string()
+        }
+    } else {
+        String::new()
+    };
     let dashboard_geometry = if matches!(view, FixedWindowE2eView::Dashboard) {
         format!(
             " settings_replace_delta={:.2}px rounded_scroll=true scrollbar_arrows=false scroll_surface=true",
@@ -446,7 +458,7 @@ fn execute_fixed_window_e2e(
         String::new()
     };
     Ok(format!(
-        "logical={}x{} physical={}x{} webview={}x{} native_scale={} dpr={} decorations=false resizable=false maximizable=false chrome=edge-to-edge controls=drag,minimize,close minimize_click=true close_destroy=true reopen_recreates_webview=true{}",
+        "logical={}x{} physical={}x{} webview={}x{} native_scale={} dpr={} decorations=false resizable=false maximizable=false chrome=edge-to-edge controls=drag,minimize,close minimize_click=true close_destroy=true reopen_recreates_webview=true{}{}",
         logical_width.round(),
         logical_height.round(),
         physical.width,
@@ -455,6 +467,7 @@ fn execute_fixed_window_e2e(
         metrics.inner_height.round(),
         scale,
         metrics.dpr,
+        onboarding_geometry,
         dashboard_geometry
     ))
 }
@@ -604,9 +617,7 @@ fn assert_fixed_window_e2e_metrics(
                 ));
             }
             if !metrics.permission_text_contained {
-                return Err(
-                    "Screen 3 permission label or description overflows its choice".into(),
-                );
+                return Err("Screen 3 permission label or description overflows its choice".into());
             }
         }
         FixedWindowE2eView::Dashboard => {
