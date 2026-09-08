@@ -15,7 +15,6 @@ export function StatusHeadline({ projection }: { projection: MainProjection | nu
       {state !== "ready" && detail && <p className="status-detail">{detail}</p>}
       <ActivityRows
         currentActivity={projection?.currentActivity ?? null}
-        lastActivity={projection?.lastActivity ?? null}
         activityStatus={projection?.activityStatus ?? "unavailable"}
       />
     </section>

@@ -64,14 +64,15 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
         </div>
       </header>
 
+      {/* 此刻在干什么，紧贴标题行。项目和权限是上下文，排在它后面。 */}
+      <StatusHeadline projection={projection} />
+
       <ContextBar
         projection={projection}
         activeProject={activeProject}
         adminModeFullAccess={adminModeFullAccess}
         onOpenProjectPicker={openProjectPicker}
       />
-
-      <StatusHeadline projection={projection} />
 
       <ServiceDetails projection={projection} />
 

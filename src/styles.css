@@ -3,16 +3,23 @@
   color:#1d1d1f;
   background:#f5f5f7;
   font-synthesis:none;
-  --control-height:40px;
-  --control-radius:10px;
+  --gutter:24px;
+  --control-height:32px;
+  --control-radius:8px;
   --control-border:rgba(29,29,31,.18);
   --control-border-hover:rgba(29,29,31,.28);
   --control-neutral:#f2f2f7;
   --control-neutral-hover:#e8e8ed;
   --control-focus:rgba(0,122,255,.3);
-  --value-column:280px;
-  --font-title:24px;
-  --font-body:14px;
+  /* 右侧数值列，也是整个界面唯一的右侧对齐线。
+     宽度取"设置 + 诊断"这一对按钮的宽度：它们右对齐后左边缘正好落在列首，
+     于是数值（1分钟、完成 · 0）与按钮共用同一条起始线，不必另开一条。
+     每多一像素都是从左边正在被截断的路径那里抢来的。 */
+  --meta-col:112px;
+  --font-title:20px;
+  --font-brand:16px;
+  --font-lead:17px;
+  --font-body:13px;
   --font-auxiliary:12px;
   --accent:#0071e3;
   --accent-hover:#0077ed;
@@ -44,12 +51,11 @@ button{cursor:pointer}
 .ghost,.secondary,.primary,.choice{
   width:max-content;
   max-width:100%;
-  min-width:5.5em;
   min-height:var(--control-height);
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  padding:0 16px;
+  padding:0 12px;
   border:1px solid transparent;
   border-radius:var(--control-radius);
   font-size:var(--font-body);
@@ -72,80 +78,87 @@ button{cursor:pointer}
 .ghost:not(:disabled):active,.secondary:not(:disabled):active,.primary:not(:disabled):active,.choice:not(:disabled):active{transform:translateY(1px)}
 .ghost:focus-visible,.secondary:focus-visible,.primary:focus-visible,.choice:focus-visible{outline:3px solid var(--control-focus);outline-offset:2px}
 .ghost:disabled,.secondary:disabled,.primary:disabled,.choice:disabled{cursor:not-allowed;opacity:.46;box-shadow:none;transform:none}
-.shell{width:calc(100% - clamp(32px,6vw,72px));max-width:1180px;min-height:100%;height:100%;display:flex;flex-direction:column;margin:0 auto;padding:22px 0 20px}
-.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
-.brand{display:flex;align-items:center;gap:10px;font-size:var(--font-title);font-weight:650;letter-spacing:-.02em;min-width:0}
-.brand .service-status-dot{width:11px;height:11px;flex:0 0 11px}
-.top-actions{display:flex;gap:8px}
+/* 水平内边距只此一处。每个 section 各自再加 padding 是上一版"对齐线"
+   从未成立的原因：标题行没加，于是它比正文左 20px。 */
+.shell{width:100%;min-height:100%;height:100%;display:flex;flex-direction:column;padding:16px var(--gutter) 14px}
+.topbar{display:grid;grid-template-columns:minmax(0,1fr) var(--meta-col);align-items:center;column-gap:16px;margin-bottom:14px}
+.brand{display:flex;align-items:center;gap:9px;font-size:var(--font-brand);font-weight:650;letter-spacing:-.01em;min-width:0}
+.brand .service-status-dot{width:9px;height:9px;flex:0 0 9px}
+.top-actions{grid-column:2;justify-self:end;display:flex;gap:8px}
 
-/* 头条：能不能用，以及此刻在干什么。字号和位置都要压过下面的上下文。 */
-.status-headline{display:grid;gap:5px;padding:0 20px 18px;border-bottom:1px solid rgba(0,0,0,.06);margin-bottom:14px}
+/* 此刻在干什么。字号和位置已经把它排在第一位，不必再加一块底色；
+   同一个平面上多出一块灰只是噪音。 */
+.status-headline{display:grid;gap:4px;margin:0 0 8px;padding-bottom:10px;border-bottom:1px solid rgba(0,0,0,.06)}
 .status-detail{margin:0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.45}
-.status-headline .task-row{min-height:32px;margin-top:5px;font-size:17px}
+.status-headline .task-row{min-height:26px;font-size:var(--font-lead);font-weight:500}
 .status-headline .task-row .activity-dot{width:9px;height:9px;flex:0 0 9px}
+.status-headline .task-row .activity-action{color:#6e6e73}
 .status-headline .activity-elapsed{font-size:var(--font-body)}
-.status-headline .last-tool-row{font-size:var(--font-auxiliary);min-height:22px}
 .services-toggle:disabled{display:none}
-.service-details{display:grid;padding:0 20px;margin-bottom:12px}
-.service-detail-row{min-height:38px;padding-left:14px}
+.service-details{display:grid;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid rgba(0,0,0,.06)}
+.service-detail-row{min-height:32px}
 .service-detail-row .label{font-size:var(--font-auxiliary)}
 .service-detail-row .value{font-size:var(--font-auxiliary)}
-.row{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:46px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:36px}
 .row+.row{border-top:1px solid rgba(0,0,0,.06)}
 .label{color:#6e6e73;font-size:var(--font-body)}
 .value{text-align:left;overflow-wrap:anywhere}
 .permission-mode-value{font-weight:500}
 .project-actions,.inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-start}
 /* 上下文条：项目与权限压成一行，把版面让给活动记录。 */
-.context-bar{display:flex;align-items:center;gap:8px;padding:0 20px;margin:0 0 14px;min-width:0;font-size:var(--font-auxiliary);color:#6e6e73}
+.context-bar{display:grid;grid-template-columns:minmax(0,1fr) var(--meta-col);align-items:center;column-gap:16px;margin:0 0 8px;padding-bottom:10px;border-bottom:1px solid rgba(0,0,0,.06);min-width:0;font-size:var(--font-auxiliary);color:#6e6e73}
+.context-left{grid-column:1;min-width:0;display:flex;align-items:center;gap:8px}
 .context-workspace{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .context-workspace.full-access{color:var(--admin-accent);font-weight:650}
 .context-separator{flex:0 0 auto;opacity:.5}
 .context-permission{flex:0 0 auto}
-.context-switch{margin-left:auto;flex:0 0 auto;min-width:0;min-height:28px;padding:0 10px;font-size:var(--font-auxiliary)}
+.context-switch{grid-column:2;justify-self:end}
 
 /* 活动记录：窗口的主体。倒序，最新在上。 */
-.activity-feed{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 20px;margin-bottom:12px;border-top:1px solid rgba(0,0,0,.06)}
+.activity-feed{flex:1 1 auto;min-height:0;overflow-y:auto;margin-bottom:12px}
 .activity-empty{margin:16px 0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.6}
-.activity-entry{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;align-items:baseline;column-gap:12px;padding:7px 0;border-bottom:1px solid rgba(0,0,0,.05);font-size:var(--font-auxiliary)}
+/* 时间 / 类型 / 对象 / 结果，四列真的是四列。上一版把类型和对象塞进同一个
+   flex，于是六行的对象起点分别是 143 / 272 / 119 / 143 / 329px。 */
+.activity-entry{display:grid;grid-template-columns:40px 5.2em minmax(0,1fr) var(--meta-col);align-items:baseline;column-gap:12px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.05);font-size:var(--font-auxiliary)}
 .activity-entry:last-child{border-bottom:0}
 .activity-entry-time{color:#8e8e93;font-variant-numeric:tabular-nums}
 .activity-entry-main{min-width:0;display:flex;align-items:baseline;gap:8px}
-.activity-entry-action{flex:0 0 auto;font-weight:600}
-.activity-entry-target{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6e6e73}
-.activity-entry-outcome{flex:0 0 auto;color:#6e6e73;font-variant-numeric:tabular-nums}
+.activity-entry-action{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6e6e73}
+.activity-entry-target{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.activity-entry-outcome{color:#6e6e73;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .activity-entry.tone-bad .activity-entry-outcome{color:var(--status-fault)}
 .activity-entry.tone-pending .activity-entry-action{opacity:.75}
 .activity-risk{flex:0 0 auto;padding:1px 7px;border-radius:999px;background:rgba(255,149,0,.16);color:#8a5300;font-weight:650;white-space:nowrap}
 
-/* 右栏。值和控件不是靠右排，而是共用同一条左边缘——右对齐的参差是没有对齐线。 */
-.service-details .row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,var(--value-column));align-items:center;gap:16px}
+/* 右栏一列两种对齐，各有各的道理：
+   数值（1分钟、完成 · 0）左对齐在列首——数字要在同一条线上起读；
+   按钮右对齐在列尾——它们宽度按字数走，共用右边缘才不会参差。 */
+.service-details .row{display:grid;grid-template-columns:minmax(0,1fr) var(--meta-col);align-items:center;gap:16px}
 select,input[type="text"],input[type="password"]{min-height:var(--control-height);border:1px solid rgba(0,0,0,.12);border-radius:var(--control-radius);background:#fff;padding:0 11px;color:#1d1d1f}
 .access-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
 .access-grid>.choice{width:100%;height:100%}
 .full-access{color:#b77900;font-weight:650}
-.service-value{display:inline-flex;align-items:center;justify-content:flex-end;gap:8px}
+.service-value{display:inline-flex;align-items:center;justify-content:flex-start;gap:8px}
 .service-status-dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--status-unknown)}
 .service-status-dot.status-ready{background:var(--status-ready)}
 .service-status-dot.status-starting{background:var(--status-starting)}
 .service-status-dot.status-fault{background:var(--status-fault)}
 .service-status-dot.status-unknown{background:var(--status-unknown)}
-.service-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,var(--value-column));align-items:center;gap:16px;width:100%;margin:0 0 10px;padding:0 20px}
-.service-actions-group{grid-column:2;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* 页脚那一对比数值列宽，向左溢出即可——右边缘仍与其余按钮同线。 */
+.service-actions{display:grid;grid-template-columns:minmax(0,1fr) var(--meta-col);align-items:center;column-gap:16px;width:100%;margin:0;padding-top:10px;border-top:1px solid rgba(0,0,0,.06)}
+.service-actions-group{grid-column:2;justify-self:end;display:flex;align-items:center;gap:8px}
 .fault-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 14px;padding:12px 14px;border:1px solid rgba(215,0,21,.22);border-radius:12px;background:#fff0f1;color:#7d0010}
 .fault-banner p{margin:3px 0 0;color:#7d0010;overflow-wrap:anywhere}
-.secondary.service-restart{background:#fff5df;border-color:rgba(182,106,0,.28);color:var(--admin-accent)}
-.secondary.service-stop{background:#fff0f1;border-color:rgba(215,0,21,.25);color:var(--status-fault)}
-.task-row,.last-tool-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,var(--value-column));align-items:center;column-gap:16px;min-height:26px;padding:2px 0;font-size:var(--font-body)}
-.activity-row-main,.last-activity-left{grid-column:1;min-width:0;display:flex;align-items:center;gap:7px;white-space:nowrap}
-.activity-action,.activity-outcome{flex:0 0 auto}
+/* 重启和关闭是最不该抢眼的两个按钮。上一版给了它们全窗最重的填充色。 */
+.secondary.service-restart{background:var(--control-neutral);border-color:var(--control-border);color:#1d1d1f}
+/* 停在那里的破坏性按钮不该是全窗最红的东西；红色留给鼠标真的悬上去时。 */
+.secondary.service-stop{background:var(--control-neutral);border-color:var(--control-border);color:#1d1d1f}
+.secondary.service-stop:not(:disabled):hover{background:#fff0f1;border-color:rgba(215,0,21,.3);color:var(--status-fault)}
+.task-row{display:grid;grid-template-columns:minmax(0,1fr) var(--meta-col);align-items:center;column-gap:16px;min-height:24px;font-size:var(--font-body)}
+.activity-row-main{grid-column:1;min-width:0;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.activity-action{flex:0 0 auto}
 .activity-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.activity-elapsed,.last-tool-age{grid-column:2;flex:0 0 auto;text-align:left;font-variant-numeric:tabular-nums;color:#6e6e73}
-.activity-dot-spacer{width:8px;height:8px}
-.last-activity-left.outcome-completed{color:var(--status-ready)}
-.last-activity-left.outcome-failed,.last-activity-left.outcome-blocked,.last-activity-left.outcome-lost{color:var(--status-fault)}
-.last-activity-left.outcome-cancelled{color:#6e6e73}
-.last-activity-left.outcome-timed_out{color:var(--status-starting)}
+.activity-elapsed{grid-column:2;text-align:left;font-variant-numeric:tabular-nums;color:#6e6e73;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .activity-dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;background:var(--status-unknown)}
 .activity-dot.task-idle,.activity-dot.task-cancelled{background:var(--status-unknown)}
 .activity-dot.task-running{background:var(--status-ready);animation:task-pulse 1.35s ease-in-out infinite}
@@ -228,11 +241,10 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .admin-warning-confirm:not(:disabled):hover{background:#b80012;border-color:#b80012}
 .status-good{color:#248a3d}
 .status-bad{color:#c9342f}
-@media (max-width:560px){
-  :root{--value-column:100%}
-  .shell{width:calc(100% - 20px);margin:18px auto}
-  .service-details .row,.task-row,.last-tool-row,.service-actions{grid-template-columns:minmax(0,1fr);row-gap:4px}
-  .service-actions-group,.activity-elapsed,.last-tool-age{grid-column:1}
+@media (max-width:520px){
+  :root{--gutter:14px;--meta-col:96px}
+  .activity-entry{grid-template-columns:38px minmax(0,1fr) var(--meta-col)}
+  .activity-entry-action{display:none}
   .value,.project-actions{text-align:left;justify-content:flex-start;width:100%}
 }
 
@@ -273,23 +285,25 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   .choice{color:#d1d1d6}
   .row+.row{border-top-color:rgba(255,255,255,.09)}
   .status-headline{border-bottom-color:rgba(255,255,255,.09)}
+  .context-bar,.service-details{border-bottom-color:rgba(255,255,255,.09)}
   .status-detail{color:#98989d}
   .context-bar{color:#98989d}
-  .activity-feed{border-top-color:rgba(255,255,255,.09)}
+  .service-actions{border-top-color:rgba(255,255,255,.09)}
   .activity-empty{color:#98989d}
   .activity-entry{border-bottom-color:rgba(255,255,255,.07)}
   .activity-entry-time{color:#8e8e93}
-  .activity-entry-target,.activity-entry-outcome{color:#98989d}
+  .activity-entry-action,.activity-entry-outcome{color:#98989d}
+  .status-headline .task-row .activity-action{color:#98989d}
   .activity-risk{background:rgba(255,159,10,.2);color:#ffb340}
   .label{color:#98989d}
   select,input[type="text"],input[type="password"]{border-color:rgba(255,255,255,.16);background:#2c2c2e;color:#f2f2f7}
   .full-access{color:var(--admin-accent)}
   .fault-banner{border-color:rgba(255,69,58,.34);background:rgba(255,69,58,.12);color:#ff9d96}
   .fault-banner p{color:#ff9d96}
-  .secondary.service-restart{background:rgba(255,159,10,.14);border-color:rgba(255,159,10,.32);color:var(--admin-accent)}
-  .secondary.service-stop{background:rgba(255,69,58,.14);border-color:rgba(255,69,58,.32);color:var(--status-fault)}
-  .activity-elapsed,.last-tool-age{color:#98989d}
-  .last-activity-left.outcome-cancelled{color:#98989d}
+  .secondary.service-restart{background:var(--control-neutral);border-color:var(--control-border);color:#f2f2f7}
+  .secondary.service-stop{background:var(--control-neutral);border-color:var(--control-border);color:#f2f2f7}
+  .secondary.service-stop:not(:disabled):hover{background:rgba(255,69,58,.16);border-color:rgba(255,69,58,.34);color:var(--status-fault)}
+  .activity-elapsed{color:#98989d}
   .sheet-backdrop,.dialog-backdrop{background:rgba(0,0,0,.52)}
   .sheet,.dialog{background:#2c2c2e;box-shadow:0 24px 70px rgba(0,0,0,.62)}
   .sheet::-webkit-scrollbar-thumb,.dialog::-webkit-scrollbar-thumb{background:rgba(235,235,245,.34);background-clip:content-box}

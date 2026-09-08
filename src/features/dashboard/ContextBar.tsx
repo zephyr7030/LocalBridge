@@ -23,11 +23,13 @@ export function ContextBar({
       : "正在读取";
   return (
     <div className="context-bar">
-      <span className={`context-workspace ${adminModeFullAccess ? "full-access" : ""}`}>
-        {workspaceDisplayText(projection)}
+      <span className="context-left">
+        <span className={`context-workspace ${adminModeFullAccess ? "full-access" : ""}`}>
+          {workspaceDisplayText(projection)}
+        </span>
+        <span className="context-separator" aria-hidden="true">·</span>
+        <span className="context-permission">{permission}</span>
       </span>
-      <span className="context-separator" aria-hidden="true">·</span>
-      <span className="context-permission">{permission}</span>
       <button
         className="ghost context-switch"
         disabled={projection?.settingsStatus !== "ready"}

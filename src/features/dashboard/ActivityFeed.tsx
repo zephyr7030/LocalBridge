@@ -65,8 +65,8 @@ export function ActivityFeed() {
             key={`${entry.timestampMs}-${entry.action}-${entry.target ?? ""}`}
           >
             <time className="activity-entry-time">{activityTime(entry.timestampMs)}</time>
+            <span className="activity-entry-action">{activityAction(entry)}</span>
             <span className="activity-entry-main">
-              <span className="activity-entry-action">{activityAction(entry)}</span>
               {entry.target && <span className="activity-entry-target">{entry.target}</span>}
               {entry.risk.map((risk) => (
                 <span className="activity-risk" key={risk}>{riskText[risk] ?? risk}</span>

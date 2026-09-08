@@ -14,7 +14,7 @@ pub const MAIN_WINDOW_LABEL: &str = "main";
 /// The fixed client size, in logical pixels. The window is not resizable, so
 /// this is the only layout budget the UI ever gets.
 pub const MAIN_WINDOW_LOGICAL_WIDTH: f64 = 660.0;
-pub const MAIN_WINDOW_LOGICAL_HEIGHT: f64 = 620.0;
+pub const MAIN_WINDOW_LOGICAL_HEIGHT: f64 = 560.0;
 const TRAY_ID: &str = "localbridge-tray";
 const MENU_OPEN_ID: &str = "open";
 const MENU_EXIT_ID: &str = "exit";

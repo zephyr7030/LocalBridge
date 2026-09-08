@@ -94,7 +94,8 @@ export function currentActivityText(activity: CurrentActivityProjection | null, 
   if (activity?.state === "cancelling") return "正在取消…";
   if (activity?.state === "waiting_input") return "等待输入…";
   if (activity?.state === "waiting") return "任务等待继续";
-  if (activity) return `${activityKindText[activity.kind]}…`;
+  // 省略号会被读成"被截断了"。脉冲圆点和右边的计时已经说明它在进行中。
+  if (activity) return activityKindText[activity.kind];
   return status === "ready" ? "空闲" : status === "stale" ? "正在刷新" : "尚未就绪";
 }
 export function currentActivityDetail(activity: CurrentActivityProjection | null): string | null {

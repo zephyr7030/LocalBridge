@@ -32,8 +32,9 @@ describe("LB-015 presentation", () => {
     expect(currentActivityText(null)).toBe("空闲");
     expect(currentActivityText(null, "unavailable")).toBe("尚未就绪");
     expect(currentActivityText({ ...base, state: "waiting" })).toBe("任务等待继续");
-    expect(currentActivityText({ ...base, state: "running" })).toBe("任务执行中…");
-    expect(currentActivityText({ ...base, kind: "command", state: "running" })).toBe("运行命令…");
+    expect(currentActivityText({ ...base, state: "running" })).toBe("任务执行中");
+    // 进行中由脉冲圆点和右边的计时表达；省略号会被读成"文字被截断了"。
+    expect(currentActivityText({ ...base, kind: "command", state: "running" })).toBe("运行命令");
     expect(currentActivityText({ ...base, kind: "command", state: "waiting_input" })).toBe("等待输入…");
     expect(currentActivityText({ ...base, kind: "command", state: "cancelling" })).toBe("正在取消…");
     expect(currentActivityDetail({ ...base, state: "running", step: "verify", progressCurrent: 2, progressTotal: 4 })).toBe("验证 2/4");
