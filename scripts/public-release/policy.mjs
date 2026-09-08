@@ -46,8 +46,6 @@ const PUBLIC_EXACT = new Set([
   "runtime-manifest.toml",
   "runtime-policy.toml",
   "rust-toolchain.toml",
-  "run-gate.cmd",
-  "check-rust.cmd",
   "scripts/prepare-toolbox.mjs",
   "scripts/prepare-lb018-resources.mjs",
   "compatibility/coding-tools/0.2.2/tools-list.json",
