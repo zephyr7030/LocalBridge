@@ -7,7 +7,6 @@ export function cargoCommand(args, environment = process.env) {
   return {
     program: "cargo",
     args: [
-      "+1.85.0",
       args[0],
       ...(targetDir ? ["--target-dir", targetDir] : []),
       ...args.slice(1),
@@ -29,6 +28,11 @@ export const CI_STAGES = validateStages([
       "scripts/test/ci-gate.test.mjs",
       "scripts/test/structure.test.mjs",
     ),
+  },
+  {
+    id: "toolchain",
+    label: "pinned Rust toolchain",
+    ...node("scripts/public-release/preflight.mjs", "verify-toolchain"),
   },
   {
     id: "format",

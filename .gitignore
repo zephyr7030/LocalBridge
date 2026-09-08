@@ -39,3 +39,6 @@ src-tauri/gen/
 # Files removed from the repository but still on disk, pending manual deletion.
 # Delete the folder and this entry together.
 _to_delete/
+
+# Locally produced installer/exe bundles; releases are published from CI artifacts.
+release-artifacts/

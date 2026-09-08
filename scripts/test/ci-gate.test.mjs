@@ -9,6 +9,7 @@ test("the shared local and CI gate has stable unique stages", () => {
     CI_STAGES.map((stage) => stage.id),
     [
       "test-base",
+      "toolchain",
       "format",
       "public-release",
       "licenses",
@@ -54,9 +55,10 @@ test("targeted local diagnosis reuses the declared gate instead of copying comma
 });
 
 test("a running desktop binary can use the same Rust gate with an isolated target directory", () => {
-  assert.deepEqual(cargoCommand(["test"], {}).args, ["+1.85.0", "test"]);
+  // 工具链由 rust-toolchain.toml 锁定，而不是在这里再写一遍版本号。
+  assert.deepEqual(cargoCommand(["test"], {}).args, ["test"]);
   assert.deepEqual(
     cargoCommand(["test"], { LOCALBRIDGE_CARGO_TARGET_DIR: "src-tauri/target/local-gate" }).args,
-    ["+1.85.0", "test", "--target-dir", "src-tauri/target/local-gate"],
+    ["test", "--target-dir", "src-tauri/target/local-gate"],
   );
 });

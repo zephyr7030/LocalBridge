@@ -1,0 +1,12 @@
+# 这个仓库使用哪个 Rust 编译器，只在这里说一次。
+#
+# 此前工具链只在 ci-gate 的 cargoCommand 里以 `+1.85.0` 前缀出现，而
+# prepare-lb018-resources、lb018-release、public-release/preflight 里的六处
+# cargo 调用都没有这个前缀，于是发布产物是用 rustup 默认工具链构建的——
+# 测试跑一个编译器，发出去的安装包用另一个。rust-toolchain.toml 对所有
+# cargo 调用生效，包括那些不经过门禁的。
+[toolchain]
+channel = "1.85.0"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-pc-windows-msvc"]
+profile = "minimal"

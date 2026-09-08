@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, extname, resolve, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isPrivatePath, isPublicPath, normalizeRepoPath, PUBLIC_FORBIDDEN_TEXT, sanitizePublicText } from "./policy.mjs";
@@ -327,6 +327,24 @@ async function verifyTrackedLocalState() {
   console.log("PRE_RELEASE_LOCAL_STATE=PASS tracked_coding_tools=0");
 }
 
+// 声称用哪个编译器和实际用哪个，是两件事。此前它们不一致了很久也没人发现，
+// 因为没有任何一步去核对。
+function verifyToolchain() {
+  const pinned = readFileSync(resolve(root, "rust-toolchain.toml"), "utf8")
+    .split(/\r?\n/)
+    .map((line) => /^\s*channel\s*=\s*"([^"]+)"/.exec(line)?.[1])
+    .find(Boolean);
+  if (!pinned) throw new Error("rust-toolchain.toml 没有声明 channel");
+  const reported = run("rustc", ["--version"]).trim();
+  if (!reported.includes(pinned)) {
+    throw new Error(
+      `工具链不一致：rust-toolchain.toml 锁定 ${pinned}，实际解析到 "${reported}"。`
+      + " 发布产物必须和测试用同一个编译器构建。",
+    );
+  }
+  console.log(`TOOLCHAIN_VERIFY=PASS pinned=${pinned}`);
+}
+
 async function main() {
   const command = process.argv[2] ?? "help";
   if (command === "scan-sensitive") return scanRepositorySensitive();
@@ -346,9 +364,10 @@ async function main() {
     console.log("PRE_RELEASE_PACKAGE_AUDIT=PASS");
     return result;
   }
+  if (command === "verify-toolchain") return verifyToolchain();
   if (command === "format-check") return formatCheck();
   if (command === "verify-local-state") return verifyTrackedLocalState();
-  throw new Error("usage: node scripts/public-release/preflight.mjs <scan-sensitive|verify-license|clean-build|export-public|verify-public|audit-package|format-check|verify-local-state> [path]");
+  throw new Error("usage: node scripts/public-release/preflight.mjs <scan-sensitive|verify-license|clean-build|export-public|verify-public|audit-package|verify-toolchain|format-check|verify-local-state> [path]");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
