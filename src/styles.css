@@ -10,6 +10,7 @@
   --control-neutral:#f2f2f7;
   --control-neutral-hover:#e8e8ed;
   --control-focus:rgba(0,122,255,.3);
+  --value-column:280px;
   --font-title:24px;
   --font-body:14px;
   --font-auxiliary:12px;
@@ -30,8 +31,10 @@ body{margin:0;min-width:320px;height:100%;overflow:hidden;font-size:var(--font-b
 button,input,select{font:inherit}
 button{cursor:pointer}
 .window-chrome{position:fixed;inset:0;width:100%;height:100%;display:grid;grid-template-rows:42px minmax(0,1fr);overflow:hidden;border:1px solid rgba(29,29,31,.22);background:#f5f5f7}
-.window-titlebar{min-width:0;height:42px;display:flex;align-items:center;justify-content:space-between;padding-left:14px;border-bottom:1px solid rgba(29,29,31,.12);background:rgba(248,248,250,.96);user-select:none;-webkit-user-select:none}
-.window-title{font-size:var(--font-auxiliary);font-weight:650;letter-spacing:.01em;color:#4a4a4f;pointer-events:none}
+.window-titlebar{min-width:0;height:42px;display:flex;align-items:center;justify-content:space-between;padding-left:12px;border-bottom:1px solid rgba(29,29,31,.12);background:rgba(248,248,250,.96);user-select:none;-webkit-user-select:none}
+.window-identity{min-width:0;display:flex;align-items:center;gap:8px;pointer-events:none}
+.window-icon{width:16px;height:16px;flex:0 0 16px;border-radius:3px;background-image:url("data:image/png;base64,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");background-size:contain;background-repeat:no-repeat}
+.window-title{font-size:var(--font-auxiliary);font-weight:650;letter-spacing:.01em;color:#4a4a4f}
 .window-controls{height:100%;display:flex;align-items:stretch}
 .window-control{width:46px;height:100%;padding:0;border:0;border-radius:0;background:transparent;color:#3a3a3c;font-size:var(--font-title);line-height:1;display:grid;place-items:center}
 .window-control:hover{background:rgba(29,29,31,.08)}
@@ -41,8 +44,12 @@ button{cursor:pointer}
 .ghost,.secondary,.primary,.choice{
   width:max-content;
   max-width:100%;
-  height:auto;
-  padding:10px 14px;
+  min-width:5.5em;
+  min-height:var(--control-height);
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  padding:0 16px;
   border:1px solid transparent;
   border-radius:var(--control-radius);
   font-size:var(--font-body);
@@ -67,15 +74,31 @@ button{cursor:pointer}
 .ghost:disabled,.secondary:disabled,.primary:disabled,.choice:disabled{cursor:not-allowed;opacity:.46;box-shadow:none;transform:none}
 .shell{width:calc(100% - clamp(32px,6vw,72px));max-width:1180px;min-height:100%;margin:0 auto;padding:28px 0 32px}
 .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
-.brand{font-size:var(--font-title);font-weight:650;letter-spacing:-.02em}
+.brand{display:flex;align-items:center;gap:10px;font-size:var(--font-title);font-weight:650;letter-spacing:-.02em;min-width:0}
+.brand .service-status-dot{width:11px;height:11px;flex:0 0 11px}
 .top-actions{display:flex;gap:8px}
 .card{background:transparent;border:0;border-radius:0;padding:0 20px;box-shadow:none;margin-bottom:14px}
+
+/* 头条：能不能用，以及此刻在干什么。字号和位置都要压过下面的上下文。 */
+.status-headline{display:grid;gap:5px;padding:0 20px 18px;border-bottom:1px solid rgba(0,0,0,.06);margin-bottom:14px}
+.status-detail{margin:0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.45}
+.status-headline .task-row{min-height:32px;margin-top:5px;font-size:17px}
+.status-headline .task-row .activity-dot{width:9px;height:9px;flex:0 0 9px}
+.status-headline .activity-elapsed{font-size:var(--font-body)}
+.status-headline .last-tool-row{font-size:var(--font-auxiliary);min-height:22px}
+.services-toggle:disabled{display:none}
+.service-details{display:grid}
+.service-detail-row{min-height:38px;padding-left:14px}
+.service-detail-row .label{font-size:var(--font-auxiliary)}
+.service-detail-row .value{font-size:var(--font-auxiliary)}
 .row{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:46px}
 .row+.row{border-top:1px solid rgba(0,0,0,.06)}
 .label{color:#6e6e73;font-size:var(--font-body)}
-.value{text-align:right;overflow-wrap:anywhere}
+.value{text-align:left;overflow-wrap:anywhere}
 .permission-mode-value{font-weight:500}
-.project-actions,.inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.project-actions,.inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-start}
+/* 右栏。值和控件不是靠右排，而是共用同一条左边缘——右对齐的参差是没有对齐线。 */
+.card .row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,var(--value-column));align-items:center;gap:16px}
 select,input[type="text"],input[type="password"]{min-height:var(--control-height);border:1px solid rgba(0,0,0,.12);border-radius:var(--control-radius);background:#fff;padding:0 11px;color:#1d1d1f}
 .access-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
 .access-grid>.choice{width:100%;height:100%}
@@ -86,16 +109,17 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .service-status-dot.status-starting{background:var(--status-starting)}
 .service-status-dot.status-fault{background:var(--status-fault)}
 .service-status-dot.status-unknown{background:var(--status-unknown)}
-.service-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;margin:0 0 10px}
+.service-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,var(--value-column));align-items:center;gap:16px;width:100%;margin:0 0 10px;padding:0 20px}
+.service-actions-group{grid-column:2;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .fault-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 14px;padding:12px 14px;border:1px solid rgba(215,0,21,.22);border-radius:12px;background:#fff0f1;color:#7d0010}
 .fault-banner p{margin:3px 0 0;color:#7d0010;overflow-wrap:anywhere}
 .secondary.service-restart{background:#fff5df;border-color:rgba(182,106,0,.28);color:var(--admin-accent)}
 .secondary.service-stop{background:#fff0f1;border-color:rgba(215,0,21,.25);color:var(--status-fault)}
-.task-row,.last-tool-row{display:grid;grid-template-columns:8px minmax(0,1fr) max-content;align-items:center;column-gap:10px;min-height:26px;padding:2px;font-size:var(--font-body)}
-.activity-row-main,.last-activity-left{grid-column:2;min-width:0;display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+.task-row,.last-tool-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,var(--value-column));align-items:center;column-gap:16px;min-height:26px;padding:2px 0;font-size:var(--font-body)}
+.activity-row-main,.last-activity-left{grid-column:1;min-width:0;display:flex;align-items:center;gap:7px;white-space:nowrap}
 .activity-action,.activity-outcome{flex:0 0 auto}
-.activity-summary{min-width:0;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.activity-elapsed,.last-tool-age{grid-column:3;flex:0 0 auto;text-align:right;font-variant-numeric:tabular-nums;color:#6e6e73}
+.activity-summary{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.activity-elapsed,.last-tool-age{grid-column:2;flex:0 0 auto;text-align:left;font-variant-numeric:tabular-nums;color:#6e6e73}
 .activity-dot-spacer{width:8px;height:8px}
 .last-activity-left.outcome-completed{color:var(--status-ready)}
 .last-activity-left.outcome-failed,.last-activity-left.outcome-blocked,.last-activity-left.outcome-lost{color:var(--status-fault)}
@@ -115,6 +139,27 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 }
 .sheet-backdrop,.dialog-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.24);display:grid;place-items:center;padding:20px;z-index:10}
 .sheet,.dialog{width:min(560px,100%);max-height:84vh;overflow:auto;border-radius:20px;clip-path:inset(0 round 20px);scrollbar-gutter:stable;background:#fff;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.2)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{min-height:32px;border:3px solid transparent;border-radius:999px;background:rgba(110,110,115,.42);background-clip:content-box}
+::-webkit-scrollbar-button,
+::-webkit-scrollbar-button:single-button,
+::-webkit-scrollbar-button:vertical:start:decrement,
+::-webkit-scrollbar-button:vertical:end:increment,
+::-webkit-scrollbar-button:horizontal:start:decrement,
+::-webkit-scrollbar-button:horizontal:end:increment{
+  -webkit-appearance:none!important;
+  appearance:none!important;
+  display:none!important;
+  width:0!important;
+  height:0!important;
+  min-width:0!important;
+  min-height:0!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  background:transparent!important;
+}
 .sheet::-webkit-scrollbar,.dialog::-webkit-scrollbar{width:10px;height:10px}
 .sheet::-webkit-scrollbar-track,.dialog::-webkit-scrollbar-track{margin-block:16px;background:transparent;border-radius:999px}
 .sheet::-webkit-scrollbar-thumb,.dialog::-webkit-scrollbar-thumb{min-height:32px;border:3px solid transparent;border-radius:999px;background:rgba(110,110,115,.48);background-clip:content-box}
@@ -162,7 +207,13 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .admin-warning-confirm:not(:disabled):hover{background:#b80012;border-color:#b80012}
 .status-good{color:#248a3d}
 .status-bad{color:#c9342f}
-@media (max-width:560px){.shell{width:calc(100% - 20px);margin:18px auto}.row{align-items:flex-start;flex-direction:column;padding:10px 0}.value,.project-actions{text-align:left;justify-content:flex-start;width:100%}}
+@media (max-width:560px){
+  :root{--value-column:100%}
+  .shell{width:calc(100% - 20px);margin:18px auto}
+  .card .row,.task-row,.last-tool-row,.service-actions{grid-template-columns:minmax(0,1fr);row-gap:4px}
+  .service-actions-group,.activity-elapsed,.last-tool-age{grid-column:1}
+  .value,.project-actions{text-align:left;justify-content:flex-start;width:100%}
+}
 
 /* Dark appearance.
    Windows reports the user's system theme to WebView2, so the app follows it
@@ -200,6 +251,8 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   .ghost:not(:disabled):hover{background:#3a3a3c}
   .choice{color:#d1d1d6}
   .row+.row{border-top-color:rgba(255,255,255,.09)}
+  .status-headline{border-bottom-color:rgba(255,255,255,.09)}
+  .status-detail{color:#98989d}
   .label{color:#98989d}
   select,input[type="text"],input[type="password"]{border-color:rgba(255,255,255,.16);background:#2c2c2e;color:#f2f2f7}
   .full-access{color:var(--admin-accent)}

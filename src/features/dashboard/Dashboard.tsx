@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { APP_NAME } from "../../appModel";
 import { bridge, type AccessCode, type ProjectProjection } from "../../bridge";
+import { brandStatusText, overallServiceState, overallVisualState } from "../../presentation";
 import { uiText } from "../../presentation";
 import { AdminModeWarning } from "../../components/AdminModeWarning";
 import { UiErrorNotice } from "../../components/UiErrorNotice";
 import { Diagnostics } from "../diagnostics/Diagnostics";
-import { ActivityRows } from "./ActivityRows";
 import { ProjectPicker } from "./ProjectPicker";
 import { SettingsSheet } from "./SettingsSheet";
 import { StatusCard } from "./StatusCard";
+import { StatusHeadline } from "./StatusHeadline";
 import { useDashboardProjection } from "./useDashboardProjection";
 
 type View = "main" | "settings" | "diagnostics";
@@ -49,12 +49,20 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   return (
     <main className="shell">
       <header className="topbar">
-        <div className="brand">{APP_NAME}</div>
+        <div className="brand">
+          <span
+            className={`service-status-dot status-${overallVisualState[overallServiceState(projection)]}`}
+            aria-hidden="true"
+          />
+          <span>{brandStatusText(projection)}</span>
+        </div>
         <div className="top-actions">
           <button className="ghost" onClick={() => setView("settings")}>{uiText.settings}</button>
           <button className="ghost" onClick={() => setView("diagnostics")}>{uiText.diagnostics}</button>
         </div>
       </header>
+
+      <StatusHeadline projection={projection} />
 
       <StatusCard
         projection={projection}
@@ -77,19 +85,15 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       ) : null}
 
       <div className="service-actions" aria-label="服务控制">
-        <button className="secondary service-restart" onClick={() => void run(() => bridge.restartServices())}>
-          重启服务
-        </button>
-        <button className="secondary service-stop" onClick={() => void run(() => bridge.stopServices())}>
-          关闭服务
-        </button>
+        <div className="service-actions-group">
+          <button className="secondary service-restart" onClick={() => void run(() => bridge.restartServices())}>
+            重启服务
+          </button>
+          <button className="secondary service-stop" onClick={() => void run(() => bridge.stopServices())}>
+            关闭服务
+          </button>
+        </div>
       </div>
-
-      <ActivityRows
-        currentActivity={projection?.currentActivity ?? null}
-        lastActivity={projection?.lastActivity ?? null}
-        activityStatus={projection?.activityStatus ?? "unavailable"}
-      />
 
       {transportError && <UiErrorNotice error={transportError} />}
       {error && <UiErrorNotice error={error} />}

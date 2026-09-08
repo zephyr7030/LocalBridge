@@ -7,7 +7,8 @@ use localbridge_lib::app::{
 use localbridge_lib::domain::UpdateCheckTrigger;
 use localbridge_lib::privilege::PrivilegeController;
 use localbridge_lib::tray::{
-    MAIN_WINDOW_LABEL, ensure_main_window, install_tray, sync_main_webview_to_client,
+    MAIN_WINDOW_LABEL, MAIN_WINDOW_LOGICAL_HEIGHT, MAIN_WINDOW_LOGICAL_WIDTH, ensure_main_window,
+    install_tray, sync_main_webview_to_client,
 };
 #[cfg(debug_assertions)]
 use localbridge_lib::{FixedWindowE2eMetricsSink, settings::SettingsStore};
@@ -353,9 +354,11 @@ fn execute_fixed_window_e2e(
     }
     let logical_width = f64::from(physical.width) / scale;
     let logical_height = f64::from(physical.height) / scale;
-    if (logical_width - 780.0).abs() > 2.0 || (logical_height - 620.0).abs() > 2.0 {
+    if (logical_width - MAIN_WINDOW_LOGICAL_WIDTH).abs() > 2.0
+        || (logical_height - MAIN_WINDOW_LOGICAL_HEIGHT).abs() > 2.0
+    {
         return Err(format!(
-            "native client is {logical_width:.1}x{logical_height:.1} logical ({}x{} physical at {scale}x), expected 780x620 logical",
+            "native client is {logical_width:.1}x{logical_height:.1} logical ({}x{} physical at {scale}x), expected {MAIN_WINDOW_LOGICAL_WIDTH}x{MAIN_WINDOW_LOGICAL_HEIGHT} logical",
             physical.width, physical.height
         ));
     }

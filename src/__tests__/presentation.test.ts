@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessText, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionRestartNotice, privilegeText, serviceVisualState, taskText, updateStatusText, workspaceDisplayText } from "../presentation";
+import { accessText, brandStatusText, overallServiceDetail, overallServiceState, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionRestartNotice, privilegeText, serviceVisualState, taskText, updateStatusText, workspaceDisplayText } from "../presentation";
 
 describe("LB-015 presentation", () => {
   it("maps frozen Chinese wording", () => {
@@ -66,6 +66,26 @@ describe("LB-015 presentation", () => {
       ...reconciling,
       workspace: { ...reconciling.workspace, observedPath: "D:/project/LocalBridge", effective: "available" },
     } as unknown as Parameters<typeof workspaceDisplayText>[0])).toBe("D:/project/LocalBridge");
+  });
+  it("collapses three services into the one question the user is asking", () => {
+    const services = (localEnvironmentService: string, tunnelService: string, codingService: string) =>
+      ({ localEnvironmentService, tunnelService, codingService, runtimeStatus: "ready" }) as unknown as Parameters<typeof overallServiceState>[0];
+    expect(overallServiceState(services("online", "online", "online"))).toBe("ready");
+    expect(overallServiceState(services("online", "starting", "online"))).toBe("starting");
+    expect(overallServiceState(services("online", "recovering", "online"))).toBe("starting");
+    expect(overallServiceState(services("off", "online", "online"))).toBe("off");
+    // The worst state wins: one broken service means the app is not usable,
+    // however healthy the other two look.
+    expect(overallServiceState(services("fault", "starting", "online"))).toBe("fault");
+    expect(overallServiceState(null)).toBe("unknown");
+    // 标题行已经说了"已就绪"，这一行只需要不矛盾，不需要复述。
+    expect(overallServiceDetail(services("online", "online", "online"))).toBe("正常");
+    expect(brandStatusText(services("online", "online", "online"))).toBe("LocalBridge 已就绪");
+    expect(brandStatusText(services("fault", "online", "online"))).toBe("LocalBridge 连接失败");
+    expect(brandStatusText(null)).toBe("LocalBridge 正在读取状态");
+    expect(overallServiceDetail(services("online", "fault", "online"))).toBe("OpenAI 安全隧道：连接失败");
+    expect(overallServiceDetail(services("off", "fault", "online"))).toBe("本地运行环境：未启动（另有 1 项）");
+    expect(overallServiceDetail(null)).toBeNull();
   });
   it("renders typed update lifecycle without guessing availability", () => {
     const base = { currentVersion: "1.0.0", latestVersion: null, releaseUrl: "https://github.com/owner/repo/releases", operationId: null, attempt: null, retryable: true };

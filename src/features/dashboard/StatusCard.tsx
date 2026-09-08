@@ -1,8 +1,22 @@
+import { useState } from "react";
 import type { MainProjection, ProjectProjection, ServiceCode } from "../../bridge";
-import { accessText, projectionStatusText, serviceText, workspaceDisplayText } from "../../presentation";
+import {
+  accessText,
+  overallServiceDetail,
+  overallServiceState,
+  projectionStatusText,
+  serviceText,
+  workspaceDisplayText,
+} from "../../presentation";
 import { ServiceStatusDot } from "../../components/ServiceStatusDot";
 
-function ServiceRow({
+const SERVICES: Array<[keyof MainProjection, string]> = [
+  ["localEnvironmentService", "本地运行环境"],
+  ["tunnelService", "OpenAI 安全隧道"],
+  ["codingService", "编码服务"],
+];
+
+function ServiceDetailRow({
   label,
   service,
   projection,
@@ -12,7 +26,7 @@ function ServiceRow({
   projection: MainProjection | null;
 }) {
   return (
-    <div className="row">
+    <div className="row service-detail-row">
       <span className="label">{label}</span>
       <span className="value service-value">
         <ServiceStatusDot service={service} />
@@ -28,6 +42,10 @@ function ServiceRow({
   );
 }
 
+/**
+ * 项目、权限和运行状态是上下文，不是头条。三项服务折叠成一行；
+ * 出故障时自动展开，因为那正是唯一需要看清是哪一项的时刻。
+ */
 export function StatusCard({
   projection,
   activeProject,
@@ -39,6 +57,10 @@ export function StatusCard({
   adminModeFullAccess: boolean;
   onOpenProjectPicker: () => void;
 }) {
+  const [manuallyExpanded, setManuallyExpanded] = useState(false);
+  const faulted = overallServiceState(projection) === "fault";
+  const expanded = manuallyExpanded || faulted;
+
   return (
     <section className="card">
       <div className="row">
@@ -56,21 +78,7 @@ export function StatusCard({
           </button>
         </div>
       </div>
-      <ServiceRow
-        label="本地运行环境"
-        service={projection?.localEnvironmentService ?? null}
-        projection={projection}
-      />
-      <ServiceRow
-        label="OpenAI 安全隧道"
-        service={projection?.tunnelService ?? null}
-        projection={projection}
-      />
-      <ServiceRow
-        label="编码服务"
-        service={projection?.codingService ?? null}
-        projection={projection}
-      />
+
       <div className="row">
         <span className="label">权限模式</span>
         <span className="value permission-mode-value">
@@ -81,6 +89,35 @@ export function StatusCard({
               : "正在读取"}
         </span>
       </div>
+
+      <div className="row">
+        <span className="label">运行状态</span>
+        <span className="value service-value">
+          <span>{overallServiceDetail(projection) ?? "正在读取"}</span>
+          <button
+            className="ghost services-toggle"
+            aria-expanded={expanded}
+            aria-controls="service-details"
+            disabled={faulted}
+            onClick={() => setManuallyExpanded((current) => !current)}
+          >
+            {expanded ? "收起" : "详情"}
+          </button>
+        </span>
+      </div>
+
+      {expanded ? (
+        <div id="service-details" className="service-details">
+          {SERVICES.map(([key, label]) => (
+            <ServiceDetailRow
+              key={label}
+              label={label}
+              service={(projection?.[key] as ServiceCode | null | undefined) ?? null}
+              projection={projection}
+            />
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

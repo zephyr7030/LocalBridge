@@ -14,7 +14,10 @@ export function WindowChrome({ children }: PropsWithChildren) {
   return (
     <div className="window-chrome">
       <header className="window-titlebar" onMouseDown={startDrag}>
-        <span className="window-title">LocalBridge</span>
+        <span className="window-identity">
+          <span className="window-icon" aria-hidden="true" />
+          <span className="window-title">LocalBridge</span>
+        </span>
         <div className="window-controls" aria-label="窗口控制">
           <button
             type="button"

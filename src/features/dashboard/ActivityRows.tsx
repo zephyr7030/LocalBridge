@@ -23,8 +23,8 @@ export function ActivityRows({
   return (
     <>
       <div className="task-row" aria-live="polite">
-        <span className={`activity-dot task-${taskState}`} aria-hidden="true" />
         <span className="activity-row-main">
+          <span className={`activity-dot task-${taskState}`} aria-hidden="true" />
           <span className="activity-action">{currentActivityText(currentActivity, activityStatus)}</span>
           {detail && <span className="activity-summary">{detail}</span>}
         </span>
@@ -32,8 +32,8 @@ export function ActivityRows({
       </div>
       {lastActivity ? (
         <div className="last-tool-row">
-          <span className="activity-dot-spacer" aria-hidden="true" />
           <span className={`last-activity-left outcome-${lastActivity.outcome}`}>
+            <span className="activity-dot-spacer" aria-hidden="true" />
             <span className="activity-action">上次执行：{lastActivityAction(lastActivity)}</span>
             {lastActivity.summary && <span className="activity-summary">{lastActivity.summary}</span>}
             <span className="activity-outcome">{lastActivityOutcome(lastActivity)}</span>

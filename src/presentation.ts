@@ -1,9 +1,78 @@
+import { APP_NAME } from "./appModel";
 import type { AccessCode, CurrentActivityProjection, LastActivityProjection, LastToolProjection, MainProjection, PrivilegeCode, ProjectionStatusCode, ServiceCode, TaskProjection, UpdateProjection } from "./bridge";
 export const uiText = { dashboard: "主控界面", settings: "设置", diagnostics: "诊断" } as const;
 export const accessText: Record<AccessCode, string> = { edit: "编辑模式", full: "完整模式", admin: "管理员模式" };
 export const privilegeText: Record<PrivilegeCode, string> = { off: "未启用", requested: "等待授权", awaiting: "等待系统授权", active: "已启用", fault: "故障" };
 export const serviceText: Record<ServiceCode, string> = { off: "未启动", starting: "正在启动", online: "已连接", recovering: "正在恢复", fault: "连接失败" };
 export type ServiceVisualState = "ready" | "starting" | "fault" | "unknown";
+export type OverallServiceCode = "ready" | "starting" | "fault" | "off" | "unknown";
+const overallText: Record<OverallServiceCode, string> = {
+  ready: "就绪",
+  starting: "正在启动",
+  fault: "连接失败",
+  off: "未启动",
+  unknown: "正在读取",
+};
+const serviceLabels = [
+  ["localEnvironmentService", "本地运行环境"],
+  ["tunnelService", "OpenAI 安全隧道"],
+  ["codingService", "编码服务"],
+] as const;
+
+function serviceStates(projection: MainProjection | null): ServiceCode[] | null {
+  if (!projection) return null;
+  const states = serviceLabels.map(([key]) => projection[key]);
+  return states.every((state): state is ServiceCode => state != null) ? states : null;
+}
+
+// 取最坏的一项。用户要的是"现在能不能用"，不是三个独立事实。
+export function overallServiceState(projection: MainProjection | null): OverallServiceCode {
+  const states = serviceStates(projection);
+  if (!states) return "unknown";
+  if (states.includes("fault")) return "fault";
+  if (states.includes("starting") || states.includes("recovering")) return "starting";
+  if (states.includes("off")) return "off";
+  return "ready";
+}
+
+// 左上角那一行。产品名和当前状态说的是同一件事，不必占两行。
+export function brandStatusText(projection: MainProjection | null): string {
+  const state = overallServiceState(projection);
+  const suffix = state === "ready" ? "已就绪"
+    : state === "starting" ? "正在启动"
+      : state === "fault" ? "连接失败"
+        : state === "off" ? "未启动"
+          : "正在读取状态";
+  return `${APP_NAME} ${suffix}`;
+}
+
+export function overallServiceText(projection: MainProjection | null): string {
+  const state = overallServiceState(projection);
+  if (state !== "unknown") return overallText[state];
+  return projection ? projectionStatusText(projection.runtimeStatus) : "正在读取";
+}
+
+// 一切正常时不必点名；出问题时直接说是哪一项，省去用户展开去找。
+export function overallServiceDetail(projection: MainProjection | null): string | null {
+  const states = serviceStates(projection);
+  if (!states) return null;
+  const broken = serviceLabels
+    .map(([, label], index) => [label, states[index]] as const)
+    .filter(([, state]) => state !== "online");
+  // 标题行已经说过"已就绪"，这里再说一遍"3 项服务正常"是同一句话讲两遍。
+  if (broken.length === 0) return "正常";
+  const [label, state] = broken[0];
+  const rest = broken.length > 1 ? `（另有 ${broken.length - 1} 项）` : "";
+  return `${label}：${serviceText[state]}${rest}`;
+}
+
+export const overallVisualState: Record<OverallServiceCode, ServiceVisualState> = {
+  ready: "ready",
+  starting: "starting",
+  fault: "fault",
+  off: "unknown",
+  unknown: "unknown",
+};
 export const serviceVisualState: Record<ServiceCode, ServiceVisualState> = { off: "unknown", starting: "starting", online: "ready", recovering: "starting", fault: "fault" };
 export function projectionStatusText(status: ProjectionStatusCode): string {
   if (status === "stale") return "正在刷新";
