@@ -1820,6 +1820,7 @@ fn schema28_public_runtime_behavior_is_real_end_to_end() {
         "recursive",
         "timeout_ms",
         "max_output_bytes",
+        "confirmation_token",
     ] {
         assert!(
             served_elevated["inputSchema"]["properties"][property].is_object(),
@@ -2896,6 +2897,7 @@ fn actual_bundled_mcp_is_reached_only_through_loopback_policy_server() {
         "recursive",
         "timeout_ms",
         "max_output_bytes",
+        "confirmation_token",
     ] {
         assert!(
             elevated_schema["inputSchema"]["properties"][property].is_object(),
@@ -5505,4 +5507,103 @@ fn typed_administrator_process_shell_and_filesystem_routes_are_broker_only() {
         .expect("MCP stop after typed administrator routing");
     drop(coding);
     cleanup_test_directory(&workspace);
+}
+
+#[test]
+fn a_flagged_administrator_command_waits_for_a_person_and_then_runs_exactly_once() {
+    // 这条把三段接起来验：风险分类器点名 → 闸门拦下并发令牌 → 用户批准后
+    // 同一条命令可以放行一次。单测已经把令牌存储本身钉死了，这里要证明的是
+    // 三者真的连在一起，而不是各自正确却没接上。
+    let _guard = crate::execution::confirmation::lock_for_test();
+
+    let arguments = json!({
+        "operation": "shell",
+        "shell": "cmd",
+        "command": "format D: /q",
+        "workdir": "D:\\project"
+    });
+    let audit = AdministratorAudit::from_arguments(&arguments);
+    assert_eq!(audit.risk, vec!["disk_format"], "分类器应当点名这条命令");
+
+    // 没有令牌：拦下，并把令牌交出去。
+    let blocked = administrator_confirmation_gate(&audit, &arguments)
+        .expect("flagged command must not reach the broker unconfirmed");
+    let error = &blocked["structuredContent"]["error"];
+    assert_eq!(error["code"], "ElevatedOperationNotReviewed");
+    assert_eq!(error["details"]["confirmation"], "awaiting");
+    assert_eq!(error["retryable"], true);
+    let token = error["details"]["confirmation_token"]
+        .as_str()
+        .expect("模型需要一个可以带回来的令牌")
+        .to_string();
+    let id = error["details"]["confirmation_id"]
+        .as_str()
+        .expect("窗口需要一个可以批准的 id")
+        .to_string();
+
+    // 令牌本身不是许可：没人点头之前带着它回来也不放行。
+    let mut with_token = arguments.clone();
+    with_token["confirmation_token"] = json!(token);
+    let audit_retry = AdministratorAudit::from_arguments(&with_token);
+    let still_blocked = administrator_confirmation_gate(&audit_retry, &with_token)
+        .expect("possession of a token is not permission");
+    assert_eq!(
+        still_blocked["structuredContent"]["error"]["details"]["confirmation"],
+        "awaiting"
+    );
+
+    // 人点头之后，同一条命令放行。
+    assert!(crate::execution::confirmation::approve(&id));
+    assert!(
+        administrator_confirmation_gate(&audit_retry, &with_token).is_none(),
+        "an approved token must let the very command that was approved through"
+    );
+
+    // 一次批准只放行一次；重放按令牌不存在处理。
+    let replay = administrator_confirmation_gate(&audit_retry, &with_token)
+        .expect("an approval is spent by the command it approved");
+    assert_eq!(
+        replay["structuredContent"]["error"]["details"]["confirmation"],
+        "unknown"
+    );
+}
+
+#[test]
+fn an_ordinary_administrator_command_is_never_interrupted() {
+    // 弹窗的代价全在这里：如果日常操作也弹，用户会学会不看就点。
+    let _guard = crate::execution::confirmation::lock_for_test();
+    for command in [
+        "ipconfig /all",
+        "sc query LocalBridgeBroker",
+        "reg add HKLM\\SOFTWARE\\Foo /v Bar /t REG_SZ /d baz /f",
+        "Get-ChildItem C:\\Windows -Recurse | Select-Object -First 5",
+        "winget install --id Git.Git",
+    ] {
+        let arguments = json!({"operation":"shell","shell":"cmd","command":command});
+        let audit = AdministratorAudit::from_arguments(&arguments);
+        assert!(
+            audit.risk.is_empty(),
+            "分类器误判了日常命令：{command} -> {:?}",
+            audit.risk
+        );
+        assert!(
+            administrator_confirmation_gate(&audit, &arguments).is_none(),
+            "日常命令被拦下了：{command}"
+        );
+    }
+}
+
+#[test]
+fn the_structured_administrator_routes_are_not_gated_on_free_text() {
+    // filesystem 与 process 路由已经结构化到路径或程序名，没有自由文本可分类。
+    // 闸门沿用分类器的边界，不自己另立一套。
+    let _guard = crate::execution::confirmation::lock_for_test();
+    let arguments = json!({
+        "operation":"filesystem",
+        "action":"delete",
+        "path":"C:\\ProgramData\\LocalBridge\\stale.log"
+    });
+    let audit = AdministratorAudit::from_arguments(&arguments);
+    assert!(audit.risk.is_empty());
+    assert!(administrator_confirmation_gate(&audit, &arguments).is_none());
 }

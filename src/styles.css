@@ -86,6 +86,19 @@ button{cursor:pointer}
 .brand .service-status-dot{width:9px;height:9px;flex:0 0 9px}
 .top-actions{grid-column:2;justify-self:end;display:flex;gap:8px}
 
+/* 等人点头的管理员命令。它比其它模态更靠前：其它模态是用户自己打开的，
+   这一个是被打断的那一方。 */
+.confirmation-backdrop{z-index:30}
+.confirmation-dialog{width:min(560px,100%)}
+.confirmation-lead{margin:0 0 14px;color:#6e6e73;line-height:1.55}
+.confirmation-chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--font-auxiliary)}
+.confirmation-route{font-weight:650;color:#8a5300}
+.confirmation-expiry{margin-left:auto;color:#6e6e73}
+/* 命令原文是用户唯一的判断依据：等宽、可换行、可选中，一个字都不省。 */
+.confirmation-command{margin:10px 0 0;padding:10px 12px;border:1px solid rgba(0,0,0,.1);border-radius:10px;background:#f5f5f7;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:var(--font-body);line-height:1.55;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
+.confirmation-workdir{margin:8px 0 0;color:#6e6e73;font-size:var(--font-auxiliary);overflow-wrap:anywhere}
+.confirmation-more{margin:10px 0 0;color:#6e6e73;font-size:var(--font-auxiliary)}
+
 /* 此刻在干什么。字号和位置已经把它排在第一位，不必再加一块底色；
    同一个平面上多出一块灰只是噪音。 */
 .status-headline{display:grid;gap:4px;margin:0 0 8px;padding-bottom:10px;border-bottom:1px solid rgba(0,0,0,.06)}
@@ -284,6 +297,9 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   .ghost:not(:disabled):hover{background:#3a3a3c}
   .choice{color:#d1d1d6}
   .row+.row{border-top-color:rgba(255,255,255,.09)}
+  .confirmation-route{color:var(--admin-accent)}
+  .confirmation-lead,.confirmation-expiry,.confirmation-workdir,.confirmation-more{color:#98989d}
+  .confirmation-command{border-color:rgba(255,255,255,.14);background:#1c1c1e}
   .status-headline{border-bottom-color:rgba(255,255,255,.09)}
   .context-bar,.service-details{border-bottom-color:rgba(255,255,255,.09)}
   .status-detail{color:#98989d}

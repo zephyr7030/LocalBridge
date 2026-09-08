@@ -7,7 +7,8 @@ use localbridge_lib::app::{
 use localbridge_lib::domain::UpdateCheckTrigger;
 use localbridge_lib::privilege::PrivilegeController;
 use localbridge_lib::tray::{
-    MAIN_WINDOW_LABEL, ensure_main_window, install_tray, sync_main_webview_to_client,
+    MAIN_WINDOW_LABEL, ensure_main_window, install_tray, start_attention_window_watcher,
+    sync_main_webview_to_client,
 };
 // The E2E driver is the only consumer of the geometry constants; keeping the import
 // gated the same way as the driver avoids an unused-import warning in release builds.
@@ -47,6 +48,7 @@ fn main() {
             let _ = lifecycle.start_update_check(UpdateCheckTrigger::Startup);
             app.manage(lifecycle);
             install_tray(app.handle())?;
+            start_attention_window_watcher(app.handle());
             let wake_app = app.handle().clone();
             single_instance.start_wake_listener(move || {
                 let _ = ensure_main_window(&wake_app);

@@ -16,6 +16,7 @@ LocalBridge 将 ChatGPT 插件与 Windows 本地环境连接起来。无需反�
 - 管理后台命令与长时间任务
 - 检查 Windows 服务、日志和运行环境
 - 执行常见系统诊断与管理员维护操作
+- 在主窗口里回看 ChatGPT 对这台机器做过的每一件事
 
 无论是修复 Bug、重构项目、排查构建问题，还是检查 Windows 运行状态，都可以直接在 ChatGPT 对话中继续完成。
 
@@ -37,14 +38,22 @@ LocalBridge 将运行所需的工具统一放入安装包，不依赖系统 PATH
 
 当前支持 **Windows 11 x64**。
 
-1. 前往 **[Releases](../../releases)**，下载 `LocalBridge_0.1.5_x64-setup.exe`。
+1. 前往 **[Releases](../../releases)**，下载最新的 `LocalBridge_<版本>_x64-setup.exe`。
 2. 安装后选择本地项目并完成连接设置。
 3. 根据应用引导创建 **Local Bridge** ChatGPT 插件连接。
 4. 回到 ChatGPT，开始处理本地开发或系统维护任务。
 
 ## 权限与安全
 
-LocalBridge 提供编辑、完整和管理员三种权限模式。管理员操作通过明确确认和 Windows UAC 启用；Runtime API Key 保存在 Windows 安全凭据中，不写入普通配置文件。
+LocalBridge 提供编辑、完整和管理员三种权限模式。管理员模式需要经过 Windows UAC，并且所有管理员操作都走一个独立的特权 Broker 进程，而不是由主程序自己提权。
+
+**每一条管理员命令都会原样记入本机的审计账本**，包括被拒绝和未执行的。账本只留在这台机器上。
+
+**破坏性命令不会直接执行。** 当一条命令落入这几类——批量删除、磁盘格式化、注册表删除、关闭本机防护、破坏恢复手段、增删管理员账户——LocalBridge 不会执行它，而是交回一个确认令牌，并把命令原文摆到主窗口里等你点头。批准与那一条命令、那一个工作目录绑定，用过即失效，超时自动作废；换一条命令就得重新问。
+
+这里有一点需要说清楚：**识别命令靠的是文本匹配，而文本匹配不是安全边界**——一条命令完全可以在运行时拼出自己的目标。真正的边界是 UAC 与 Broker 授权，确认弹窗是在此之上的一层礼貌。所以判定刻意偏向沉默：读取、列举、查询、构建、安装、启动一律不打扰你，只有不可撤销的、以及削弱本机自我防护的操作才会拦下来。漏判的代价是少一次弹窗，不是越过了边界。
+
+Runtime API Key 保存在 Windows 安全凭据中，不写入普通配置文件。无遥测、无使用统计、无崩溃信息上传。
 
 完整的权限边界和安全设计见 [SECURITY.md](SECURITY.md)。
 
@@ -52,14 +61,18 @@ LocalBridge 提供编辑、完整和管理员三种权限模式。管理员操�
 
 ## 从源码构建
 
-仅开发者需要准备 Node.js 和 Rust：
+仅开发者需要准备 Node.js 和 rustup。Rust 版本由仓库根目录的 `rust-toolchain.toml` 锁定，rustup 会自动取用，不要手工指定——测试与发布包必须由同一个编译器产出。
 
 ```powershell
 npm ci
 node scripts/prepare-lb018-resources.mjs
-npm test
-npm run build
-cargo test --manifest-path src-tauri/Cargo.toml --locked -- --test-threads=1
+node scripts/test/ci-gate.mjs
+```
+
+`ci-gate.mjs` 是唯一的门禁入口，串起工具链核对、格式、许可证审计、前端单测与构建、Rust 测试与 clippy，直到产出 NSIS 安装包。窗口行为另有一个真实渲染的端到端检查：
+
+```powershell
+node tests/e2e/onboarding/fixed_window_runtime_e2e.mjs
 ```
 
 ---

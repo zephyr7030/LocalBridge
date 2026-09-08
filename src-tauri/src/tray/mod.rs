@@ -239,6 +239,46 @@ fn select_frozen_ico_frame(
         ))
 }
 
+/// 后端需要用户回答时，把主窗口叫到前台。
+///
+/// LocalBridge 的常态是托盘里的一个图标：窗口关着，用户人在 ChatGPT 那边。
+/// 所以"请看窗口"这件事必须由后端主动做——前端没法把自己的窗口叫起来。
+///
+/// 三类状态共用这一条路：断线重连放弃、管理员权限待授权、高危命令待确认。
+/// 在此之前 `BackgroundRecoveryAction::ShowFinalErrorWindow` 只有定义和构造、
+/// 没有任何消费者，于是重连失败的提示只在用户恰好开着窗口时才看得见。
+pub fn start_attention_window_watcher<R: Runtime>(app: &AppHandle<R>) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut raised_for: Option<u64> = None;
+        loop {
+            // 一秒一次：待确认那一步很便宜，但取控制面快照不是，
+            // 而这三件事都不是毫秒级的紧急事项。
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let Some(lifecycle) = app.try_state::<DesktopLifecycle>() else {
+                continue;
+            };
+            if !crate::commands::ui::user_attention_required(&lifecycle) {
+                raised_for = None;
+                continue;
+            }
+            // 只在状态变化时打扰一次。持续的故障不该每半秒把窗口抢回来，
+            // 但一条新的待确认命令必须能再叫一次——所以记的是确认账本的
+            // 版本号，而不是一个布尔。
+            let fingerprint = crate::execution::confirmation::revision();
+            if raised_for == Some(fingerprint) {
+                continue;
+            }
+            raised_for = Some(fingerprint);
+            let raise = app.clone();
+            // 窗口操作交回主线程：Windows 上从别的线程 show/set_focus 不可靠。
+            let _ = app.run_on_main_thread(move || {
+                let _ = ensure_main_window(&raise);
+            });
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

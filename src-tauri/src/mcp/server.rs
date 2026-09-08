@@ -3354,6 +3354,7 @@ fn append_elevated_exec_tool(result: &mut Value) {
                 "shell": {"type": "string", "enum": ["auto", "powershell", "pwsh", "windows_powershell", "cmd"], "description": "Logical shell selector for shell operations."},
                 "command": {"type": "string", "description": "Reviewed shell command text."},
                 "workdir": {"type": ["string", "null"], "description": "Administrator-route working directory when applicable."},
+                "confirmation_token": {"type": "string", "description": "Token returned by a previous ElevatedOperationNotReviewed response, once a person has approved that exact command in the LocalBridge window."},
                 "action": {"type": "string", "enum": ["read_file", "write_file", "create_directory", "rename", "delete"], "description": "Filesystem action."},
                 "path": {"type": "string", "description": "Filesystem source/target path."},
                 "destination": {"type": ["string", "null"], "description": "Rename destination when applicable."},
@@ -4124,6 +4125,69 @@ impl AdministratorAudit {
     }
 }
 
+/// 风险分类器点名的命令不会直接执行。
+///
+/// 返回 `Some(result)` 表示这次调用到此为止：要么在等人批准，要么令牌不作数。
+/// 返回 `None` 表示可以往下走——命令没被点名，或者用户已经批准过这一条。
+///
+/// 这里不阻塞。MCP 调用立刻带着令牌返回，人在窗口里批准之后模型重试即可，
+/// 所以不会有一个工作线程停在那儿等人。
+fn administrator_confirmation_gate(audit: &AdministratorAudit, arguments: &Value) -> Option<Value> {
+    if audit.risk.is_empty() {
+        return None;
+    }
+    let workdir = audit.workdir.as_deref();
+    if let Some(token) = arguments
+        .get("confirmation_token")
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+    {
+        return match crate::execution::confirmation::redeem(
+            token,
+            audit.route,
+            &audit.command,
+            workdir,
+        ) {
+            Ok(()) => None,
+            Err(reason) => {
+                // 账本要说清是哪一种：等待中、过期、对不上、不存在，这四件事
+                // 对读日志的人意味着完全不同的下一步。
+                audit.record(&format!("confirmation_{}", reason.code()), None);
+                Some(
+                    FacadeError::new(
+                        FacadeErrorCode::ElevatedOperationNotReviewed,
+                        "确认令牌不可用于这条命令",
+                        false,
+                    )
+                    .with_details(json!({
+                        "confirmation": reason.code(),
+                        "risk": audit.risk,
+                    }))
+                    .to_mcp_result(),
+                )
+            }
+        };
+    }
+
+    let (token, id) =
+        crate::execution::confirmation::request(audit.route, &audit.command, workdir, &audit.risk);
+    audit.record("awaiting_confirmation", None);
+    Some(
+        FacadeError::new(
+            FacadeErrorCode::ElevatedOperationNotReviewed,
+            "这条命令需要用户在 LocalBridge 窗口中确认后才会执行",
+            true,
+        )
+        .with_details(json!({
+            "confirmation": "awaiting",
+            "confirmation_token": token,
+            "confirmation_id": id,
+            "risk": audit.risk,
+        }))
+        .to_mcp_result(),
+    )
+}
+
 fn administrator_process_summary(arguments: &Value) -> String {
     let program = arguments
         .get("program")
@@ -4207,6 +4271,10 @@ fn handle_elevated_exec(
         return write_rpc_result(stream, id, elevation_required_result(), Some(session));
     }
     let audit = AdministratorAudit::from_arguments(&reviewed_arguments);
+    if let Some(blocked) = administrator_confirmation_gate(&audit, &reviewed_arguments) {
+        finish_elevated_task(current_task, Some(TaskExecutionState::Blocked));
+        return write_rpc_result(stream, id, blocked, Some(session));
+    }
     let route = match elevated_exec_spec(arguments) {
         Ok(route) => route,
         Err(()) => {

@@ -320,6 +320,29 @@ pub async fn ui_ready(app: AppHandle) -> UiResult<()> {
     .map_err(UiError::from_string)
 }
 
+/// 后端此刻是否在等用户回答。
+///
+/// 三件事会让它为真：断线重连已经放弃并要求用户介入、管理员权限在等授权、
+/// 有高危命令等着确认。它们的共同点是——在用户回答之前，事情不会自己往下走。
+///
+/// 这个判断存在的理由是 `BackgroundRecoveryAction::ShowFinalErrorWindow`：
+/// 那个枚举有定义、有构造，却从来没有任何代码去消费它。于是"重连失败请看
+/// 窗口"这件事只在用户恰好开着窗口时才成立，而 LocalBridge 平时是关着窗口
+/// 挂在托盘里的。
+pub fn user_attention_required(lifecycle: &DesktopLifecycle) -> bool {
+    if !crate::execution::confirmation::awaiting().is_empty() {
+        return true;
+    }
+    let Ok(projection) = get_main_projection_blocking(lifecycle) else {
+        return false;
+    };
+    projection.reconnect.is_some()
+        || matches!(
+            projection.permission_reconciliation,
+            Some("authorization_required" | "awaiting_authorization")
+        )
+}
+
 fn get_main_projection_blocking(lifecycle: &DesktopLifecycle) -> UiResult<MainProjection> {
     let control_plane = lifecycle.control_plane_snapshot();
     let runtime = ready_section_value(&control_plane.runtime);

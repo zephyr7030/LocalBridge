@@ -90,6 +90,10 @@ arbitrary_shell_executable_path = "deny"
 # recorded instead of guessed at.
 control_plane_mutation = "deny_declared_reference"
 command_audit = "required"
+# 风险分类器点名的命令不会直接执行：后端交回一个确认令牌，令牌要等人在
+# 窗口里批准之后才可兑换。分类器漏判只意味着少一次弹窗，不意味着越过了
+# 边界——真正的边界仍然是 Broker 授权。
+command_confirmation = "required_for_flagged"
 
 
 [credentials]

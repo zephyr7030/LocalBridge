@@ -345,6 +345,7 @@ struct AdministratorGatewaySection {
     shell: String,
     filesystem: String,
     command_audit: String,
+    command_confirmation: String,
     system_management_identity: String,
     arbitrary_shell_executable_path: String,
     control_plane_mutation: String,
@@ -1159,6 +1160,7 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
             != "deny"
         || document.administrator_gateway.control_plane_mutation != "deny_declared_reference"
         || document.administrator_gateway.command_audit != "required"
+        || document.administrator_gateway.command_confirmation != "required_for_flagged"
     {
         return Err(PolicyError::ContractMismatch("administrator_gateway"));
     }

@@ -1,3 +1,4 @@
+pub(crate) mod confirmation;
 pub(crate) mod output_handles;
 pub(crate) mod policy;
 pub(crate) mod risk;

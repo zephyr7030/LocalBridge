@@ -25,6 +25,11 @@ const outcomeText: Record<string, string> = {
   timed_out: "超时",
   lost: "已丢失",
   broker_failed: "失败",
+  awaiting_confirmation: "等待确认",
+  confirmation_awaiting: "等待确认",
+  confirmation_expired: "确认已超时",
+  confirmation_mismatch: "令牌与命令不符",
+  confirmation_unknown: "令牌无效",
   elevation_unavailable: "未授权",
 };
 

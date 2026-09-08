@@ -167,7 +167,7 @@ impl FacadeErrorCode {
             }
             Self::InvalidShellSyntax => "按所选 Windows Shell 的原生语法修正命令",
             Self::ElevatedOperationNotReviewed => {
-                "使用允许列表中的程序、参数与工作目录提交管理员操作"
+                "使用允许列表中的程序、参数与工作目录；若响应带 confirmation_token，请在用户于 LocalBridge 窗口批准后，用同样的参数加上该令牌重试"
             }
             Self::PrivilegedRouteNotAvailable | Self::ElevationRequired => {
                 "检查 workspace_context 中的权限模式与管理员路由状态"
