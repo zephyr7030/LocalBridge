@@ -7,7 +7,9 @@ import { UiErrorNotice } from "../../components/UiErrorNotice";
 import { Diagnostics } from "../diagnostics/Diagnostics";
 import { ProjectPicker } from "./ProjectPicker";
 import { SettingsSheet } from "./SettingsSheet";
-import { StatusCard } from "./StatusCard";
+import { ActivityFeed } from "./ActivityFeed";
+import { ContextBar } from "./ContextBar";
+import { ServiceDetails } from "./ServiceDetails";
 import { StatusHeadline } from "./StatusHeadline";
 import { useDashboardProjection } from "./useDashboardProjection";
 
@@ -62,14 +64,18 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
         </div>
       </header>
 
-      <StatusHeadline projection={projection} />
-
-      <StatusCard
+      <ContextBar
         projection={projection}
         activeProject={activeProject}
         adminModeFullAccess={adminModeFullAccess}
         onOpenProjectPicker={openProjectPicker}
       />
+
+      <StatusHeadline projection={projection} />
+
+      <ServiceDetails projection={projection} />
+
+      <ActivityFeed />
 
       {projection?.activeFaults.length ? (
         <section className="fault-banner" role="alert">

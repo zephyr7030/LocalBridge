@@ -1119,6 +1119,29 @@ fn configure_accepted_stream(stream: &TcpStream) -> Result<(), ()> {
         .map_err(|_| ())
 }
 
+/// 一次工具调用作用在什么上。工具名说不出"它动了哪个文件"，
+/// 而那正是用户看活动记录时唯一想知道的事。
+fn tool_call_target(name: &str, arguments: &Value) -> Option<String> {
+    let field = |key: &str| arguments.get(key).and_then(Value::as_str);
+    let target = match name {
+        "filesystem" | "document_workflow" | "view_image" => field("path"),
+        "exec_command" => field("command"),
+        "git_workflow" | "command_control" | "task_control" => field("action"),
+        "agent_workflow" => field("objective").or_else(|| field("action")),
+        _ => None,
+    }?;
+    Some(truncate_target(target))
+}
+
+fn truncate_target(value: &str) -> String {
+    const MAX_TARGET_CHARS: usize = 160;
+    if value.chars().count() <= MAX_TARGET_CHARS {
+        return value.to_string();
+    }
+    let kept: String = value.chars().take(MAX_TARGET_CHARS).collect();
+    format!("{kept}…")
+}
+
 fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> Result<(), ()> {
     let ConnectionContext {
         authenticator,
@@ -1661,7 +1684,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                 let registered_task =
                     RegisteredTaskProjection::new(task_id, tasks.clone(), current_task.clone());
                 let request_key = request_diagnostic_key(&id);
-                record_mcp_request_start(&request_key, session, name);
+                record_mcp_request_start(
+                    &request_key,
+                    session,
+                    name,
+                    tool_call_target(name, &arguments).as_deref(),
+                );
                 let result = handle_elevated_exec(
                     &mut stream,
                     id,
@@ -1722,7 +1750,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             }
             if name == "task_control" {
                 let request_key = request_diagnostic_key(&id);
-                record_mcp_request_start(&request_key, session, name);
+                record_mcp_request_start(
+                    &request_key,
+                    session,
+                    name,
+                    tool_call_target(name, &arguments).as_deref(),
+                );
                 let result = handle_task_control(
                     &mut stream,
                     id,
@@ -1746,7 +1779,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
             }
             if name == "workspace_context" {
                 let request_key = request_diagnostic_key(&id);
-                record_mcp_request_start(&request_key, session, name);
+                record_mcp_request_start(
+                    &request_key,
+                    session,
+                    name,
+                    tool_call_target(name, &arguments).as_deref(),
+                );
                 let decision = public_policy
                     .read()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1869,6 +1907,7 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                                     &request_diagnostic_key(&id),
                                     session,
                                     name,
+                                    tool_call_target(name, &arguments).as_deref(),
                                 );
                                 let decision = public_policy
                                     .read()
@@ -1938,7 +1977,12 @@ fn handle_connection(mut stream: TcpStream, context: ConnectionContext<'_>) -> R
                     Some(session),
                 );
             }
-            record_mcp_request_start(&request_diagnostic_key(&id), session, name);
+            record_mcp_request_start(
+                &request_diagnostic_key(&id),
+                session,
+                name,
+                tool_call_target(name, &arguments).as_deref(),
+            );
             let private_request_value = rpc_request_id_to_json(&private_request_id);
             let call_task_id = registered_task
                 .clone()
@@ -3182,7 +3226,7 @@ fn handle_workspace_filesystem(
         stopping,
     } = context;
     let request_key = request_diagnostic_key(&id);
-    record_mcp_request_start(&request_key, session, "filesystem");
+    record_mcp_request_start(&request_key, session, "filesystem", None);
     let request = match parse_filesystem_request(&arguments) {
         Ok(request) => request,
         Err(error) => {
@@ -3492,7 +3536,7 @@ fn handle_administrator_filesystem(
         Ok(request) => request,
         Err(error) => {
             let request_key = request_diagnostic_key(&id);
-            record_mcp_request_start(&request_key, session, "filesystem");
+            record_mcp_request_start(&request_key, session, "filesystem", None);
             project_filesystem_task(
                 current_task,
                 TaskKind::ModifyFile,
@@ -3511,7 +3555,7 @@ fn handle_administrator_filesystem(
         execution_guard.authorize_public_request(mode, "filesystem", arguments)
     {
         let request_key = request_diagnostic_key(&id);
-        record_mcp_request_start(&request_key, session, "filesystem");
+        record_mcp_request_start(&request_key, session, "filesystem", None);
         project_filesystem_task(current_task, kind, TaskExecutionState::Blocked);
         current_task.project(CurrentTaskStatus::Idle);
         return finalize_special_handler_request(
@@ -3522,7 +3566,7 @@ fn handle_administrator_filesystem(
     }
     if let Err(error) = execution_guard.validate_workspace_identity() {
         let request_key = request_diagnostic_key(&id);
-        record_mcp_request_start(&request_key, session, "filesystem");
+        record_mcp_request_start(&request_key, session, "filesystem", None);
         project_filesystem_task(current_task, kind, TaskExecutionState::Blocked);
         current_task.project(CurrentTaskStatus::Idle);
         return finalize_special_handler_request(
@@ -3536,7 +3580,7 @@ fn handle_administrator_filesystem(
         Ok(spec) => spec,
         Err(error) => {
             let request_key = request_diagnostic_key(&id);
-            record_mcp_request_start(&request_key, session, "filesystem");
+            record_mcp_request_start(&request_key, session, "filesystem", None);
             project_filesystem_task(current_task, kind, TaskExecutionState::Blocked);
             current_task.project(CurrentTaskStatus::Idle);
             return finalize_special_handler_request(
@@ -3549,7 +3593,7 @@ fn handle_administrator_filesystem(
     drop(execution_guard);
 
     let request_key = request_diagnostic_key(&id);
-    record_mcp_request_start(&request_key, session, "filesystem");
+    record_mcp_request_start(&request_key, session, "filesystem", None);
     let Some(privileged) = privileged else {
         finish_filesystem_task(
             current_task,

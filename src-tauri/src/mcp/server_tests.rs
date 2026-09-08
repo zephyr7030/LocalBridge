@@ -899,7 +899,7 @@ fn r1_transport_cancel_lookup_is_scoped_by_mcp_session() {
 #[test]
 fn schema42_special_handler_abort_closes_request_diagnostics() {
     crate::diagnostics::reset_request_diagnostics_for_test();
-    record_mcp_request_start("special-abort", "session-special", "task_control");
+    record_mcp_request_start("special-abort", "session-special", "task_control", None);
     assert!(finalize_special_handler_request("special-abort", "session-special", Err(())).is_err());
     let events = crate::diagnostics::request_diagnostics_for_test();
     let end = events
@@ -917,7 +917,12 @@ fn schema43_response_diagnostics_finalize_after_transport_delivery() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     crate::diagnostics::reset_request_diagnostics_for_test();
-    record_mcp_request_start("response-ok", "session-response", "filesystem");
+    record_mcp_request_start(
+        "response-ok",
+        "session-response",
+        "filesystem",
+        Some("C:/work/a.txt"),
+    );
     let delivered = AtomicBool::new(false);
     let result = stable_success(json!({"changed":true}), "done");
     assert!(
@@ -936,7 +941,12 @@ fn schema43_response_diagnostics_finalize_after_transport_delivery() {
     assert_eq!(success.outcome.as_deref(), Some("success"));
 
     crate::diagnostics::reset_request_diagnostics_for_test();
-    record_mcp_request_start("response-fail", "session-response", "filesystem");
+    record_mcp_request_start(
+        "response-fail",
+        "session-response",
+        "filesystem",
+        Some("C:/work/b.txt"),
+    );
     let delivered = AtomicBool::new(false);
     assert!(
         finalize_response_diagnostic("response-fail", "session-response", Err(()), || {

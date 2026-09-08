@@ -87,6 +87,26 @@ pub fn administrator_command(
     }));
 }
 
+/// 账本里最近的管理员命令，最新的在前。
+///
+/// 倒着读整个文件而不是解析全部：这个文件的目的是被人读，不是被查询。
+/// 单行损坏就跳过——一条记不全的记录不该让整份记录读不出来。
+pub fn recent_administrator_commands(limit: usize) -> Vec<Value> {
+    let Some(path) = current_path() else {
+        return Vec::new();
+    };
+    let Ok(contents) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    contents
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|entry| entry.get("kind").and_then(Value::as_str) == Some("administrator_command"))
+        .take(limit)
+        .collect()
+}
+
 fn append(mut entry: Value) {
     let Some(path) = current_path() else {
         return;

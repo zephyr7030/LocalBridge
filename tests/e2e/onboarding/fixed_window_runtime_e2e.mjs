@@ -96,12 +96,12 @@ const requestedView = process.argv.slice(2).find((argument) => !argument.startsW
 if (requestedView) {
   if (!['onboarding', 'dashboard'].includes(requestedView)) throw new Error(`Unknown fixed-window E2E view: ${requestedView}`);
   const marker = await runView(requestedView);
-  console.log(`LB016_FIXED_WINDOW_E2E=PASS view=${requestedView} logical_fixed=780x620 native_dpi_scaling=true native_decorations=false resizable=false maximizable=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false`);
+  console.log(`LB016_FIXED_WINDOW_E2E=PASS view=${requestedView} native_dpi_scaling=true native_decorations=false resizable=false maximizable=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false`);
   console.log(marker);
 } else {
   const onboarding = await runView("onboarding");
   const dashboard = await runView("dashboard");
-  console.log("LB016_FIXED_WINDOW_E2E=PASS views=2 logical_fixed=780x620 native_dpi_scaling=true native_decorations=false resizable=false maximizable=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false");
+  console.log("LB016_FIXED_WINDOW_E2E=PASS views=2 native_dpi_scaling=true native_decorations=false resizable=false maximizable=false single_custom_chrome=true edge_to_edge=true controls=drag,minimize,close maximize=false");
   console.log(onboarding);
   console.log(dashboard);
 }

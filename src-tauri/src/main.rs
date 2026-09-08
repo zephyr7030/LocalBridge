@@ -7,9 +7,12 @@ use localbridge_lib::app::{
 use localbridge_lib::domain::UpdateCheckTrigger;
 use localbridge_lib::privilege::PrivilegeController;
 use localbridge_lib::tray::{
-    MAIN_WINDOW_LABEL, MAIN_WINDOW_LOGICAL_HEIGHT, MAIN_WINDOW_LOGICAL_WIDTH, ensure_main_window,
-    install_tray, sync_main_webview_to_client,
+    MAIN_WINDOW_LABEL, ensure_main_window, install_tray, sync_main_webview_to_client,
 };
+// The E2E driver is the only consumer of the geometry constants; keeping the import
+// gated the same way as the driver avoids an unused-import warning in release builds.
+#[cfg(debug_assertions)]
+use localbridge_lib::tray::{MAIN_WINDOW_LOGICAL_HEIGHT, MAIN_WINDOW_LOGICAL_WIDTH};
 #[cfg(debug_assertions)]
 use localbridge_lib::{FixedWindowE2eMetricsSink, settings::SettingsStore};
 #[cfg(debug_assertions)]
@@ -453,8 +456,15 @@ fn execute_fixed_window_e2e(
         String::new()
     };
     let dashboard_geometry = if matches!(view, FixedWindowE2eView::Dashboard) {
+        // 仪表盘已经没有卡片了；结论里如实写出来，而不是让一条不再适用的
+        // 断言默默消失。
+        let card_surface = if metrics.dashboard_card_background_before_settings.is_some() {
+            "flat"
+        } else {
+            "absent"
+        };
         format!(
-            " settings_replace_delta={:.2}px rounded_scroll=true scrollbar_arrows=false scroll_surface=true",
+            " dashboard_card={card_surface} settings_replace_delta={:.2}px rounded_scroll=true scrollbar_arrows=false scroll_surface=true",
             (metrics.settings_replace_lefts[0] - metrics.settings_replace_lefts[1]).abs()
         )
     } else {
@@ -637,32 +647,37 @@ fn assert_fixed_window_e2e_metrics(
                     metrics.dashboard_overlay_count_before_settings
                 ));
             }
-            let card_background = metrics
-                .dashboard_card_background_before_settings
-                .as_deref()
-                .ok_or("dashboard card computed background missing")?;
-            if card_background != "rgba(0, 0, 0, 0)" && card_background != "transparent" {
-                return Err(format!(
-                    "dashboard card still has an independent background: {card_background}"
-                ));
-            }
-            let card_border = metrics
-                .dashboard_card_border_width_before_settings
-                .as_deref()
-                .ok_or("dashboard card computed border missing")?;
-            if card_border != "0px" {
-                return Err(format!(
-                    "dashboard card still has an independent border: {card_border}"
-                ));
-            }
-            let card_shadow = metrics
-                .dashboard_card_box_shadow_before_settings
-                .as_deref()
-                .ok_or("dashboard card computed shadow missing")?;
-            if card_shadow != "none" && !card_shadow.is_empty() {
-                return Err(format!(
-                    "dashboard card still has an independent shadow: {card_shadow}"
-                ));
+            // 这条断言原本管的是"卡片不得画自己的背景/边框/阴影"。仪表盘现在
+            // 没有卡片了——项目与权限成了一行上下文条，版面让给了活动记录。
+            // 与其为了满足断言造一个空壳，不如按事实检查：卡片在就必须是平的，
+            // 不在就在结论里说清楚它不在，而不是悄悄跳过。
+            match metrics.dashboard_card_background_before_settings.as_deref() {
+                None => {}
+                Some(background) => {
+                    if background != "rgba(0, 0, 0, 0)" && background != "transparent" {
+                        return Err(format!(
+                            "dashboard card still has an independent background: {background}"
+                        ));
+                    }
+                    let card_border = metrics
+                        .dashboard_card_border_width_before_settings
+                        .as_deref()
+                        .ok_or("dashboard card computed border missing")?;
+                    if card_border != "0px" {
+                        return Err(format!(
+                            "dashboard card still has an independent border: {card_border}"
+                        ));
+                    }
+                    let card_shadow = metrics
+                        .dashboard_card_box_shadow_before_settings
+                        .as_deref()
+                        .ok_or("dashboard card computed shadow missing")?;
+                    if card_shadow != "none" && !card_shadow.is_empty() {
+                        return Err(format!(
+                            "dashboard card still has an independent shadow: {card_shadow}"
+                        ));
+                    }
+                }
             }
             let replace_delta =
                 (metrics.settings_replace_lefts[0] - metrics.settings_replace_lefts[1]).abs();

@@ -151,6 +151,9 @@ pub struct RequestDiagnosticEvent {
     pub connection_id: String,
     pub attempt: u32,
     pub tool: String,
+    /// 这次调用作用在什么上：文件路径、命令、Git 子操作。
+    /// 只有工具名的日志回答不了用户真正要问的问题。
+    pub target: Option<String>,
     pub outcome: Option<String>,
     pub error_code: Option<String>,
     pub phase: Option<String>,
@@ -531,6 +534,7 @@ pub fn record_recovery_attempt_event(event: &RecoveryAttemptEvent) {
                         connection_id: connection_id.clone(),
                         attempt: *attempt,
                         tool: tool.clone(),
+                        target: None,
                         outcome: None,
                         error_code: None,
                         phase: None,
@@ -598,7 +602,12 @@ fn mcp_diagnostic_request_id(request_key: &str, connection_id: &str) -> String {
     format!("mcp:{connection_id}:{request_key}")
 }
 
-pub fn record_mcp_request_start(request_key: &str, connection_id: &str, tool: &str) {
+pub fn record_mcp_request_start(
+    request_key: &str,
+    connection_id: &str,
+    tool: &str,
+    target: Option<&str>,
+) {
     diagnostics_store().mutate(|state| {
         push_request_event(
             &mut state.requests,
@@ -609,6 +618,7 @@ pub fn record_mcp_request_start(request_key: &str, connection_id: &str, tool: &s
                 connection_id: connection_id.to_string(),
                 attempt: 1,
                 tool: tool.to_string(),
+                target: target.map(str::to_string),
                 outcome: None,
                 error_code: None,
                 phase: None,
@@ -707,6 +717,7 @@ fn push_mcp_request_end(log: &mut RequestDiagnosticState, end: McpRequestEnd<'_>
             connection_id: end.connection_id.to_string(),
             attempt: 1,
             tool: String::new(),
+            target: None,
             outcome: Some(end.outcome.to_string()),
             error_code: end.error_code,
             phase: end.phase,
@@ -761,6 +772,7 @@ fn push_request_end_fields(
             connection_id: active.connection_id,
             attempt: active.attempt,
             tool: active.tool,
+            target: None,
             outcome: Some(outcome.to_string()),
             error_code,
             phase,
@@ -776,8 +788,7 @@ fn push_request_event(log: &mut RequestDiagnosticState, event: RequestDiagnostic
     log.events.truncate(REQUEST_DIAGNOSTIC_LIMIT);
 }
 
-#[cfg(test)]
-fn recent_request_diagnostics() -> Vec<RequestDiagnosticEvent> {
+pub fn recent_request_diagnostics() -> Vec<RequestDiagnosticEvent> {
     diagnostics_store().read().request_diagnostics
 }
 

@@ -53,6 +53,7 @@ macro_rules! localbridge_invoke_handler {
             commands::onboarding::choose_onboarding_workspace_folder,
             commands::onboarding::prepare_onboarding_project,
             commands::onboarding::complete_onboarding,
+            commands::activity::get_activity,
             commands::diagnostics::get_diagnostics,
             commands::diagnostics::wait_diagnostics_change,
             commands::diagnostics::open_logs,

@@ -142,6 +142,7 @@ fn one_log_owner_revisions_real_changes_and_deduplicates_stable_observations() {
             connection_id: "session-revision".into(),
             attempt: 1,
             tool: "workspace_context".into(),
+            target: None,
             outcome: None,
             error_code: None,
             phase: None,
@@ -455,6 +456,7 @@ fn mcp_request_diagnostics_are_append_only_and_bounded() {
             &format!("request-{index}"),
             "session-bounded",
             "workspace_context",
+            None,
         );
     }
     let events = request_diagnostics_for_test();
