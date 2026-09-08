@@ -344,6 +344,7 @@ struct AdministratorGatewaySection {
     direct_process: String,
     shell: String,
     filesystem: String,
+    command_audit: String,
     system_management_identity: String,
     arbitrary_shell_executable_path: String,
     control_plane_mutation: String,
@@ -353,6 +354,9 @@ struct AdministratorGatewaySection {
 #[serde(deny_unknown_fields)]
 struct AdministratorShellRequest {
     operation: String,
+    // Parsed, never read: deserializing it is what rejects a shell selector the
+    // broker does not recognise, before the request gets that far.
+    #[allow(dead_code)]
     shell: ShellSelector,
     command: String,
     workdir: String,
@@ -991,40 +995,6 @@ fn command_invokes_any(command: &str, invocations: &[&str]) -> bool {
         })
 }
 
-fn static_nested_cmd_inner(command: &str) -> Option<&str> {
-    let trimmed = command.trim();
-    let (program, rest) = if let Some(quoted) = trimmed.strip_prefix('"') {
-        let end = quoted.find('"')?;
-        (&quoted[..end], &quoted[end + 1..])
-    } else {
-        let end = trimmed.find(char::is_whitespace)?;
-        (&trimmed[..end], &trimmed[end..])
-    };
-    let program = program.rsplit(['\\', '/']).next().unwrap_or(program);
-    if !matches!(program.to_ascii_lowercase().as_str(), "cmd" | "cmd.exe") {
-        return None;
-    }
-    let rest = rest.trim_start();
-    let switch_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    if !matches!(
-        rest[..switch_end].to_ascii_lowercase().as_str(),
-        "/c" | "/k"
-    ) {
-        return None;
-    }
-    let inner = rest[switch_end..].trim_start();
-    (!inner.is_empty()).then_some(inner)
-}
-
-fn nested_cmd_body(inner: &str) -> &str {
-    let inner = inner.trim();
-    inner
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .filter(|value| !value.is_empty())
-        .unwrap_or(inner)
-}
-
 fn is_control_plane_name(name: &str) -> bool {
     CONTROL_PLANE_NAMES.contains(&name)
         || name.starts_with("localbridge.")
@@ -1187,7 +1157,8 @@ fn validate_document(document: &PolicyDocument) -> Result<(), PolicyError> {
             .administrator_gateway
             .arbitrary_shell_executable_path
             != "deny"
-        || document.administrator_gateway.control_plane_mutation != "deny_always"
+        || document.administrator_gateway.control_plane_mutation != "deny_declared_reference"
+        || document.administrator_gateway.command_audit != "required"
     {
         return Err(PolicyError::ContractMismatch("administrator_gateway"));
     }
@@ -1343,7 +1314,6 @@ fn reviewed_administrator_shell(arguments: &Value) -> bool {
         || request.max_output_bytes > MAX_ELEVATED_OUTPUT_BYTES
         || explicit_control_plane_reference_obfuscated(&request.command)
         || explicit_control_plane_reference(&request.workdir)
-        || administrator_shell_dynamic_target_construction(request.shell, &request.command)
     {
         return false;
     }
@@ -1357,70 +1327,6 @@ fn reviewed_administrator_shell(arguments: &Value) -> bool {
         return false;
     }
     true
-}
-
-fn administrator_shell_dynamic_target_construction(shell: ShellSelector, command: &str) -> bool {
-    match shell {
-        ShellSelector::Cmd => administrator_cmd_dynamic_target_construction(command),
-        ShellSelector::Auto
-        | ShellSelector::Powershell
-        | ShellSelector::Pwsh
-        | ShellSelector::WindowsPowershell => {
-            administrator_powershell_dynamic_target_construction(command)
-                || static_nested_cmd_inner(command).is_some_and(|inner| {
-                    administrator_cmd_dynamic_target_construction(nested_cmd_body(inner))
-                })
-        }
-    }
-}
-
-fn administrator_powershell_dynamic_target_construction(command: &str) -> bool {
-    // Administrator Shell requests must be statically reviewable. These are
-    // PowerShell language surfaces that can synthesize a path/command after the
-    // PEP decision, so allowing them would make control_plane_mutation=deny_always
-    // depend on request spelling rather than the executed target.
-    if command.chars().any(|ch| {
-        matches!(
-            ch,
-            '$' | '`' | '+' | '@' | '(' | ')' | '{' | '}' | '[' | ']'
-        )
-    }) {
-        return true;
-    }
-    let lower = command.to_ascii_lowercase();
-    [
-        "invoke-expression",
-        " iex ",
-        "set-variable",
-        "new-variable",
-        "set-alias",
-        "new-alias",
-        "invoke-command",
-        "foreach-object",
-        "start-process",
-        " -join ",
-        " -f ",
-        "function ",
-        "filter ",
-        "workflow ",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-}
-
-fn administrator_cmd_dynamic_target_construction(command: &str) -> bool {
-    if command.chars().any(|ch| matches!(ch, '%' | '!' | '^')) {
-        return true;
-    }
-    command
-        .split(|ch: char| ch.is_whitespace() || matches!(ch, '&' | '|' | '(' | ')' | ';'))
-        .filter(|word| !word.is_empty())
-        .any(|word| {
-            matches!(
-                word.to_ascii_lowercase().as_str(),
-                "call" | "for" | "setlocal"
-            )
-        })
 }
 
 fn reviewed_administrator_filesystem(arguments: &Value) -> bool {
@@ -1539,21 +1445,11 @@ mod administrator_gateway_tests {
     }
 
     #[test]
-    fn administrator_shell_rejects_dynamic_or_obfuscated_control_plane_targets() {
+    fn administrator_shell_rejects_declared_control_plane_targets_but_not_constructed_ones() {
+        // What the review still guarantees: a request that names the control
+        // plane is refused, including when the name is broken up by quoting.
         for command in [
-            "$a='Local'; $b='Bridge'; Set-Content ('C:\\ProgramData\\'+$a+$b+'\\settings.json') x",
-            "Set-Content ('C:\\ProgramData\\Loc'+'alBridge\\settings.json') x",
-        ] {
-            assert!(
-                !reviewed_elevated_exec(&json!({
-                    "operation":"shell","shell":"powershell","command":command,
-                    "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
-                })),
-                "{command}"
-            );
-        }
-        for command in [
-            "set a=Local&set b=Bridge&del C:\\ProgramData\\%a%%b%\\settings.json",
+            "Set-Content C:\\ProgramData\\LocalBridge\\settings.json x",
             "del C:\\ProgramData\\Loc\"alBri\"dge\\settings.json",
         ] {
             assert!(
@@ -1564,17 +1460,34 @@ mod administrator_gateway_tests {
                 "{command}"
             );
         }
-        for (shell, command) in [
-            ("cmd", "whoami /user"),
-            ("cmd", "sc.exe query wuauserv"),
-            ("powershell", "Get-Service wuauserv"),
+
+        // What it does not guarantee, stated plainly rather than implied by a
+        // blocklist that never closed it. A command that assembles its target
+        // at runtime is opaque to any review of the command text, whichever
+        // constructs that review happens to enumerate: the call operator, dot
+        // sourcing and plain redirection all reach a target the text never
+        // spells out. The boundary for those is the audit ledger, which records
+        // every administrator command whatever it turns out to touch, not a
+        // list of forbidden punctuation that also made ordinary PowerShell
+        // unusable.
+        let constructed = "$a='Local'; $b='Bridge';              Set-Content ('C:\\ProgramData\\'+$a+$b+'\\settings.json') x";
+        assert!(reviewed_elevated_exec(&json!({
+            "operation":"shell","shell":"powershell","command":constructed,
+            "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
+        })));
+
+        // And ordinary administrator work is no longer rejected for containing
+        // a dollar sign or a bracket.
+        for command in [
+            "Get-Service | Where-Object {$_.Status -eq 'Running'}",
+            "Get-ChildItem C:\\Windows\\Logs | Measure-Object -Sum Length",
         ] {
             assert!(
                 reviewed_elevated_exec(&json!({
-                    "operation":"shell","shell":shell,"command":command,
+                    "operation":"shell","shell":"powershell","command":command,
                     "workdir":"C:\\Windows\\Temp","timeout_ms":1000,"max_output_bytes":4096
                 })),
-                "{shell}: {command}"
+                "{command}"
             );
         }
     }

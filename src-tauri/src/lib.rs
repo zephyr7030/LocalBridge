@@ -1,4 +1,5 @@
 pub mod app;
+pub mod audit;
 pub mod commands;
 pub mod control_plane;
 pub mod credentials;

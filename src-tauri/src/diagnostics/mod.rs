@@ -20,9 +20,9 @@ pub mod error;
 pub const DIAGNOSTICS_SCHEMA_VERSION: u32 = 2;
 static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const DIAGNOSTIC_EXPORT_RETENTION: usize = 20;
-pub(crate) const RECENT_DIAGNOSTIC_EVENT_LIMIT: usize = 8;
+pub(crate) const RECENT_DIAGNOSTIC_EVENT_LIMIT: usize = 200;
 const RECENT_EVENT_LIMIT: usize = RECENT_DIAGNOSTIC_EVENT_LIMIT;
-pub(crate) const REQUEST_DIAGNOSTIC_LIMIT: usize = 16;
+pub(crate) const REQUEST_DIAGNOSTIC_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticsOutageInput {

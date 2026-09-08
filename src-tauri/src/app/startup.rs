@@ -86,6 +86,7 @@ pub fn configure_desktop_startup(
     lifecycle: &DesktopLifecycle,
 ) -> Result<DesktopStartupOutcome, DesktopStartupError> {
     fs::create_dir_all(app_data_dir).map_err(DesktopStartupError::AppDataIo)?;
+    crate::audit::install(app_data_dir);
     let data = SettingsStore::new(app_data_dir.join("settings.json"))
         .load()
         .map_err(DesktopStartupError::Settings)?;

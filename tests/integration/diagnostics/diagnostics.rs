@@ -213,7 +213,9 @@ fn exhausted_recoverable_generation_reports_exact_five_attempts_but_nonrecoverab
 #[test]
 fn recent_user_events_are_backend_typed_bounded_timestamped_and_redacted() {
     reset_recent_user_events_for_test();
-    for index in 0..12 {
+    // Overshoot the bound so the ring buffer is actually exercised rather than
+    // merely under-filled.
+    for index in 0..RECENT_EVENT_LIMIT + 12 {
         let state = if index % 3 == 0 {
             RuntimeState::Ready
         } else if index % 3 == 1 {
@@ -448,7 +450,7 @@ fn stable_runtime_and_broker_observations_do_not_flood_recent_events() {
 #[test]
 fn mcp_request_diagnostics_are_append_only_and_bounded() {
     reset_request_diagnostics_for_test();
-    for index in 0..40 {
+    for index in 0..REQUEST_DIAGNOSTIC_LIMIT + 40 {
         record_mcp_request_start(
             &format!("request-{index}"),
             "session-bounded",

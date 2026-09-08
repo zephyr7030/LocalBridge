@@ -84,7 +84,12 @@ shell = "trusted_logical_selector_only"
 filesystem = "structured_absolute_path_broker"
 system_management_identity = "exact_system32"
 arbitrary_shell_executable_path = "deny"
-control_plane_mutation = "deny_always"
+# Reviewing command text cannot promise "always": a shell command can assemble
+# its target at runtime. What the review does enforce is that a request may not
+# name the control plane. Everything an administrator command actually does is
+# recorded instead of guessed at.
+control_plane_mutation = "deny_declared_reference"
+command_audit = "required"
 
 
 [credentials]

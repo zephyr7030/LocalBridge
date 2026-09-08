@@ -1013,8 +1013,10 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                         match handled {
                             Ok(Ok(())) => {}
                             Ok(Err(())) => {
-                                eprintln!(
-                                    "[localbridge-mcp] connection closed before response completed"
+                                crate::audit::runtime_event(
+                                    "warning",
+                                    "mcp",
+                                    "connection closed before response completed",
                                 );
                             }
                             Err(_) => {
@@ -1026,8 +1028,10 @@ fn serve(listener: TcpListener, context: ServeContext) -> AgentFacade<CodingTool
                                         None,
                                     );
                                 }
-                                eprintln!(
-                                    "[localbridge-mcp] request handler panicked; connection failed and the runtime stays up"
+                                crate::audit::runtime_event(
+                                    "error",
+                                    "mcp",
+                                    "request handler panicked; connection failed and the runtime stays up",
                                 );
                             }
                         }
@@ -4013,6 +4017,106 @@ fn administrator_filesystem_error_result(code: AdministratorFilesystemErrorCode)
     FacadeError::new(code, message, retryable).to_mcp_result()
 }
 
+/// What an administrator request asked for, captured before the route is
+/// rewritten into a broker spec, so the ledger records what the caller wrote
+/// rather than the `cmd.exe /c ...` the broker ends up executing.
+struct AdministratorAudit {
+    route: &'static str,
+    command: String,
+    workdir: Option<String>,
+    risk: Vec<&'static str>,
+    started_at: Instant,
+}
+
+impl AdministratorAudit {
+    fn from_arguments(arguments: &Value) -> Self {
+        let operation = arguments.get("operation").and_then(Value::as_str);
+        let workdir = arguments
+            .get("workdir")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let (route, command) = match operation {
+            Some("shell") => (
+                "shell",
+                arguments
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+            Some("filesystem") => ("filesystem", administrator_filesystem_summary(arguments)),
+            _ => ("process", administrator_process_summary(arguments)),
+        };
+        // Only the shell route takes free-form text; the other two are already
+        // structured down to a program or a path.
+        let risk = if route == "shell" {
+            crate::execution::risk::classify(&command)
+                .into_iter()
+                .map(crate::execution::risk::RiskCategory::code)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Self {
+            route,
+            command,
+            workdir,
+            risk,
+            started_at: Instant::now(),
+        }
+    }
+
+    fn record(&self, outcome: &str, exit_code: Option<u32>) {
+        let duration_ms = u64::try_from(self.started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        crate::audit::administrator_command(
+            self.route,
+            &self.command,
+            self.workdir.as_deref(),
+            outcome,
+            exit_code,
+            duration_ms,
+            &self.risk,
+        );
+    }
+}
+
+fn administrator_process_summary(arguments: &Value) -> String {
+    let program = arguments
+        .get("program")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let args = arguments
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|args| {
+            args.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    if args.is_empty() {
+        program.to_string()
+    } else {
+        format!("{program} {args}")
+    }
+}
+
+fn administrator_filesystem_summary(arguments: &Value) -> String {
+    let action = arguments
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let path = arguments
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match arguments.get("destination").and_then(Value::as_str) {
+        Some(destination) => format!("{action} {path} -> {destination}"),
+        None => format!("{action} {path}"),
+    }
+}
+
 fn handle_elevated_exec(
     stream: &mut TcpStream,
     id: Value,
@@ -4058,6 +4162,7 @@ fn handle_elevated_exec(
         );
         return write_rpc_result(stream, id, elevation_required_result(), Some(session));
     }
+    let audit = AdministratorAudit::from_arguments(&reviewed_arguments);
     let route = match elevated_exec_spec(arguments) {
         Ok(route) => route,
         Err(()) => {
@@ -4077,6 +4182,7 @@ fn handle_elevated_exec(
         let filesystem = match privileged.filesystem(spec) {
             Ok(filesystem) => filesystem,
             Err(PrivilegedExecError::GateClosed(_)) => {
+                audit.record("elevation_unavailable", None);
                 finish_elevated_task(
                     current_task,
                     Some(TaskExecutionState::AwaitingAuthorization),
@@ -4084,6 +4190,7 @@ fn handle_elevated_exec(
                 return write_rpc_result(stream, id, elevation_required_result(), Some(session));
             }
             Err(PrivilegedExecError::Broker(_)) => {
+                audit.record("broker_failed", None);
                 finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
                 return write_rpc_error(
                     stream,
@@ -4094,6 +4201,7 @@ fn handle_elevated_exec(
                 );
             }
             Err(PrivilegedExecError::Filesystem(_)) => {
+                audit.record("broker_failed", None);
                 finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
                 return write_rpc_error(
                     stream,
@@ -4104,6 +4212,7 @@ fn handle_elevated_exec(
                 );
             }
         };
+        audit.record("completed", None);
         let response = json!({
             "content": [{"type":"text","text":"Privileged filesystem operation completed"}],
             "structuredContent": {
@@ -4193,6 +4302,7 @@ fn handle_elevated_exec(
     let execution = match execution {
         Ok(execution) => execution,
         Err(PrivilegedExecError::GateClosed(_)) => {
+            audit.record("elevation_unavailable", None);
             finish_elevated_task(
                 current_task,
                 Some(TaskExecutionState::AwaitingAuthorization),
@@ -4200,6 +4310,7 @@ fn handle_elevated_exec(
             return write_rpc_result(stream, id, elevation_required_result(), Some(session));
         }
         Err(PrivilegedExecError::Broker(_)) => {
+            audit.record("broker_failed", None);
             finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
             return write_rpc_error(
                 stream,
@@ -4210,6 +4321,7 @@ fn handle_elevated_exec(
             );
         }
         Err(PrivilegedExecError::Filesystem(_)) => {
+            audit.record("broker_failed", None);
             finish_elevated_task(current_task, Some(TaskExecutionState::Failed));
             return write_rpc_error(
                 stream,
@@ -4226,6 +4338,7 @@ fn handle_elevated_exec(
         ElevatedExecOutcome::TimedOut => "timed_out",
         ElevatedExecOutcome::Cancelled => "cancelled",
     };
+    audit.record(outcome, execution.exit_code);
     let terminal = match execution.outcome {
         ElevatedExecOutcome::Completed => None,
         ElevatedExecOutcome::TimedOut => Some(TaskExecutionState::Failed),

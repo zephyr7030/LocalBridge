@@ -9,15 +9,13 @@ export function adminWarningCanConfirm(notBeforeUnixMs: number, nowUnixMs: numbe
   return nowUnixMs >= notBeforeUnixMs;
 }
 
-const ADMIN_WARNING_CONSEQUENCES = [
-  "删除或覆盖重要文件",
-  "修改系统关键配置",
-  "软件或系统无法正常启动",
-  "数据永久丢失",
-  "安全机制被绕过或关闭",
-  "凭据、密钥等敏感信息泄露",
-  "恶意程序获得更高权限",
-  "系统被破坏，严重时可能需要重装 Windows",
+// 这里不列举灾难。八条递进的后果只会让人练出视而不见的本事，
+// 而且它回答不了用户此刻真正要判断的事：这次授权管多久、之后怎么查、
+// 以及自己是不是根本不需要它。
+const ADMIN_MODE_FACTS = [
+  "这次授权在你切回其他模式之前一直有效，不会每条命令再问你一次。",
+  "每条以管理员身份执行的命令都会原样记进本地日志，可以在诊断里逐条查看。",
+  "LocalBridge 会挡掉明确指向自身配置的命令，但这是一道浅防线，不是保证。",
 ] as const;
 const ADMIN_WARNING_INITIAL_SECONDS = 3;
 
@@ -84,10 +82,10 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
 
   return <div className="dialog-backdrop admin-warning-backdrop" onMouseDown={() => void cancel()}>
     <section className="dialog admin-warning" role="dialog" aria-modal="true" aria-labelledby="admin-warning-title" onMouseDown={(event) => event.stopPropagation()}>
-      <h2 id="admin-warning-title">管理员权限确认</h2>
-      <p>启用管理员权限后，错误或恶意操作可能导致：</p>
-      <ul>{ADMIN_WARNING_CONSEQUENCES.map((item) => <li key={item}>{item}</li>)}</ul>
-      <p className="admin-warning-footer">仅在你明确理解操作后果时授权。</p>
+      <h2 id="admin-warning-title">切换到管理员模式</h2>
+      <p>ChatGPT 发来的命令将以管理员身份运行：可以改动系统设置、服务和注册表，也可以读写任何目录，包括其他模式下拒绝的位置。</p>
+      <ul>{ADMIN_MODE_FACTS.map((item) => <li key={item}>{item}</li>)}</ul>
+      <p className="admin-warning-footer">如果只是让它跑测试、编译或改项目里的文件，完整模式就够了。</p>
       <div className="dialog-actions">
         <button className="secondary" onClick={() => void cancel()}>取消</button>
         <button className="primary admin-warning-confirm" disabled={!backendChallengeReady || remainingSeconds > 0} onClick={() => void confirm()}>{remainingSeconds > 0 ? `确认${remainingSeconds}` : "确认"}</button>
