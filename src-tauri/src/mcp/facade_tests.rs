@@ -2906,3 +2906,54 @@ fn ordinary_commands_are_not_classified_from_argument_substrings() {
         TaskKind::Build
     );
 }
+
+#[test]
+fn transport_timeout_never_terminalizes_a_command_that_is_still_running() {
+    // 传输预算耗尽只说明我们没等到回答，不说明命令死了。上一版三个调用方里
+    // 只有 command_control 记得这一点，于是 exec 和后台回收都会把活着的进程
+    // 标成失败，它的输出从此取不回来。规则现在归 mark_error_terminal 所有。
+    let task_state = test_task_state("timeout-not-terminal");
+    let mut sessions = PublicCommandSessions::default();
+    let public = bind_test_session(&mut sessions, &task_state, "PRIVATE_TIMEOUT");
+
+    let timed_out = normalize_runtime_error(CodingToolsRuntimeError::RequestTimeout);
+    assert_eq!(timed_out.code, FacadeErrorCode::OperationTimedOut);
+    sessions
+        .mark_error_terminal(&public, &timed_out, &task_state)
+        .expect("a transport timeout is not an error to record");
+
+    let execution = task_state
+        .execution_for_public_session(&PublicSessionId::new(public.clone()))
+        .expect("the execution survives the timeout");
+    assert!(
+        matches!(execution.state, ExecutionState::Running),
+        "a timed-out transport left the execution as {:?}",
+        execution.state
+    );
+
+    // 而真正的失败仍然照常落地，否则上面那条就变成了"永不终结"。
+    sessions
+        .mark_error_terminal(&public, &session_unavailable(), &task_state)
+        .expect("a real failure still settles");
+    let execution = task_state
+        .execution_for_public_session(&PublicSessionId::new(public))
+        .expect("the execution remains authoritative");
+    assert!(matches!(execution.state, ExecutionState::Terminal(_)));
+}
+
+#[test]
+fn a_timed_out_command_hands_back_a_session_id_to_poll_with() {
+    // "稍后 poll 以观察同一 Execution"这句补救建议，在载荷里没有 session_id
+    // 的时候是空头支票——模型手上没有任何可 poll 的句柄。
+    let error = normalize_runtime_error(CodingToolsRuntimeError::RequestTimeout)
+        .with_message("命令已超出 yield_time_ms 传输预算，仍在后台运行")
+        .with_details(json!({"session_id": "PUBLIC_ABC"}));
+    let payload = error.to_mcp_result();
+    let error_object = &payload["structuredContent"]["error"];
+
+    assert_eq!(error_object["code"], "OperationTimedOut");
+    assert_eq!(error_object["details"]["session_id"], "PUBLIC_ABC");
+    assert_eq!(error_object["retryable"], true);
+    // 契约要求错误响应的 data 为 null，所以 session_id 只能落在 details 里。
+    assert!(payload["structuredContent"]["data"].is_null());
+}

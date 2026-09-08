@@ -232,6 +232,11 @@ impl FacadeError {
         self
     }
 
+    pub fn with_message(mut self, message: &'static str) -> Self {
+        self.message = message;
+        self
+    }
+
     pub fn to_mcp_result(&self) -> Value {
         let diagnostic = self
             .diagnostic
@@ -1150,12 +1155,21 @@ impl PublicCommandSessions {
         Ok(())
     }
 
+    /// 超时不是终态。传输预算耗尽只说明"我们没等到回答"，不说明命令死了——
+    /// 它还在运行时里跑着。把它标成失败，控制面上就会出现一个已失败的活进程，
+    /// 而它的输出再也取不回来。
+    ///
+    /// 这条规则属于这里，而不是属于三个调用方各自记得：`command_control`
+    /// 当初写对了，`execute_shell` 和 `reap_command_sessions` 都漏了。
     fn mark_error_terminal(
         &mut self,
         public_session_id: &str,
         error: &FacadeError,
         executions: &ExecutionRegistry,
     ) -> Result<(), FacadeError> {
+        if error.code == FacadeErrorCode::OperationTimedOut {
+            return Ok(());
+        }
         self.mark_terminal(public_session_id, error.to_mcp_result(), executions)
     }
 
@@ -1854,6 +1868,13 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                     &error,
                     &self.executions,
                 )?;
+                if error.code == FacadeErrorCode::OperationTimedOut {
+                    // 会话在这一步之前就建好了，只是模型还不知道它的 id。
+                    // 不交出去，那句"稍后 poll 以观察同一 Execution"就是空头支票。
+                    return Err(error
+                        .with_message("命令已超出 yield_time_ms 传输预算，仍在后台运行")
+                        .with_details(json!({"session_id": public_session_id.as_str()})));
+                }
                 Err(error)
             }
         }
@@ -2132,6 +2153,8 @@ impl WorkspaceRuntimeAdapter for CodingToolsRuntimeAdapter {
                         .public_commands
                         .terminal_with_pending(&public_session_id, terminal));
                 }
+                // mark_error_terminal 现在自己会挡住超时，这里留着这层判断是为了
+                // clear_cancellation：一次超时的 kill 请求不代表取消已经作废。
                 if error.code != FacadeErrorCode::OperationTimedOut {
                     if action == CommandControlAction::Kill {
                         self.executions.clear_cancellation(&public_session_key);
@@ -2942,8 +2965,17 @@ fn command_state_internal_error() -> FacadeError {
     )
 }
 
+/// 运行时承诺在 `yield_time_ms` 处让出之后，回答还要走一趟传输。这段余量
+/// 就是留给那一趟的。机器越忙它越不够用——但超时已不再丢会话，所以它现在
+/// 只影响响应延迟，不再是正确性的悬崖。
+const COMMAND_YIELD_TRANSPORT_HEADROOM_MS: u64 = 3_000;
+
 fn command_transport_timeout(wait_ms: u64) -> std::time::Duration {
-    std::time::Duration::from_millis(wait_ms.min(30_000).saturating_add(3_000))
+    std::time::Duration::from_millis(
+        wait_ms
+            .min(30_000)
+            .saturating_add(COMMAND_YIELD_TRANSPORT_HEADROOM_MS),
+    )
 }
 
 fn command_control_transport_timeout(wait_ms: u64) -> std::time::Duration {

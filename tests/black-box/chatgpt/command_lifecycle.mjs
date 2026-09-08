@@ -8,11 +8,18 @@ export function publicCommandIsPending(response) {
   );
 }
 
+// 待决响应有两种形状，session_id 的位置也就有两处：
+//   status:"running"  —— 成功响应，id 在 data.session_id
+//   OperationTimedOut —— 错误响应，契约规定 data 为 null，id 在 error.details
+// 这个断言本身不变：待决就必须给得出一个可 poll 的 id，给不出就是缺陷。
+export function pendingPublicSessionId(response) {
+  const structured = response?.body?.result?.structuredContent;
+  return structured?.data?.session_id ?? structured?.error?.details?.session_id ?? null;
+}
+
 export async function settleAcceptedPublicCommand({ initialResponse, ...driver }) {
   if (!publicCommandIsPending(initialResponse)) return initialResponse;
-  const publicSessionId =
-    driver.publicSessionId ??
-    initialResponse?.body?.result?.structuredContent?.data?.session_id;
+  const publicSessionId = driver.publicSessionId ?? pendingPublicSessionId(initialResponse);
   if (!publicSessionId) {
     const error = new Error("pending public command response has no stable session_id");
     error.code = "PublicSessionIdMissing";
