@@ -251,7 +251,11 @@ export async function runRevision46Scenario({ endpoint, workspace, extraHeaders 
         command: "Start-Sleep -Seconds 4; Write-Output LB_QUEUE_BLOCKER_DONE",
         shell: "windows_powershell",
         yield_time_ms: 10_000,
-        timeout_ms: 20_000,
+        // 这个上限是防跑飞的，不是性能断言。20 秒给一条 4 秒的 sleep，等于
+        // 顺带断言了 powershell.exe 能在 16 秒内冷启动——共享 runner 上它做
+        // 不到，进程在 20054ms 被杀，一个字符都没来得及输出。本文件里其余三
+        // 条 windows_powershell 命令用的都是 60 秒，这一处是唯一的异类。
+        timeout_ms: 60_000,
       },
       "queue-blocker",
     );
