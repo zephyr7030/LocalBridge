@@ -18,6 +18,28 @@ use crate::state::PermissionMode;
 
 const TEST_BEARER: &str = "LOCALBRIDGE_TEST_RUNTIME_BEARER_DO_NOT_LEAK";
 
+const KILL_SETTLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CommandProgress {
+    Pending,
+    Terminal,
+}
+
+// The facade registers a cancellation before it calls the runtime and derives the
+// transport deadline from `wait_ms`, so `OperationTimedOut` means the request ran
+// out of budget while the command carried on — for a waiting caller that is the
+// same situation as `running`, not a failure. `None` is a contract violation.
+pub(crate) fn classify_command_progress(body: &Value) -> Option<CommandProgress> {
+    let content = &body["result"]["structuredContent"];
+    match content["data"]["status"].as_str() {
+        Some("running") => Some(CommandProgress::Pending),
+        Some(_) => Some(CommandProgress::Terminal),
+        None if content["error"]["code"] == "OperationTimedOut" => Some(CommandProgress::Pending),
+        None => None,
+    }
+}
+
 pub(crate) struct ClientResponse {
     pub(crate) status: u16,
     pub(crate) session: Option<String>,
@@ -506,9 +528,8 @@ impl<'a> DetachedCommand<'a> {
                 self.last_response.body
             );
             self.poll(1_000);
-            assert_eq!(
-                self.status(),
-                Some("running"),
+            assert!(
+                !self.reached_terminal(),
                 "command terminated before emitting {marker:?}: {:#?}",
                 self.last_response.body
             );
@@ -549,11 +570,32 @@ impl<'a> DetachedCommand<'a> {
                 "wait_ms":wait_ms
             }),
         );
-        self.observe(response)
+        self.observe(response);
+        self.settle_to_terminal(KILL_SETTLE_TIMEOUT)
     }
 
-    pub(crate) fn status(&self) -> Option<&str> {
-        self.last_response.body["result"]["structuredContent"]["data"]["status"].as_str()
+    fn settle_to_terminal(&mut self, timeout: Duration) -> &ClientResponse {
+        let deadline = Instant::now() + timeout;
+        while !self.reached_terminal() {
+            assert!(
+                Instant::now() < deadline,
+                "killed command did not reach terminal state: {:#?}",
+                self.last_response.body
+            );
+            self.poll(1_000);
+        }
+        &self.last_response
+    }
+
+    fn reached_terminal(&self) -> bool {
+        match classify_command_progress(&self.last_response.body) {
+            Some(CommandProgress::Terminal) => true,
+            Some(CommandProgress::Pending) => false,
+            None => panic!(
+                "command_control returned neither lifecycle status nor bounded timeout: {:#?}",
+                self.last_response.body
+            ),
+        }
     }
 
     fn observe(&mut self, response: ClientResponse) -> &ClientResponse {
@@ -624,11 +666,9 @@ pub(crate) fn poll_public_command_to_terminal(
             json!({"action":"poll","session_id":public_session,"wait_ms":1_000}),
         );
         poll_id = poll_id.saturating_add(1);
-        let content = &response.body["result"]["structuredContent"];
-        match content["data"]["status"].as_str() {
-            Some("running") => {}
-            Some(_) => return response,
-            None if content["error"]["code"] == "OperationTimedOut" => {}
+        match classify_command_progress(&response.body) {
+            Some(CommandProgress::Terminal) => return response,
+            Some(CommandProgress::Pending) => {}
             None => panic!(
                 "public command returned neither lifecycle status nor bounded timeout: {:#?}",
                 response.body
@@ -640,4 +680,46 @@ pub(crate) fn poll_public_command_to_terminal(
             response.body
         );
     }
+}
+
+fn command_control_response(status: Option<&str>, error_code: Option<&str>) -> Value {
+    json!({
+        "result": {
+            "structuredContent": {
+                "data": status.map(|status| json!({"status": status})),
+                "error": error_code.map(|code| json!({"code": code})),
+            }
+        }
+    })
+}
+
+#[test]
+fn transport_budget_expiry_and_running_are_both_pending() {
+    assert_eq!(
+        classify_command_progress(&command_control_response(Some("running"), None)),
+        Some(CommandProgress::Pending)
+    );
+    assert_eq!(
+        classify_command_progress(&command_control_response(None, Some("OperationTimedOut"))),
+        Some(CommandProgress::Pending)
+    );
+}
+
+#[test]
+fn every_other_lifecycle_status_is_terminal() {
+    for status in ["completed", "cancelled", "failed", "timed_out"] {
+        assert_eq!(
+            classify_command_progress(&command_control_response(Some(status), None)),
+            Some(CommandProgress::Terminal),
+            "{status} must settle the wait"
+        );
+    }
+}
+
+#[test]
+fn a_typed_tool_error_is_neither_pending_nor_terminal() {
+    assert_eq!(
+        classify_command_progress(&command_control_response(None, Some("SessionUnavailable"))),
+        None
+    );
 }
