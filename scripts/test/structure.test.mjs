@@ -67,11 +67,15 @@ test("the ChatGPT simulator remains outside production and internal state bounda
   }
 });
 
-test("black-box scenarios reuse the shared command terminal driver", () => {
+test("black-box scenarios own no private copy of the command terminal driver", () => {
   const source = readFileSync(revisionScenarioPath, "utf8");
   assert.match(source, /from "\.\/command_lifecycle\.mjs"/);
   assert.equal(source.includes("function pollToTerminal"), false);
   // Adding a regression scenario must not require changing a magic call count.
   // Terminal/deadline behavior is asserted by command_lifecycle.test.mjs.
   assert.match(source, /await settleAcceptedPublicCommand\(\{/);
+  // 这条只证明场景文件没有自己另写一个轮询器，并且确实用过共享的那个。
+  // 它无法证明每一个待决响应都走了共享驱动——那需要源码文本匹配，而这个
+  // 仓库已经成建制地退役了那类契约。真正漏用的后果由 CI 上的场景本身暴露：
+  // 一个没被驱动到终态的命令会以 status:"running" 直接撞上终态断言。
 });

@@ -301,7 +301,16 @@ export async function runRevision46Scenario({ endpoint, workspace, extraHeaders 
     );
     assert.ok(cancelledQueued.elapsed_ms < 1_000, explain(cancelledQueued));
     assertToolError(await queued, "ProcessCancelled");
-    assert.equal(assertSuccess(await blocker).status, "completed");
+    // blocker 睡 4 秒，yield_time_ms 是 10 秒——只剩 6 秒余量给 PowerShell 冷启动。
+    // 在 CI 这种慢机器上它会先让出、返回 status:"running"，而那不是失败，是这套
+    // 协议的正常一半。断言不变（仍然必须 completed），只是不再要求它在一个来回
+    // 之内完成。这个文件里已经有专门干这件事的助手，这里本就该用它。
+    const blockerSettled = await settleAcceptedPublicCommand({
+      initialResponse: await blocker,
+      callTool: (name, args, requestId) => toolCall(client, name, args, requestId),
+      requestPrefix: "queue-blocker-poll",
+    });
+    assert.equal(assertSuccess(blockerSettled).status, "completed");
     assertToolError(
       await toolCall(
         client,
