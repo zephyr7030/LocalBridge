@@ -8,6 +8,7 @@ import {
   singleChunkedRequestFetch,
 } from "./client.mjs";
 import {
+  callPublicToolUntilAccepted,
   drivePublicCommandToTerminal,
   settleAcceptedPublicCommand,
 } from "./command_lifecycle.mjs";
@@ -62,13 +63,20 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 
 async function toolCall(client, name, args, requestId) {
   try {
-    return await client.execute({
-      op: "tools/call",
-      request_id: requestId,
+    return await callPublicToolUntilAccepted({
+      callTool: (toolName, toolArgs, id) =>
+        client.execute({
+          op: "tools/call",
+          request_id: id,
+          name: toolName,
+          arguments: toolArgs,
+        }),
       name,
-      arguments: args,
+      args,
+      requestId,
     });
   } catch (error) {
+    if (error?.code === "ControlLaneDeadlineExceeded") throw error;
     const cause = error?.cause ? `; cause=${error.cause.code ?? error.cause}` : "";
     throw new Error(`${requestId} transport failed: ${error.message}${cause}`, { cause: error });
   }

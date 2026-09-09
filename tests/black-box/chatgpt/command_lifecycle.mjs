@@ -1,5 +1,45 @@
 const DEFAULT_TERMINAL_DEADLINE_MS = 60_000;
 const DEFAULT_POLL_WAIT_MS = 100;
+const DEFAULT_LANE_DEADLINE_MS = 30_000;
+const DEFAULT_LANE_RETRY_DELAY_MS = 50;
+
+// 控制通道用 try_lock：Work 通道占用期间，一个拿不到直连 command_control 路径的调用
+// 会在到达门面之前就被挡回来，所以请求根本没有执行——服务端正是因此把它标成可重试。
+// 这不是答复，是"现在不行"。只认 retryable，因为 RuntimeUnavailable 也用于
+// "没有可信 Shell" 这类终局失败，那些是 retryable:false。
+export function publicCallWasDeferred(response) {
+  const error = response?.body?.result?.structuredContent?.error;
+  return error?.code === "RuntimeUnavailable" && error?.retryable === true;
+}
+
+export async function callPublicToolUntilAccepted({
+  callTool,
+  name,
+  args,
+  requestId,
+  deadlineMs = DEFAULT_LANE_DEADLINE_MS,
+  retryDelayMs = DEFAULT_LANE_RETRY_DELAY_MS,
+  monotonicNow = () => performance.now(),
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}) {
+  if (typeof callTool !== "function") throw new TypeError("callTool must be a function");
+  if (!Number.isFinite(deadlineMs) || deadlineMs <= 0) {
+    throw new RangeError("deadlineMs must be positive");
+  }
+
+  const deadline = monotonicNow() + deadlineMs;
+  let response;
+  do {
+    response = await callTool(name, args, requestId);
+    if (!publicCallWasDeferred(response)) return response;
+    await sleep(retryDelayMs);
+  } while (monotonicNow() < deadline);
+
+  const error = new Error(`control lane stayed busy for ${deadlineMs}ms`);
+  error.code = "ControlLaneDeadlineExceeded";
+  error.lastResponse = response;
+  throw error;
+}
 
 export function publicCommandIsPending(response) {
   const structured = response?.body?.result?.structuredContent;
