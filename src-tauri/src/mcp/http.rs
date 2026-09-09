@@ -599,6 +599,16 @@ struct HttpResponse {
     body: Vec<u8>,
 }
 
+// 第二个 Duration 是每次读的空闲预算，不是总耗时上限：应答慢但持续的调用不会被
+// 它砍断，沉默超过它才会。
+//
+// 已知缺陷，未修：测试专用的 CodingToolsRuntime::call_tool 走这条路，而
+// tests/integration/mcp/coding_runtime.rs 会送进 yield_time_ms:5000 —— 运行时按它
+// 合法沉默最多 5 秒，超过这里的 2 秒，读超时便冒成 ConnectionUnavailable，与
+// "进程没了"无法区分（lb006 在慢机器上偶发）。生产路径不在此列：需要等待的调用
+// 一律走 private_call_with_timeout，自行由请求的等待推导预算。
+// 两种直觉修法都验证过更糟，别照抄：放大这里的空闲预算、以及改用
+// call_tool_with_timeout 的总死线，都让该测试更容易失败，原因未查明。
 fn post_json(
     port: u16,
     bearer: Option<&InternalBearer>,

@@ -2201,6 +2201,11 @@ fn schema28_public_runtime_behavior_is_real_end_to_end() {
         "{:#?}",
         quoted.body
     );
+    // 已知偶发，根因未查明：慢 runner 上这里出现过 `missing "a|b": ""` —— 命令
+    // isError 为 false（上面的断言过了），却一个字符都没收到。空输出加成功终态，
+    // 说明要么进程没写就结束了，要么 settle_public_command 在最后一段输出送达前
+    // 就凭终态返回了。后者是可查的：它一见非 running 状态就 return，不再排空。
+    // 只有一次样本（CI 34322115063），别按上面这段猜测直接改。
     for literal in ["a|b", "a&b", "q|b", "q&b", "中文输出✓"] {
         assert!(
             quoted_output.contains(literal),

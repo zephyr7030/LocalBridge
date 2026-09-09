@@ -761,6 +761,10 @@ mod tests {
         );
         assert!(!format!("{prepared:?}").contains(SECRET_TWO));
         let mut runtime = prepared.spawn().unwrap();
+        // 已知缺陷，未修：这 10 秒是一条没人选过的断言——"真实 tunnel 二进制能在
+        // 10 秒内启动并完成一次本机探测"。断言要验的是请求头里带不带凭证，与快慢
+        // 无关，慢 runner 上却会因此变红（CI 34322115063）。要么把预算放到不再是
+        // 声明的量级，要么改成轮询到收满为止并只用一条显式墙钟死线。
         let received = request_rx.recv_timeout(Duration::from_secs(10));
         runtime.stop().unwrap();
         probe.join().unwrap();

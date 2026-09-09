@@ -641,6 +641,12 @@ pub(crate) fn settle_public_command(
                 poll_id = poll_id.saturating_add(1);
             }
             Some(_) => return (response, output),
+            // 已知缺陷，未修：这是本文件最后一处仍把预算到期当契约违规的地方。
+            // 上面的 poll 带 wait_ms:1000，撞上预算时响应是 OperationTimedOut、
+            // data 为 null，于是 status 取不到，落进这条 panic —— 慢机器上会把
+            // "再问一次"报成"响应没有 status"。kill、wait_for_output 和
+            // poll_public_command_to_terminal 都已改用 classify_command_progress，
+            // 这里照做即可：Pending 继续轮询，只有真正两者都不是才 panic。
             None => panic!(
                 "public command response has no status: {:#?}",
                 response.body
