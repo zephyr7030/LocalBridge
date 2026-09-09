@@ -35,6 +35,11 @@ export const CI_STAGES = validateStages([
     ...node("scripts/public-release/preflight.mjs", "verify-toolchain"),
   },
   {
+    id: "vendored-payload",
+    label: "byte-stable vendored runtime payload",
+    ...node("scripts/public-release/preflight.mjs", "verify-payload"),
+  },
+  {
     id: "format",
     label: "public source formatting",
     ...node("scripts/public-release/preflight.mjs", "format-check"),

@@ -21,3 +21,9 @@
 *.pyd binary
 *.zip binary
 *.7z binary
+
+# 随仓库携带的运行时载荷（Python 内嵌运行时、coding-tools-mcp、tunnel 客户端）
+# 被 src-tauri/src/mcp/bundle.rs 按整棵树逐字节钉了 SHA-256。它们不是源码，
+# 是载荷：任何换行符转换都会改掉哈希，于是同一个提交在不同 git 配置的机器上
+# 校验结果不同——本机通过而 CI 全红就是这么来的。任何平台都必须原样取出。
+runtime/** binary

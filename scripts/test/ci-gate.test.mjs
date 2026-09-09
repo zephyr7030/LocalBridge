@@ -10,6 +10,7 @@ test("the shared local and CI gate has stable unique stages", () => {
     [
       "test-base",
       "toolchain",
+      "vendored-payload",
       "format",
       "public-release",
       "licenses",

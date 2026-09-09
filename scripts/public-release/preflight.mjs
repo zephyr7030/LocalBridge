@@ -345,6 +345,36 @@ function verifyToolchain() {
   console.log(`TOOLCHAIN_VERIFY=PASS pinned=${pinned}`);
 }
 
+// 随仓库携带的运行时载荷按整棵树逐字节钉了 SHA-256（src-tauri/src/mcp/bundle.rs）。
+// 只要 Git 认为其中任何一个文件是文本，它的字节就取决于检出机器的换行符配置，
+// 于是同一个提交在不同机器上校验结果不同——本机全绿而 CI 全红正是这么来的。
+// 钉住一个哈希，就必须同时钉住被测量的对象。
+function verifyVendoredPayloadIsByteStable() {
+  const roots = ["runtime"];
+  const tracked = roots.flatMap((dir) =>
+    run("git", ["ls-files", "-z", "--", dir]).split("\0").filter(Boolean),
+  );
+  if (tracked.length === 0) {
+    throw new Error("没有找到随仓库携带的运行时载荷，校验目标为空");
+  }
+  // check-attr 一次问完，避免每个文件起一个进程。
+  const answers = run("git", ["check-attr", "-z", "text", "--", ...tracked]).split("\0");
+  const converted = [];
+  for (let index = 0; index + 2 < answers.length; index += 3) {
+    const [path, , value] = answers.slice(index, index + 3);
+    if (value !== "unset") converted.push(`${path} (text: ${value})`);
+  }
+  if (converted.length > 0) {
+    throw new Error(
+      `${converted.length} 个被哈希钉住的载荷文件仍会被 Git 做换行符转换，`
+      + "它们的字节会随检出机器的 git 配置而变：\n  "
+      + converted.slice(0, 10).join("\n  ")
+      + "\n在 .gitattributes 里把它们标成 binary。",
+    );
+  }
+  console.log(`VENDORED_PAYLOAD_VERIFY=PASS files=${tracked.length} eol_conversion=none`);
+}
+
 async function main() {
   const command = process.argv[2] ?? "help";
   if (command === "scan-sensitive") return scanRepositorySensitive();
@@ -365,9 +395,10 @@ async function main() {
     return result;
   }
   if (command === "verify-toolchain") return verifyToolchain();
+  if (command === "verify-payload") return verifyVendoredPayloadIsByteStable();
   if (command === "format-check") return formatCheck();
   if (command === "verify-local-state") return verifyTrackedLocalState();
-  throw new Error("usage: node scripts/public-release/preflight.mjs <scan-sensitive|verify-license|clean-build|export-public|verify-public|audit-package|verify-toolchain|format-check|verify-local-state> [path]");
+  throw new Error("usage: node scripts/public-release/preflight.mjs <scan-sensitive|verify-license|clean-build|export-public|verify-public|audit-package|verify-toolchain|verify-payload|format-check|verify-local-state> [path]");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
