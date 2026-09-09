@@ -184,3 +184,54 @@ fn every_change_moves_the_revision_so_the_window_knows_to_redraw() {
     assert!(approve(&id));
     assert!(revision() > after_request);
 }
+
+#[test]
+fn revision_waiter_blocks_until_confirmation_changes() {
+    let _guard = fresh();
+    let since = revision();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        tx.send(wait_for_revision_after(
+            since,
+            std::time::Duration::from_secs(1),
+        ))
+        .unwrap();
+    });
+
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(40))
+            .is_err()
+    );
+    let _ = request("shell", "del C:\\wake\\*", None, &["bulk_delete"]);
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap() > since,
+        "request did not wake the confirmation waiter"
+    );
+    waiter.join().unwrap();
+}
+
+#[test]
+fn revision_waiter_wakes_when_an_awaiting_request_expires() {
+    let _guard = fresh();
+    let (_token, id) = request("shell", "del C:\\expire\\*", None, &["bulk_delete"]);
+    let since = revision();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        tx.send(wait_for_revision_after(
+            since,
+            std::time::Duration::from_secs(1),
+        ))
+        .unwrap();
+    });
+
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(40))
+            .is_err()
+    );
+    force_expiry_for_test(&id);
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap() > since,
+        "expiry did not wake and advance the confirmation revision"
+    );
+    waiter.join().unwrap();
+}

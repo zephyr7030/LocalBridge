@@ -11,7 +11,10 @@ const KEY_HINT = "Runtime API Key 仅保存在 Windows 安全凭据中。";
 
 type Screen4CopyKey = "name" | "tunnel";
 
-const messageFrom = (value: unknown, fallback: string) => uiErrorText(parseUiError(value, fallback));
+const messageFrom = (value: unknown, fallback: string) => {
+  const error = parseUiError(value, fallback);
+  return error.code === "Ui.FrontendFailure" ? fallback : uiErrorText(error);
+};
 
 export function Onboarding({ initial, onComplete, previewMode = false }: { initial: OnboardingState; onComplete: () => void; previewMode?: boolean }) {
   // Dev-only deep link so the fixed-window E2E harness can open Screen 3

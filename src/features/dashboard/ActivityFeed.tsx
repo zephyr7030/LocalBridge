@@ -21,17 +21,17 @@ export function ActivityFeed() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      let logRevision = 0;
+      let revision = 0;
       let retryDelayMs = 250;
       while (!cancelled) {
         try {
           const next = await activityApi.read();
           if (cancelled) return;
           setEntries(next.entries);
-          logRevision = next.logRevision;
+          revision = next.revision;
           retryDelayMs = 250;
-          // 只等待活动日志自己的 revision；不再让无关的主状态 revision 触发空转。
-          await activityApi.waitForChange(logRevision);
+          // 只等待 Activity 自己的 revision；无关 diagnostics 变化不会返回前端。
+          await activityApi.waitForChange(revision);
         } catch {
           if (cancelled) return;
           await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs));

@@ -75,7 +75,7 @@ pub fn administrator_command(
     duration_ms: u64,
     risk: &[&str],
 ) {
-    append(json!({
+    if append(json!({
         "kind": "administrator_command",
         "route": route,
         "command": truncate(command, MAX_RECORDED_COMMAND_BYTES),
@@ -84,7 +84,9 @@ pub fn administrator_command(
         "exit_code": exit_code,
         "duration_ms": duration_ms,
         "risk": risk,
-    }));
+    })) {
+        crate::diagnostics::mark_activity_changed();
+    }
 }
 
 /// 账本里最近的管理员命令，最新的在前。
@@ -107,23 +109,26 @@ pub fn recent_administrator_commands(limit: usize) -> Vec<Value> {
         .collect()
 }
 
-fn append(mut entry: Value) {
+fn append(mut entry: Value) -> bool {
     let Some(path) = current_path() else {
-        return;
+        return false;
     };
     if let Some(object) = entry.as_object_mut() {
         object.insert("timestamp_ms".into(), json!(unix_time_ms()));
     }
     let Ok(mut line) = serde_json::to_vec(&entry) else {
-        return;
+        return false;
     };
     line.push(b'\n');
     rotate_if_oversized(&path);
     // Auditing is best effort by construction: it must never be able to fail a
     // user operation, and it must never panic inside a worker thread.
-    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = file.write_all(&line);
-    }
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut file| file.write_all(&line))
+        .is_ok()
 }
 
 fn current_path() -> Option<PathBuf> {

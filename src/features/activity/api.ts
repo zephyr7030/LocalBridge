@@ -18,7 +18,7 @@ export interface ActivityEntry {
 }
 
 export interface ActivityProjection {
-  logRevision: number;
+  revision: number;
   entries: ActivityEntry[];
 }
 
@@ -41,7 +41,7 @@ const isEntry = (value: unknown): value is ActivityEntry =>
 
 function parseActivity(value: unknown): ActivityProjection {
   if (!isRecord(value)
-    || typeof value.logRevision !== "number"
+    || typeof value.revision !== "number"
     || !Array.isArray(value.entries)
     || !value.entries.every(isEntry)) {
     throw new Error("后端活动记录合同不兼容");

@@ -194,6 +194,7 @@ struct RequestDiagnosticState {
 #[derive(Debug)]
 struct DiagnosticsState {
     revision: u64,
+    activity_revision: u64,
     recent_events: VecDeque<DiagnosticEvent>,
     recent_observations: RecentUserObservationState,
     requests: RequestDiagnosticState,
@@ -203,6 +204,7 @@ impl Default for DiagnosticsState {
     fn default() -> Self {
         Self {
             revision: 0,
+            activity_revision: 0,
             recent_events: VecDeque::with_capacity(RECENT_EVENT_LIMIT),
             recent_observations: RecentUserObservationState::default(),
             requests: RequestDiagnosticState::default(),
@@ -233,6 +235,49 @@ impl DiagnosticsStore {
             state.revision = state.revision.saturating_add(1);
             self.changed.notify_all();
         }
+    }
+
+    fn mutate_activity(&self, update: impl FnOnce(&mut DiagnosticsState) -> bool) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if update(&mut state) {
+            state.revision = state.revision.saturating_add(1);
+            state.activity_revision = state.activity_revision.saturating_add(1);
+            self.changed.notify_all();
+        }
+    }
+
+    fn mark_activity_changed(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.activity_revision = state.activity_revision.saturating_add(1);
+        self.changed.notify_all();
+    }
+
+    fn activity_revision(&self) -> u64 {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .activity_revision
+    }
+
+    fn wait_activity_after(&self, since: u64, timeout: Duration) -> u64 {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.activity_revision > since {
+            return state.activity_revision;
+        }
+        let (state, _) = self
+            .changed
+            .wait_timeout_while(state, timeout, |state| state.activity_revision <= since)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.activity_revision
     }
 
     fn read(&self) -> DiagnosticsLogSnapshot {
@@ -274,6 +319,18 @@ pub fn wait_diagnostics_log_change_after(since: u64, timeout: Duration) -> u64 {
 
 pub fn diagnostics_log_revision() -> u64 {
     diagnostics_store().read().revision
+}
+
+pub fn activity_revision() -> u64 {
+    diagnostics_store().activity_revision()
+}
+
+pub fn mark_activity_changed() {
+    diagnostics_store().mark_activity_changed();
+}
+
+pub fn wait_activity_change_after(since: u64, timeout: Duration) -> u64 {
+    diagnostics_store().wait_activity_after(since, timeout)
 }
 
 pub fn build_snapshot(
@@ -494,7 +551,7 @@ pub fn record_runtime_user_events(
 }
 
 pub fn record_recovery_attempt_event(event: &RecoveryAttemptEvent) {
-    diagnostics_store().mutate(|state| {
+    diagnostics_store().mutate_activity(|state| {
         let log = &mut state.requests;
         match event {
             RecoveryAttemptEvent::Started {
@@ -621,7 +678,7 @@ pub fn record_mcp_request_start_with_operation(
     operation: Option<&str>,
     target: Option<&str>,
 ) {
-    diagnostics_store().mutate(|state| {
+    diagnostics_store().mutate_activity(|state| {
         push_request_event(
             &mut state.requests,
             RequestDiagnosticEvent {
@@ -672,7 +729,7 @@ pub fn record_mcp_request_result(request_key: &str, connection_id: &str, result:
             _ => "failed",
         }
     };
-    diagnostics_store().mutate(|state| {
+    diagnostics_store().mutate_activity(|state| {
         push_mcp_request_end(
             &mut state.requests,
             McpRequestEnd {
@@ -694,7 +751,7 @@ pub fn record_mcp_request_error(
     connection_id: &str,
     diagnostic: ErrorDiagnostic,
 ) {
-    diagnostics_store().mutate(|state| {
+    diagnostics_store().mutate_activity(|state| {
         push_mcp_request_end(
             &mut state.requests,
             McpRequestEnd {
@@ -815,7 +872,7 @@ pub(crate) fn request_diagnostics_for_test() -> Vec<RequestDiagnosticEvent> {
 
 #[cfg(test)]
 pub(crate) fn reset_request_diagnostics_for_test() {
-    diagnostics_store().mutate(|state| {
+    diagnostics_store().mutate_activity(|state| {
         state.requests = RequestDiagnosticState::default();
         true
     });

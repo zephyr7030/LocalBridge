@@ -8,8 +8,10 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 - Activity history now keeps each tool's second-level operation in the existing action field, for example 文档 写入, instead of dropping the operation.
 - Activity outcomes now render with green success, yellow neutral, and red failure semantics, while unknown backend enum values no longer leak into user-facing text.
-- Normal UI errors and active-fault banners now use frontend wording instead of directly displaying backend technical messages; full structured details remain available in diagnostics.
-- Activity and administrator-confirmation feeds now wait on their own revisions instead of spinning on the diagnostics change API.
+- Normal UI errors no longer expose frontend contract or backend technical messages; diagnostics explicitly retain raw messages, codes, and structured envelopes.
+- Administrator-confirmation waits now use Store Condvar notifications instead of 250 ms polling.
+- Activity history now uses a dedicated activity revision inside DiagnosticsStore, ignores unrelated diagnostics changes, and advances after successful administrator audit writes.
+- The main activity feed hides its visible scrollbar while retaining wheel and touchpad scrolling.
 - Markdown DocumentIR parsing now keeps ordinary text paragraphs as paragraph blocks after inspect/edit cycles.
 
 

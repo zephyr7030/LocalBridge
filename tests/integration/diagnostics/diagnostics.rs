@@ -484,6 +484,34 @@ fn diagnostics_log_revision_wakes_waiters_without_a_control_plane_change() {
 }
 
 #[test]
+fn activity_revision_ignores_unrelated_diagnostics_and_wakes_for_activity() {
+    let store = std::sync::Arc::new(DiagnosticsStore::default());
+    let since = store.activity_revision();
+    let waiter_store = std::sync::Arc::clone(&store);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        tx.send(waiter_store.wait_activity_after(
+            since,
+            std::time::Duration::from_secs(1),
+        ))
+        .unwrap();
+    });
+
+    store.mutate(|_| true);
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_millis(40)).is_err(),
+        "unrelated diagnostics incorrectly woke the activity waiter"
+    );
+
+    store.mutate_activity(|_| true);
+    assert_eq!(
+        rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap(),
+        since + 1
+    );
+    waiter.join().unwrap();
+}
+
+#[test]
 fn materialized_log_directory_contains_a_redacted_diagnostics_artifact() {
     let root = TempDir::new("materialized-log");
     complete_runtime(root.path());

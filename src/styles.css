@@ -128,7 +128,8 @@ button{cursor:pointer}
 .context-switch{grid-column:2;justify-self:end}
 
 /* 活动记录：窗口的主体。倒序，最新在上。 */
-.activity-feed{flex:1 1 auto;min-height:0;overflow-y:auto;margin-bottom:12px}
+.activity-feed{flex:1 1 auto;min-height:0;overflow-y:auto;margin-bottom:12px;scrollbar-width:none}
+.activity-feed::-webkit-scrollbar{display:none}
 .activity-empty{margin:16px 0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.6}
 /* 时间 / 类型 / 对象 / 结果，四列真的是四列。上一版把类型和对象塞进同一个
    flex，于是六行的对象起点分别是 143 / 272 / 119 / 143 / 329px。 */

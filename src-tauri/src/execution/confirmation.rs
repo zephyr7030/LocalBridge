@@ -14,8 +14,8 @@
 //! together, so an approved token cannot be replayed against a different
 //! command. Approving `del C:\temp\*` does not approve `del C:\*`.
 
-use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
@@ -101,13 +101,27 @@ struct Store {
     revision: u64,
 }
 
-static STORE: OnceLock<Mutex<Store>> = OnceLock::new();
+#[derive(Default)]
+struct ConfirmationStore {
+    state: Mutex<Store>,
+    changed: Condvar,
+}
+
+static STORE: OnceLock<ConfirmationStore> = OnceLock::new();
+
+fn confirmation_store() -> &'static ConfirmationStore {
+    STORE.get_or_init(ConfirmationStore::default)
+}
 
 fn store() -> MutexGuard<'static, Store> {
-    STORE
-        .get_or_init(|| Mutex::new(Store::default()))
+    confirmation_store()
+        .state
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
+}
+
+fn notify_changed() {
+    confirmation_store().changed.notify_all();
 }
 
 fn now_ms() -> u64 {
@@ -132,12 +146,14 @@ fn request_digest(route: &str, command: &str, workdir: Option<&str>) -> String {
     ))
 }
 
-fn prune(store: &mut Store, now: u64) {
+fn prune(store: &mut Store, now: u64) -> bool {
     let before = store.entries.len();
     store.entries.retain(|entry| entry.expires_at_ms > now);
-    if store.entries.len() != before {
+    let changed = store.entries.len() != before;
+    if changed {
         store.revision += 1;
     }
+    changed
 }
 
 /// Records a flagged command and returns the token the model must come back
@@ -180,6 +196,8 @@ pub fn request(
         expires_at_ms: now.saturating_add(AWAITING_TTL_MS),
     });
     store.revision += 1;
+    drop(store);
+    notify_changed();
     (token, id)
 }
 
@@ -208,6 +226,8 @@ pub fn redeem(
     if store.entries[index].expires_at_ms <= now {
         store.entries.remove(index);
         store.revision += 1;
+        drop(store);
+        notify_changed();
         return Err(RedeemError::Expired);
     }
     if store.entries[index].decision != Decision::Approved {
@@ -220,6 +240,8 @@ pub fn redeem(
     }
     store.entries.remove(index);
     store.revision += 1;
+    drop(store);
+    notify_changed();
     Ok(())
 }
 
@@ -227,13 +249,19 @@ pub fn redeem(
 pub fn approve(id: &str) -> bool {
     let now = now_ms();
     let mut store = store();
-    prune(&mut store, now);
+    let pruned = prune(&mut store, now);
     let Some(entry) = store.entries.iter_mut().find(|entry| entry.id == id) else {
+        drop(store);
+        if pruned {
+            notify_changed();
+        }
         return false;
     };
     entry.decision = Decision::Approved;
     entry.expires_at_ms = now.saturating_add(APPROVED_TTL_MS);
     store.revision += 1;
+    drop(store);
+    notify_changed();
     true
 }
 
@@ -247,6 +275,10 @@ pub fn reject(id: &str) -> bool {
     if removed {
         store.revision += 1;
     }
+    drop(store);
+    if removed {
+        notify_changed();
+    }
     removed
 }
 
@@ -255,8 +287,8 @@ pub fn reject(id: &str) -> bool {
 pub fn awaiting() -> Vec<PendingConfirmation> {
     let now = now_ms();
     let mut store = store();
-    prune(&mut store, now);
-    store
+    let pruned = prune(&mut store, now);
+    let pending = store
         .entries
         .iter()
         .filter(|entry| entry.decision == Decision::Awaiting)
@@ -269,11 +301,48 @@ pub fn awaiting() -> Vec<PendingConfirmation> {
             requested_at_ms: entry.requested_at_ms,
             expires_at_ms: entry.expires_at_ms,
         })
-        .collect()
+        .collect();
+    drop(store);
+    if pruned {
+        notify_changed();
+    }
+    pending
 }
 
 pub fn revision() -> u64 {
     store().revision
+}
+
+pub fn wait_for_revision_after(since_revision: u64, timeout: Duration) -> u64 {
+    let holder = confirmation_store();
+    let deadline = Instant::now() + timeout;
+    let mut store = holder.state.lock().unwrap_or_else(PoisonError::into_inner);
+    loop {
+        let now = now_ms();
+        if prune(&mut store, now) {
+            holder.changed.notify_all();
+        }
+        if store.revision > since_revision {
+            return store.revision;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return store.revision;
+        }
+        let expiry_wait = store
+            .entries
+            .iter()
+            .filter(|entry| entry.decision == Decision::Awaiting)
+            .map(|entry| Duration::from_millis(entry.expires_at_ms.saturating_sub(now)))
+            .min()
+            .unwrap_or(remaining);
+        let wait_for = remaining.min(expiry_wait);
+        let (next, _) = holder
+            .changed
+            .wait_timeout(store, wait_for)
+            .unwrap_or_else(PoisonError::into_inner);
+        store = next;
+    }
 }
 
 /// 这些用例共用一个进程级存储，而 cargo 默认并行跑测试。这把锁归模块所有
@@ -293,6 +362,8 @@ pub(crate) fn reset_for_test() {
     let mut store = store();
     store.entries.clear();
     store.revision = 0;
+    drop(store);
+    notify_changed();
 }
 
 #[cfg(test)]
@@ -301,6 +372,8 @@ pub(crate) fn force_expiry_for_test(id: &str) {
     if let Some(entry) = store.entries.iter_mut().find(|entry| entry.id == id) {
         entry.expires_at_ms = 0;
     }
+    drop(store);
+    notify_changed();
 }
 
 #[cfg(test)]

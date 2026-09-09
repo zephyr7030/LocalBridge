@@ -13,8 +13,8 @@ use std::time::Duration;
 
 use super::error::{UiError, UiResult};
 use crate::diagnostics::{
-    RequestDiagnosticEvent, RequestDiagnosticKind, diagnostics_log_revision,
-    recent_request_diagnostics, wait_diagnostics_log_change_after,
+    RequestDiagnosticEvent, RequestDiagnosticKind, activity_revision, recent_request_diagnostics,
+    wait_activity_change_after,
 };
 
 const FEED_LIMIT: usize = 60;
@@ -41,7 +41,7 @@ pub struct ActivityEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityProjection {
-    log_revision: u64,
+    revision: u64,
     entries: Vec<ActivityEntry>,
 }
 
@@ -55,22 +55,19 @@ pub async fn get_activity() -> UiResult<ActivityProjection> {
 #[tauri::command]
 pub async fn wait_activity_change(since_revision: u64) -> UiResult<u64> {
     tauri::async_runtime::spawn_blocking(move || {
-        wait_diagnostics_log_change_after(since_revision, ACTIVITY_WAIT_TIMEOUT)
+        wait_activity_change_after(since_revision, ACTIVITY_WAIT_TIMEOUT)
     })
     .await
     .map_err(|_| UiError::internal("Ui.ActivityWaitJoinFailed", "活动记录唤醒后台任务异常"))
 }
 
 fn collect_activity() -> ActivityProjection {
-    let log_revision = diagnostics_log_revision();
+    let revision = activity_revision();
     let mut entries = tool_entries();
     entries.extend(administrator_entries());
     entries.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
     entries.truncate(FEED_LIMIT);
-    ActivityProjection {
-        log_revision,
-        entries,
-    }
+    ActivityProjection { revision, entries }
 }
 
 fn tool_entries() -> Vec<ActivityEntry> {

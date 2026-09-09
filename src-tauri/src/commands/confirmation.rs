@@ -4,15 +4,13 @@
 //! revision 造成立即返回和高频 IPC；批准与兑换的安全状态机保持不变。
 
 use serde::Serialize;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::error::{UiError, UiResult};
 use crate::execution::confirmation;
 
-// 30 秒让空闲窗口保持低唤醒频率；250 ms 只发生在一个本地阻塞任务内部，
-// 用于让新确认请求在不改动安全关键 Store 同步模型的前提下及时出现。
+// Bound idle long-polls so shutdown or a lost wake cannot strand a frontend request.
 const CONFIRMATION_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-const CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,14 +43,7 @@ pub async fn get_pending_confirmations() -> UiResult<ConfirmationProjection> {
 #[tauri::command]
 pub async fn wait_pending_confirmations_change(since_revision: u64) -> UiResult<u64> {
     tauri::async_runtime::spawn_blocking(move || {
-        let deadline = Instant::now() + CONFIRMATION_WAIT_TIMEOUT;
-        loop {
-            let revision = confirmation::revision();
-            if revision > since_revision || Instant::now() >= deadline {
-                return revision;
-            }
-            std::thread::sleep(CONFIRMATION_POLL_INTERVAL);
-        }
+        confirmation::wait_for_revision_after(since_revision, CONFIRMATION_WAIT_TIMEOUT)
     })
     .await
     .map_err(|_| {

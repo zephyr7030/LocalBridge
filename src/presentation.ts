@@ -14,9 +14,7 @@ const uiErrorCategoryText: Record<UiErrorCategory, string> = {
 };
 
 export function uiErrorText(error: UiErrorLike): string {
-  if (error.code === "Ui.FrontendFailure" && error.message?.trim()) {
-    return error.message;
-  }
+  if (error.code === "Ui.FrontendFailure") return "状态暂时无法读取，请重试";
   if (error.code.startsWith("Runtime.")) return "本地运行服务暂不可用";
   if (error.code.startsWith("Authority.")) return "管理员权限服务暂不可用";
   return uiErrorCategoryText[error.category];

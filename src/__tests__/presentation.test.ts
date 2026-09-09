@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accessText, brandStatusText, overallServiceDetail, overallServiceState, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionRestartNotice, privilegeText, serviceVisualState, taskText, updateStatusText, workspaceDisplayText } from "../presentation";
+import { accessText, brandStatusText, overallServiceDetail, overallServiceState, currentActivityDetail, currentActivityText, formatLastToolAge, lastActivityAction, lastActivityOutcome, permissionRestartNotice, privilegeText, serviceVisualState, taskText, uiErrorText, updateStatusText, workspaceDisplayText } from "../presentation";
 
 describe("LB-015 presentation", () => {
   it("maps frozen Chinese wording", () => {
@@ -94,6 +94,9 @@ describe("LB-015 presentation", () => {
     expect(updateStatusText({ ...base, state: "current" })).toContain("已是最新版本");
     expect(updateStatusText({ ...base, state: "available", latestVersion: "1.1.0" })).toBe("发现新版本 1.1.0");
     expect(updateStatusText({ ...base, state: "source_unavailable", releaseUrl: null, retryable: false })).toContain("发布源不可用");
+  });
+  it("does not expose frontend contract failures as user-facing technical text", () => {
+    expect(uiErrorText({ code: "Ui.FrontendFailure", category: "unavailable", message: "后端主状态合同不兼容" })).toBe("状态暂时无法读取，请重试");
   });
 
 });
