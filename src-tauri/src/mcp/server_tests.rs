@@ -1277,7 +1277,7 @@ fn schema27_public_facade_runtime_semantics_are_real_end_to_end() {
         &session,
         603,
         "exec_command",
-        json!({"command":"exit /b 7","shell":"cmd","yield_time_ms":10000}),
+        json!({"command":"exit /b 7","shell":"cmd","yield_time_ms":10000,"timeout_ms":120000}),
     );
     assert_eq!(nonzero.body["result"]["isError"], true);
     assert_eq!(
@@ -1297,7 +1297,8 @@ fn schema27_public_facade_runtime_semantics_are_real_end_to_end() {
         json!({
             "command":"Start-Sleep -Milliseconds 900; Write-Output LB_SCHEMA27_DONE",
             "shell":"windows_powershell",
-            "yield_time_ms":0
+            "yield_time_ms":0,
+            "timeout_ms":120000
         }),
     );
     assert_eq!(
@@ -2167,7 +2168,8 @@ fn schema28_public_runtime_behavior_is_real_end_to_end() {
         json!({
             "command":format!("$env:PSModulePath='{module_root_literal}'; Invoke-LbGen14Auto"),
             "shell":"windows_powershell",
-            "yield_time_ms":10000
+            "yield_time_ms":10000,
+            "timeout_ms":120000
         }),
     );
     let (autoload, autoload_output) = settle_public_command(pep.port(), &session, 10_699, autoload);
@@ -2189,7 +2191,8 @@ fn schema28_public_runtime_behavior_is_real_end_to_end() {
         json!({
             "command":"Write-Output \"a|b\"; Write-Output \"a&b\"; Write-Output 'q|b'; Write-Output 'q&b'; Write-Output '中文输出✓'",
             "shell":"windows_powershell",
-            "yield_time_ms":0
+            "yield_time_ms":0,
+            "timeout_ms":120000
         }),
     );
     let (quoted, quoted_output) = settle_public_command(pep.port(), &session, 41_000, quoted);
@@ -2213,7 +2216,8 @@ fn schema28_public_runtime_behavior_is_real_end_to_end() {
         json!({
             "command":"Write-Error \"READERR 🚀\"",
             "shell":"windows_powershell",
-            "yield_time_ms":0
+            "yield_time_ms":0,
+            "timeout_ms":120000
         }),
     );
     let (powershell_error, powershell_error_output) =
@@ -2294,7 +2298,8 @@ fn schema28_public_runtime_behavior_is_real_end_to_end() {
         json!({
             "command":"cd /d . && echo LB_CMD_D_OK",
             "shell":"cmd",
-            "yield_time_ms":0
+            "yield_time_ms":0,
+            "timeout_ms":120000
         }),
     );
     let (cmd_cd_switch, cmd_cd_output) =
@@ -2317,7 +2322,8 @@ fn schema28_public_runtime_behavior_is_real_end_to_end() {
         json!({
             "command":"cd /d C:\\Windows && cd",
             "shell":"cmd",
-            "yield_time_ms":10000
+            "yield_time_ms":10000,
+            "timeout_ms":120000
         }),
     );
     assert_eq!(
@@ -2343,7 +2349,8 @@ fn schema28_public_runtime_behavior_is_real_end_to_end() {
         json!({
             "command":"Write-Output '自动中文✓'",
             "shell":"auto",
-            "yield_time_ms":0
+            "yield_time_ms":0,
+            "timeout_ms":120000
         }),
     );
     let (auto_utf8, auto_utf8_output) =
@@ -2591,7 +2598,8 @@ fn absolute_and_relative_active_workspace_paths_are_equivalent() {
             "command":"cd",
             "shell":"cmd",
             "workdir":workspace.to_string_lossy(),
-            "yield_time_ms":10000
+            "yield_time_ms":10000,
+            "timeout_ms":120000
         }),
     );
     assert_eq!(workdir.status, 200);
@@ -2611,7 +2619,8 @@ fn absolute_and_relative_active_workspace_paths_are_equivalent() {
             "command":format!(r#"echo ABSOLUTE_REDIRECT_OK>"{}""#, absolute_redirect_target.display()),
             "shell":"cmd",
             "workdir":workspace.to_string_lossy(),
-            "yield_time_ms":10000
+            "yield_time_ms":10000,
+            "timeout_ms":120000
         }),
     );
     assert_eq!(
@@ -2629,7 +2638,8 @@ fn absolute_and_relative_active_workspace_paths_are_equivalent() {
             "command":"echo RELATIVE_REDIRECT_OK>relative-redirect.txt",
             "shell":"cmd",
             "workdir":workspace.to_string_lossy(),
-            "yield_time_ms":10000
+            "yield_time_ms":10000,
+            "timeout_ms":120000
         }),
     );
     assert_eq!(
@@ -2660,7 +2670,8 @@ fn absolute_and_relative_active_workspace_paths_are_equivalent() {
             "command":format!(r#"echo CURRENT_USER_WRITE>"{}""#, outside_redirect_target.display()),
             "shell":"cmd",
             "workdir":workspace.to_string_lossy(),
-            "yield_time_ms":10000
+            "yield_time_ms":10000,
+            "timeout_ms":120000
         }),
     );
     assert_eq!(
@@ -3214,7 +3225,8 @@ fn full_scripts_share_current_user_authority_independent_of_path_spelling() {
         json!({
             "command":"echo LB_SCHEMA42_OEM_é中あ한Я",
             "shell":"cmd",
-            "yield_time_ms":10000
+            "yield_time_ms":10000,
+            "timeout_ms":120000
         }),
     );
     assert_eq!(oem.body["result"]["isError"], false, "{:#?}", oem.body);
@@ -3241,7 +3253,8 @@ fn full_scripts_share_current_user_authority_independent_of_path_spelling() {
         json!({
             "command":format!(r"..\{outside_name}"),
             "shell":"cmd",
-            "yield_time_ms":10000
+            "yield_time_ms":10000,
+            "timeout_ms":120000
         }),
     );
     assert_eq!(
