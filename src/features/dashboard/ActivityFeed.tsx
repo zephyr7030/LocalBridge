@@ -6,9 +6,8 @@ import {
   activityOutcome,
   activityTime,
   activityTone,
-  riskText,
+  activityRiskText,
 } from "../activity/presentation";
-import { diagnosticsApi } from "../diagnostics/api";
 
 /**
  * 这台机器上刚刚发生了什么。
@@ -31,8 +30,8 @@ export function ActivityFeed() {
           setEntries(next.entries);
           logRevision = next.logRevision;
           retryDelayMs = 250;
-          // 搭诊断面板现成的唤醒通道：每条工具调用都会推高 log revision。
-          await diagnosticsApi.waitForChange(0, logRevision);
+          // 只等待活动日志自己的 revision；不再让无关的主状态 revision 触发空转。
+          await activityApi.waitForChange(logRevision);
         } catch {
           if (cancelled) return;
           await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs));
@@ -69,7 +68,7 @@ export function ActivityFeed() {
             <span className="activity-entry-main">
               {entry.target && <span className="activity-entry-target">{entry.target}</span>}
               {entry.risk.map((risk) => (
-                <span className="activity-risk" key={risk}>{riskText[risk] ?? risk}</span>
+                <span className="activity-risk" key={risk}>{activityRiskText(risk)}</span>
               ))}
             </span>
             <span className="activity-entry-outcome">

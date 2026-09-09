@@ -151,6 +151,8 @@ pub struct RequestDiagnosticEvent {
     pub connection_id: String,
     pub attempt: u32,
     pub tool: String,
+    #[serde(skip_serializing)]
+    pub operation: Option<String>,
     /// 这次调用作用在什么上：文件路径、命令、Git 子操作。
     /// 只有工具名的日志回答不了用户真正要问的问题。
     pub target: Option<String>,
@@ -534,6 +536,7 @@ pub fn record_recovery_attempt_event(event: &RecoveryAttemptEvent) {
                         connection_id: connection_id.clone(),
                         attempt: *attempt,
                         tool: tool.clone(),
+                        operation: None,
                         target: None,
                         outcome: None,
                         error_code: None,
@@ -608,6 +611,16 @@ pub fn record_mcp_request_start(
     tool: &str,
     target: Option<&str>,
 ) {
+    record_mcp_request_start_with_operation(request_key, connection_id, tool, None, target);
+}
+
+pub fn record_mcp_request_start_with_operation(
+    request_key: &str,
+    connection_id: &str,
+    tool: &str,
+    operation: Option<&str>,
+    target: Option<&str>,
+) {
     diagnostics_store().mutate(|state| {
         push_request_event(
             &mut state.requests,
@@ -618,6 +631,7 @@ pub fn record_mcp_request_start(
                 connection_id: connection_id.to_string(),
                 attempt: 1,
                 tool: tool.to_string(),
+                operation: operation.map(str::to_string),
                 target: target.map(str::to_string),
                 outcome: None,
                 error_code: None,
@@ -717,6 +731,7 @@ fn push_mcp_request_end(log: &mut RequestDiagnosticState, end: McpRequestEnd<'_>
             connection_id: end.connection_id.to_string(),
             attempt: 1,
             tool: String::new(),
+            operation: None,
             target: None,
             outcome: Some(end.outcome.to_string()),
             error_code: end.error_code,
@@ -772,6 +787,7 @@ fn push_request_end_fields(
             connection_id: active.connection_id,
             attempt: active.attempt,
             tool: active.tool,
+            operation: None,
             target: None,
             outcome: Some(outcome.to_string()),
             error_code,

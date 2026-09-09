@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { parseUiError, type UiError } from "../../bridge";
 import { diagnosticsApi, type DiagnosticsViewProjection } from "./api";
 import { UiErrorNotice } from "../../components/UiErrorNotice";
+import { uiErrorText } from "../../presentation";
 import "./diagnostics.css";
 
 const eventTime = (timestampMs: number) => new Date(timestampMs).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -64,7 +65,7 @@ export function Diagnostics({ onClose, commandError }: { onClose: () => void; co
         <h2>诊断</h2>
         {!snapshot ? <p className="diagnostics-muted">正在检查…</p> : (
           <>
-            {snapshot.activeFaults.length ? <div className="diagnostics-section"><h3>需要处理</h3><div className="diagnostics-checks">{snapshot.activeFaults.map((fault) => <div className="diagnostics-check" key={fault.code}><span className="diagnostics-dot error" aria-hidden="true"/><div><strong>{fault.message}</strong><small>{fault.code}{fault.retryable ? " · 可重试" : ""}</small></div></div>)}</div></div> : null}
+            {snapshot.activeFaults.length ? <div className="diagnostics-section"><h3>需要处理</h3><div className="diagnostics-checks">{snapshot.activeFaults.map((fault) => <div className="diagnostics-check" key={fault.code}><span className="diagnostics-dot error" aria-hidden="true"/><div><strong>{uiErrorText(fault)}</strong><small>{fault.code}{fault.retryable ? " · 可重试" : ""}</small></div></div>)}</div></div> : null}
             <div className="diagnostics-section">
               <h3>运行状态</h3>
               <div className="diagnostics-checks">{snapshot.checks.map((check) => (

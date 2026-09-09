@@ -4,7 +4,15 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 ## [Unreleased]
 
-No user-visible changes yet.
+### Fixed
+
+- Activity history now keeps each tool's second-level operation in the existing action field, for example 文档 写入, instead of dropping the operation.
+- Activity outcomes now render with green success, yellow neutral, and red failure semantics, while unknown backend enum values no longer leak into user-facing text.
+- Normal UI errors and active-fault banners now use frontend wording instead of directly displaying backend technical messages; full structured details remain available in diagnostics.
+- Activity and administrator-confirmation feeds now wait on their own revisions instead of spinning on the diagnostics change API.
+- Markdown DocumentIR parsing now keeps ordinary text paragraphs as paragraph blocks after inspect/edit cycles.
+
+
 
 ## [0.1.6] - 2026-09-08
 

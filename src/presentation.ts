@@ -1,6 +1,26 @@
 import { APP_NAME } from "./appModel";
-import type { AccessCode, CurrentActivityProjection, LastActivityProjection, LastToolProjection, MainProjection, PrivilegeCode, ProjectionStatusCode, ServiceCode, TaskProjection, UpdateProjection } from "./bridge";
+import type { AccessCode, CurrentActivityProjection, LastActivityProjection, LastToolProjection, MainProjection, PrivilegeCode, ProjectionStatusCode, ServiceCode, TaskProjection, UiErrorCategory, UpdateProjection } from "./bridge";
 export const uiText = { dashboard: "主控界面", settings: "设置", diagnostics: "诊断" } as const;
+type UiErrorLike = { code: string; category: UiErrorCategory; message?: string };
+
+const uiErrorCategoryText: Record<UiErrorCategory, string> = {
+  validation: "输入内容不符合要求",
+  authorization: "授权尚未完成",
+  capacity: "当前任务较多，请稍后重试",
+  conflict: "状态已变化，请重试",
+  timeout: "操作超时，请重试",
+  unavailable: "服务暂不可用",
+  internal: "操作未完成",
+};
+
+export function uiErrorText(error: UiErrorLike): string {
+  if (error.code === "Ui.FrontendFailure" && error.message?.trim()) {
+    return error.message;
+  }
+  if (error.code.startsWith("Runtime.")) return "本地运行服务暂不可用";
+  if (error.code.startsWith("Authority.")) return "管理员权限服务暂不可用";
+  return uiErrorCategoryText[error.category];
+}
 export const accessText: Record<AccessCode, string> = { edit: "编辑模式", full: "完整模式", admin: "管理员模式" };
 export const privilegeText: Record<PrivilegeCode, string> = { off: "未启用", requested: "等待授权", awaiting: "等待系统授权", active: "已启用", fault: "故障" };
 export const serviceText: Record<ServiceCode, string> = { off: "未启动", starting: "正在启动", online: "已连接", recovering: "正在恢复", fault: "连接失败" };

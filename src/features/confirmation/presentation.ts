@@ -1,4 +1,4 @@
-import { riskText } from "../activity/presentation";
+import { activityRiskText } from "../activity/presentation";
 
 /** 路由说的是"这条命令会怎么落地"，用户需要知道它是自由文本还是结构化操作。 */
 const routeText: Record<string, string> = {
@@ -8,11 +8,11 @@ const routeText: Record<string, string> = {
 };
 
 export function confirmationRouteText(route: string): string {
-  return routeText[route] ?? route;
+  return routeText[route] ?? "管理员操作";
 }
 
 export function confirmationRiskText(risk: string[]): string[] {
-  return risk.map((item) => riskText[item] ?? item);
+  return risk.map(activityRiskText);
 }
 
 /** 剩余时间取整到分钟。秒级倒计时会让人觉得被催，而这里不该催。 */

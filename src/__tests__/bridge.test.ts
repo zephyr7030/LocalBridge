@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseMainProjection, parseUiError, uiErrorMessage, type UiError } from "../bridge";
+import { parseMainProjection, parseUiError, type UiError } from "../bridge";
 import { projectionReadFailed, projectionReadSucceeded } from "../projectionTransport";
 import { parseDiagnosticsProjection } from "../features/diagnostics/api";
 import { parseOnboardingState } from "../features/onboarding/api";
@@ -18,12 +18,14 @@ describe("typed UI error boundary", () => {
       taskId: "task-1",
     };
 
-    expect(uiErrorMessage(error, "fallback")).toBe("queue is full");
     expect(parseUiError(error, "fallback")).toEqual(error);
   });
 
   it("does not treat an untyped string as the UI error contract", () => {
-    expect(uiErrorMessage("legacy string error", "fallback")).toBe("fallback");
+    expect(parseUiError("legacy string error", "fallback")).toMatchObject({
+      code: "Ui.FrontendFailure",
+      message: "fallback",
+    });
   });
 });
 

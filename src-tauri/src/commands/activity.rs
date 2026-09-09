@@ -9,15 +9,18 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::time::Duration;
 
 use super::error::{UiError, UiResult};
 use crate::diagnostics::{
     RequestDiagnosticEvent, RequestDiagnosticKind, diagnostics_log_revision,
-    recent_request_diagnostics,
+    recent_request_diagnostics, wait_diagnostics_log_change_after,
 };
 
 const FEED_LIMIT: usize = 60;
 const LEDGER_LIMIT: usize = 40;
+// Bound idle long-polls so a lost wake or shutdown cannot strand a frontend request.
+const ACTIVITY_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +29,7 @@ pub struct ActivityEntry {
     source: &'static str,
     timestamp_ms: u64,
     action: String,
+    operation: Option<String>,
     target: Option<String>,
     outcome: Option<String>,
     error_code: Option<String>,
@@ -46,6 +50,15 @@ pub async fn get_activity() -> UiResult<ActivityProjection> {
     tauri::async_runtime::spawn_blocking(collect_activity)
         .await
         .map_err(|_| UiError::internal("Ui.ActivityReadJoinFailed", "活动记录后台任务异常"))
+}
+
+#[tauri::command]
+pub async fn wait_activity_change(since_revision: u64) -> UiResult<u64> {
+    tauri::async_runtime::spawn_blocking(move || {
+        wait_diagnostics_log_change_after(since_revision, ACTIVITY_WAIT_TIMEOUT)
+    })
+    .await
+    .map_err(|_| UiError::internal("Ui.ActivityWaitJoinFailed", "活动记录唤醒后台任务异常"))
 }
 
 fn collect_activity() -> ActivityProjection {
@@ -79,6 +92,7 @@ fn tool_entries() -> Vec<ActivityEntry> {
                 source: "tool",
                 timestamp_ms: start.timestamp_ms,
                 action: start.tool.clone(),
+                operation: start.operation.clone(),
                 target: start.target.clone(),
                 outcome: end.and_then(|end| end.outcome.clone()),
                 error_code: end.and_then(|end| end.error_code.clone()),
@@ -107,6 +121,7 @@ fn administrator_entries() -> Vec<ActivityEntry> {
                     .and_then(serde_json::Value::as_u64)
                     .unwrap_or_default(),
                 action: string("route").unwrap_or_else(|| "shell".to_string()),
+                operation: None,
                 target: string("command"),
                 outcome: string("outcome"),
                 error_code: None,

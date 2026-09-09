@@ -6,7 +6,6 @@ import {
   confirmationRiskText,
   confirmationRouteText,
 } from "../confirmation/presentation";
-import { diagnosticsApi } from "../diagnostics/api";
 
 /**
  * 等着用户点头的管理员命令。
@@ -28,13 +27,15 @@ export function ConfirmationRequests() {
     let cancelled = false;
     void (async () => {
       let retryDelayMs = 250;
+      let revision = 0;
       while (!cancelled) {
         try {
           const next = await confirmationApi.read();
           if (cancelled) return;
           setEntries(next.entries);
+          revision = next.revision;
           retryDelayMs = 250;
-          await diagnosticsApi.waitForChange(0, 0);
+          await confirmationApi.waitForChange(revision);
         } catch {
           if (cancelled) return;
           await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs));

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { bridge, type AccessCode, type ProjectProjection } from "../../bridge";
-import { brandStatusText, overallServiceState, overallVisualState } from "../../presentation";
+import { brandStatusText, overallServiceState, overallVisualState, uiErrorText } from "../../presentation";
 import { uiText } from "../../presentation";
 import { AdminModeWarning } from "../../components/AdminModeWarning";
 import { UiErrorNotice } from "../../components/UiErrorNotice";
@@ -84,7 +84,7 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
           <div>
             <strong>LocalBridge 需要处理</strong>
             <p>
-              {projection.activeFaults[0].message}
+              {uiErrorText(projection.activeFaults[0])}
               {projection.activeFaults.length > 1 ? `（另有 ${projection.activeFaults.length - 1} 项）` : ""}
             </p>
           </div>

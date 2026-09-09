@@ -132,15 +132,16 @@ button{cursor:pointer}
 .activity-empty{margin:16px 0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.6}
 /* 时间 / 类型 / 对象 / 结果，四列真的是四列。上一版把类型和对象塞进同一个
    flex，于是六行的对象起点分别是 143 / 272 / 119 / 143 / 329px。 */
-.activity-entry{display:grid;grid-template-columns:40px 5.2em minmax(0,1fr) var(--meta-col);align-items:baseline;column-gap:12px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.05);font-size:var(--font-auxiliary)}
+.activity-entry{display:grid;grid-template-columns:40px 7.2em minmax(0,1fr) var(--meta-col);align-items:baseline;column-gap:12px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.05);font-size:var(--font-auxiliary)}
 .activity-entry:last-child{border-bottom:0}
 .activity-entry-time{color:#8e8e93;font-variant-numeric:tabular-nums}
 .activity-entry-main{min-width:0;display:flex;align-items:baseline;gap:8px}
 .activity-entry-action{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6e6e73}
 .activity-entry-target{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .activity-entry-outcome{color:#6e6e73;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.activity-entry.tone-bad .activity-entry-outcome{color:var(--status-fault)}
-.activity-entry.tone-pending .activity-entry-action{opacity:.75}
+.activity-entry.tone-positive .activity-entry-outcome{color:var(--status-ready)}
+.activity-entry.tone-neutral .activity-entry-outcome{color:var(--status-starting)}
+.activity-entry.tone-negative .activity-entry-outcome{color:var(--status-fault)}
 .activity-risk{flex:0 0 auto;padding:1px 7px;border-radius:999px;background:rgba(255,149,0,.16);color:#8a5300;font-weight:650;white-space:nowrap}
 
 /* 右栏一列两种对齐，各有各的道理：
@@ -256,8 +257,7 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .status-bad{color:#c9342f}
 @media (max-width:520px){
   :root{--gutter:14px;--meta-col:96px}
-  .activity-entry{grid-template-columns:38px minmax(0,1fr) var(--meta-col)}
-  .activity-entry-action{display:none}
+  .activity-entry{grid-template-columns:38px 7.2em minmax(0,1fr) var(--meta-col)}
   .value,.project-actions{text-align:left;justify-content:flex-start;width:100%}
 }
 

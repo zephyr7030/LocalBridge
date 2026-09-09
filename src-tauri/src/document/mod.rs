@@ -564,7 +564,12 @@ fn markdown_blocks(content: &str) -> Vec<DocumentBlock> {
                 });
             }
             Event::Start(Tag::Paragraph) if active.is_none() => {
-                active = Some(new_paragraph(String::new()));
+                active = Some(DocumentBlock {
+                    id: String::new(),
+                    kind: DocumentBlockKind::Paragraph,
+                    text: String::new(),
+                    level: None,
+                });
             }
             Event::Text(text) | Event::Code(text) => {
                 if let Some(block) = active.as_mut() {
@@ -1284,6 +1289,55 @@ mod tests {
         ));
     }
     use document_fixtures::{rich_docx, zip_entry};
+
+    #[test]
+    fn markdown_paragraph_remains_paragraph_after_edit() {
+        let (root, service) = fixture();
+        fs::write(root.join("paragraph.md"), "# Title\n\nBody").unwrap();
+        let inspected = service
+            .execute(DocumentRequest::Inspect {
+                path: "paragraph.md".into(),
+                start_block: 1,
+                max_blocks: 20,
+                max_bytes: 1024,
+            })
+            .unwrap();
+        let sha256 = match inspected {
+            DocumentResult::Inspect { sha256, blocks, .. } => {
+                assert_eq!(blocks.len(), 2);
+                assert_eq!(blocks[0].kind, DocumentBlockKind::Heading);
+                assert_eq!(blocks[1].kind, DocumentBlockKind::Paragraph);
+                assert_eq!(blocks[1].text, "Body");
+                sha256
+            }
+            _ => unreachable!(),
+        };
+        service
+            .execute(DocumentRequest::Edit {
+                path: "paragraph.md".into(),
+                expected_sha256: sha256,
+                edits: vec![DocumentEditOperation::Replace {
+                    block_id: "block-2".into(),
+                    content: "Edited line.".into(),
+                }],
+            })
+            .unwrap();
+        let reinspected = service
+            .execute(DocumentRequest::Inspect {
+                path: "paragraph.md".into(),
+                start_block: 1,
+                max_blocks: 20,
+                max_bytes: 1024,
+            })
+            .unwrap();
+        assert!(matches!(
+            reinspected,
+            DocumentResult::Inspect { blocks, .. }
+                if blocks[1].kind == DocumentBlockKind::Paragraph
+                    && blocks[1].text == "Edited line."
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn text_edit_is_hash_guarded_and_atomic() {

@@ -142,6 +142,7 @@ fn one_log_owner_revisions_real_changes_and_deduplicates_stable_observations() {
             connection_id: "session-revision".into(),
             attempt: 1,
             tool: "workspace_context".into(),
+            operation: None,
             target: None,
             outcome: None,
             error_code: None,

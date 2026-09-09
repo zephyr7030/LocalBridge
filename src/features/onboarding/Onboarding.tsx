@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEve
 import { WizardFrame } from "../../components/WizardFrame";
 import { ReadinessCheck } from "../../components/ReadinessCheck";
 import { AdminModeWarning } from "../../components/AdminModeWarning";
-import { bridge, type AccessCode, type MainProjection, uiErrorMessage } from "../../bridge";
-import { accessText } from "../../presentation";
+import { bridge, parseUiError, type AccessCode, type MainProjection } from "../../bridge";
+import { accessText, uiErrorText } from "../../presentation";
 import { onboardingApi, type OnboardingState } from "./api";
 import "./onboarding.css";
 
@@ -11,7 +11,7 @@ const KEY_HINT = "Runtime API Key 仅保存在 Windows 安全凭据中。";
 
 type Screen4CopyKey = "name" | "tunnel";
 
-const messageFrom = (value: unknown, fallback: string) => uiErrorMessage(value, fallback);
+const messageFrom = (value: unknown, fallback: string) => uiErrorText(parseUiError(value, fallback));
 
 export function Onboarding({ initial, onComplete, previewMode = false }: { initial: OnboardingState; onComplete: () => void; previewMode?: boolean }) {
   // Dev-only deep link so the fixed-window E2E harness can open Screen 3

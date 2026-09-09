@@ -40,6 +40,7 @@ function parseConfirmations(value: unknown): ConfirmationProjection {
 
 export const confirmationApi = {
   read: async () => parseConfirmations(await invoke<unknown>("get_pending_confirmations")),
+  waitForChange: (sinceRevision: number) => invoke<number>("wait_pending_confirmations_change", { sinceRevision }),
   approve: (id: string) => invoke<boolean>("approve_administrator_command", { id }),
   reject: (id: string) => invoke<boolean>("reject_administrator_command", { id }),
 };

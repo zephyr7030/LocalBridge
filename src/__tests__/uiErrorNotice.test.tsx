@@ -8,6 +8,8 @@ it("retains the full backend error envelope in expandable diagnostic details", (
     operationId: "op-123", sessionId: "session-456", requestId: 789, taskId: "task-012",
   }} />);
   expect(rendered).toContain('role="alert"');
+  expect(rendered).toContain("<span>操作未完成</span>");
+  expect(rendered).toContain("Cannot save");
   for (const fact of ["Settings.SaveFailed", "internal", "retryable", "op-123", "session-456", "789", "task-012"]) {
     expect(rendered).toContain(fact);
   }

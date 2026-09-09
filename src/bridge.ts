@@ -115,13 +115,10 @@ export function parseAdminConsentChallenge(value: unknown): AdminConsentChalleng
   if (!isRecord(value) || typeof value.challengeId !== "string" || typeof value.notBeforeUnixMs !== "number") throw new Error("后端管理员确认合同不兼容");
   return value as unknown as AdminConsentChallenge;
 }
-export function uiErrorMessage(value: unknown, fallback: string): string {
-  return parseUiError(value, fallback).message;
-}
 export function parseUiError(value: unknown, fallback: string): UiError {
   if (isUiError(value)) return value;
   return {
-    code: value instanceof Error ? "Ui.FrontendFailure" : "Ui.Unavailable",
+    code: "Ui.FrontendFailure",
     category: "unavailable",
     message: value instanceof Error && value.message.trim() ? value.message : fallback,
     retryable: true,

@@ -1,13 +1,18 @@
-//! 待确认的管理员命令：读取、批准、拒绝。
+//! 待确认的管理员命令：读取、等待变化、批准、拒绝。
 //!
-//! 唤醒沿用活动流那条通路。请求确认发生在 `elevated_exec` 调用期间，而该
-//! 调用本来就会推高诊断 revision，所以窗口在既有的 `waitForChange` 上就能
-//! 醒过来——不需要为此再开一条通道。
+//! UI 等待只观察 confirmation 自己的 revision，避免借用无关的 diagnostics
+//! revision 造成立即返回和高频 IPC；批准与兑换的安全状态机保持不变。
 
 use serde::Serialize;
+use std::time::{Duration, Instant};
 
 use super::error::{UiError, UiResult};
 use crate::execution::confirmation;
+
+// 30 秒让空闲窗口保持低唤醒频率；250 ms 只发生在一个本地阻塞任务内部，
+// 用于让新确认请求在不改动安全关键 Store 同步模型的前提下及时出现。
+const CONFIRMATION_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+const CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +40,27 @@ pub async fn get_pending_confirmations() -> UiResult<ConfirmationProjection> {
     tauri::async_runtime::spawn_blocking(collect)
         .await
         .map_err(|_| UiError::internal("Ui.ConfirmationReadJoinFailed", "待确认记录后台任务异常"))
+}
+
+#[tauri::command]
+pub async fn wait_pending_confirmations_change(since_revision: u64) -> UiResult<u64> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let deadline = Instant::now() + CONFIRMATION_WAIT_TIMEOUT;
+        loop {
+            let revision = confirmation::revision();
+            if revision > since_revision || Instant::now() >= deadline {
+                return revision;
+            }
+            std::thread::sleep(CONFIRMATION_POLL_INTERVAL);
+        }
+    })
+    .await
+    .map_err(|_| {
+        UiError::internal(
+            "Ui.ConfirmationWaitJoinFailed",
+            "待确认记录唤醒后台任务异常",
+        )
+    })
 }
 
 fn collect() -> ConfirmationProjection {

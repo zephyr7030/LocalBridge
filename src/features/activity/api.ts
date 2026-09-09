@@ -8,6 +8,7 @@ export interface ActivityEntry {
   source: ActivitySource;
   timestampMs: number;
   action: string;
+  operation: string | null;
   target: string | null;
   outcome: string | null;
   errorCode: string | null;
@@ -30,6 +31,7 @@ const isEntry = (value: unknown): value is ActivityEntry =>
   && typeof value.source === "string" && sources.includes(value.source as ActivitySource)
   && typeof value.timestampMs === "number"
   && typeof value.action === "string"
+  && isStringOrNull(value.operation)
   && isStringOrNull(value.target)
   && isStringOrNull(value.outcome)
   && isStringOrNull(value.errorCode)
@@ -49,4 +51,5 @@ function parseActivity(value: unknown): ActivityProjection {
 
 export const activityApi = {
   read: async () => parseActivity(await invoke<unknown>("get_activity")),
+  waitForChange: (sinceRevision: number) => invoke<number>("wait_activity_change", { sinceRevision }),
 };
