@@ -6,6 +6,10 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 ### Fixed
 
+- Update checks now discover the newest usable GitHub release from the release list, including pre-releases, while ignoring drafts, invalid tags, and historical semver mistags.
+- Available updates now open a native LocalBridge-style prompt with right-aligned Later and View Update actions; manual checks remain available after terminal failures.
+- The main activity feed now shows at most 15 recent entries, keeps deeper diagnostics/audit history intact, and uses a fixed 16 px visual indent.
+- Settings and Diagnostics body content now use a subtle 8 px indent, and Settings inline action groups align to the right.
 - Activity history now keeps each tool's second-level operation in the existing action field, for example 文档 写入, instead of dropping the operation.
 - Activity outcomes now render with green success, yellow neutral, and red failure semantics, while unknown backend enum values no longer leak into user-facing text.
 - Normal UI errors no longer expose frontend contract or backend technical messages; diagnostics explicitly retain raw messages, codes, and structured envelopes.

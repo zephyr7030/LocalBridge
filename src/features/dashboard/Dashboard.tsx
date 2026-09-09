@@ -24,11 +24,25 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
   const [adminWarningOpen, setAdminWarningOpen] = useState(false);
   const [fullAccessInfoOpen, setFullAccessInfoOpen] = useState(false);
   const [handledGeneration, setHandledGeneration] = useState<number | null>(null);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
 
   const activeProject = projection?.projects?.find((item) => item.active) ?? null;
   const adminModeFullAccess = projection?.pathAuthority === "administrator";
   const reconnectVisible = Boolean(
     projection?.reconnect && projection.reconnect.generation !== handledGeneration,
+  );
+  const availableUpdateVersion = projection?.update?.state === "available"
+    ? projection.update.latestVersion
+    : null;
+  const updateDialogVisible = Boolean(
+    view === "main"
+      && availableUpdateVersion
+      && availableUpdateVersion !== dismissedUpdateVersion
+      && !projectPickerOpen
+      && !removeTarget
+      && !reconnectVisible
+      && !adminWarningOpen
+      && !fullAccessInfoOpen,
   );
 
   // Administrator is the one mode the user cannot select silently: it needs the
@@ -117,6 +131,31 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       )}
 
       {view === "diagnostics" && <Diagnostics commandError={error} onClose={() => setView("main")} />}
+
+      {updateDialogVisible && (
+        <div className="dialog-backdrop update-dialog-backdrop">
+          <section className="dialog" role="dialog" aria-modal="true" aria-label="发现新版本">
+            <h2>发现新版本</h2>
+            <p>LocalBridge {availableUpdateVersion} 已发布。</p>
+            <div className="dialog-actions">
+              <button className="secondary" onClick={() => setDismissedUpdateVersion(availableUpdateVersion)}>
+                稍后
+              </button>
+              <button
+                className="primary"
+                onClick={() =>
+                  void run(async () => {
+                    await bridge.openGitHubReleases();
+                    setDismissedUpdateVersion(availableUpdateVersion);
+                  })
+                }
+              >
+                查看更新
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* 等人点头的管理员命令。窗口由后端观察者叫到前台，这里把它摆成
           一件必须回答的事。 */}

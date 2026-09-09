@@ -75,8 +75,11 @@ impl GitHubRepository {
         &self.0
     }
 
-    pub fn latest_api_url(&self) -> String {
-        format!("https://api.github.com/repos/{}/releases/latest", self.0)
+    pub fn releases_api_url(&self) -> String {
+        format!(
+            "https://api.github.com/repos/{}/releases?per_page=10",
+            self.0
+        )
     }
 
     pub fn releases_url(&self) -> String {
@@ -235,8 +238,8 @@ mod tests {
     fn github_repository_and_release_links_are_exactly_scoped() {
         let repository = GitHubRepository::new("owner/LocalBridge").unwrap();
         assert_eq!(
-            repository.latest_api_url(),
-            "https://api.github.com/repos/owner/LocalBridge/releases/latest"
+            repository.releases_api_url(),
+            "https://api.github.com/repos/owner/LocalBridge/releases?per_page=10"
         );
         assert!(
             repository.owns_release_url("https://github.com/owner/LocalBridge/releases/tag/v1.2.3")

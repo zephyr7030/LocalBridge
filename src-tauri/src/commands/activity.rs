@@ -17,7 +17,7 @@ use crate::diagnostics::{
     wait_activity_change_after,
 };
 
-const FEED_LIMIT: usize = 60;
+const FEED_LIMIT: usize = 15;
 const LEDGER_LIMIT: usize = 40;
 // Bound idle long-polls so a lost wake or shutdown cannot strand a frontend request.
 const ACTIVITY_WAIT_TIMEOUT: Duration = Duration::from_secs(30);

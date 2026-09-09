@@ -78,8 +78,8 @@ button{cursor:pointer}
 .ghost:not(:disabled):active,.secondary:not(:disabled):active,.primary:not(:disabled):active,.choice:not(:disabled):active{transform:translateY(1px)}
 .ghost:focus-visible,.secondary:focus-visible,.primary:focus-visible,.choice:focus-visible{outline:3px solid var(--control-focus);outline-offset:2px}
 .ghost:disabled,.secondary:disabled,.primary:disabled,.choice:disabled{cursor:not-allowed;opacity:.46;box-shadow:none;transform:none}
-/* 水平内边距只此一处。每个 section 各自再加 padding 是上一版"对齐线"
-   从未成立的原因：标题行没加，于是它比正文左 20px。 */
+/* 主界面的水平内边距只此一处。主界面 section 不再各自叠加 padding，
+   避免标题、正文和右侧数值列出现多套对齐线。 */
 .shell{width:100%;min-height:100%;height:100%;display:flex;flex-direction:column;padding:16px var(--gutter) 14px}
 .topbar{display:grid;grid-template-columns:minmax(0,1fr) var(--meta-col);align-items:center;column-gap:16px;margin-bottom:14px}
 .brand{display:flex;align-items:center;gap:9px;font-size:var(--font-brand);font-weight:650;letter-spacing:-.01em;min-width:0}
@@ -88,6 +88,7 @@ button{cursor:pointer}
 
 /* 等人点头的管理员命令。它比其它模态更靠前：其它模态是用户自己打开的，
    这一个是被打断的那一方。 */
+.update-dialog-backdrop{z-index:15}
 .confirmation-backdrop{z-index:30}
 .confirmation-dialog{width:min(560px,100%)}
 .confirmation-lead{margin:0 0 14px;color:#6e6e73;line-height:1.55}
@@ -117,7 +118,9 @@ button{cursor:pointer}
 .label{color:#6e6e73;font-size:var(--font-body)}
 .value{text-align:left;overflow-wrap:anywhere}
 .permission-mode-value{font-weight:500}
-.project-actions,.inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-start}
+.project-actions,.inline-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.project-actions{justify-content:flex-start}
+.inline-actions{justify-content:flex-end}
 /* 上下文条：项目与权限压成一行，把版面让给活动记录。 */
 .context-bar{display:grid;grid-template-columns:minmax(0,1fr) var(--meta-col);align-items:center;column-gap:16px;margin:0 0 8px;padding-bottom:10px;border-bottom:1px solid rgba(0,0,0,.06);min-width:0;font-size:var(--font-auxiliary);color:#6e6e73}
 .context-left{grid-column:1;min-width:0;display:flex;align-items:center;gap:8px}
@@ -128,7 +131,7 @@ button{cursor:pointer}
 .context-switch{grid-column:2;justify-self:end}
 
 /* 活动记录：窗口的主体。倒序，最新在上。 */
-.activity-feed{flex:1 1 auto;min-height:0;overflow-y:auto;margin-bottom:12px;scrollbar-width:none}
+.activity-feed{flex:1 1 auto;min-height:0;overflow-y:auto;margin-bottom:12px;padding-left:16px;scrollbar-width:none}
 .activity-feed::-webkit-scrollbar{display:none}
 .activity-empty{margin:16px 0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.6}
 /* 时间 / 类型 / 对象 / 结果，四列真的是四列。上一版把类型和对象塞进同一个
@@ -229,6 +232,8 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   background:transparent!important;
 }
 .sheet h2,.dialog h2{margin:0 0 18px;font-size:var(--font-title)}
+.settings-section{padding-left:8px}
+.settings-section>h3{margin-left:-8px}
 .field{display:grid;gap:8px;margin:16px 0}
 .field input{width:100%}
 .settings-summary{display:grid;grid-template-columns:minmax(0,1fr) max-content max-content;align-items:center;column-gap:8px}

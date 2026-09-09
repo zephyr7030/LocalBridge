@@ -250,7 +250,7 @@ export function SettingsSheet({
             <div className="inline-actions">
               <button
                 className="secondary"
-                disabled={!projection?.update?.retryable || projection.update.state === "checking"}
+                disabled={!projection?.update || projection.update.state === "checking" || projection.update.state === "source_unavailable"}
                 onClick={() => void run(async () => { await bridge.retryUpdateCheck(); })}
               >
                 检查更新

@@ -14,7 +14,7 @@ const UPDATE_CHECK_GLOBAL_TIMEOUT: Duration = Duration::from_secs(5);
 const UPDATE_CHECK_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const UPDATE_CHECK_RETRY_DELAY: Duration = Duration::from_millis(250);
 const UPDATE_CHECK_MAX_ATTEMPTS: u8 = 2;
-const UPDATE_RESPONSE_MAX_BYTES: u64 = 64 * 1024;
+const UPDATE_RESPONSE_MAX_BYTES: u64 = 256 * 1024;
 
 pub trait ReleaseSource: Send + Sync {
     fn latest(&self, repository: &GitHubRepository) -> Result<ReleaseDiscovery, UpdateFetchError>;
@@ -46,16 +46,33 @@ impl Default for GitHubReleaseSource {
 }
 
 #[derive(Debug, Deserialize)]
-struct GitHubLatestRelease {
+struct GitHubRelease {
     tag_name: String,
     html_url: String,
+    draft: bool,
+}
+
+fn latest_release(
+    repository: &GitHubRepository,
+    releases: Vec<GitHubRelease>,
+) -> Result<ReleaseDiscovery, UpdateFetchError> {
+    // GitHub lists releases newest first. Use release recency rather than the maximum
+    // historical semver so an old mistag cannot outrank a newer corrected release.
+    for release in releases.into_iter().filter(|release| !release.draft) {
+        let Ok(version) = ProductVersion::parse(&release.tag_name) else {
+            continue;
+        };
+        return ReleaseDiscovery::new(repository, version, release.html_url)
+            .map_err(|_| UpdateFetchError::ForeignReleaseUrl);
+    }
+    Err(UpdateFetchError::NoPublishedRelease)
 }
 
 impl ReleaseSource for GitHubReleaseSource {
     fn latest(&self, repository: &GitHubRepository) -> Result<ReleaseDiscovery, UpdateFetchError> {
         let mut response = self
             .agent
-            .get(repository.latest_api_url())
+            .get(repository.releases_api_url())
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")
             .header(
@@ -70,12 +87,9 @@ impl ReleaseSource for GitHubReleaseSource {
             .limit(UPDATE_RESPONSE_MAX_BYTES)
             .read_to_string()
             .map_err(UpdateFetchError::from_transport)?;
-        let release: GitHubLatestRelease =
+        let releases: Vec<GitHubRelease> =
             serde_json::from_str(&body).map_err(|_| UpdateFetchError::InvalidResponse)?;
-        let version = ProductVersion::parse(&release.tag_name)
-            .map_err(|_| UpdateFetchError::InvalidVersion)?;
-        ReleaseDiscovery::new(repository, version, release.html_url)
-            .map_err(|_| UpdateFetchError::ForeignReleaseUrl)
+        latest_release(repository, releases)
     }
 }
 
@@ -86,7 +100,6 @@ pub enum UpdateFetchError {
     NoPublishedRelease,
     RateLimited,
     InvalidResponse,
-    InvalidVersion,
     ForeignReleaseUrl,
 }
 
@@ -130,11 +143,6 @@ impl UpdateFetchError {
                 "Update.InvalidResponse",
                 ErrorCategory::Unavailable,
                 "update service returned an invalid response",
-            ),
-            Self::InvalidVersion => (
-                "Update.InvalidVersion",
-                ErrorCategory::Unavailable,
-                "latest release has an invalid version",
             ),
             Self::ForeignReleaseUrl => (
                 "Update.ForeignReleaseUrl",
@@ -307,5 +315,53 @@ mod tests {
             UpdateLifecycle::Available { latest_version, .. }
                 if latest_version == ProductVersion::parse("1.1.0").unwrap()
         ));
+    }
+
+    #[test]
+    fn release_list_uses_newest_valid_release_and_ignores_historical_semver_mistags() {
+        let repository = GitHubRepository::new("owner/repo").unwrap();
+        let release = latest_release(
+            &repository,
+            vec![
+                GitHubRelease {
+                    tag_name: "not-a-version".into(),
+                    html_url: format!("{}/tag/invalid", repository.releases_url()),
+                    draft: false,
+                },
+                GitHubRelease {
+                    tag_name: "v9.0.0".into(),
+                    html_url: format!("{}/tag/v9.0.0", repository.releases_url()),
+                    draft: true,
+                },
+                GitHubRelease {
+                    tag_name: "v0.1.6".into(),
+                    html_url: format!("{}/tag/v0.1.6", repository.releases_url()),
+                    draft: false,
+                },
+                GitHubRelease {
+                    tag_name: "v0.13.0".into(),
+                    html_url: format!("{}/tag/v0.13.0", repository.releases_url()),
+                    draft: false,
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(release.version, ProductVersion::parse("0.1.6").unwrap());
+    }
+
+    #[test]
+    fn release_list_rejects_foreign_release_urls() {
+        let repository = GitHubRepository::new("owner/repo").unwrap();
+        assert_eq!(
+            latest_release(
+                &repository,
+                vec![GitHubRelease {
+                    tag_name: "v1.1.0".into(),
+                    html_url: "https://example.invalid/releases/v1.1.0".into(),
+                    draft: false,
+                }],
+            ),
+            Err(UpdateFetchError::ForeignReleaseUrl)
+        );
     }
 }
