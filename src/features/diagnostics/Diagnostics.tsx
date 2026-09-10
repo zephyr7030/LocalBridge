@@ -62,6 +62,7 @@ export function Diagnostics({ onClose, commandError }: { onClose: () => void; co
 
   return (
     <ModalSurface variant="sheet" className="diagnostics-sheet" initialFocus="surface" labelledBy="diagnostics-title" onDismiss={onClose} dismissOnBackdrop>
+      <div className="sheet-scroll">
         <h2 id="diagnostics-title">诊断</h2>
         {!snapshot ? <p className="diagnostics-muted">正在检查…</p> : (
           <>
@@ -90,7 +91,8 @@ export function Diagnostics({ onClose, commandError }: { onClose: () => void; co
         {transportError && <UiErrorNotice error={transportError} showTechnicalDetails />}
         {error && <UiErrorNotice error={error} showTechnicalDetails />}
         {exportedPath ? <p className="diagnostics-exported">已导出到：{exportedPath}</p> : null}
-        <div className="dialog-actions diagnostics-actions">
+      </div>
+      <div className="dialog-actions sheet-actions diagnostics-actions">
           <button className="secondary" onClick={() => void diagnosticsApi.openLogs().catch((value) => setError(parseUiError(value, "无法打开日志")))}>生成并打开日志</button>
           <button className="secondary" onClick={() => void exportReport()}>导出诊断</button>
           <button className="primary" onClick={onClose}>完成</button>

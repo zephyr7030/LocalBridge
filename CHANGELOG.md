@@ -6,6 +6,7 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 ### Fixed
 
+- Settings, Diagnostics, and project switching now share one fixed-height sheet layout with independently scrolling content and a non-scrolling action footer; logs can no longer bleed beneath footer controls.
 - Modal and sheet surfaces now share priority-safe focus trapping, background inert isolation, Escape policy, and focus restoration; administrator confirmations cannot keyboard-focus underlying controls.
 - Settings section headings now use the shared body tier, About actions align to the true right edge, Diagnostics keeps a lightweight sticky action footer, and the hidden-scrollbar activity feed has a visible keyboard focus state.
 - Update checks now discover the newest usable GitHub release from the release list, including pre-releases, while ignoring drafts, invalid tags, and historical semver mistags.

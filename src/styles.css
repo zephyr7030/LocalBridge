@@ -191,7 +191,10 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   .ghost,.secondary,.primary,.choice{transition:none}
 }
 .sheet-backdrop,.dialog-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.24);display:grid;place-items:center;padding:20px;z-index:10}
-.sheet,.dialog{width:min(560px,100%);max-height:84vh;overflow:auto;border-radius:20px;clip-path:inset(0 round 20px);scrollbar-gutter:stable;background:#fff;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.2)}
+.sheet,.dialog{width:min(560px,100%);border-radius:20px;clip-path:inset(0 round 20px);background:#fff;box-shadow:0 24px 70px rgba(0,0,0,.2)}
+.dialog{max-height:84vh;overflow:auto;scrollbar-gutter:stable;padding:22px}
+.sheet{height:84vh;max-height:84vh;overflow:hidden;display:flex;flex-direction:column;padding:0}
+.sheet-scroll{min-height:0;flex:1 1 auto;overflow:auto;padding:22px 22px 12px}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{min-height:32px;border:3px solid transparent;border-radius:999px;background:rgba(110,110,115,.42);background-clip:content-box}
@@ -213,13 +216,13 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   border:0!important;
   background:transparent!important;
 }
-.sheet::-webkit-scrollbar,.dialog::-webkit-scrollbar{width:10px;height:10px}
-.sheet::-webkit-scrollbar-track,.dialog::-webkit-scrollbar-track{margin-block:16px;background:transparent;border-radius:999px}
-.sheet::-webkit-scrollbar-thumb,.dialog::-webkit-scrollbar-thumb{min-height:32px;border:3px solid transparent;border-radius:999px;background:rgba(110,110,115,.48);background-clip:content-box}
-.sheet::-webkit-scrollbar-button,.dialog::-webkit-scrollbar-button,
-.sheet::-webkit-scrollbar-button:single-button,.dialog::-webkit-scrollbar-button:single-button,
-.sheet::-webkit-scrollbar-button:vertical:start:decrement,.dialog::-webkit-scrollbar-button:vertical:start:decrement,
-.sheet::-webkit-scrollbar-button:vertical:end:increment,.dialog::-webkit-scrollbar-button:vertical:end:increment{
+.sheet-scroll::-webkit-scrollbar,.dialog::-webkit-scrollbar{width:10px;height:10px}
+.sheet-scroll::-webkit-scrollbar-track,.dialog::-webkit-scrollbar-track{margin-block:16px;background:transparent;border-radius:999px}
+.sheet-scroll::-webkit-scrollbar-thumb,.dialog::-webkit-scrollbar-thumb{min-height:32px;border:3px solid transparent;border-radius:999px;background:rgba(110,110,115,.48);background-clip:content-box}
+.sheet-scroll::-webkit-scrollbar-button,.dialog::-webkit-scrollbar-button,
+.sheet-scroll::-webkit-scrollbar-button:single-button,.dialog::-webkit-scrollbar-button:single-button,
+.sheet-scroll::-webkit-scrollbar-button:vertical:start:decrement,.dialog::-webkit-scrollbar-button:vertical:start:decrement,
+.sheet-scroll::-webkit-scrollbar-button:vertical:end:increment,.dialog::-webkit-scrollbar-button:vertical:end:increment{
   -webkit-appearance:none!important;
   appearance:none!important;
   display:none!important;
@@ -247,7 +250,7 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .settings-status{margin:9px 0 0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.45}
 .saved{color:#248a3d;font-size:var(--font-body)}
 .error{color:#c9342f;font-size:var(--font-body);margin-top:10px}
-.project-list{display:grid;gap:8px;margin-top:12px}
+.project-list{display:grid;gap:8px;margin-top:0}
 .project-item{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#f5f5f7;border-radius:12px;padding:10px 12px}
 .project-path{overflow-wrap:anywhere;min-width:0;text-align:left}
 .project-select{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:10px}
@@ -255,6 +258,7 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .project-current{flex:0 0 auto;color:#6e6e73;font-size:var(--font-auxiliary);font-weight:600}
 .dialog p{color:#6e6e73;line-height:1.5}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.sheet-actions{flex:0 0 auto;margin:0;padding:12px 22px 22px;border-top:1px solid rgba(60,60,67,.13);background:inherit}
 .admin-warning-backdrop{z-index:20}
 .admin-warning{width:min(520px,100%)}
 .admin-warning ul{margin:0;padding-left:1.4em;display:grid;gap:6px;color:#3a3a3c}
@@ -330,7 +334,8 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   .activity-elapsed{color:#98989d}
   .sheet-backdrop,.dialog-backdrop{background:rgba(0,0,0,.52)}
   .sheet,.dialog{background:#2c2c2e;box-shadow:0 24px 70px rgba(0,0,0,.62)}
-  .sheet::-webkit-scrollbar-thumb,.dialog::-webkit-scrollbar-thumb{background:rgba(235,235,245,.34);background-clip:content-box}
+  .sheet-scroll::-webkit-scrollbar-thumb,.dialog::-webkit-scrollbar-thumb{background:rgba(235,235,245,.34);background-clip:content-box}
+  .sheet-actions{border-top-color:rgba(255,255,255,.13)}
   .settings-summary>.settings-confirm-delete{background:rgba(255,69,58,.14);border-color:rgba(255,69,58,.32);color:var(--status-fault)}
   .settings-status{color:#98989d}
   .saved{color:#30d158}

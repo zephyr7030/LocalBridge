@@ -23,6 +23,7 @@ export function ProjectPicker({
     });
   return (
     <ModalSurface variant="sheet" labelledBy="project-picker-title" onDismiss={onClose} dismissOnBackdrop>
+      <div className="sheet-scroll">
         <h2 id="project-picker-title">切换项目</h2>
         <div className="project-list">
           {projection?.projects?.map((item) => (
@@ -56,7 +57,8 @@ export function ProjectPicker({
             </div>
           ))}
         </div>
-        <div className="dialog-actions">
+      </div>
+      <div className="dialog-actions sheet-actions">
           <button className="secondary" onClick={chooseOtherFolder}>
             选择其他文件夹
           </button>

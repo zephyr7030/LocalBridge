@@ -40,6 +40,7 @@ export function SettingsSheet({
 
   return (
     <ModalSurface variant="sheet" ariaLabel={uiText.settings} onDismiss={onClose} dismissOnBackdrop>
+      <div className="sheet-scroll">
         <h2>{uiText.settings}</h2>
 
         <section className="settings-section">
@@ -266,7 +267,8 @@ export function SettingsSheet({
           </div>
         </section>
 
-        <div className="dialog-actions">
+      </div>
+      <div className="dialog-actions sheet-actions">
           <button className="secondary" onClick={onOpenWelcome}>
             打开欢迎页
           </button>
