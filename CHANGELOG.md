@@ -4,27 +4,9 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 ## [Unreleased]
 
-### Fixed
+## [0.1.7] - 2026-09-10
 
-- The active project now shows a disabled Current action in the same position as the Switch action instead of duplicating current-state text beside the path.
-- Project switching now keeps paths as static information and exposes explicit Switch and Remove actions with stable row alignment for long paths.
-- Activity entries now surface concise failure reasons, open a shared-style detail sheet on selection, and project existing request diagnostics without adding a second detail API.
-- Settings, Diagnostics, and project switching now share one fixed-height sheet layout with independently scrolling content and a non-scrolling action footer; logs can no longer bleed beneath footer controls.
-- Modal and sheet surfaces now share priority-safe focus trapping, background inert isolation, Escape policy, and focus restoration; administrator confirmations cannot keyboard-focus underlying controls.
-- Settings section headings now use the shared body tier, About actions align to the true right edge, Diagnostics keeps a lightweight sticky action footer, and the hidden-scrollbar activity feed has a visible keyboard focus state.
-- Update checks now discover the newest usable GitHub release from the release list, including pre-releases, while ignoring drafts, invalid tags, and historical semver mistags.
-- Available updates now open a native LocalBridge-style prompt with right-aligned Later and View Update actions; manual checks remain available after terminal failures.
-- The main activity feed now shows at most 15 recent entries, keeps deeper diagnostics/audit history intact, and uses a fixed 16 px visual indent.
-- Settings and Diagnostics body content now use a subtle 8 px indent, and Settings inline action groups align to the right.
-- Activity history now keeps each tool's second-level operation in the existing action field, for example 文档 写入, instead of dropping the operation.
-- Activity outcomes now render with green success, yellow neutral, and red failure semantics, while unknown backend enum values no longer leak into user-facing text.
-- Normal UI errors no longer expose frontend contract or backend technical messages; diagnostics explicitly retain raw messages, codes, and structured envelopes.
-- Administrator-confirmation waits now use Store Condvar notifications instead of 250 ms polling.
-- Activity history now uses a dedicated activity revision inside DiagnosticsStore, ignores unrelated diagnostics changes, and advances after successful administrator audit writes.
-- The main activity feed hides its visible scrollbar while retaining wheel and touchpad scrolling.
-- Markdown DocumentIR parsing now keeps ordinary text paragraphs as paragraph blocks after inspect/edit cycles.
-
-
+大量修改
 
 ## [0.1.6] - 2026-09-08
 
