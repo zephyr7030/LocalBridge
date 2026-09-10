@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
+import { ActivityDetail } from "../activity/ActivityDetail";
 import { activityApi, type ActivityEntry } from "../activity/api";
 import {
   activityAction,
   activityDuration,
+  activityErrorReason,
   activityOutcome,
   activityTime,
   activityTone,
@@ -17,6 +19,7 @@ import {
  */
 export function ActivityFeed() {
   const [entries, setEntries] = useState<ActivityEntry[] | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<ActivityEntry | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,31 +57,38 @@ export function ActivityFeed() {
   }
 
   return (
-    <section className="activity-feed" aria-label="活动记录">
-      {entries.map((entry) => {
-        const outcome = activityOutcome(entry);
-        const duration = activityDuration(entry.durationMs);
-        return (
-          <div
-            className={`activity-entry tone-${activityTone(entry)}`}
-            key={`${entry.timestampMs}-${entry.action}-${entry.target ?? ""}`}
-          >
-            <time className="activity-entry-time">{activityTime(entry.timestampMs)}</time>
-            <span className="activity-entry-action">{activityAction(entry)}</span>
-            <span className="activity-entry-main">
-              {entry.target && <span className="activity-entry-target">{entry.target}</span>}
-              {entry.risk.map((risk) => (
-                <span className="activity-risk" key={risk}>{activityRiskText(risk)}</span>
-              ))}
-            </span>
-            <span className="activity-entry-outcome">
-              {outcome}
-              {entry.exitCode != null && outcome ? ` · ${entry.exitCode}` : null}
-              {duration ? ` · ${duration}` : null}
-            </span>
-          </div>
-        );
-      })}
-    </section>
+    <>
+      <section className="activity-feed" aria-label="活动记录">
+        {entries.map((entry) => {
+          const outcome = activityOutcome(entry);
+          const duration = activityDuration(entry.durationMs);
+          const errorReason = activityErrorReason(entry);
+          return (
+            <button
+              type="button"
+              className={`activity-entry tone-${activityTone(entry)}`}
+              key={entry.requestId ?? `${entry.source}-${entry.timestampMs}-${entry.action}-${entry.target ?? ""}`}
+              onClick={() => setSelectedEntry(entry)}
+            >
+              <time className="activity-entry-time">{activityTime(entry.timestampMs)}</time>
+              <span className="activity-entry-action">{activityAction(entry)}</span>
+              <span className="activity-entry-main">
+                {entry.target && <span className="activity-entry-target">{entry.target}</span>}
+                {entry.risk.map((risk) => (
+                  <span className="activity-risk" key={risk}>{activityRiskText(risk)}</span>
+                ))}
+              </span>
+              <span className="activity-entry-outcome">
+                {outcome}
+                {errorReason ? ` · ${errorReason}` : null}
+                {!errorReason && entry.exitCode != null && outcome ? ` · ${entry.exitCode}` : null}
+                {!errorReason && duration ? ` · ${duration}` : null}
+              </span>
+            </button>
+          );
+        })}
+      </section>
+      {selectedEntry ? <ActivityDetail entry={selectedEntry} onClose={() => setSelectedEntry(null)} /> : null}
+    </>
   );
 }

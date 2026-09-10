@@ -12,6 +12,13 @@ export interface ActivityEntry {
   target: string | null;
   outcome: string | null;
   errorCode: string | null;
+  requestId: string | null;
+  connectionId: string | null;
+  attempt: number | null;
+  phase: string | null;
+  cause: string | null;
+  httpStatus: number | null;
+  workdir: string | null;
   durationMs: number | null;
   exitCode: number | null;
   risk: string[];
@@ -35,6 +42,13 @@ const isEntry = (value: unknown): value is ActivityEntry =>
   && isStringOrNull(value.target)
   && isStringOrNull(value.outcome)
   && isStringOrNull(value.errorCode)
+  && isStringOrNull(value.requestId)
+  && isStringOrNull(value.connectionId)
+  && isNumberOrNull(value.attempt)
+  && isStringOrNull(value.phase)
+  && isStringOrNull(value.cause)
+  && isNumberOrNull(value.httpStatus)
+  && isStringOrNull(value.workdir)
   && isNumberOrNull(value.durationMs)
   && isNumberOrNull(value.exitCode)
   && Array.isArray(value.risk) && value.risk.every((item) => typeof item === "string");

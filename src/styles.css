@@ -137,8 +137,10 @@ button{cursor:pointer}
 .activity-empty{margin:16px 0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.6}
 /* 时间 / 类型 / 对象 / 结果，四列真的是四列。上一版把类型和对象塞进同一个
    flex，于是六行的对象起点分别是 143 / 272 / 119 / 143 / 329px。 */
-.activity-entry{display:grid;grid-template-columns:40px 7.2em minmax(0,1fr) var(--meta-col);align-items:baseline;column-gap:12px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.05);font-size:var(--font-auxiliary)}
+.activity-entry{width:100%;display:grid;grid-template-columns:40px 7.2em minmax(0,1fr) var(--meta-col);align-items:baseline;column-gap:12px;padding:6px 0;border:0;border-bottom:1px solid rgba(0,0,0,.05);background:transparent;color:inherit;text-align:inherit;font:inherit;font-size:var(--font-auxiliary);cursor:pointer}
 .activity-entry:last-child{border-bottom:0}
+.activity-entry:hover{background:rgba(0,0,0,.025)}
+.activity-entry:focus-visible{outline:2px solid var(--control-focus);outline-offset:-2px}
 .activity-entry-time{color:#8e8e93;font-variant-numeric:tabular-nums}
 .activity-entry-main{min-width:0;display:flex;align-items:baseline;gap:8px}
 .activity-entry-action{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6e6e73}
@@ -250,12 +252,19 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
 .settings-status{margin:9px 0 0;color:#6e6e73;font-size:var(--font-auxiliary);line-height:1.45}
 .saved{color:#248a3d;font-size:var(--font-body)}
 .error{color:#c9342f;font-size:var(--font-body);margin-top:10px}
-.project-list{display:grid;gap:8px;margin-top:0}
-.project-item{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#f5f5f7;border-radius:12px;padding:10px 12px}
-.project-path{overflow-wrap:anywhere;min-width:0;text-align:left}
-.project-select{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:10px}
-.project-select:disabled{cursor:default;opacity:1;background:#f5f5f7;color:#1d1d1f}
+.project-list{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:0}
+.project-item{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#f5f5f7;border-radius:12px;padding:10px 12px}
+.project-path-area{flex:1;min-width:0;display:flex;align-items:center;gap:8px}
+.project-path{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .project-current{flex:0 0 auto;color:#6e6e73;font-size:var(--font-auxiliary);font-weight:600}
+.project-item-actions{flex:0 0 auto;display:flex;align-items:center;gap:8px}
+.activity-detail-lead{display:grid;gap:5px;padding-left:8px;margin-bottom:18px}
+.activity-detail-lead strong{font-size:var(--font-body)}
+.activity-detail-lead span{color:#6e6e73;font-size:var(--font-auxiliary);overflow-wrap:anywhere}
+.activity-detail-grid{border-top:1px solid rgba(60,60,67,.13);padding:8px 0 0 8px}
+.activity-detail-row{display:grid;grid-template-columns:82px minmax(0,1fr);gap:16px;padding:6px 0;font-size:var(--font-body);align-items:start}
+.activity-detail-row>span:first-child{color:#6e6e73}
+.activity-detail-row>span:last-child{min-width:0;overflow-wrap:anywhere}
 .dialog p{color:#6e6e73;line-height:1.5}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 .sheet-actions{flex:0 0 auto;margin:0;padding:12px 22px 22px;border-top:1px solid rgba(60,60,67,.13);background:inherit}
@@ -321,6 +330,7 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   .activity-entry{border-bottom-color:rgba(255,255,255,.07)}
   .activity-entry-time{color:#8e8e93}
   .activity-entry-action,.activity-entry-outcome{color:#98989d}
+  .activity-entry:hover{background:rgba(255,255,255,.035)}
   .status-headline .task-row .activity-action{color:#98989d}
   .activity-risk{background:rgba(255,159,10,.2);color:#ffb340}
   .label{color:#98989d}
@@ -341,8 +351,9 @@ select,input[type="text"],input[type="password"]{min-height:var(--control-height
   .saved{color:#30d158}
   .error{color:#ff6961}
   .project-item{background:#1c1c1e}
-  .project-select:disabled{background:#1c1c1e;color:#f2f2f7}
   .project-current{color:#98989d}
+  .activity-detail-lead span,.activity-detail-row>span:first-child{color:#98989d}
+  .activity-detail-grid{border-top-color:rgba(255,255,255,.13)}
   .dialog p{color:#aeaeb2}
   .admin-warning ul{color:#d1d1d6}
   .admin-warning-confirm{background:#ff453a;border-color:#ff453a;color:#1c1c1e}

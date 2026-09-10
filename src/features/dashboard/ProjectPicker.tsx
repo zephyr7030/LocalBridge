@@ -28,32 +28,37 @@ export function ProjectPicker({
         <div className="project-list">
           {projection?.projects?.map((item) => (
             <div className="project-item" key={item.id}>
-              <button
-                className="ghost project-select"
-                disabled={item.active}
-                onClick={() =>
-                  void run(async () => {
-                    await bridge.selectProject(item.id);
-                    onClose();
-                  })
-                }
-              >
-                <span className="project-path">{item.path}</span>
+              <div className="project-path-area">
+                <span className="project-path" title={item.path}>{item.path}</span>
                 {item.active ? <span className="project-current">当前</span> : null}
-              </button>
-              <button
-                className="secondary"
-                onClick={() => {
-                  if (item.active) {
-                    onClose();
-                    onConfirmRemoveActive(item);
-                  } else {
-                    void run(() => bridge.removeProject(item.id));
+              </div>
+              <div className="project-item-actions">
+                <button
+                  className="secondary"
+                  disabled={item.active}
+                  onClick={() =>
+                    void run(async () => {
+                      await bridge.selectProject(item.id);
+                      onClose();
+                    })
                   }
-                }}
-              >
-                移除
-              </button>
+                >
+                  切换
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    if (item.active) {
+                      onClose();
+                      onConfirmRemoveActive(item);
+                    } else {
+                      void run(() => bridge.removeProject(item.id));
+                    }
+                  }}
+                >
+                  移除
+                </button>
+              </div>
             </div>
           ))}
         </div>

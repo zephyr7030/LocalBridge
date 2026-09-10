@@ -99,3 +99,63 @@ export function activityDuration(durationMs: number | null): string | null {
   if (seconds < 60) return String(seconds) + "S";
   return String(Math.floor(seconds / 60)) + "分" + String(seconds % 60) + "S";
 }
+
+const errorCodeText: Record<string, string> = {
+  InvalidRequest: "请求无效",
+  Unavailable: "服务不可用",
+  Denied: "权限不足",
+  Timeout: "执行超时",
+  Cancelled: "已取消",
+  ExecutionFailed: "执行失败",
+  Unknown: "未知错误",
+  ProcessTimedOut: "执行超时",
+  ProcessCancelled: "已取消",
+  SessionUnavailable: "会话不可用",
+  WorkspaceDenied: "工作区拒绝",
+};
+
+const causeText: Record<string, string> = {
+  workspace_denied: "工作区拒绝",
+  capability_denied: "权限不足",
+  policy_denied: "策略阻止",
+  task_not_owned: "任务不归属",
+  elevated_operation_not_reviewed: "管理员操作未审查",
+  privileged_route_unavailable: "管理员通道不可用",
+  elevation_required: "需要管理员权限",
+  process_timed_out: "执行超时",
+  operation_timed_out: "请求超时",
+  process_failed: "执行失败",
+  session_unavailable: "会话不可用",
+  protocol_mismatch: "协议不兼容",
+  runtime_unavailable: "运行时不可用",
+  capability_unavailable: "能力不可用",
+  runtime_capability_mismatch: "能力不兼容",
+  output_truncated: "输出被截断",
+  internal: "内部错误",
+};
+
+const outcomesWithoutErrorReason = new Set([
+  "success",
+  "completed",
+  "cancelled",
+  "awaiting_confirmation",
+  "confirmation_awaiting",
+]);
+
+export function activityErrorReason(entry: ActivityEntry): string | null {
+  if (entry.outcome && outcomesWithoutErrorReason.has(entry.outcome)) return null;
+  if (entry.cause && causeText[entry.cause]) return causeText[entry.cause];
+  if (entry.errorCode) return errorCodeText[entry.errorCode] ?? "执行失败";
+  if (entry.exitCode != null && entry.exitCode !== 0) return `退出码 ${entry.exitCode}`;
+  return null;
+}
+
+export function activityDetailDuration(durationMs: number | null): string | null {
+  if (durationMs == null) return null;
+  if (durationMs < 1000) return `${durationMs}ms`;
+  return activityDuration(durationMs);
+}
+
+export function activitySourceText(source: ActivityEntry["source"]): string {
+  return source === "administrator" ? "管理员命令" : "工具调用";
+}

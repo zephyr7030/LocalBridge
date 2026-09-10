@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityAction, activityOutcome, activityRiskText, activityTone } from "../features/activity/presentation";
+import { activityAction, activityErrorReason, activityOutcome, activityRiskText, activityTone } from "../features/activity/presentation";
 import type { ActivityEntry } from "../features/activity/api";
 
 const entry = (overrides: Partial<ActivityEntry> = {}): ActivityEntry => ({
@@ -10,6 +10,13 @@ const entry = (overrides: Partial<ActivityEntry> = {}): ActivityEntry => ({
   target: "README.md",
   outcome: "success",
   errorCode: null,
+  requestId: "req-1",
+  connectionId: "conn-1",
+  attempt: 1,
+  phase: null,
+  cause: null,
+  httpStatus: null,
+  workdir: null,
   durationMs: null,
   exitCode: null,
   risk: [],
@@ -38,5 +45,13 @@ describe("activity presentation", () => {
     expect(activityTone(entry({ outcome: "cancelled" }))).toBe("neutral");
     expect(activityTone(entry({ outcome: "failed" }))).toBe("negative");
     expect(activityTone(entry({ outcome: "timed_out" }))).toBe("negative");
+  });
+
+  it("uses specific diagnostic causes before generic error codes", () => {
+    expect(activityErrorReason(entry({ outcome: "failed", errorCode: "Denied", cause: "workspace_denied" }))).toBe("工作区拒绝");
+    expect(activityErrorReason(entry({ outcome: "failed", errorCode: "Timeout" }))).toBe("执行超时");
+    expect(activityErrorReason(entry({ source: "administrator", outcome: "failed", requestId: null, connectionId: null, attempt: null, exitCode: 5 }))).toBe("退出码 5");
+    expect(activityErrorReason(entry({ outcome: "failed", errorCode: "FutureFailure" }))).toBe("执行失败");
+    expect(activityErrorReason(entry({ outcome: "cancelled", errorCode: "Cancelled", exitCode: 1 }))).toBeNull();
   });
 });
