@@ -6,6 +6,7 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 ### Fixed
 
+- The active project now shows a disabled Current action in the same position as the Switch action instead of duplicating current-state text beside the path.
 - Project switching now keeps paths as static information and exposes explicit Switch and Remove actions with stable row alignment for long paths.
 - Activity entries now surface concise failure reasons, open a shared-style detail sheet on selection, and project existing request diagnostics without adding a second detail API.
 - Settings, Diagnostics, and project switching now share one fixed-height sheet layout with independently scrolling content and a non-scrolling action footer; logs can no longer bleed beneath footer controls.

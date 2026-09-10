@@ -30,7 +30,6 @@ export function ProjectPicker({
             <div className="project-item" key={item.id}>
               <div className="project-path-area">
                 <span className="project-path" title={item.path}>{item.path}</span>
-                {item.active ? <span className="project-current">当前</span> : null}
               </div>
               <div className="project-item-actions">
                 <button
@@ -43,7 +42,7 @@ export function ProjectPicker({
                     })
                   }
                 >
-                  切换
+                  {item.active ? "当前" : "切换"}
                 </button>
                 <button
                   className="secondary"
