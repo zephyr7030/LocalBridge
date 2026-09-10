@@ -6,6 +6,8 @@ All notable user-visible changes to LocalBridge are recorded here.
 
 ### Fixed
 
+- Modal and sheet surfaces now share priority-safe focus trapping, background inert isolation, Escape policy, and focus restoration; administrator confirmations cannot keyboard-focus underlying controls.
+- Settings section headings now use the shared body tier, About actions align to the true right edge, Diagnostics keeps a lightweight sticky action footer, and the hidden-scrollbar activity feed has a visible keyboard focus state.
 - Update checks now discover the newest usable GitHub release from the release list, including pre-releases, while ignoring drafts, invalid tags, and historical semver mistags.
 - Available updates now open a native LocalBridge-style prompt with right-aligned Later and View Update actions; manual checks remain available after terminal failures.
 - The main activity feed now shows at most 15 recent entries, keeps deeper diagnostics/audit history intact, and uses a fixed 16 px visual indent.

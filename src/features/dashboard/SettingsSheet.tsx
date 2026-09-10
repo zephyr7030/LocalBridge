@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { bridge, type AccessCode, type MainProjection } from "../../bridge";
+import { ModalSurface } from "../../components/ModalSurface";
 import { accessText, permissionRestartNotice, projectionStatusText, uiText, updateStatusText } from "../../presentation";
 import type { DashboardRun } from "./useDashboardProjection";
 
@@ -38,8 +39,7 @@ export function SettingsSheet({
   const connectionReady = projection?.connectionStatus === "ready";
 
   return (
-    <div className="sheet-backdrop" onMouseDown={onClose}>
-      <section className="sheet" onMouseDown={(event) => event.stopPropagation()}>
+    <ModalSurface variant="sheet" ariaLabel={uiText.settings} onDismiss={onClose} dismissOnBackdrop>
         <h2>{uiText.settings}</h2>
 
         <section className="settings-section">
@@ -274,7 +274,6 @@ export function SettingsSheet({
             完成
           </button>
         </div>
-      </section>
-    </div>
+    </ModalSurface>
   );
 }

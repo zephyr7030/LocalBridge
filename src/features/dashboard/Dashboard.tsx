@@ -3,6 +3,7 @@ import { bridge, type AccessCode, type ProjectProjection } from "../../bridge";
 import { brandStatusText, overallServiceState, overallVisualState, uiErrorText } from "../../presentation";
 import { uiText } from "../../presentation";
 import { AdminModeWarning } from "../../components/AdminModeWarning";
+import { ModalSurface } from "../../components/ModalSurface";
 import { UiErrorNotice } from "../../components/UiErrorNotice";
 import { Diagnostics } from "../diagnostics/Diagnostics";
 import { ProjectPicker } from "./ProjectPicker";
@@ -133,9 +134,8 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       {view === "diagnostics" && <Diagnostics commandError={error} onClose={() => setView("main")} />}
 
       {updateDialogVisible && (
-        <div className="dialog-backdrop update-dialog-backdrop">
-          <section className="dialog" role="dialog" aria-modal="true" aria-label="发现新版本">
-            <h2>发现新版本</h2>
+        <ModalSurface backdropClassName="update-dialog-backdrop" priority={15} labelledBy="update-dialog-title" onDismiss={() => setDismissedUpdateVersion(availableUpdateVersion)}>
+            <h2 id="update-dialog-title">发现新版本</h2>
             <p>LocalBridge {availableUpdateVersion} 已发布。</p>
             <div className="dialog-actions">
               <button className="secondary" onClick={() => setDismissedUpdateVersion(availableUpdateVersion)}>
@@ -153,8 +153,7 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
                 查看更新
               </button>
             </div>
-          </section>
-        </div>
+        </ModalSurface>
       )}
 
       {/* 等人点头的管理员命令。窗口由后端观察者叫到前台，这里把它摆成
@@ -172,20 +171,13 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       )}
 
       {fullAccessInfoOpen && (
-        <div className="dialog-backdrop" onMouseDown={() => setFullAccessInfoOpen(false)}>
-          <section
-            className="dialog"
-            role="dialog"
-            aria-modal="true"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <h2>全目录访问</h2>
+        <ModalSurface labelledBy="full-access-title" onDismiss={() => setFullAccessInfoOpen(false)} dismissOnBackdrop>
+            <h2 id="full-access-title">全目录访问</h2>
             <p>管理员模式拥有系统管理员令牌范围内的文件访问能力，若要切换，请切换其他模式</p>
             <div className="dialog-actions">
               <button className="primary" onClick={() => setFullAccessInfoOpen(false)}>完成</button>
             </div>
-          </section>
-        </div>
+        </ModalSurface>
       )}
 
       {projectPickerOpen && (
@@ -198,9 +190,8 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
       )}
 
       {removeTarget && (
-        <div className="dialog-backdrop">
-          <section className="dialog">
-            <h2>移除当前项目</h2>
+        <ModalSurface labelledBy="remove-project-title" onDismiss={() => setRemoveTarget(null)}>
+            <h2 id="remove-project-title">移除当前项目</h2>
             <p>
               从 LocalBridge 移除此项目？
               <br />
@@ -220,14 +211,12 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
                 移除
               </button>
             </div>
-          </section>
-        </div>
+        </ModalSurface>
       )}
 
       {reconnectVisible && projection?.reconnect && (
-        <div className="dialog-backdrop">
-          <section className="dialog" role="dialog" aria-modal="true">
-            <h2>连接失败</h2>
+        <ModalSurface labelledBy="reconnect-title">
+            <h2 id="reconnect-title">连接失败</h2>
             <p>已自动重试 5 次。</p>
             <div className="dialog-actions">
               <button
@@ -251,9 +240,9 @@ export function Dashboard({ onOpenWelcome }: { onOpenWelcome: () => void }) {
                 查看诊断
               </button>
             </div>
-          </section>
-        </div>
+        </ModalSurface>
       )}
+
     </main>
   );
 }

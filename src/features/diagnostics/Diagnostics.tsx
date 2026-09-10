@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { parseUiError, type UiError } from "../../bridge";
 import { diagnosticsApi, type DiagnosticsViewProjection } from "./api";
 import { UiErrorNotice } from "../../components/UiErrorNotice";
+import { ModalSurface } from "../../components/ModalSurface";
 import { uiErrorText } from "../../presentation";
 import "./diagnostics.css";
 
@@ -60,9 +61,8 @@ export function Diagnostics({ onClose, commandError }: { onClose: () => void; co
   };
 
   return (
-    <div className="sheet-backdrop" onMouseDown={onClose}>
-      <section className="sheet diagnostics-sheet" onMouseDown={(event) => event.stopPropagation()} aria-label="诊断">
-        <h2>诊断</h2>
+    <ModalSurface variant="sheet" className="diagnostics-sheet" initialFocus="surface" labelledBy="diagnostics-title" onDismiss={onClose} dismissOnBackdrop>
+        <h2 id="diagnostics-title">诊断</h2>
         {!snapshot ? <p className="diagnostics-muted">正在检查…</p> : (
           <>
             {snapshot.activeFaults.length ? <div className="diagnostics-section"><h3>需要处理</h3><div className="diagnostics-checks">{snapshot.activeFaults.map((fault) => <div className="diagnostics-check" key={fault.code}><span className="diagnostics-dot error" aria-hidden="true"/><div><strong>{uiErrorText(fault)}</strong><small>{fault.message}</small><small>{fault.code}{fault.retryable ? " · 可重试" : ""}</small></div></div>)}</div></div> : null}
@@ -95,7 +95,6 @@ export function Diagnostics({ onClose, commandError }: { onClose: () => void; co
           <button className="secondary" onClick={() => void exportReport()}>导出诊断</button>
           <button className="primary" onClick={onClose}>完成</button>
         </div>
-      </section>
-    </div>
+    </ModalSurface>
   );
 }

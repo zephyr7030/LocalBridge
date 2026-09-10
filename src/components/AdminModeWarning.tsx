@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ModalSurface } from "./ModalSurface";
 import { bridge } from "../bridge";
 
 export function adminWarningRemainingSeconds(notBeforeUnixMs: number, nowUnixMs: number): number {
@@ -54,14 +55,9 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
       }
     };
     const timer = window.setInterval(update, 100);
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") void cancel();
-    };
-    window.addEventListener("keydown", onKeyDown);
     return () => {
       disposed = true;
       window.clearInterval(timer);
-      window.removeEventListener("keydown", onKeyDown);
       if (!confirmationHandedOff.current) {
         void bridge.cancelAdminConsent(challengeId.current).catch(() => undefined);
       }
@@ -80,8 +76,7 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
     onConfirm();
   };
 
-  return <div className="dialog-backdrop admin-warning-backdrop" onMouseDown={() => void cancel()}>
-    <section className="dialog admin-warning" role="dialog" aria-modal="true" aria-labelledby="admin-warning-title" onMouseDown={(event) => event.stopPropagation()}>
+  return <ModalSurface className="admin-warning" backdropClassName="admin-warning-backdrop" priority={20} labelledBy="admin-warning-title" onDismiss={cancel} dismissOnBackdrop>
       <h2 id="admin-warning-title">切换到管理员模式</h2>
       <p>ChatGPT 发来的命令将以管理员身份运行：可以改动系统设置、服务和注册表，也可以读写任何目录，包括其他模式下拒绝的位置。</p>
       <ul>{ADMIN_MODE_FACTS.map((item) => <li key={item}>{item}</li>)}</ul>
@@ -90,6 +85,5 @@ export function AdminModeWarning({ onCancel, onConfirm }: { onCancel: () => void
         <button className="secondary" onClick={() => void cancel()}>取消</button>
         <button className="primary admin-warning-confirm" disabled={!backendChallengeReady || remainingSeconds > 0} onClick={() => void confirm()}>{remainingSeconds > 0 ? `确认${remainingSeconds}` : "确认"}</button>
       </div>
-    </section>
-  </div>;
+  </ModalSurface>;
 }

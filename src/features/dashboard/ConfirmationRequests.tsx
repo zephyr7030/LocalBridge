@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ModalSurface } from "../../components/ModalSurface";
 
 import { confirmationApi, type PendingConfirmation } from "../confirmation/api";
 import {
@@ -73,9 +74,8 @@ export function ConfirmationRequests() {
 
   return (
     // 背景点击不关闭：这不是一个可以顺手划掉的提示。
-    <div className="dialog-backdrop confirmation-backdrop">
-      <section className="dialog confirmation-dialog" role="dialog" aria-modal="true">
-        <h2>需要你确认</h2>
+    <ModalSurface className="confirmation-dialog" backdropClassName="confirmation-backdrop" priority={30} labelledBy="confirmation-title">
+        <h2 id="confirmation-title">需要你确认</h2>
         <p className="confirmation-lead">
           ChatGPT 要求以管理员身份运行下面这条命令。它已经被拦下，你不点头就不会执行。
         </p>
@@ -100,7 +100,6 @@ export function ConfirmationRequests() {
             允许这一条
           </button>
         </div>
-      </section>
-    </div>
+    </ModalSurface>
   );
 }

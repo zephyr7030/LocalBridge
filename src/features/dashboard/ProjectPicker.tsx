@@ -1,4 +1,5 @@
 import { bridge, type MainProjection, type ProjectProjection } from "../../bridge";
+import { ModalSurface } from "../../components/ModalSurface";
 import type { DashboardRun } from "./useDashboardProjection";
 
 export function ProjectPicker({
@@ -21,9 +22,8 @@ export function ProjectPicker({
       }
     });
   return (
-    <div className="sheet-backdrop" onMouseDown={onClose}>
-      <section className="sheet" onMouseDown={(event) => event.stopPropagation()}>
-        <h2>切换项目</h2>
+    <ModalSurface variant="sheet" labelledBy="project-picker-title" onDismiss={onClose} dismissOnBackdrop>
+        <h2 id="project-picker-title">切换项目</h2>
         <div className="project-list">
           {projection?.projects?.map((item) => (
             <div className="project-item" key={item.id}>
@@ -64,7 +64,6 @@ export function ProjectPicker({
             完成
           </button>
         </div>
-      </section>
-    </div>
+    </ModalSurface>
   );
 }
